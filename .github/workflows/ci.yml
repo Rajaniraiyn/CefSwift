@@ -56,6 +56,11 @@ jobs:
             --allow-network-connections all \
             cef download
 
+      # Audit the dlsym bridge: every symbol in Sources/CCef/.../ccef_symbols.h
+      # must be an exported global of the just-downloaded framework binary.
+      - name: Check bridge symbols against CEF binary
+        run: Scripts/check-symbols.sh
+
       - name: Build Examples package
         run: swift build --package-path Examples
 
@@ -81,3 +86,16 @@ jobs:
           TIMEOUT=timeout
           command -v timeout >/dev/null 2>&1 || TIMEOUT=gtimeout
           "$TIMEOUT" 60 ./Examples/dist/Browser.app/Contents/MacOS/Browser --cef-smoke-test
+
+      # Catch generated files escaping .gitignore: after building, testing,
+      # downloading, and bundling, the working tree must still be clean —
+      # no modified tracked files and nothing untracked.
+      - name: Working tree must stay clean
+        run: |
+          git diff --exit-code
+          UNTRACKED="$(git status --porcelain)"
+          if [ -n "$UNTRACKED" ]; then
+            echo "Working tree is dirty after the build — add the offenders to .gitignore:"
+            echo "$UNTRACKED"
+            exit 1
+          fi

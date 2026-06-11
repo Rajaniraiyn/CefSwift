@@ -35,6 +35,12 @@ public protocol CefBrowserDelegate: AnyObject {
     func browserDidClose(_ b: CefBrowser)
     /// A console message was logged by the page.
     func browser(_ b: CefBrowser, didReceiveConsoleMessage message: String, level: CefLogSeverity, source: String, line: Int)
+    /// A download is about to begin; decide what happens to it. The default
+    /// saves to `~/Downloads/<suggestedName>`.
+    func browser(_ b: CefBrowser, decidePolicyForDownload download: CefDownload, suggestedName: String) -> CefDownloadDecision
+    /// A download's progress/state changed (fires repeatedly, including the
+    /// final update where `isComplete` or `isCanceled` is set).
+    func browser(_ b: CefBrowser, downloadDidProgress download: CefDownload)
 }
 
 // Default no-op implementations.
@@ -49,6 +55,10 @@ extension CefBrowserDelegate {
     public func browser(_ b: CefBrowser, requestsPopupFor url: URL?) -> CefPopupDecision { .allow }
     public func browserDidClose(_ b: CefBrowser) {}
     public func browser(_ b: CefBrowser, didReceiveConsoleMessage message: String, level: CefLogSeverity, source: String, line: Int) {}
+    public func browser(_ b: CefBrowser, decidePolicyForDownload download: CefDownload, suggestedName: String) -> CefDownloadDecision {
+        .allow(destination: nil)
+    }
+    public func browser(_ b: CefBrowser, downloadDidProgress download: CefDownload) {}
 }
 
 /// Per-browser creation options. Kept deliberately small in v1.

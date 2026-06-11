@@ -1,59 +1,91 @@
 # Sandbox
 
-## Status: v1 ships unsandboxed
+## Status: implemented, off by default
 
-CefSwift v1 initializes CEF with `no_sandbox = 1` (`CefConfiguration.noSandbox`
-defaults to `true`, and v1 does not support turning it off). Renderer, GPU,
-and utility processes run **without** Chromium's macOS sandbox.
+CefSwift fully wires the Chromium macOS sandbox; flipping it on is one knob:
 
-This is a deliberate, documented v1 trade-off — wiring the sandbox correctly
-across five helper apps, ad-hoc signing, and a SwiftPM-built loader is real
-work we chose to land after the core — but you should understand what it
-means before shipping.
+```swift
+static var cefConfiguration: CefConfiguration {
+    var config = CefConfiguration()
+    config.noSandbox = false   // enable the Chromium sandbox
+    return config
+}
+```
 
-## What enabling the sandbox will require
+It still defaults to **off** (`noSandbox = true`) because sandboxed operation
+is only supportable on properly signed bundles (see the caveats below). Flip
+it for your distribution builds once your signing pipeline is in place.
 
-Since CEF M138, the macOS sandbox ships as a dylib inside the framework:
-`Chromium Embedded Framework.framework/Libraries/libcef_sandbox.dylib`
-(previously it was the static `cef_sandbox.a` you had to link). The enabling
-sequence, per process:
+## How it works
 
-1. **Helpers first.** Each helper process must call
-   `cef_sandbox_initialize(argc, argv)` from `libcef_sandbox.dylib`
-   **before loading the main CEF framework** — the sandbox must be sealed
-   before Chromium code runs. (There is a corresponding
-   `cef_sandbox_destroy` for teardown.)
-2. The browser process initializes CEF with `no_sandbox = 0`.
-3. Bundle structure must remain exactly as the plugin builds it (the sandbox
-   policy depends on helper layout), and signing identities/entitlements must
-   be consistent across app and helpers.
+Since CEF M138 the macOS sandbox ships as a dylib inside the framework:
+`Chromium Embedded Framework.framework/Libraries/libcef_sandbox.dylib`. The
+sequence CefSwift implements:
 
-CefSwift's design leaves a **clean seam** for this: the helper entry point
-(`CefRuntime.helperMain()`) is the single place the dylib load order is
-decided, and the loader already resolves the framework path before any CEF
-call. When this lands it will be a configuration flip plus a plugin update —
-no app-code changes.
+1. **Browser process** — `cef_settings_t.no_sandbox = 0` (mapped from
+   `CefConfiguration.noSandbox`). With the sandbox on, CEF stops appending
+   `--no-sandbox` to helper command lines.
+2. **Helper processes** — `CefRuntime.helperMain()` inspects argv: when
+   `--no-sandbox` is absent it calls `ccef_sandbox_initialize(argc, argv)`
+   (`Sources/CCef/ccef_sandbox.{h,c}`), which dlopens
+   `libcef_sandbox.dylib` from the helper-relative path
+   (`<exe>/../../../Chromium Embedded Framework.framework/Libraries/…`),
+   resolves `cef_sandbox_initialize`, and seals the process — **before** the
+   main CEF framework is loaded, as the sandbox contract requires. The
+   context and dylib stay alive for the process lifetime. If sealing fails,
+   the helper exits 125 with the loader error on stderr (running an
+   unsandboxed helper when the browser expected a sandboxed one would be
+   silently weaker — we refuse instead).
+3. The sandbox loader is intentionally **separate** from the main
+   `ccef_loader` symbol table: it has its own dlopen/dlsym pair, mirroring
+   CEF's `cef_scoped_sandbox_context_mac.mm`.
 
-Until then, do not set `noSandbox = false`; v1 ignores/rejects it.
+No app-code changes are needed beyond the configuration flip; the bundle
+layout the `cef` plugin produces is already correct (the dylib ships inside
+the framework's `Libraries/` directory).
 
-## Security posture guidance (running unsandboxed)
+## What we verified (CEF 148, macOS, Apple Silicon)
 
-Treat your v1 CefSwift app the way you would treat any unsandboxed browser
-runtime:
+Using the Browser example's dev hook (`CEFSWIFT_ENABLE_SANDBOX=1`, see
+`Examples/Sources/Browser/BrowserApp.swift`) on an **ad-hoc-signed** dev
+bundle:
+
+- `Browser --cef-smoke-test` with the sandbox enabled: **exit 0** (page
+  loads and renders).
+- Helper command lines contain **no** `--no-sandbox`; renderers run with
+  `--enable-sandbox` and a live `--seatbelt-client=<fd>` — i.e. the Seatbelt
+  sandbox is genuinely engaged, not silently skipped.
+- Normal browsing (DuckDuckGo, chrome:// pages) works under the sandbox.
+
+So on this machine the sandbox works end-to-end even ad-hoc signed. Treat
+that as encouraging but not portable:
+
+## Caveats
+
+- **Signing matters.** Chromium's sandbox expectations are tied to bundle
+  identity and consistent signing across the app and all five helpers. Ship
+  sandboxed builds with real Developer ID / App Store signing (+ hardened
+  runtime for notarization). Ad-hoc builds happened to work in our testing;
+  that is not a support promise, and OS updates may tighten it.
+- **Keep the bundle layout intact.** The dylib path is resolved relative to
+  the helper executable; don't restructure what `swift package cef bundle`
+  produces.
+- **`--no-sandbox` wins.** If anything injects `--no-sandbox` into the
+  browser process, CEF propagates it and helpers skip sealing (by design —
+  that's the switch CEF itself uses).
+- The macOS **App Sandbox** (the App Store entitlement) is a separate
+  mechanism from Chromium's sandbox; CefSwift does not manage entitlements.
+
+## Security posture guidance (if you stay unsandboxed)
 
 - **Prefer trusted content.** An embedded dashboard loading your own origins
   is a very different risk profile from a general-purpose browser loading
-  arbitrary URLs. For the latter, understand that a renderer compromise is not
-  contained by an OS sandbox.
-- **Keep CEF current.** This is the single highest-leverage mitigation, and
-  CefSwift automates it — the auto-update pipeline
+  arbitrary URLs.
+- **Keep CEF current.** The auto-update pipeline
   ([automation.md](automation.md)) turns Chromium security releases into
   auto-merging PRs. Ship updates promptly.
-- **Narrow the surface.** Use `extraCommandLineSwitches` to disable features
-  you don't need; don't enable `remoteDebuggingPort` in production builds
-  (it's an unauthenticated localhost control channel).
-- **Standard hardening still applies.** Hardened runtime + notarization for
-  distribution ([bundling.md](bundling.md)), HTTPS-only content, and treating
-  console/JS bridges as untrusted input.
-- The macOS **App Sandbox** (the App Store entitlement) is a separate
-  mechanism from Chromium's sandbox and is likewise not supported in v1.
+- **Narrow the surface.** Disable features you don't need via
+  `extraCommandLineSwitches`; don't enable `remoteDebuggingPort` in
+  production (it's an unauthenticated localhost control channel).
+- **Treat bridges as attack surface.** `CefBridge` handlers run with app
+  privileges — validate inputs ([js-bridge.md](js-bridge.md)).

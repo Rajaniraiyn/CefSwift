@@ -74,6 +74,28 @@ CCEF_SYM_VOID(cef_string_list_append,
               (cef_string_list_t list, const cef_string_t* value), (list, value))
 CCEF_SYM_VOID(cef_string_list_free, (cef_string_list_t list), (list))
 
+// --- String multimaps ----------------------------------------------------------
+CCEF_SYM(cef_string_multimap_t, cef_string_multimap_alloc, (void), ())
+CCEF_SYM(size_t, cef_string_multimap_size, (cef_string_multimap_t map), (map))
+CCEF_SYM(int, cef_string_multimap_key,
+         (cef_string_multimap_t map, size_t index, cef_string_t* key),
+         (map, index, key))
+CCEF_SYM(int, cef_string_multimap_value,
+         (cef_string_multimap_t map, size_t index, cef_string_t* value),
+         (map, index, value))
+CCEF_SYM(int, cef_string_multimap_append,
+         (cef_string_multimap_t map, const cef_string_t* key,
+          const cef_string_t* value),
+         (map, key, value))
+CCEF_SYM_VOID(cef_string_multimap_free, (cef_string_multimap_t map), (map))
+
+// --- Custom schemes ------------------------------------------------------------
+CCEF_SYM(int, cef_register_scheme_handler_factory,
+         (const cef_string_t* scheme_name, const cef_string_t* domain_name,
+          struct _cef_scheme_handler_factory_t* factory),
+         (scheme_name, domain_name, factory))
+CCEF_SYM(int, cef_clear_scheme_handler_factories, (void), ())
+
 // --- Request context / command line ------------------------------------------
 CCEF_SYM(cef_request_context_t*, cef_request_context_get_global_context,
          (void), ())

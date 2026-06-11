@@ -89,8 +89,8 @@ jobs:
           fi
           echo "PR: $PR_URL"
           if [ -n "$WARNING" ]; then
-            echo "::warning title=CEF API version::${WARNING}"
-            echo "Skipping auto-merge: the pinned CEF_API_VERSION needs manual migration."
+            echo "::warning title=CEF update needs attention::${WARNING}"
+            echo "Skipping auto-merge: manual migration required (CEF_API_VERSION pin and/or bridge symbols — see the PR body)."
           else
             # Requires "Allow auto-merge" + required status checks on main.
             gh pr merge --auto --squash "$PR_URL" \

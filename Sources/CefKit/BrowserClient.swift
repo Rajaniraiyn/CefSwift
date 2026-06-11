@@ -25,6 +25,7 @@ final class BrowserClient {
     nonisolated(unsafe) private var lifeSpanPointer: UnsafeMutablePointer<cef_life_span_handler_t>?
     nonisolated(unsafe) private var loadPointer: UnsafeMutablePointer<cef_load_handler_t>?
     nonisolated(unsafe) private var displayPointer: UnsafeMutablePointer<cef_display_handler_t>?
+    nonisolated(unsafe) private var downloadPointer: UnsafeMutablePointer<cef_download_handler_t>?
 
     func attach(_ browser: CefBrowser) {
         self.browser = browser
@@ -117,6 +118,23 @@ final class BrowserClient {
                 cefBrowser.delegate?.browser(cefBrowser, didFailLoad: code, errorText: text, failedURL: failed)
             }
         }
+        load.pointee.on_load_end = { handlerSelf, browser, frame, _ in
+            cefRelease(browser.map(UnsafeMutableRawPointer.init))
+            defer { cefRelease(frame.map(UnsafeMutableRawPointer.init)) }
+            guard let frame, frame.pointee.is_main?(frame) != 0 else { return }
+            guard BrowserClient.owner(handlerSelf.map(UnsafeMutableRawPointer.init)) != nil else { return }
+            MainActor.assumeIsolated {
+                // JS ↔ Swift bridge: late shim injection (see CefBridge docs;
+                // production pages should embed CefBridge.javascriptShim).
+                let bridge = CefRuntime.shared.bridge
+                guard bridge.autoInjectsShim, bridge.hasRegisteredFunctions else { return }
+                CefStringUtil.withCefString(CefBridge.javascriptShim) { code in
+                    CefStringUtil.withCefString("cefswift://shim") { shimURL in
+                        frame.pointee.execute_java_script?(frame, code, shimURL, 0)
+                    }
+                }
+            }
+        }
         loadPointer = load
 
         let display = cefAllocate(cef_display_handler_t.self, owner: self)
@@ -193,6 +211,59 @@ final class BrowserClient {
         }
         displayPointer = display
 
+        let download = cefAllocate(cef_download_handler_t.self, owner: self)
+        download.pointee.can_download = { _, browser, _, _ in
+            cefRelease(browser.map(UnsafeMutableRawPointer.init))
+            // Policy is decided in on_before_download where the suggested
+            // name and a CefDownload snapshot are available.
+            return 1
+        }
+        download.pointee.on_before_download = { handlerSelf, browser, item, suggestedName, callback in
+            cefRelease(browser.map(UnsafeMutableRawPointer.init))
+            guard let item, let callback else {
+                cefRelease(item.map(UnsafeMutableRawPointer.init))
+                cefRelease(callback.map(UnsafeMutableRawPointer.init))
+                return 0  // default handling
+            }
+            // Snapshot the item; references to it must not outlive this call.
+            let download = CefDownload(item: item)
+            cefRelease(UnsafeMutableRawPointer(item))
+            let name = CefStringUtil.string(from: suggestedName)
+            guard let client = BrowserClient.owner(handlerSelf.map(UnsafeMutableRawPointer.init)) else {
+                cefRelease(UnsafeMutableRawPointer(callback))
+                return 0
+            }
+            return MainActor.assumeIsolated {
+                defer { cefRelease(UnsafeMutableRawPointer(callback)) }
+                guard let cefBrowser = client.browser else { return 0 }
+                let decision = cefBrowser.delegate?.browser(
+                    cefBrowser, decidePolicyForDownload: download, suggestedName: name
+                ) ?? .allow(destination: nil)
+                if let destination = CefDownloadDestination.resolve(decision: decision, suggestedName: name) {
+                    CefStringUtil.withCefString(destination.path) { path in
+                        callback.pointee.cont?(callback, path, 0)
+                    }
+                }
+                // .deny: return 1 without executing the callback — CEF
+                // cancels the download when the callback is destroyed
+                // unexecuted.
+                return 1
+            }
+        }
+        download.pointee.on_download_updated = { handlerSelf, browser, item, callback in
+            cefRelease(browser.map(UnsafeMutableRawPointer.init))
+            cefRelease(callback.map(UnsafeMutableRawPointer.init))  // cancel/pause/resume unused
+            guard let item else { return }
+            let download = CefDownload(item: item)
+            cefRelease(UnsafeMutableRawPointer(item))
+            guard let client = BrowserClient.owner(handlerSelf.map(UnsafeMutableRawPointer.init)) else { return }
+            MainActor.assumeIsolated {
+                guard let cefBrowser = client.browser else { return }
+                cefBrowser.delegate?.browser(cefBrowser, downloadDidProgress: download)
+            }
+        }
+        downloadPointer = download
+
         let client = cefAllocate(cef_client_t.self, owner: self)
         client.pointee.get_life_span_handler = { clientSelf in
             guard let me = BrowserClient.owner(clientSelf.map(UnsafeMutableRawPointer.init)),
@@ -209,6 +280,12 @@ final class BrowserClient {
         client.pointee.get_display_handler = { clientSelf in
             guard let me = BrowserClient.owner(clientSelf.map(UnsafeMutableRawPointer.init)),
                   let handler = me.displayPointer else { return nil }
+            cefAddRef(UnsafeMutableRawPointer(handler))
+            return handler
+        }
+        client.pointee.get_download_handler = { clientSelf in
+            guard let me = BrowserClient.owner(clientSelf.map(UnsafeMutableRawPointer.init)),
+                  let handler = me.downloadPointer else { return nil }
             cefAddRef(UnsafeMutableRawPointer(handler))
             return handler
         }

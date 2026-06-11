@@ -35,6 +35,10 @@ public final class CefRuntime {
     /// before initialization.
     public private(set) var configuration: CefConfiguration?
 
+    /// The JS ↔ Swift function bridge. Register functions any time; pages
+    /// call them via `window.cefSwift.invoke(name, params)`. See ``CefBridge``.
+    public let bridge = CefBridge()
+
     var messagePump: CefMessagePump?
     private var appContext: CefAppContext?
     private var settings: MappedCefSettings?
@@ -83,11 +87,20 @@ public final class CefRuntime {
             throw error
         }
 
+        // Custom schemes must be registered identically in every process;
+        // the reserved bridge scheme is always present so CefBridge works
+        // without configuration.
+        var customSchemes = configuration.customSchemes
+        if !customSchemes.contains(where: { $0.name == CefBridge.schemeName }) {
+            customSchemes.append(CefBridge.customScheme)
+        }
+
         let pump = CefMessagePump()
         let context = CefAppContext(
             extraSwitches: configuration.extraCommandLineSwitches,
             useMockKeychain: configuration.safeStorage.resolved() == .mockKeychain,
             userCommandLineHook: configuration.onBeforeCommandLineProcessing,
+            customSchemes: customSchemes,
             pump: pump
         )
         let app = context.makeApp()
@@ -112,6 +125,38 @@ public final class CefRuntime {
         pump.start()
         CEFApplication.setTerminateHandler(cefTerminateHandler)
         isInitialized = true
+
+        // Route cefswift://bridge/* to the bridge dispatcher.
+        registerSchemeHandler(scheme: CefBridge.schemeName, handler: CefBridgeSchemeHandler(bridge: bridge))
+    }
+
+    // MARK: Custom scheme handlers
+
+    /// Registers `handler` as the content source for `scheme` (optionally
+    /// restricted to `domain` for standard schemes). Call after
+    /// ``initialize(configuration:)``; for custom (non-built-in) schemes the
+    /// scheme must also be declared in ``CefConfiguration/customSchemes``.
+    /// Registering again for the same scheme/domain replaces the handler.
+    public func registerSchemeHandler(scheme: String, domain: String? = nil, handler: some CefSchemeHandler) {
+        precondition(
+            isInitialized,
+            "CefRuntime.registerSchemeHandler requires initialize() to have succeeded first."
+        )
+        let factory = SchemeHandlerFactory(handler: handler)
+        // cef_register_scheme_handler_factory consumes our +1 factory ref.
+        let factoryPointer = factory.makeFactory()
+        let registered = CefStringUtil.withCefString(scheme) { cefScheme in
+            if let domain {
+                return CefStringUtil.withCefString(domain) { cefDomain in
+                    cef_register_scheme_handler_factory(cefScheme, cefDomain, factoryPointer)
+                }
+            }
+            return cef_register_scheme_handler_factory(cefScheme, nil, factoryPointer)
+        }
+        if registered == 0 {
+            FileHandle.standardError.write(
+                Data("CefSwift: cef_register_scheme_handler_factory failed for scheme '\(scheme)'.\n".utf8))
+        }
     }
 
     /// Shuts CEF down and unloads the framework. All browsers must already
@@ -132,10 +177,25 @@ public final class CefRuntime {
     // MARK: Helper process
 
     /// Entry point for helper executables (`cef-helper`'s main.swift calls
-    /// only this). Loads the framework from the helper-relative bundle
-    /// location (or `CEF_FRAMEWORK_PATH`), runs `cef_execute_process`, and
-    /// exits with its return code. Never returns.
+    /// only this). Seals the macOS sandbox when requested (i.e. unless CEF
+    /// passed `--no-sandbox`), loads the framework from the helper-relative
+    /// bundle location (or `CEF_FRAMEWORK_PATH`), mirrors any custom scheme
+    /// registration forwarded on the command line, runs
+    /// `cef_execute_process`, and exits with its return code. Never returns.
     public static func helperMain() -> Never {
+        let arguments = CommandLine.arguments
+
+        // Sandbox: when the browser process runs with no_sandbox=0, CEF stops
+        // passing --no-sandbox to subprocesses; each helper must then load
+        // libcef_sandbox.dylib and seal itself BEFORE the framework loads.
+        if !arguments.contains("--no-sandbox") {
+            guard ccef_sandbox_initialize(CommandLine.argc, CommandLine.unsafeArgv) != 0 else {
+                let message = String(cString: ccef_sandbox_error())
+                FileHandle.standardError.write(Data("cef-helper: sandbox initialization failed: \(message)\n".utf8))
+                exit(125)
+            }
+        }
+
         let binary: URL
         do {
             binary = try resolveHelperFrameworkBinary()
@@ -154,8 +214,18 @@ public final class CefRuntime {
             FileHandle.standardError.write(Data("cef-helper: \(error)\n".utf8))
             exit(125)
         }
+
+        // Custom schemes must be registered in every process: the browser
+        // forwarded its list via --cefswift-schemes (see CefAppContext).
+        let customSchemes = CefCustomScheme.parse(fromArguments: arguments)
+        var helperApp: UnsafeMutablePointer<cef_app_t>?
+        if !customSchemes.isEmpty {
+            // cef_execute_process consumes our +1 reference on the app.
+            helperApp = CefHelperAppContext(customSchemes: customSchemes).makeApp()
+        }
+
         var mainArgs = cef_main_args_t(argc: CommandLine.argc, argv: CommandLine.unsafeArgv)
-        let code = cef_execute_process(&mainArgs, nil, nil)
+        let code = cef_execute_process(&mainArgs, helperApp, nil)
         exit(code)
     }
 

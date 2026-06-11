@@ -191,6 +191,42 @@ elif ! grep -q "#define CEF_API_VERSION_${PINNED} " "$VENDORED_INCLUDE/cef_api_v
 fi
 [[ -n "$WARNING" ]] && log "WARNING: $WARNING"
 
+# --- 6b. Check every bound bridge symbol still exists in the new capi headers --
+# Cheap automated signal: every name in ccef_symbols.h must appear somewhere in
+# the NEW vendored headers (capi/, internal/, plus top-level C headers such as
+# cef_api_hash.h / cef_version_info.h). A miss means the new CEF major
+# removed/renamed a C API entry point we dlsym — the bridge would fail to load.
+# (Scripts/check-symbols.sh does the authoritative nm(1) check against the real
+# binary in CI; this header grep catches it at update time without a download.)
+SYMBOLS_H="$(find "$ROOT/Sources/CCef" -type f -name ccef_symbols.h 2>/dev/null | head -n1)"
+MISSING_SYMS=""
+if [[ -n "$SYMBOLS_H" ]]; then
+  # Same X-macro parser as Scripts/check-symbols.sh: name is the 1st field of
+  # CCEF_SYM_VOID(...) and the 2nd field of CCEF_SYM(type, name, ...).
+  BOUND_SYMS="$(awk '
+    /^[[:space:]]*CCEF_SYM_VOID\(/ {
+      s = $0; sub(/^[[:space:]]*CCEF_SYM_VOID\([[:space:]]*/, "", s)
+      sub(/[,)].*$/, "", s); gsub(/[[:space:]]/, "", s)
+      if (s != "") print s; next
+    }
+    /^[[:space:]]*CCEF_SYM\(/ {
+      s = $0; sub(/^[[:space:]]*CCEF_SYM\([[:space:]]*/, "", s)
+      n = split(s, parts, ",")
+      if (n >= 2) { name = parts[2]; gsub(/[[:space:]]/, "", name); if (name != "") print name }
+    }
+  ' "$SYMBOLS_H" | grep -E '^cef_' | sort -u)"
+  for sym in $BOUND_SYMS; do
+    if ! grep -rqw --include='*.h' "$sym" "$VENDORED_INCLUDE" 2>/dev/null; then
+      MISSING_SYMS+="$sym"$'\n'
+    fi
+  done
+fi
+if [[ -n "$MISSING_SYMS" ]]; then
+  SYMBOL_WARNING="Bridge symbol(s) missing from the new CEF capi headers (likely removed/renamed by this CEF version): $(printf '%s' "$MISSING_SYMS" | tr '\n' ' '). Update Sources/CCef/include/ccef_symbols.h and the Swift wrappers before merging."
+  log "WARNING: $SYMBOL_WARNING"
+  WARNING="${WARNING:+$WARNING }$SYMBOL_WARNING"
+fi
+
 # --- 7. PR body + outputs ------------------------------------------------------
 ARM_MIN_SIZE="$(jq -r '.platforms.macosarm64.minimal.size' "$MANIFEST")"
 ARM_STD_SIZE="$(jq -r '.platforms.macosarm64.standard.size' "$MANIFEST")"
@@ -210,6 +246,13 @@ X64_STD_SIZE="$(jq -r '.platforms.macosx64.standard.size' "$MANIFEST")"
   printf '### Changes\n\n'
   printf -- '- `CEF_VERSION.json` rewritten from index.json (minimal + standard, both mac platforms)\n'
   printf -- '- `Sources/CCef` vendored `include/` tree replaced with the %s distro headers\n\n' "$NEW"
+  printf '### Reviewer checklist\n\n'
+  printf -- '- [ ] New CEF majors may add/remove C API symbols — review `Sources/CCef/include/ccef_symbols.h` against the new headers (CI runs `Scripts/check-symbols.sh` against the real binary).\n\n'
+  if [[ -n "$MISSING_SYMS" ]]; then
+    printf '> [!CAUTION]\n> **Bound bridge symbols are MISSING from the new capi headers** — the dlsym loader will fail at runtime until `ccef_symbols.h` is fixed:\n>\n'
+    printf '%s' "$MISSING_SYMS" | sed 's/^/> - `/; s/$/`/'
+    printf '>\n> Auto-merge is disabled for this PR.\n\n'
+  fi
   if [[ -n "$WARNING" ]]; then
     printf '> [!WARNING]\n> %s\n\n' "$WARNING"
   fi

@@ -74,6 +74,15 @@ public final class CefWebViewModel {
     /// When `nil`, popups are allowed.
     public var onPopupRequest: ((URL?) -> CefPopupDecision)?
 
+    /// Called when a download is about to begin; return a
+    /// `CefDownloadDecision`. When `nil`, downloads are saved to
+    /// `~/Downloads/<suggested name>`.
+    public var onDownloadDecision: ((CefDownload, _ suggestedName: String) -> CefDownloadDecision)?
+
+    /// Called whenever a download's progress or state changes (including the
+    /// final completed/canceled update).
+    public var onDownloadProgress: ((CefDownload) -> Void)?
+
     /// Set while mirroring a browser-reported address change into ``url``,
     /// so the `didSet` observer doesn't navigate again.
     @ObservationIgnored private var isApplyingBrowserURL = false
@@ -194,5 +203,17 @@ extension CefWebViewModel: CefBrowserDelegate {
         line: Int
     ) {
         onConsoleMessage?(message)
+    }
+
+    public func browser(
+        _ b: CefBrowser,
+        decidePolicyForDownload download: CefDownload,
+        suggestedName: String
+    ) -> CefDownloadDecision {
+        onDownloadDecision?(download, suggestedName) ?? .allow(destination: nil)
+    }
+
+    public func browser(_ b: CefBrowser, downloadDidProgress download: CefDownload) {
+        onDownloadProgress?(download)
     }
 }

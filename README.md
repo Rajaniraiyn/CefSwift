@@ -1,5 +1,8 @@
 # CefSwift
 
+<!-- TODO: point this badge at the real repository once a remote exists. -->
+<!-- [![CI](https://github.com/rajaniraiyn/CefSwift/actions/workflows/ci.yml/badge.svg)](https://github.com/rajaniraiyn/CefSwift/actions/workflows/ci.yml) -->
+
 **The Chromium Embedded Framework, as if Apple shipped it.**
 
 CefSwift is to Swift and SwiftUI what CefSharp is to .NET: a Swift Package that
@@ -10,10 +13,11 @@ and completely automated CEF download and `.app` assembly through a SwiftPM
 command plugin. It is designed to scale from a single embedded web card in a
 dashboard all the way up to an Arc-class browser.
 
-> **Status:** v1. Windowed (native NSView) embedding on macOS, arm64 and x64.
-> Honest limitations: no off-screen rendering yet, the Chromium sandbox is
-> disabled (`no_sandbox`), and JS↔Swift bridging is not exposed. See the
-> [Roadmap](#roadmap).
+> **Status: v0.1 — windowed embedding works end-to-end.** Windowed (native
+> NSView) browsers on macOS, arm64 and x64: create, navigate, observe, bundle,
+> sign, launch — all exercised by CI on every push. Honest limitations: no
+> off-screen rendering yet, the Chromium sandbox is disabled (`no_sandbox`),
+> and JS↔Swift bridging is not exposed. See the [Roadmap](#roadmap).
 
 ## Why CefSwift
 
@@ -43,7 +47,7 @@ Add the package:
 ```swift
 // Package.swift
 dependencies: [
-    .package(url: "https://github.com/rajaniraiyn/CefSwift.git", from: "1.0.0")
+    .package(url: "https://github.com/rajaniraiyn/CefSwift.git", from: "0.1.0")
 ],
 targets: [
     .executableTarget(
@@ -81,7 +85,12 @@ swift package --allow-writing-to-package-directory \
 ```
 
 That's it. The plugin prints the path of the finished `MyApp.app` and a hint
-to `open` it.
+to `open` it. Signing defaults to auto-detect (falling back to ad-hoc); pass
+`--sign <identity>` to use a specific codesigning identity, or `--sign -` to
+force ad-hoc. Other useful flags: `--configuration debug|release`,
+`--flavor minimal|standard`, `--output <dir>`, `--bundle-id <id>`,
+`--name <DisplayName>` — and `swift package cef info` / `cef clean` manage the
+download cache.
 
 For programmatic control, drive the view through a model:
 
@@ -181,6 +190,7 @@ struct MyApp: CefSwiftApp {
 | `rootCachePath` / `cachePath` | Profile and cache locations |
 | `remoteDebuggingPort` | Chrome DevTools Protocol on localhost |
 | `logSeverity` / `logFile` | Chromium logging |
+| `safeStorage` | Cookie-encryption key policy: `.automatic` uses the macOS keychain for properly signed builds and a mock key for ad-hoc dev builds (no keychain ACL prompt) |
 | `extraCommandLineSwitches` | Any Chromium switch, pluggable |
 | `onBeforeCommandLineProcessing` | Last-word hook over the command line |
 

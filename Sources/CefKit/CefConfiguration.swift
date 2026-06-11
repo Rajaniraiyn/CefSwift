@@ -63,7 +63,11 @@ public enum CefLogSeverity: Sendable, Equatable {
 /// `cef_settings_t`; every knob has a sensible default so `.default` works
 /// out of the box for a bundled app.
 public struct CefConfiguration: Sendable {
-    /// Disable the Chromium sandbox. CefSwift v1 only supports `true`.
+    /// Disable the Chromium sandbox (the default). Setting `false` enables
+    /// the macOS sandbox end-to-end: helper processes load
+    /// `libcef_sandbox.dylib` and seal themselves before any Chromium code
+    /// runs. Sandboxed operation requires a properly signed bundle — see
+    /// `docs/sandbox.md` before flipping this.
     public var noSandbox: Bool = true
 
     /// Root directory for all CEF profile data. Defaults to
@@ -116,6 +120,14 @@ public struct CefConfiguration: Sendable {
     /// ad-hoc-signed/unsigned dev builds (no prompt) and the real keychain
     /// for properly signed builds (Chrome-like; "Always Allow" sticks).
     public var safeStorage: CefSafeStoragePolicy = .automatic
+
+    /// Custom URL schemes registered in every CEF process (browser, renderer,
+    /// GPU, …). Declare schemes here, then serve them with
+    /// ``CefRuntime/registerSchemeHandler(scheme:domain:handler:)``.
+    /// CefSwift forwards the list to helper processes automatically via a
+    /// `--cefswift-schemes` command-line switch. The reserved `cefswift`
+    /// bridge scheme (see ``CefBridge``) is always appended.
+    public var customSchemes: [CefCustomScheme] = []
 
     /// Extra Chromium command-line switches applied to the browser process,
     /// e.g. `["disable-gpu": nil, "proxy-server": "socks5://localhost:1080"]`.

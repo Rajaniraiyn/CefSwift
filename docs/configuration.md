@@ -26,7 +26,7 @@ Or, without `CefSwiftApp`, pass it to
 
 | Knob | Type / default | Effect |
 |---|---|---|
-| `noSandbox` | `Bool`, `true` | v1 always runs unsandboxed; see [sandbox.md](sandbox.md). |
+| `noSandbox` | `Bool`, `true` | `false` enables the Chromium macOS sandbox end-to-end (helpers seal themselves via `libcef_sandbox.dylib` before loading CEF). Requires a properly signed bundle — see [sandbox.md](sandbox.md). |
 | `rootCachePath` | `URL?`, `~/Library/Application Support/<bundle-id>/CefSwift` | Root for all profile data (cookies, local storage, caches). |
 | `cachePath` | `URL?` | A specific profile directory under the root. Unset = "incognito-like" global profile semantics per CEF defaults. |
 | `locale` | `String?` | UI locale, e.g. `"de"`. Defaults to the system locale. |
@@ -40,8 +40,17 @@ Or, without `CefSwiftApp`, pass it to
 | `externalMessagePump` | `Bool`, `true` | Leave on. SwiftUI owns the run loop; see [architecture.md](architecture.md). |
 | `frameworkDirectory` | `URL?` | Override where the CEF framework is found (default: the app bundle's `Contents/Frameworks/`). Useful for unbundled dev setups. |
 | `browserSubprocessPath` | `URL?` | Override the helper executable path. |
+| `customSchemes` | `[CefCustomScheme]`, `[]` | Custom URL schemes registered in **every** CEF process (the helper side is automated via a `--cefswift-schemes` switch). Serve them with `CefRuntime.registerSchemeHandler(scheme:domain:handler:)` — e.g. `CefBundleSchemeHandler(directory:)` for bundled web UI. The reserved `cefswift` bridge scheme is always added. |
 | `extraCommandLineSwitches` | `[String: String?]` | Any Chromium switch — `nil` value for boolean switches: `["disable-gpu-shader-disk-cache": nil]`. |
 | `onBeforeCommandLineProcessing` | closure | The last word: inspect/mutate the full `CefCommandLine` before Chromium parses it. |
+
+## Beyond CefConfiguration: runtime-level plug points
+
+| Surface | What it does |
+|---|---|
+| `CefRuntime.shared.registerSchemeHandler(scheme:domain:handler:)` | Routes a scheme to a `CefSchemeHandler` (`func response(for: CefSchemeRequest) async -> CefSchemeResponse`, whole-body buffered). Pair with `customSchemes` above; `CefBundleSchemeHandler(directory:indexFile:)` serves local files with UTType-based MIME detection. |
+| `CefRuntime.shared.bridge` | JS ↔ Swift function bridge: `bridge.register("name") { (input: In) in Out }` (Codable) and pages call `await window.cefSwift.invoke('name', {…})`. Shim auto-injection toggle: `bridge.autoInjectsShim`. See [js-bridge.md](js-bridge.md). |
+| Downloads | Per browser: `CefBrowserDelegate.browser(_:decidePolicyForDownload:suggestedName:)` (return `.allow(destination:)` / `.deny`; default saves to `~/Downloads/<suggested name>`) plus `browser(_:downloadDidProgress:)` with a `CefDownload` snapshot (id, url, bytes, completion, path). On `CefWebViewModel`: the `onDownloadDecision` / `onDownloadProgress` closures. |
 
 ## Runtime styles: chrome vs alloy
 

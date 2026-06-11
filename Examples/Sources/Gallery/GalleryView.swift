@@ -11,6 +11,7 @@ struct GalleryView: View {
     var body: some View {
         ScrollView {
             LazyVGrid(columns: columns, spacing: 16) {
+                SwiftJSBridgeCard()
                 AlloyStyleCard()
                 MutedVideoCard()
                 ConsoleLogCard()
@@ -37,7 +38,7 @@ struct GalleryView: View {
 
 // MARK: - Card chrome
 
-private struct GalleryCard<Content: View>: View {
+struct GalleryCard<Content: View>: View {
     let title: String
     let symbol: String
     let caption: String

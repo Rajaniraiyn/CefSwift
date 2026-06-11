@@ -23,7 +23,15 @@ struct GalleryApp: CefSwiftApp {
         ]
         // Demo profile: never touch the keychain (no "Chromium Safe Storage" prompt).
         config.safeStorage = .mockKeychain
+        // Custom scheme serving the Swift ↔ JS bridge demo page (see BridgeCard.swift).
+        config.customSchemes = [CefCustomScheme(name: "gallery")]
         return config
+    }
+
+    init() {
+        // CEF is initialized before SwiftUI constructs the App; register the
+        // gallery:// page handler and the bridge functions now.
+        BridgeDemo.shared.activate()
     }
 
     var body: some Scene {
