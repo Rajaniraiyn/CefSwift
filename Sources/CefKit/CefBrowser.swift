@@ -9,8 +9,13 @@ import Foundation
 /// when using the external message pump.
 @MainActor
 public final class CefBrowser: Identifiable {
-    /// CEF's browser identifier (unique per process; `-1` if creation failed).
-    public let id: Int32
+    /// CEF's browser identifier (unique per process; `-1` if creation failed
+    /// or, for views-hosted browsers, until creation completes).
+    ///
+    /// `nonisolated(unsafe)` keeps the `Identifiable` conformance nonisolated
+    /// (as it was when this was a `let`): written only on the main actor (at
+    /// init and in `adoptRaw`), so cross-actor reads are benign.
+    nonisolated(unsafe) public private(set) var id: Int32
 
     /// Event observer. Held weakly.
     public weak var delegate: CefBrowserDelegate?
@@ -144,6 +149,31 @@ public final class CefBrowser: Identifiable {
     }
 
     // MARK: Internal plumbing
+
+    /// Adopts a raw browser after the fact (views-hosted browsers are created
+    /// asynchronously by CEF; ``CefChromeBrowser`` calls this from
+    /// `on_browser_created`). Takes ownership of the caller's +1 reference.
+    /// If a raw browser is already owned the extra reference is released —
+    /// this guards against popup browsers reusing the same client.
+    func adoptRaw(_ newRaw: UnsafeMutablePointer<cef_browser_t>) {
+        guard raw == nil else {
+            cefRelease(UnsafeMutableRawPointer(newRaw))
+            return
+        }
+        raw = newRaw
+        id = newRaw.pointee.get_identifier?(newRaw) ?? -1
+        CefRuntime.shared.registerBrowser(self)
+    }
+
+    /// Whether a live raw cef_browser_t is attached.
+    var hasRawBrowser: Bool { raw != nil }
+
+    /// Calls `try_close_browser` on the host: gives JavaScript
+    /// `onbeforeunload` handlers their say, then proceeds with the close.
+    /// Used by the views window delegate's `can_close`.
+    func tryCloseFromWindow() -> Bool {
+        withHost { ($0.pointee.try_close_browser?($0) ?? 1) != 0 } ?? true
+    }
 
     /// Runs `body` with a +1 host reference, releasing it afterwards.
     private func withHost<R>(_ body: (UnsafeMutablePointer<cef_browser_host_t>) -> R) -> R? {

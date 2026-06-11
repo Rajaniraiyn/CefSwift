@@ -19,6 +19,7 @@ final class MappedCefSettings {
         raw.log_severity = configuration.logSeverity.cefValue
         raw.persist_session_cookies = configuration.persistSessionCookies ? 1 : 0
         raw.remote_debugging_port = Int32(configuration.remoteDebuggingPort ?? 0)
+        raw.windowless_rendering_enabled = configuration.windowlessRenderingEnabled ? 1 : 0
 
         // CEF requires cache_path to equal or live under root_cache_path. When only
         // cachePath is given, derive the root from it so the pair is always valid.

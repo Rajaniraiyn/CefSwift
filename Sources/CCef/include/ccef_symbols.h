@@ -117,6 +117,33 @@ CCEF_SYM(cef_binary_value_t*, cef_binary_value_create,
 CCEF_SYM(cef_dictionary_value_t*, cef_dictionary_value_create, (void), ())
 CCEF_SYM(cef_list_value_t*, cef_list_value_create, (void), ())
 
+// --- Views framework (chrome-style windows) -----------------------------------
+CCEF_SYM(cef_browser_view_t*, cef_browser_view_create,
+         (struct _cef_client_t* client, const cef_string_t* url,
+          const struct _cef_browser_settings_t* settings,
+          struct _cef_dictionary_value_t* extra_info,
+          struct _cef_request_context_t* request_context,
+          struct _cef_browser_view_delegate_t* delegate),
+         (client, url, settings, extra_info, request_context, delegate))
+CCEF_SYM(cef_browser_view_t*, cef_browser_view_get_for_browser,
+         (struct _cef_browser_t* browser), (browser))
+CCEF_SYM(cef_window_t*, cef_window_create_top_level,
+         (struct _cef_window_delegate_t* delegate), (delegate))
+
 // --- Cookies ------------------------------------------------------------------------
 CCEF_SYM(cef_cookie_manager_t*, cef_cookie_manager_get_global_manager,
          (struct _cef_completion_callback_t* callback), (callback))
+
+// --- Native JS binding (v8 + IPC) ---------------------------------------------------
+// Not yet wired up; listed so the render-process handler path (window.<name>
+// injection + Promise round-trip via process messages) can use the native v8
+// bridge rather than the cefswift:// scheme shim. See docs/js-bridge.md.
+CCEF_SYM(cef_v8_context_t*, cef_v8_context_get_current_context, (void), ())
+CCEF_SYM(cef_v8_value_t*, cef_v8_value_create_function,
+         (const cef_string_t* name, struct _cef_v8_handler_t* handler),
+         (name, handler))
+CCEF_SYM(cef_v8_value_t*, cef_v8_value_create_string,
+         (const cef_string_t* value), (value))
+CCEF_SYM(cef_v8_value_t*, cef_v8_value_create_promise, (void), ())
+CCEF_SYM(cef_process_message_t*, cef_process_message_create,
+         (const cef_string_t* name), (name))

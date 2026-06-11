@@ -103,6 +103,15 @@ public struct CefConfiguration: Sendable {
     /// when SwiftUI/AppKit owns the run loop). Leave `true`.
     public var externalMessagePump: Bool = true
 
+    /// Enable Chromium offscreen (windowless) rendering process-wide. Required
+    /// for the OSR hosting mode, where CEF paints into a shared `IOSurface`
+    /// that CefSwift composites in a Metal/`CALayer`-backed SwiftUI view rather
+    /// than a CEF-owned window. Has no effect on windowed or chrome-window
+    /// browsers. Note: windowless rendering always uses Alloy style — the
+    /// Chrome runtime (chrome:// internals, extensions) is unavailable in this
+    /// mode (a CEF/Chromium constraint on macOS).
+    public var windowlessRenderingEnabled: Bool = false
+
     /// Explicit path to `Chromium Embedded Framework.framework`. When `nil`
     /// the framework is resolved from the app bundle's Frameworks directory,
     /// then from the `CEF_FRAMEWORK_PATH` environment variable.

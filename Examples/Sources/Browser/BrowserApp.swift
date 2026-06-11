@@ -38,11 +38,35 @@ struct BrowserApp: CefSwiftApp {
     /// `--open-url <url>`: navigate the initial tab at launch (handy for
     /// scripted testing, e.g. verifying chrome:// pages).
     private static var launchURL: URL? {
+        argumentURL(after: "--open-url")
+    }
+
+    /// `--open-chrome-url <url>`: open a chrome-style window (CefChromeBrowser,
+    /// toolbar hidden) at launch — scripted verification of chrome:// WebUI.
+    private static var launchChromeURL: URL? {
+        argumentURL(after: "--open-chrome-url")
+    }
+
+    /// `--open-embedded-chrome-url <url>`: open an *embedded* chrome-style tab
+    /// (CefChromeWebView child-window overlay) at launch.
+    private static var launchEmbeddedChromeURL: URL? {
+        argumentURL(after: "--open-embedded-chrome-url")
+    }
+
+    private static func argumentURL(after flag: String) -> URL? {
         let arguments = CommandLine.arguments
-        guard let index = arguments.firstIndex(of: "--open-url"),
+        guard let index = arguments.firstIndex(of: flag),
               arguments.indices.contains(index + 1)
         else { return nil }
         return URL(string: arguments[index + 1])
+    }
+
+    /// Opens `url` in a standalone chrome-style window: full Chrome runtime
+    /// (history/extensions/settings WebUI render), Chrome's own toolbar hidden.
+    private func openChromeWindow(_ url: URL) {
+        var options = CefChromeBrowserOptions()
+        options.showsChromeToolbar = false
+        CefChromeBrowser.create(url: url, options: options)
     }
 
     @State private var store = TabStore()
@@ -58,6 +82,12 @@ struct BrowserApp: CefSwiftApp {
                     if let url = Self.launchURL {
                         store.newTab(url: url)
                     }
+                    if let url = Self.launchChromeURL {
+                        openChromeWindow(url)
+                    }
+                    if let url = Self.launchEmbeddedChromeURL {
+                        store.newTab(url: url, kind: .chromeEmbedded)
+                    }
                 }
         }
         .windowStyle(.hiddenTitleBar)
@@ -67,6 +97,17 @@ struct BrowserApp: CefSwiftApp {
                     .keyboardShortcut("t", modifiers: .command)
                 Button("Close Tab") { store.closeSelectedTab() }
                     .keyboardShortcut("w", modifiers: .command)
+                Divider()
+                // Re-opens the current page in a CEF Views window running the
+                // real Chrome runtime style (toolbar hidden) — the hosting
+                // mode where chrome://history & co. actually render.
+                Button("Open in Chrome Window") {
+                    openChromeWindow(store.selectedTab?.model.url ?? TabStore.homeURL)
+                }
+                .keyboardShortcut("n", modifiers: [.command, .shift])
+                Button("New Embedded Chrome Tab (Experimental)") {
+                    store.newTab(url: URL(string: "chrome://history")!, kind: .chromeEmbedded)
+                }
                 Divider()
                 Button("Open Location…") { store.requestOmniboxFocus() }
                     .keyboardShortcut("l", modifiers: .command)
@@ -87,13 +128,15 @@ struct BrowserApp: CefSwiftApp {
                 Button("Network Log Export") { store.newTab(url: URL(string: "chrome://net-export")!) }
                 Button("All Chrome URLs") { store.newTab(url: URL(string: "chrome://about")!) }
                 Divider()
-                Menu("Needs Chrome-Style Window") {
-                    // Kept for documentation: enabled so you can see the blank
-                    // render yourself, but expect no content in embedded views.
-                    Button("History (blank when embedded)") { store.newTab(url: URL(string: "chrome://history")!) }
-                    Button("Extensions (blank when embedded)") { store.newTab(url: URL(string: "chrome://extensions")!) }
-                    Button("Settings (blank when embedded)") { store.newTab(url: URL(string: "chrome://settings")!) }
-                    Button("Downloads (blank when embedded)") { store.newTab(url: URL(string: "chrome://downloads")!) }
+                Menu("Chrome-Style Window") {
+                    // These WebUI pages need a Chrome-style *window* to render
+                    // (they load but stay blank in NSView-embedded tabs), so
+                    // they open as CefChromeBrowser windows where they work.
+                    Button("History") { openChromeWindow(URL(string: "chrome://history")!) }
+                    Button("Extensions") { openChromeWindow(URL(string: "chrome://extensions")!) }
+                    Button("Settings") { openChromeWindow(URL(string: "chrome://settings")!) }
+                    Button("Downloads") { openChromeWindow(URL(string: "chrome://downloads")!) }
+                    Button("Flags") { openChromeWindow(URL(string: "chrome://flags")!) }
                 }
                 Divider()
                 Button("Toggle DevTools") { store.selectedTab?.model.browser?.showDevTools() }

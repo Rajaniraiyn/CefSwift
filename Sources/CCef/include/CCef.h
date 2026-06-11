@@ -65,6 +65,7 @@
 #include "include/capi/cef_request_context_capi.h"
 #include "include/capi/cef_request_context_handler_capi.h"
 #include "include/capi/cef_request_handler_capi.h"
+#include "include/capi/cef_v8_capi.h"
 #include "include/capi/cef_resource_handler_capi.h"
 #include "include/capi/cef_resource_request_handler_capi.h"
 #include "include/capi/cef_response_capi.h"
@@ -72,6 +73,16 @@
 #include "include/capi/cef_string_visitor_capi.h"
 #include "include/capi/cef_task_capi.h"
 #include "include/capi/cef_values_capi.h"
+
+// Views framework (chrome-style windows: cef_browser_view + cef_window).
+#include "include/capi/views/cef_view_capi.h"
+#include "include/capi/views/cef_view_delegate_capi.h"
+#include "include/capi/views/cef_panel_capi.h"
+#include "include/capi/views/cef_panel_delegate_capi.h"
+#include "include/capi/views/cef_browser_view_capi.h"
+#include "include/capi/views/cef_browser_view_delegate_capi.h"
+#include "include/capi/views/cef_window_capi.h"
+#include "include/capi/views/cef_window_delegate_capi.h"
 
 // CefSwift runtime loader + helpers.
 #include "ccef_loader.h"

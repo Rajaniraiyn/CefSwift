@@ -6,10 +6,21 @@ import CefSwiftUI
 @Observable
 @MainActor
 final class BrowserTab: Identifiable {
+    /// How the tab's browser is hosted.
+    enum Kind {
+        /// NSView-embedded browser (`CefWebView`, Alloy style).
+        case web
+        /// Chrome-style child-window overlay (`CefChromeWebView`,
+        /// experimental) — full Chrome runtime, chrome:// pages render.
+        case chromeEmbedded
+    }
+
     let id = UUID()
+    let kind: Kind
     let model: CefWebViewModel
 
-    init(url: URL, store: TabStore? = nil) {
+    init(url: URL, kind: Kind = .web, store: TabStore? = nil) {
+        self.kind = kind
         model = CefWebViewModel(url: url)
         // Popups (target=_blank, window.open) become new tabs instead of new windows.
         model.onPopupRequest = { [weak store] popupURL in
@@ -46,8 +57,8 @@ final class TabStore {
     }
 
     @discardableResult
-    func newTab(url: URL = TabStore.homeURL) -> BrowserTab {
-        let tab = BrowserTab(url: url, store: self)
+    func newTab(url: URL = TabStore.homeURL, kind: BrowserTab.Kind = .web) -> BrowserTab {
+        let tab = BrowserTab(url: url, kind: kind, store: self)
         tabs.append(tab)
         selectedTabID = tab.id
         return tab

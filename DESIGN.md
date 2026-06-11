@@ -5,6 +5,41 @@
 > If something here is impossible in practice, implement the closest working alternative and
 > leave a `// CONTRACT-DEVIATION:` comment explaining why.
 
+## Embedding architecture (SETTLED — evidence-backed, CEF 148, macOS)
+
+The central constraint: **CEF/Chromium binds a chrome-runtime browser's compositor to its
+own NSWindow.** Native-parent (`parent_view`) and windowless both force Alloy style on macOS
+(libcef `browser_host_create.cc`; tracking issue #3294 — Win/Linux only). Plain NSView
+reparenting of a chrome browser blanks rendering (compositor re-detaches in ~2s). Remote
+CALayer mirroring (CAContext id) is not exposed by CEF and is App-Store-hostile. Therefore
+CefSwift ships **three hosting modes**, each proven with screenshots:
+
+1. **Windowed Alloy** — `CefWebView` (NSViewRepresentable, `parent_view`). CEF renders +
+   handles input/IME/AX natively. Cannot composite native UI *over* the page region. Default,
+   max compatibility. SHIPPING.
+2. **Chrome-runtime window (inverted ownership)** — `CefChromeWindow`: a CEF Views top-level
+   window (`cef_browser_view` + `cef_window`, chrome style, toolbar hidden via
+   `CEF_CTT_NONE`) that HOSTS native `NSHostingView` SwiftUI overlays added as subviews of the
+   CEF window's content view (proven: SwiftUI tabstrip/omnibox composite on top of full chrome
+   runtime — chrome://history/extensions/settings render). CEF owns the NSWindow (not SwiftUI's
+   `WindowGroup`); lifecycle driven through `cef_window_delegate_t`. The "full browser" mode.
+3. **OSR / Metal (`windowlessRenderingEnabled`)** — `CefMetalWebView`: CEF paints into a
+   shared `IOSurface` (`on_accelerated_paint`, `shared_texture_enabled`) composited in a
+   `CAMetalLayer`/`CALayer`-backed view → a genuine in-tree subview, retina-correct, native UI
+   compositable anywhere (beats Electron's BrowserView). Alloy style only (no chrome://). All
+   "native" affordances are DIY via capi handlers: input (`send_mouse_*`/`send_key_event` +
+   DIP coordinate mapping), IME (`NSTextInputClient` ↔ `ime_set_composition`), cursor
+   (`on_cursor_change`), AX (`cef_accessibility_handler` → `NSAccessibility`), context menu
+   (`cef_context_menu_handler`), DevTools (`show_dev_tools` → own surface). The "indistinguishable
+   embedded web view" premium primitive.
+
+Native JS binding (`window.<name>` Electron/Playwright parity): feasible via
+`get_render_process_handler` → `on_context_created` installing `cef_v8_value_create_function`
++ `cef_v8_handler_t` → `send_process_message` IPC → browser route → reply → promise resolve.
+Requires the shared `cef-helper` app to carry a render-process handler (extends the same app
+seam the custom-schemes work opened). Complements (does not replace) the `cefswift://` scheme
+bridge.
+
 ## Vision
 
 CefSwift is to Swift/SwiftUI what CefSharp is to .NET — but designed as if Apple shipped it:

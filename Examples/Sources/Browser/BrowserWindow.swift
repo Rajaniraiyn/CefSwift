@@ -16,10 +16,20 @@ struct BrowserWindow: View {
                 Divider()
                 ZStack {
                     // All tabs stay alive; only the selected one is visible.
+                    // (Chrome-overlay tabs are an exception: the overlay is a
+                    // child *window*, so opacity can't hide it — they are
+                    // removed from the hierarchy when deselected instead.)
                     ForEach(store.tabs) { tab in
-                        CefWebView(model: tab.model)
-                            .opacity(tab.id == store.selectedTabID ? 1 : 0)
-                            .allowsHitTesting(tab.id == store.selectedTabID)
+                        switch tab.kind {
+                        case .web:
+                            CefWebView(model: tab.model)
+                                .opacity(tab.id == store.selectedTabID ? 1 : 0)
+                                .allowsHitTesting(tab.id == store.selectedTabID)
+                        case .chromeEmbedded:
+                            if tab.id == store.selectedTabID {
+                                CefChromeWebView(model: tab.model)
+                            }
+                        }
                     }
                 }
             }
