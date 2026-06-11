@@ -1,0 +1,83 @@
+# CefSwift CI — build, test, bundle the Browser example, and smoke-test a real
+# CEF launch on every push/PR to main.
+#
+# Cost notes (keep this cheap):
+#   - Single macos-15 job (arm64). macos-latest currently aliases macos-26 and
+#     macos-14 is deprecating, so the runner is pinned explicitly.
+#   - Only the minimal arm64 CEF flavor is downloaded, and `.cef/downloads`
+#     (~120 MB) is cached keyed on the pinned CEF version.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    # Job name intentionally just "ci" — docs/automation.md tells users to mark
+    # it as the required status check that gates auto-merged CEF update PRs.
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Read pinned CEF version
+        id: cef
+        run: echo "version=$(jq -r .cef CEF_VERSION.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Build (root package)
+        run: swift build
+
+      - name: Test
+        run: swift test
+
+      # Cache the downloaded CEF tarball; the key matches the scheme used by
+      # Scripts/cef-update.sh and the CefPlugin: cef-<version>-<platform>-<flavor>.
+      - name: Cache CEF downloads
+        uses: actions/cache@v4
+        with:
+          path: .cef/downloads
+          key: cef-${{ steps.cef.outputs.version }}-macosarm64-minimal
+
+      - name: Download CEF (minimal, arm64)
+        run: |
+          swift package \
+            --allow-writing-to-package-directory \
+            --allow-network-connections all \
+            cef download
+
+      - name: Build Examples package
+        run: swift build --package-path Examples
+
+      # Bundle the Browser example into a runnable .app.
+      # NOTE: the `cef` command plugin is declared in the ROOT package; the
+      # Examples package depends on it via `.package(path: "..")`, which makes
+      # the plugin verb available when running from Examples. If SwiftPM ever
+      # reports an ambiguous/unknown `cef` verb here, disambiguate with
+      # `--package cefswift` (the root package identity) after `swift package`.
+      # `--output dist` resolves relative to the Examples package directory.
+      - name: Bundle Browser example
+        run: |
+          swift package --package-path Examples \
+            --allow-writing-to-package-directory \
+            --allow-network-connections all \
+            cef bundle --product Browser --configuration release --output dist
+
+      # The Browser example exits 0 after its first successful page load when
+      # launched with --cef-smoke-test. GNU `timeout` ships as `gtimeout` from
+      # Homebrew coreutils on macOS runners; fall back accordingly.
+      - name: Smoke test (launch CEF, load a page, exit)
+        run: |
+          TIMEOUT=timeout
+          command -v timeout >/dev/null 2>&1 || TIMEOUT=gtimeout
+          "$TIMEOUT" 60 ./Examples/dist/Browser.app/Contents/MacOS/Browser --cef-smoke-test

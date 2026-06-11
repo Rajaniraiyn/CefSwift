@@ -1,0 +1,5 @@
+{
+  "bundleIdentifier": "dev.rajaniraiyn.cefswift.browser",
+  "displayName": "CefSwift Browser",
+  "minimumSystemVersion": "14.0"
+}

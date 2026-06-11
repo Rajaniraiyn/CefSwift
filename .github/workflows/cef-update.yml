@@ -1,0 +1,98 @@
+# CEF auto-update — polls cef-builds.spotifycdn.com twice a week and opens an
+# auto-merging PR when a newer stable CEF is available.
+#
+# Required repository setup (see docs/automation.md for the full walkthrough):
+#   - Settings → General → "Allow auto-merge" enabled
+#   - Branch protection on main with the `ci` job as a required status check
+#     (auto-merge only fires once required checks pass)
+#   - Settings → Actions → "Allow GitHub Actions to create and approve pull
+#     requests" enabled
+#   - OPTIONAL but strongly recommended: a fine-grained PAT in the secret
+#     CEF_UPDATE_TOKEN (contents: write, pull-requests: write).
+#
+# IMPORTANT PITFALL: pull requests created with the default GITHUB_TOKEN do
+# NOT trigger other workflows — meaning CI never runs on the update PR, the
+# required check never reports, and auto-merge never completes. Set
+# CEF_UPDATE_TOKEN to avoid this; without it the PR is still created but you
+# must close/reopen it (or push to it) manually to kick CI.
+#
+# Note: scheduled workflows only run on the default branch.
+name: CEF Update
+
+on:
+  schedule:
+    - cron: '17 6 * * 1,4'   # Mon & Thu, 06:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: cef-update
+  cancel-in-progress: false
+
+jobs:
+  update:
+    name: Check for new stable CEF
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      # PAT if configured, else the default token (see pitfall note above).
+      GH_TOKEN: ${{ secrets.CEF_UPDATE_TOKEN || github.token }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.CEF_UPDATE_TOKEN || github.token }}
+
+      - name: Run update check
+        id: update
+        run: Scripts/cef-update.sh
+
+      - name: Report up to date
+        if: steps.update.outputs.updated != 'true'
+        run: echo "CEF pin ${{ steps.update.outputs.old }} is the latest stable. Nothing to do."
+
+      - name: Create update branch and commit
+        if: steps.update.outputs.updated == 'true'
+        env:
+          NEW_VERSION: ${{ steps.update.outputs.new }}
+        run: |
+          BRANCH="cef-update/${NEW_VERSION}"
+          echo "BRANCH=$BRANCH" >> "$GITHUB_ENV"
+          git config user.name "cef-update[bot]"
+          git config user.email "cef-update-bot@users.noreply.github.com"
+          git checkout -B "$BRANCH"
+          git add CEF_VERSION.json Sources/CCef
+          git commit -m "Bump CEF to ${NEW_VERSION}"
+          git push --force origin "$BRANCH"
+
+      - name: Open pull request and enable auto-merge
+        if: steps.update.outputs.updated == 'true'
+        env:
+          OLD_VERSION: ${{ steps.update.outputs.old }}
+          NEW_VERSION: ${{ steps.update.outputs.new }}
+          BODY_PATH: ${{ steps.update.outputs.body_path }}
+          WARNING: ${{ steps.update.outputs.warning }}
+        run: |
+          # Reuse an existing open PR for this branch if a previous run made one.
+          PR_URL="$(gh pr list --head "$BRANCH" --state open --json url --jq '.[0].url')"
+          if [ -z "$PR_URL" ]; then
+            PR_URL="$(gh pr create \
+              --base main \
+              --head "$BRANCH" \
+              --title "Bump CEF to ${NEW_VERSION}" \
+              --body-file "$BODY_PATH")"
+          else
+            gh pr edit "$PR_URL" --body-file "$BODY_PATH"
+          fi
+          echo "PR: $PR_URL"
+          if [ -n "$WARNING" ]; then
+            echo "::warning title=CEF API version::${WARNING}"
+            echo "Skipping auto-merge: the pinned CEF_API_VERSION needs manual migration."
+          else
+            # Requires "Allow auto-merge" + required status checks on main.
+            gh pr merge --auto --squash "$PR_URL" \
+              || echo "::warning::Could not enable auto-merge — check that 'Allow auto-merge' is enabled and main has required status checks."
+          fi

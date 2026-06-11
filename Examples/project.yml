@@ -1,0 +1,92 @@
+# XcodeGen spec for the CefSwift example apps.
+#
+#   xcodegen generate            # run from Examples/ — emits CefSwiftExamples.xcodeproj (gitignored)
+#
+# NOTE on CEF bundling: building from Xcode produces the app *binary* with a correct
+# Info.plist, but the Chromium Embedded Framework + the five helper apps are assembled by
+# the SwiftPM command plugin:
+#
+#   swift package --package-path .. ... cef bundle --product Browser
+#
+# The post-build script phase below shells out to the plugin so an Xcode build still ends
+# with a runnable bundle. If you prefer Xcode-only iteration on pure-SwiftUI code, you can
+# delete that phase and run the plugin manually.
+
+name: CefSwiftExamples
+options:
+  bundleIdPrefix: dev.rajaniraiyn.cefswift
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+
+packages:
+  CefSwift:
+    path: ..
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+    CODE_SIGN_STYLE: Automatic
+    CODE_SIGN_IDENTITY: "-"
+
+targetTemplates:
+  CefApp:
+    type: application
+    platform: macOS
+    dependencies:
+      - package: CefSwift
+        product: CefSwiftUI
+    info:
+      path: Generated/${target_name}-Info.plist
+      properties:
+        # Pinned facts from DESIGN.md — required for CEF on macOS.
+        LSEnvironment:
+          MallocNanoZone: "0"
+        NSPrincipalClass: NSApplication
+        LSMinimumSystemVersion: "14.0"
+        NSSupportsAutomaticGraphicsSwitching: true
+        LSApplicationCategoryType: public.app-category.developer-tools
+        NSHumanReadableCopyright: ""
+    postBuildScripts:
+      - name: Bundle CEF framework + helpers (CefPlugin)
+        shell: /bin/bash
+        basedOnDependencyAnalysis: false
+        script: |
+          # Assemble Chromium Embedded Framework + the 5 helper apps into a runnable
+          # .app via the CefSwift command plugin. Requires network on first run
+          # (downloads the pinned CEF distribution into ../.cef/).
+          # Skip gracefully in sandboxed/CI Xcode builds where this isn't wanted:
+          if [ "${CEFSWIFT_SKIP_BUNDLE:-0}" = "1" ]; then
+            echo "CEFSWIFT_SKIP_BUNDLE=1 — skipping CEF bundling"
+            exit 0
+          fi
+          cd "${PROJECT_DIR}"
+          swift package --package-path . \
+            --allow-writing-to-package-directory \
+            --allow-network-connections all \
+            cef bundle --product "${TARGET_NAME}" \
+            || echo "warning: 'swift package cef bundle' failed — run it manually (see Examples/README.md)"
+
+targets:
+  Browser:
+    templates: [CefApp]
+    sources:
+      - path: Sources/Browser
+        excludes: ["cefapp.json"]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.rajaniraiyn.cefswift.browser
+        PRODUCT_NAME: Browser
+        INFOPLIST_KEY_CFBundleDisplayName: CefSwift Browser
+
+  Gallery:
+    templates: [CefApp]
+    sources:
+      - path: Sources/Gallery
+        excludes: ["cefapp.json"]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.rajaniraiyn.cefswift.gallery
+        PRODUCT_NAME: Gallery
+        INFOPLIST_KEY_CFBundleDisplayName: CefSwift Gallery
