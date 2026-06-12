@@ -104,7 +104,13 @@ extension CefBrowser {
         text: String? = nil, html: String? = nil, urls: [URL] = [], files: [String] = []
     ) {
         guard let data = cef_drag_data_create() else { return }
-        defer { cefRelease(UnsafeMutableRawPointer(data)) }
+        // `cef_drag_data_create` returns a +1 ref; `drag_target_drag_enter`
+        // CONSUMES one ref (the C-API takes ownership of objects passed in), so
+        // we transfer our created ref into it and must NOT release again — doing
+        // so was a double-release / use-after-free (the drag-in crash). Only
+        // release ourselves if we never managed to hand it off.
+        var transferred = false
+        defer { if !transferred { cefRelease(UnsafeMutableRawPointer(data)) } }
         // The web view rejects file contents on drag-in; reset to be safe.
         data.pointee.reset_file_contents?(data)
         if let text, !text.isEmpty {
@@ -124,8 +130,10 @@ extension CefBrowser {
             }
         }
         withHostInternal { host in
+            guard let enter = host.pointee.drag_target_drag_enter else { return }
             var event = cef_mouse_event_t(x: Int32(point.x.rounded()), y: Int32(point.y.rounded()), modifiers: modifiers)
-            host.pointee.drag_target_drag_enter?(host, data, &event, allowedOps.cefValue)
+            enter(host, data, &event, allowedOps.cefValue)
+            transferred = true
         }
     }
 
