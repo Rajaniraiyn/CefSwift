@@ -72,7 +72,18 @@ public final class CefWebViewModel {
     /// Called when the page requests a popup (e.g. `window.open`). Return a
     /// `CefPopupDecision` (`.allow`, `.block`, or `.openInSameBrowser`).
     /// When `nil`, popups are allowed.
+    ///
+    /// - Note: Prefer ``onWindowOpen``, which carries the full request
+    ///   (disposition, user gesture, popup features) and is OSR-safe by default.
     public var onPopupRequest: ((URL?) -> CefPopupDecision)?
+
+    /// Called when the page tries to open a link/popup/new window, Electron
+    /// `setWindowOpenHandler`-style. Return a ``CefWindowOpenAction``.
+    ///
+    /// When `nil`, CefSwift applies its safe default policy
+    /// (``CefWindowOpenPolicy/defaultAction(for:)``): the target loads in the
+    /// current browser — an OSR browser is never given an unsafe native popup.
+    public var onWindowOpen: ((CefWindowOpenRequest) -> CefWindowOpenAction)?
 
     /// Called when a download is about to begin; return a
     /// `CefDownloadDecision`. When `nil`, downloads are saved to
@@ -82,6 +93,18 @@ public final class CefWebViewModel {
     /// Called whenever a download's progress or state changes (including the
     /// final completed/canceled update).
     public var onDownloadProgress: ((CefDownload) -> Void)?
+
+    /// Called just before a page context menu is shown. Mutate `menu` to add,
+    /// remove, or replace items (CEF's standard Back/Forward/Reload/Copy/Paste/
+    /// View Source/etc. are already present). When `nil`, the default menu is
+    /// shown unchanged.
+    public var onConfigureContextMenu: ((CefMenuModel, CefContextMenuParams) -> Void)?
+
+    /// Called when a context-menu command is selected. Return `true` if you
+    /// handled a custom (user-range) command; `false` lets CEF run its built-in
+    /// command (navigate, clipboard, view-source, …). When `nil`, all commands
+    /// fall through to CEF.
+    public var onContextMenuCommand: ((Int, CefContextMenuParams) -> Bool)?
 
     /// Set while mirroring a browser-reported address change into ``url``,
     /// so the `didSet` observer doesn't navigate again.
@@ -188,6 +211,18 @@ extension CefWebViewModel: CefBrowserDelegate {
         onPopupRequest?(url) ?? .allow
     }
 
+    public func browser(_ b: CefBrowser, decideWindowOpenFor request: CefWindowOpenRequest) -> CefWindowOpenAction {
+        if let onWindowOpen {
+            return CefWindowOpenPolicy.resolve(onWindowOpen(request), for: request)
+        }
+        // If only the legacy popup hook is set, bridge it; otherwise apply the
+        // safe default policy (OSR never gets a native popup).
+        if let onPopupRequest {
+            return CefWindowOpenPolicy.action(for: onPopupRequest(request.targetURL), request: request)
+        }
+        return CefWindowOpenPolicy.defaultAction(for: request)
+    }
+
     public func browserDidClose(_ b: CefBrowser) {
         detach()
         isLoading = false
@@ -215,5 +250,13 @@ extension CefWebViewModel: CefBrowserDelegate {
 
     public func browser(_ b: CefBrowser, downloadDidProgress download: CefDownload) {
         onDownloadProgress?(download)
+    }
+
+    public func browser(_ b: CefBrowser, configureContextMenu menu: CefMenuModel, params: CefContextMenuParams) {
+        onConfigureContextMenu?(menu, params)
+    }
+
+    public func browser(_ b: CefBrowser, contextMenuCommand commandID: Int, params: CefContextMenuParams) -> Bool {
+        onContextMenuCommand?(commandID, params) ?? false
     }
 }

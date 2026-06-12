@@ -2,6 +2,12 @@ import AppKit
 import Foundation
 
 /// What to do with a window/tab a page tries to open.
+///
+/// - Note: Superseded by the richer
+///   ``CefBrowserDelegate/browser(_:decideWindowOpenFor:)`` / ``CefWindowOpenAction``
+///   API, which surfaces the disposition (foreground/background tab, popup,
+///   window), the user-gesture flag and popup features. ``CefPopupDecision`` is
+///   kept for source compatibility and bridged automatically.
 public enum CefPopupDecision: Sendable {
     /// Let CEF open the popup in its own window.
     case allow
@@ -30,7 +36,34 @@ public protocol CefBrowserDelegate: AnyObject {
     /// The page entered or exited HTML fullscreen.
     func browser(_ b: CefBrowser, didChangeFullscreen isFullscreen: Bool)
     /// The page wants to open a popup window. Defaults to ``CefPopupDecision/allow``.
+    ///
+    /// - Note: Prefer ``browser(_:decideWindowOpenFor:)``, which carries the
+    ///   disposition, user-gesture flag and popup features. This method is
+    ///   bridged into the new API for source compatibility.
     func browser(_ b: CefBrowser, requestsPopupFor url: URL?) -> CefPopupDecision
+
+    /// The page is trying to open a link/popup/new window (`target=_blank`,
+    /// `window.open`, ⌘/Ctrl-click, middle-click). Decide how CefSwift routes
+    /// it, Electron-`setWindowOpenHandler`-style.
+    ///
+    /// `request` carries the target URL, frame name, the disposition Chromium
+    /// computed (e.g. ``CefWindowOpenDisposition/newBackgroundTab`` for
+    /// ⌘-click), the user-gesture flag, popup features, and whether the source
+    /// browser is offscreen.
+    ///
+    /// Return one of:
+    /// - ``CefWindowOpenAction/deny`` — suppress it.
+    /// - ``CefWindowOpenAction/openInCurrentBrowser`` — load the URL in this
+    ///   browser (the safe choice for OSR).
+    /// - ``CefWindowOpenAction/allowNativePopup`` — let CEF create a native
+    ///   popup (windowed/chrome only; downgraded to `openInCurrentBrowser` for
+    ///   OSR browsers).
+    /// - ``CefWindowOpenAction/handled`` — you opened your own tab/window;
+    ///   CEF's popup is blocked.
+    ///
+    /// The default implementation bridges the legacy `requestsPopupFor` result
+    /// (so existing apps keep working), then applies the OSR safety downgrade.
+    func browser(_ b: CefBrowser, decideWindowOpenFor request: CefWindowOpenRequest) -> CefWindowOpenAction
     /// The browser finished closing; release any references to it.
     func browserDidClose(_ b: CefBrowser)
     /// A console message was logged by the page.
@@ -142,6 +175,13 @@ extension CefBrowserDelegate {
     public func browser(_ b: CefBrowser, didChangeFavicon urls: [URL]) {}
     public func browser(_ b: CefBrowser, didChangeFullscreen isFullscreen: Bool) {}
     public func browser(_ b: CefBrowser, requestsPopupFor url: URL?) -> CefPopupDecision { .allow }
+    public func browser(_ b: CefBrowser, decideWindowOpenFor request: CefWindowOpenRequest) -> CefWindowOpenAction {
+        // Bridge the legacy popup decision so apps that only adopted
+        // requestsPopupFor keep their behavior — then apply the OSR safety
+        // downgrade (a native popup for an OSR browser is unsafe).
+        let legacy = browser(b, requestsPopupFor: request.targetURL)
+        return CefWindowOpenPolicy.action(for: legacy, request: request)
+    }
     public func browserDidClose(_ b: CefBrowser) {}
     public func browser(_ b: CefBrowser, didReceiveConsoleMessage message: String, level: CefLogSeverity, source: String, line: Int) {}
     public func browser(_ b: CefBrowser, decidePolicyForDownload download: CefDownload, suggestedName: String) -> CefDownloadDecision {

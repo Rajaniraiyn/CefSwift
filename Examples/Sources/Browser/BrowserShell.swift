@@ -165,10 +165,18 @@ extension BrowserShell: CefBrowserDelegate {
         selectedTab?.faviconURL = urls.first
     }
 
-    func browser(_ b: CefBrowser, requestsPopupFor url: URL?) -> CefPopupDecision {
-        // Popups become new tabs in this window.
-        if let url { newTab(url: url) }
-        return .block
+    func browser(_ b: CefBrowser, decideWindowOpenFor request: CefWindowOpenRequest) -> CefWindowOpenAction {
+        // target=_blank / window.open / ⌘-click / middle-click become TABS in
+        // this window. Honor the disposition: ⌘/middle-click → background tab,
+        // everything else → foreground.
+        guard let url = request.targetURL else { return .deny }
+        let tab = BrowserTab(url: url)
+        tabs.append(tab)
+        if request.disposition.prefersForeground {
+            select(tab)          // foreground: switch to the new tab
+        }                        // background: leave the current tab selected
+        // We created our own tab — block CEF's native popup.
+        return .handled
     }
 
     func browserDidClose(_ b: CefBrowser) {

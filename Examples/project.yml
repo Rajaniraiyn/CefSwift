@@ -90,3 +90,14 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: dev.rajaniraiyn.cefswift.gallery
         PRODUCT_NAME: Gallery
         INFOPLIST_KEY_CFBundleDisplayName: CefSwift Gallery
+
+  Launcher:
+    templates: [CefApp]
+    sources:
+      - path: Sources/Launcher
+        excludes: ["cefapp.json"]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.rajaniraiyn.cefswift.launcher
+        PRODUCT_NAME: Launcher
+        INFOPLIST_KEY_CFBundleDisplayName: CefSwift Launcher

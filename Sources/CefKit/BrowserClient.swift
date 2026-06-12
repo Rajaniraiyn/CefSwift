@@ -108,23 +108,43 @@ final class BrowserClient {
             }
         }
         lifeSpan.pointee.on_before_popup = {
-            handlerSelf, browser, frame, _, targetURL, _, _, _, _, _, _, _, _, _ in
+            handlerSelf, browser, frame, _, targetURL, targetFrameName, targetDisposition,
+            userGesture, popupFeatures, _, _, _, _, _ in
             cefRelease(browser.map(UnsafeMutableRawPointer.init))
             cefRelease(frame.map(UnsafeMutableRawPointer.init))
             guard let client = BrowserClient.owner(handlerSelf.map(UnsafeMutableRawPointer.init)) else { return 0 }
-            let urlString = CefStringUtil.string(from: targetURL)
-            let url = URL(string: urlString)
+            let url = URL(string: CefStringUtil.string(from: targetURL))
+            let frameName = CefStringUtil.string(from: targetFrameName)
+            let disposition = CefWindowOpenDisposition(cefValue: targetDisposition)
+            let gesture = userGesture != 0
+            let features = popupFeatures.map { CefPopupFeatures(raw: $0.pointee) } ?? CefPopupFeatures()
+            // Returning non-zero from on_before_popup tells CEF to suppress its
+            // own popup. We return 0 ONLY for `.allowNativePopup` (windowed/
+            // chrome). Everything else is handled in-process and returns 1, so
+            // an OSR browser never gets a render-handler-less popup created.
             return MainActor.assumeIsolated {
                 guard let cefBrowser = client.browser else { return 0 }
-                let decision = cefBrowser.delegate?.browser(cefBrowser, requestsPopupFor: url) ?? .allow
-                switch decision {
-                case .allow:
-                    return 0
-                case .block:
-                    return 1
-                case .openInSameBrowser:
+                let isOSR = client.osrHost != nil
+                let request = CefWindowOpenRequest(
+                    targetURL: url,
+                    frameName: frameName,
+                    disposition: disposition,
+                    userGesture: gesture,
+                    features: features,
+                    isSourceOffscreen: isOSR
+                )
+                let raw = cefBrowser.delegate?.browser(cefBrowser, decideWindowOpenFor: request)
+                    ?? CefWindowOpenPolicy.defaultAction(for: request)
+                // Defense in depth: re-apply the OSR downgrade even if a
+                // delegate returned `.allowNativePopup` for an OSR browser.
+                switch CefWindowOpenPolicy.resolve(raw, for: request) {
+                case .allowNativePopup:
+                    return 0  // let CEF create the native popup
+                case .openInCurrentBrowser:
                     if let url { cefBrowser.load(url) }
                     return 1
+                case .deny, .handled:
+                    return 1  // app handled it (or denied); block CEF's popup
                 }
             }
         }

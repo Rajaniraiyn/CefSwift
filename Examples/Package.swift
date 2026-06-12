@@ -7,6 +7,7 @@ let package = Package(
     products: [
         .executable(name: "Browser", targets: ["Browser"]),
         .executable(name: "Gallery", targets: ["Gallery"]),
+        .executable(name: "Launcher", targets: ["Launcher"]),
     ],
     dependencies: [
         .package(path: ".."),
@@ -23,6 +24,14 @@ let package = Package(
         // Embedding showcase — native SwiftUI dashboard mixing web cards and controls.
         .executableTarget(
             name: "Gallery",
+            dependencies: [
+                .product(name: "CefSwiftUI", package: "CefSwift"),
+            ],
+            exclude: ["cefapp.json"]
+        ),
+        // Launcher — opens each hosting mode / config demo one at a time.
+        .executableTarget(
+            name: "Launcher",
             dependencies: [
                 .product(name: "CefSwiftUI", package: "CefSwift"),
             ],

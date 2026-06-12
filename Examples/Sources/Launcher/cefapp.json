@@ -1,0 +1,5 @@
+{
+  "bundleIdentifier": "dev.rajaniraiyn.cefswift.launcher",
+  "displayName": "CefSwift Launcher",
+  "minimumSystemVersion": "14.0"
+}
