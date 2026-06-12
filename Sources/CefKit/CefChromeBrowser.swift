@@ -81,6 +81,12 @@ public final class CefChromeBrowser {
     private var rawWindow: UnsafeMutablePointer<cef_window_t>?
     private var rawBrowserView: UnsafeMutablePointer<cef_browser_view_t>?
 
+    /// Border space (DIP) reserved around the browser view inside the window,
+    /// so native overlays (e.g. a SwiftUI tab strip/omnibox) hosted on top of
+    /// the window don't obscure the page. Applied via a BoxLayout's
+    /// `inside_border_insets`. Default: zero (browser fills the window).
+    private var insets: cef_insets_t = cef_insets_t(top: 0, left: 0, bottom: 0, right: 0)
+
     // Keep the Swift delegate owners reachable for the window's lifetime
     // (CEF's refs on the structs retain them too; this is belt and braces).
     private var viewDelegate: ChromeBrowserViewDelegate?
@@ -170,6 +176,49 @@ public final class CefChromeBrowser {
         rawWindow.pointee.close?(rawWindow)
     }
 
+    /// Reserves border space (in DIPs / points) around the browser view inside
+    /// the window, so native content hosted *over* the window (e.g. a SwiftUI
+    /// tab strip and omnibox added as an `NSHostingView` subview of
+    /// ``rootView``) sits above empty space rather than obscuring the page.
+    ///
+    /// This insets the **browser view's frame within the window** (using a CEF
+    /// `BoxLayout`), it does not cover the page. A `top` inset equal to your
+    /// toolbar height produces the standard Arc/Chrome layout: chrome occupies
+    /// the top strip, web content fills the rest. Safe to call repeatedly (e.g.
+    /// when the toolbar height changes); takes effect immediately if the window
+    /// already exists, otherwise on window creation.
+    public func setContentInsets(top: Double = 0, left: Double = 0, bottom: Double = 0, right: Double = 0) {
+        insets = cef_insets_t(
+            top: Int32(top.rounded()),
+            left: Int32(left.rounded()),
+            bottom: Int32(bottom.rounded()),
+            right: Int32(right.rounded())
+        )
+        applyLayout()
+    }
+
+    /// Applies a vertical `BoxLayout` to the window carrying the current
+    /// ``insets`` as `inside_border_insets`, then re-lays-out. The single child
+    /// (the browser view) gets the default flex (1) and stretches to fill the
+    /// remaining space below/around the insets.
+    private func applyLayout() {
+        guard let rawWindow else { return }
+        var settings = cef_box_layout_settings_t()
+        settings.size = MemoryLayout<cef_box_layout_settings_t>.stride
+        settings.horizontal = 0
+        settings.inside_border_insets = insets
+        settings.cross_axis_alignment = CEF_AXIS_ALIGNMENT_STRETCH
+        settings.main_axis_alignment = CEF_AXIS_ALIGNMENT_STRETCH
+        settings.default_flex = 1
+        withUnsafeMutablePointer(to: &rawWindow.pointee.base) { panel in
+            if let layout = panel.pointee.set_to_box_layout?(panel, &settings) {
+                // set_to_box_layout returns a +1 cef_box_layout_t we own.
+                cefRelease(UnsafeMutableRawPointer(layout))
+            }
+            panel.pointee.layout?(panel)
+        }
+    }
+
     // MARK: Callbacks from delegates
 
     /// The window exists in the views hierarchy: attach the browser view.
@@ -181,6 +230,11 @@ public final class CefChromeBrowser {
         withUnsafeMutablePointer(to: &window.pointee.base) { panel in
             panel.pointee.add_child_view?(panel, view)
         }
+        // Apply a BoxLayout carrying any insets set before window creation
+        // (default insets = zero ⇒ browser fills the window, as with the
+        // implicit FillLayout). This must run after add_child_view so the
+        // browser view participates in the layout.
+        applyLayout()
         if options.initialBounds == nil {
             var size = cef_size_t(width: 1100, height: 760)
             window.pointee.center_window?(window, &size)

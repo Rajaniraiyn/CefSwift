@@ -55,10 +55,14 @@ public enum CefBrowserFactory {
             browserSettings.background_color = cefColor(color)
         }
 
+        // Resolve the request context from the profile (nil = global).
+        // The profile hands us a +1 reference that the create call consumes.
+        let requestContext = options.profile?.makeRequestContext()
+
         // cef_browser_host_create_browser_sync consumes our +1 client ref and
         // returns a +1 browser ref that CefBrowser owns.
         let rawBrowser = CefStringUtil.withCefString(url.absoluteString) { cefURL in
-            cef_browser_host_create_browser_sync(&windowInfo, clientPointer, cefURL, &browserSettings, nil, nil)
+            cef_browser_host_create_browser_sync(&windowInfo, clientPointer, cefURL, &browserSettings, nil, requestContext)
         }
 
         let browser = CefBrowser(raw: rawBrowser, client: client, delegate: delegate)

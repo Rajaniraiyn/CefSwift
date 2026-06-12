@@ -99,6 +99,10 @@ CCEF_SYM(int, cef_clear_scheme_handler_factories, (void), ())
 // --- Request context / command line ------------------------------------------
 CCEF_SYM(cef_request_context_t*, cef_request_context_get_global_context,
          (void), ())
+CCEF_SYM(cef_request_context_t*, cef_request_context_create_context,
+         (const struct _cef_request_context_settings_t* settings,
+          struct _cef_request_context_handler_t* handler),
+         (settings, handler))
 CCEF_SYM(cef_command_line_t*, cef_command_line_create, (void), ())
 CCEF_SYM(cef_command_line_t*, cef_command_line_get_global, (void), ())
 

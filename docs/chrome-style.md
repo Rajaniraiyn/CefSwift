@@ -1,91 +1,190 @@
-# Building a full browser: the Chrome runtime style
+# Building a full browser: hosting modes & the Chrome runtime
 
-CefSwift defaults to CEF's **Chrome runtime style**: each browser view is
-backed by Chrome's real browser machinery rather than the bare rendering
-engine. This is what makes an Arc-class browser feasible on CefSwift rather
-than merely a web view.
+CefSwift can power anything from a single embedded web card to a full
+Arc/Atlas-class browser. Which you build comes down to **how the CEF browser is
+hosted** — and that choice is constrained by a hard Chromium fact:
 
-## What Chrome style gives you
+> **CEF/Chromium binds a Chrome-runtime browser's compositor to its own
+> `NSWindow`.** Native-parent (`parent_view`) embedding forces *Alloy* style on
+> macOS, and plain NSView reparenting of a Chrome browser blanks rendering.
 
-- **Real tab semantics.** Every `CefBrowser` is a Chrome tab under the hood,
-  with Chrome's session, navigation, and lifecycle behavior. Your SwiftUI tab
-  strip (one `CefWebViewModel` per tab, like the Browser example) maps 1:1
-  onto genuine Chrome tabs.
-- **`chrome://` internals — with a big caveat.** CEF forces **Alloy style**
-  for browsers embedded via a parent NSView (i.e. every `CefWebView`), and
-  several Chrome WebUI pages need a real Chrome-style *window* to render
-  content. Verified behavior in CefSwift-embedded views (CEF 148; each page
-  loaded via `Browser --open-url` and screenshot-inspected):
+So CefSwift ships **three hosting modes**, each proven with screenshots. Pick by
+what you're building:
 
-  | Page | Embedded (`CefWebView`) result |
-  |---|---|
-  | `chrome://version` | ✅ works — full build/flag diagnostics |
-  | `chrome://gpu` | ✅ works — graphics feature status + report download |
-  | `chrome://process-internals` | ✅ works — renderer/process info |
-  | `chrome://net-internals` | ✅ works — DNS/sockets/proxy tools |
-  | `chrome://net-export` | ✅ works — network log capture UI |
-  | `chrome://about` (alias `chrome://chrome-urls`) | ✅ works — lists all pages |
-  | `chrome://history` | ⚠️ loads but renders a **blank page** |
-  | `chrome://extensions` | ⚠️ blank page |
-  | `chrome://settings` | ⚠️ blank page |
-  | `chrome://downloads` | ⚠️ blank page |
-  | `chrome://flags` | ⚠️ blank page |
+| Mode | Type | Chrome runtime (`chrome://`, extensions, profiles) | Native UI *over* the page | Use it for |
+|---|---|---|---|---|
+| **Chrome-runtime window** ⭐ | `CefChromeWindow` | ✅ full | ✅ SwiftUI overlay in the same window | A full browser (Arc-class) |
+| **Windowed Alloy** | `CefWebView` | ⚠️ partial (see table) | ❌ (CEF draws the region) | Embedded web content, dashboards |
+| **Chrome-style child window** | `CefChromeWebView` | ✅ full | ❌ (it's an overlay window) | A Chrome view inside an existing SwiftUI window |
 
-  The blank pages are tab-scoped Chrome UI that requires the Chrome browser
-  *window* machinery embedded views never get. The underlying services still
-  run (history is recorded, downloads proceed — surfaced natively through
-  `CefBrowserDelegate`'s download methods); only those management UIs don't
-  render. The Browser example's Chrome menu lists exactly the working set.
+---
 
-- **Profiles.** Chrome's profile model backs `rootCachePath`/`cachePath`, so
-  separate profiles (work/personal, per-space) are separate cache paths.
-- **Browser-grade behavior for free:** permission prompts, HTTPS interstitials,
-  PDF viewer, autofill plumbing, find-in-page, print preview machinery —
-  Chrome's implementations, not reimplementations.
+## ⭐ `CefChromeWindow` — the full-browser mode (recommended)
 
-## What CefSwift exposes today (v1)
+This is CefSwift's flagship hosting mode (the *inverted-ownership* model). One
+real `NSWindow`, no child-window overlay, no frame-syncing:
 
-- Chrome-style browsers as SwiftUI views (`CefWebView` /
-  `CefBrowserFactory.createBrowser`), windowed (native NSView) embedding.
-- Navigation + state: URL/title/loading/progress/back/forward/favicon via
-  `CefWebViewModel` or `CefBrowserDelegate`.
-- Popup routing: decide `.allow` / `.block` / `.openInSameBrowser` per popup —
-  the Browser example turns popups into new tabs.
-- DevTools: `browser.showDevTools()` / `closeDevTools()`, plus the
-  `remoteDebuggingPort` configuration for CDP automation.
-- Zoom, audio mute, find-in-page, JavaScript execution
-  (`executeJavaScript(_:)`, fire-and-forget), console message observation.
-- **Downloads:** decide per download (`.allow(destination:)`/`.deny`) and
-  observe progress via `CefBrowserDelegate` /
-  `CefWebViewModel.onDownloadDecision`/`onDownloadProgress`
-  (see [configuration.md](configuration.md)).
-- **Custom schemes + JS ↔ Swift bridge:** serve `myapp://` content from Swift
-  (`CefConfiguration.customSchemes` + `registerSchemeHandler`) and call Swift
-  functions from page JS (`CefRuntime.shared.bridge`,
-  see [js-bridge.md](js-bridge.md)).
-- Arbitrary Chromium switches and command-line hooks for everything else.
+- It's a **CEF Views top-level window** (`cef_window` + `cef_browser_view`,
+  Chrome style, Chrome's own toolbar hidden via `CEF_CTT_NONE`). CEF creates and
+  owns the window — which is exactly what unlocks Chrome style.
+- Your **SwiftUI chrome** (tab strip, omnibox, …) is hosted in an
+  `NSHostingView` added as a subview of the CEF window's content view, stacked
+  **above** the browser region. Native UI composites on top of the live page.
+- The page is **inset, not covered**: `setContentInsets(_:)` reserves space by
+  *resizing the browser view* within the window (via a CEF `BoxLayout`), so web
+  content fills the area below your toolbar — the real Arc/Chrome layout.
+- The full Chrome runtime renders. **`chrome://history`,
+  `chrome://extensions`, `chrome://settings`, `chrome://downloads`,
+  `chrome://flags`** — the WebUI pages that are blank in Alloy embedding — all
+  work here, as do extension installs and Chrome profiles.
 
-The **Browser** example (`Examples/Sources/Browser`) is the reference
-implementation: tab strip, omnibox with search fallback, progress, favicons,
-popup-to-new-tab, DevTools menu, and a `chrome://` pages menu.
+```swift
+let window = CefChromeWindow.open(
+    url: URL(string: "https://example.com")!,
+    initialBounds: CGRect(x: 160, y: 160, width: 1180, height: 800)
+) { window in
+    window.setContentInsets(NSEdgeInsets(top: 96, left: 0, bottom: 0, right: 0))
+    window.setOverlay { MyArcChrome() }   // tab strip + omnibox, on top
+}
+```
 
-## What's not exposed yet (roadmap)
+### How overlays + insets fit together
 
-- **Context-menu customization** — Chrome's default menus appear; injecting
-  your own items isn't surfaced yet.
-- **Chrome-style windows** — the tabbed Chrome window UI (which would make
-  chrome://history/extensions/settings render) isn't exposed; CefSwift
-  embeds browsers as NSViews, which CEF pins to Alloy style.
-- **Extension management UI** — `chrome://extensions` renders blank when
-  embedded (see the table above).
-- **Reading/writing history & bookmarks programmatically** — no Swift API
-  over them yet (and the `chrome://history` UI doesn't render embedded).
-- **Per-tab throttling/discarding controls.**
+The overlay `NSHostingView` is stretched across the whole window. Your SwiftUI
+view should paint an **opaque toolbar in the top inset strip** (e.g. the top 96
+pt) and be **transparent below**, so the page shows through and stays
+interactive. CefSwift's overlay host forwards clicks that land on transparent
+(non-control) regions down to the browser view, so taps over the page reach the
+page while taps on your toolbar/tab strip hit SwiftUI.
 
-## When to use alloy instead
+```
+┌──────────────────────────────────────────┐  ← one NSWindow (CEF-owned)
+│  ▒▒ SwiftUI overlay: toolbar + tab strip ▒▒│  ← opaque, top inset (96pt)
+├──────────────────────────────────────────┤
+│                                            │
+│        Chrome-runtime web content          │  ← browser view, inset below
+│        (chrome://… renders here)           │
+│                                            │
+└──────────────────────────────────────────┘
+```
 
-If a view should behave like *content*, not a browser — a dashboard card, a
-docs pane, an HTML-rendered report — use `.alloy`
-(`CefBrowserOptions.runtimeStyle = .alloy`). It skips Chrome's browser
-machinery: no extensions, no `chrome://`, lighter weight, everything
-delegate-driven. The Gallery example shows both styles side by side.
+`setContentInsets(_:)` and `setOverlay(_:)` are safe to call again at any time
+(e.g. when your toolbar height changes). On window resize the overlay tracks the
+window automatically and the BoxLayout keeps the browser view inset.
+
+### App model: CEF owns the window
+
+Because CEF — not SwiftUI — owns this `NSWindow`, the window lives **outside
+SwiftUI's `Scene` graph**. This is expected and correct for a browser shell;
+don't try to declare it in a `WindowGroup`. The clean pattern:
+
+1. Bootstrap CEF with `CefSwiftApp` as usual.
+2. Hold an app-level **`CefChromeWindowController`** (`@State` / `@Observable`),
+   or your own controller object.
+3. Open chrome windows from it once the runtime is up — e.g. from a tiny
+   placeholder `WindowGroup`'s `.task`, or an `NSApplicationDelegate`.
+
+```swift
+@main
+struct BrowserApp: CefSwiftApp {
+    @State private var shell = BrowserShell()           // your controller
+    var body: some Scene {
+        WindowGroup {
+            Color.clear.frame(width: 1, height: 1)      // placeholder, hidden
+                .task { shell.openWindow(initialURL: homeURL) }
+        }
+    }
+}
+```
+
+The `Browser` example (`Examples/Sources/Browser`) is the reference
+implementation of this mode: a CEF-owned chrome window, an Arc-style SwiftUI
+tab strip + omnibox hosted on top, web content inset below, and a **Chrome**
+menu that opens `chrome://history` / `extensions` / `settings` / `downloads` /
+`flags` as tabs that actually render.
+
+### What you get
+
+The wrapped `browser` is an ordinary `CefBrowser`: delegate events, JavaScript
+execution, downloads, DevTools, find-in-page, zoom, the JS bridge and custom
+schemes all work exactly as for `CefWebView`. Plus, because it's the full Chrome
+runtime: real tab semantics, extensions, `chrome://` WebUI, profiles, permission
+prompts, HTTPS interstitials, PDF viewer, autofill and print-preview machinery —
+Chrome's implementations, not reimplementations.
+
+---
+
+## `CefWebView` — windowed Alloy (embedded content)
+
+`CefWebView` (`NSViewRepresentable`, `parent_view` embedding) renders inside an
+ordinary SwiftUI layout. CEF handles input/IME/accessibility natively; it's the
+default and the most compatible mode. The trade-offs:
+
+- CEF draws the page region, so you **cannot composite native UI over the page**
+  inside the same view (overlay siblings in SwiftUI won't show above it).
+- Embedded browsers are forced to **Alloy style**, so several `chrome://` WebUI
+  pages load but render blank. Verified in CefSwift-embedded views (CEF 148):
+
+  | Page | Embedded (`CefWebView`) | `CefChromeWindow` |
+  |---|---|---|
+  | `chrome://version`, `gpu`, `process-internals`, `net-internals`, `net-export`, `about` | ✅ renders | ✅ renders |
+  | `chrome://history` | ⚠️ blank | ✅ renders |
+  | `chrome://extensions` | ⚠️ blank | ✅ renders |
+  | `chrome://settings` | ⚠️ blank | ✅ renders |
+  | `chrome://downloads` | ⚠️ blank | ✅ renders |
+  | `chrome://flags` | ⚠️ blank | ✅ renders |
+
+  The blank pages are tabbed Chrome UI that needs the Chrome *window* machinery
+  embedded views never get. The underlying services still run (history is
+  recorded, downloads proceed — surfaced via `CefBrowserDelegate`); only those
+  management UIs don't render. Use `CefChromeWindow` when you need them.
+
+Use `CefWebView` for dashboard cards, docs panes, HTML reports — anything that
+should behave like *content*, not a browser. Set
+`CefBrowserOptions.runtimeStyle = .alloy` for the lightest weight (no Chrome
+machinery at all). The **Gallery** example shows embedded cards.
+
+---
+
+## `CefChromeWebView` — Chrome-style child-window overlay (alternative)
+
+When you want the full Chrome runtime (and its `chrome://` pages) **inside an
+existing SwiftUI window** rather than a separate CEF-owned window,
+`CefChromeWebView` is the documented alternative. It attaches a frameless,
+CEF-created `NSWindow` as a child window of your hosting window and keeps it
+frame-synced to the view's bounds. The Chrome runtime renders (it's a real CEF
+window under the hood), but:
+
+- It draws **above all sibling SwiftUI/AppKit content** in that region (don't
+  place native overlays over it).
+- Spaces/fullscreen transitions and window-dragging can briefly show the overlay
+  detached; it's a separate window to AppKit.
+
+Prefer `CefChromeWindow` for full browsers — it avoids the child-window seams by
+owning the window outright and lets you composite native chrome on top.
+`CefChromeWebView` is for embedding a Chrome view into a window you also fill
+with other SwiftUI content.
+
+---
+
+## Forthcoming: OSR / Metal (`CefMetalWebView`)
+
+A windowless (OSR) mode where CEF paints into a shared `IOSurface`
+(`on_accelerated_paint`) composited in a `CAMetalLayer`-backed view — a genuine
+in-tree subview, native UI compositable anywhere, retina-correct. Alloy style
+only (no `chrome://`); input/IME/cursor/accessibility/context-menu are wired by
+hand. The "indistinguishable embedded web view" primitive. Not shipping yet —
+see `DESIGN.md`.
+
+---
+
+## Choosing a mode
+
+- **Building a browser?** → `CefChromeWindow`. Real Chrome runtime, native
+  chrome on top, `chrome://` everything works.
+- **Embedding web content in a SwiftUI app?** → `CefWebView` (`.alloy` for pure
+  content, `.default`/chrome for browser-ish behavior).
+- **Need Chrome `chrome://` pages *inside* an existing SwiftUI window?** →
+  `CefChromeWebView` (overlay caveats apply).
+- **Need native UI composited over an embedded page, no `chrome://`?** →
+  (forthcoming) `CefMetalWebView` OSR mode.

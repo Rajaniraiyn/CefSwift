@@ -106,11 +106,16 @@ public final class CefBrowser: Identifiable {
         set { withHost { $0.pointee.set_audio_muted?($0, newValue ? 1 : 0) } }
     }
 
-    /// Opens Chrome DevTools for this browser in a separate window.
+    /// Opens Chrome DevTools for this browser in its own window. No-op if a
+    /// DevTools window is already open (CEF brings it to front).
     public func showDevTools() {
         withHost { host in
             var windowInfo = cef_window_info_t()
             windowInfo.size = MemoryLayout<cef_window_info_t>.stride
+            // Give DevTools a real top-level window rather than a zero-rect:
+            // parent_view stays nil so CEF creates its own NSWindow.
+            windowInfo.bounds = cef_rect_t(x: 0, y: 0, width: 900, height: 700)
+            windowInfo.runtime_style = CEF_RUNTIME_STYLE_DEFAULT
             var settings = cef_browser_settings_t()
             settings.size = MemoryLayout<cef_browser_settings_t>.stride
             host.pointee.show_dev_tools?(host, &windowInfo, nil, &settings, nil)
@@ -120,6 +125,20 @@ public final class CefBrowser: Identifiable {
     /// Closes the DevTools window, if open.
     public func closeDevTools() {
         withHost { $0.pointee.close_dev_tools?($0) }
+    }
+
+    /// Whether a DevTools window is currently open for this browser.
+    public var hasDevTools: Bool {
+        withHost { ($0.pointee.has_dev_tools?($0) ?? 0) != 0 } ?? false
+    }
+
+    /// Opens DevTools if closed, closes it if open.
+    public func toggleDevTools() {
+        if hasDevTools {
+            closeDevTools()
+        } else {
+            showDevTools()
+        }
     }
 
     /// Searches the page for `text`.

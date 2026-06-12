@@ -26,6 +26,17 @@ final class BrowserClient {
     nonisolated(unsafe) private var loadPointer: UnsafeMutablePointer<cef_load_handler_t>?
     nonisolated(unsafe) private var displayPointer: UnsafeMutablePointer<cef_display_handler_t>?
     nonisolated(unsafe) private var downloadPointer: UnsafeMutablePointer<cef_download_handler_t>?
+    nonisolated(unsafe) var jsDialogPointer: UnsafeMutablePointer<cef_jsdialog_handler_t>?
+    nonisolated(unsafe) var contextMenuPointer: UnsafeMutablePointer<cef_context_menu_handler_t>?
+    nonisolated(unsafe) var permissionPointer: UnsafeMutablePointer<cef_permission_handler_t>?
+    nonisolated(unsafe) var requestPointer: UnsafeMutablePointer<cef_request_handler_t>?
+    nonisolated(unsafe) var keyboardPointer: UnsafeMutablePointer<cef_keyboard_handler_t>?
+    nonisolated(unsafe) var focusPointer: UnsafeMutablePointer<cef_focus_handler_t>?
+
+    // The most recent context-menu params, captured in on_before_context_menu
+    // and replayed to the command/dismiss callbacks (which also receive params,
+    // but keeping the snapshot avoids re-reading the borrowed struct).
+    private var lastContextMenuParams = CefContextMenuParams()
 
     func attach(_ browser: CefBrowser) {
         self.browser = browser
@@ -209,6 +220,28 @@ final class BrowserClient {
             }
             return 0  // keep default logging behavior
         }
+        display.pointee.on_status_message = { handlerSelf, browser, value in
+            cefRelease(browser.map(UnsafeMutableRawPointer.init))
+            let message = CefStringUtil.string(from: value)
+            BrowserClient.withBrowser(handlerSelf.map(UnsafeMutableRawPointer.init), default: ()) { _, cefBrowser in
+                cefBrowser.delegate?.browser(cefBrowser, didChangeStatusMessage: message)
+            }
+        }
+        display.pointee.on_tooltip = { handlerSelf, browser, text in
+            cefRelease(browser.map(UnsafeMutableRawPointer.init))
+            let tip = CefStringUtil.string(from: text.map { UnsafePointer($0) })
+            return BrowserClient.withBrowser(handlerSelf.map(UnsafeMutableRawPointer.init), default: Int32(0)) { _, cefBrowser in
+                (cefBrowser.delegate?.browser(cefBrowser, showTooltip: tip) ?? false) ? 1 : 0
+            }
+        }
+        display.pointee.on_cursor_change = { handlerSelf, browser, _, type, _ in
+            cefRelease(browser.map(UnsafeMutableRawPointer.init))
+            let cursor = CefCursorType(cefValue: type)
+            return BrowserClient.withBrowser(handlerSelf.map(UnsafeMutableRawPointer.init), default: Int32(0)) { _, cefBrowser in
+                cefBrowser.delegate?.browser(cefBrowser, didChangeCursor: cursor)
+                return 0  // let CEF apply the cursor for windowed browsers
+            }
+        }
         displayPointer = display
 
         let download = cefAllocate(cef_download_handler_t.self, owner: self)
@@ -264,6 +297,8 @@ final class BrowserClient {
         }
         downloadPointer = download
 
+        makeExtendedHandlers()
+
         let client = cefAllocate(cef_client_t.self, owner: self)
         client.pointee.get_life_span_handler = { clientSelf in
             guard let me = BrowserClient.owner(clientSelf.map(UnsafeMutableRawPointer.init)),
@@ -289,8 +324,58 @@ final class BrowserClient {
             cefAddRef(UnsafeMutableRawPointer(handler))
             return handler
         }
+        client.pointee.get_jsdialog_handler = { clientSelf in
+            guard let me = BrowserClient.owner(clientSelf.map(UnsafeMutableRawPointer.init)),
+                  let handler = me.jsDialogPointer else { return nil }
+            cefAddRef(UnsafeMutableRawPointer(handler))
+            return handler
+        }
+        client.pointee.get_context_menu_handler = { clientSelf in
+            guard let me = BrowserClient.owner(clientSelf.map(UnsafeMutableRawPointer.init)),
+                  let handler = me.contextMenuPointer else { return nil }
+            cefAddRef(UnsafeMutableRawPointer(handler))
+            return handler
+        }
+        client.pointee.get_permission_handler = { clientSelf in
+            guard let me = BrowserClient.owner(clientSelf.map(UnsafeMutableRawPointer.init)),
+                  let handler = me.permissionPointer else { return nil }
+            cefAddRef(UnsafeMutableRawPointer(handler))
+            return handler
+        }
+        client.pointee.get_request_handler = { clientSelf in
+            guard let me = BrowserClient.owner(clientSelf.map(UnsafeMutableRawPointer.init)),
+                  let handler = me.requestPointer else { return nil }
+            cefAddRef(UnsafeMutableRawPointer(handler))
+            return handler
+        }
+        client.pointee.get_keyboard_handler = { clientSelf in
+            guard let me = BrowserClient.owner(clientSelf.map(UnsafeMutableRawPointer.init)),
+                  let handler = me.keyboardPointer else { return nil }
+            cefAddRef(UnsafeMutableRawPointer(handler))
+            return handler
+        }
+        client.pointee.get_focus_handler = { clientSelf in
+            guard let me = BrowserClient.owner(clientSelf.map(UnsafeMutableRawPointer.init)),
+                  let handler = me.focusPointer else { return nil }
+            cefAddRef(UnsafeMutableRawPointer(handler))
+            return handler
+        }
         clientPointer = client
         return client
+    }
+
+    /// Helper: resolves the owning client and its attached browser+delegate
+    /// on the main actor, calling `body` only when both exist.
+    nonisolated static func withBrowser<R: Sendable>(
+        _ handlerSelf: UnsafeMutableRawPointer?,
+        default fallback: R,
+        _ body: @MainActor (BrowserClient, CefBrowser) -> R
+    ) -> R {
+        guard let client = BrowserClient.owner(handlerSelf) else { return fallback }
+        return MainActor.assumeIsolated {
+            guard let browser = client.browser else { return fallback }
+            return body(client, browser)
+        }
     }
 
     // MARK: State routing (main thread)
@@ -309,6 +394,14 @@ final class BrowserClient {
         } else {
             pendingURL = urlString
         }
+    }
+
+    func setLastContextMenuParams(_ params: CefContextMenuParams) {
+        lastContextMenuParams = params
+    }
+
+    var currentContextMenuParams: CefContextMenuParams {
+        lastContextMenuParams
     }
 
     private func updateLoadingState(isLoading: Bool, canGoBack: Bool, canGoForward: Bool) {
