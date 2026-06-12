@@ -60,6 +60,15 @@ extension CefMetalHostView {
     public override func swipe(with event: NSEvent) {
         guard let browser = osrBrowser else { return }
         // deltaX > 0 is a right-to-left swipe → go back; < 0 → go forward.
+        //
+        // Gesture-vs-scroll conflict: AppKit only delivers `swipe(with:)` for
+        // the dedicated 3-finger (or the user-configured 2-finger) navigation
+        // gesture, which is mutually exclusive at the AppKit level with the
+        // `scrollWheel(with:)` momentum stream — so our swipe-nav never
+        // double-fires against a normal two-finger scroll. We deliberately make
+        // this the single navigation path and do NOT also drive Chromium's
+        // built-in horizontal-overscroll navigation from forwarded wheel
+        // deltas, avoiding a double-navigation; see the OSR input docs.
         if event.deltaX > 0 {
             browser.goBack()
         } else if event.deltaX < 0 {

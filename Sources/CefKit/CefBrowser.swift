@@ -187,6 +187,10 @@ public final class CefBrowser: Identifiable {
     /// Whether a live raw cef_browser_t is attached.
     var hasRawBrowser: Bool { raw != nil }
 
+    /// Module-internal raw `cef_browser_t` accessor for the editing extension
+    /// (used to resolve the focused/main frame for clipboard commands).
+    var rawBrowserPointer: UnsafeMutablePointer<cef_browser_t>? { raw }
+
     /// Calls `try_close_browser` on the host: gives JavaScript
     /// `onbeforeunload` handlers their say, then proceeds with the close.
     /// Used by the views window delegate's `can_close`.

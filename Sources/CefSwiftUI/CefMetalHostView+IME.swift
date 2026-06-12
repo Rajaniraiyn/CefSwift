@@ -74,18 +74,33 @@ extension CefMetalHostView: @preconcurrency NSTextInputClient {
         []
     }
 
-    /// Returns the screen rect (bottom-left origin) for the IME candidate
-    /// window, derived from the last reported composition character bounds.
+    /// Returns the screen rect (bottom-left origin) used to position the IME
+    /// candidate window, the emoji & symbols palette (Cmd+Ctrl+Space), and the
+    /// press-and-hold accent popup, anchored at the caret.
+    ///
+    /// Source of the caret rect, in order of fidelity:
+    /// 1. **Live composition bounds** — during an active IME composition CEF
+    ///    delivers exact per-character bounds via
+    ///    `on_ime_composition_range_changed`; we use the first glyph's box.
+    /// 2. **Last-known caret rect** — we cache (1) so that immediately after a
+    ///    composition ends, and for the accent popup that fires on the next
+    ///    key, the anchor stays at the real caret instead of snapping away.
+    /// 3. **Focused-view fallback** — with no composition data at all (a plain
+    ///    caret in an `<input>`), CEF's OSR API exposes no caret rect for a
+    ///    non-composition selection, so we anchor near the top-left of the view
+    ///    rather than at the screen origin. This is an honest limitation, not
+    ///    pixel-perfect; see the OSR input docs.
     public func firstRect(forCharacterRange range: NSRange, actualRange: NSRangePointer?) -> NSRect {
-        guard let firstBounds = currentImeCharacterBounds.first, let window else {
-            // Fallback: bottom-left of the view.
-            let p = convert(CGPoint(x: 0, y: bounds.height), to: nil)
-            return NSRect(origin: window?.convertPoint(toScreen: p) ?? p, size: .zero)
+        guard let window else { return NSRect(origin: .zero, size: .zero) }
+        if let bounds = currentImeCharacterBounds.first {
+            lastKnownCaretRectDIP = bounds
         }
-        // Character bounds are in view DIP (top-left). Convert to view coords
-        // then to window/screen (bottom-left).
-        let viewRect = NSRect(x: firstBounds.minX, y: firstBounds.maxY,
-                              width: firstBounds.width, height: firstBounds.height)
+        let caret = lastKnownCaretRectDIP ?? CGRect(x: 4, y: 4, width: 1, height: 16)
+        // Caret bounds are in view DIP (top-left). Build a view-coordinate rect
+        // whose origin is the caret's bottom (palette appears just below the
+        // glyph), then convert to window then screen (bottom-left).
+        let viewRect = NSRect(x: caret.minX, y: caret.maxY,
+                              width: max(caret.width, 1), height: max(caret.height, 1))
         let inWindow = convert(viewRect, to: nil)
         return window.convertToScreen(inWindow)
     }

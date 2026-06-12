@@ -68,10 +68,31 @@ extension CefMetalHostView {
     public override func rightMouseUp(with event: NSEvent) {
         osrBrowser?.sendMouseUp(at: dipPoint(for: event), button: .right, clickCount: event.clickCount, modifiers: modifiers)
     }
+    /// What an `otherMouse*` button maps to. Buttons 3/4 are the standard
+    /// "back"/"forward" thumb buttons; anything else is treated as a middle
+    /// click. Extracted so the mapping is unit-testable.
+    enum OtherMouseAction: Equatable { case back, forward, middle }
+    static func otherMouseAction(forButtonNumber n: Int) -> OtherMouseAction {
+        switch n {
+        case 3: return .back
+        case 4: return .forward
+        default: return .middle
+        }
+    }
+
     public override func otherMouseDown(with event: NSEvent) {
-        osrBrowser?.sendMouseDown(at: dipPoint(for: event), button: .middle, clickCount: event.clickCount, modifiers: modifiers)
+        // The press is the meaningful edge for nav — fire on down, swallow up.
+        switch CefMetalHostView.otherMouseAction(forButtonNumber: event.buttonNumber) {
+        case .back: osrBrowser?.goBack(); return
+        case .forward: osrBrowser?.goForward(); return
+        case .middle:
+            osrBrowser?.sendMouseDown(at: dipPoint(for: event), button: .middle, clickCount: event.clickCount, modifiers: modifiers)
+        }
     }
     public override func otherMouseUp(with event: NSEvent) {
+        // Swallow the release of the back/forward thumb buttons so they don't
+        // also reach the page as a middle click.
+        guard CefMetalHostView.otherMouseAction(forButtonNumber: event.buttonNumber) == .middle else { return }
         osrBrowser?.sendMouseUp(at: dipPoint(for: event), button: .middle, clickCount: event.clickCount, modifiers: modifiers)
     }
 
@@ -135,6 +156,14 @@ extension CefMetalHostView {
         var e = cef_key_event_t()
         e.size = MemoryLayout<cef_key_event_t>.stride
         e.modifiers = CefMetalHostView.cefModifiers(event.modifierFlags)
+        // Numpad detection (mirrors cefclient's getModifiersForEvent / the
+        // EVENTFLAG_IS_KEY_PAD bit) for key events. There is no EVENTFLAG for
+        // the Fn key or NumLock on macOS, so those are intentionally omitted.
+        if event.type == .keyDown || event.type == .keyUp || event.type == .flagsChanged {
+            if CefMetalHostView.isKeyPadEvent(event) {
+                e.modifiers |= UInt32(EVENTFLAG_IS_KEY_PAD.rawValue)
+            }
+        }
         e.native_key_code = Int32(event.keyCode)
         if event.type == .keyDown || event.type == .keyUp {
             e.windows_key_code = Int32(CefKeyCodes.windowsKeyCode(
@@ -147,6 +176,21 @@ extension CefMetalHostView {
             }
         }
         return e
+    }
+
+    /// Whether a key event originates from the numeric keypad (mirrors
+    /// cefclient's `isKeyPadEvent:` — the `NSEventModifierFlagNumericPad` flag
+    /// plus the known keypad key codes).
+    static func isKeyPadEvent(_ event: NSEvent) -> Bool {
+        if event.modifierFlags.contains(.numericPad) { return true }
+        switch event.keyCode {
+        // Clear, =, /, *, -, +, Enter, ., and digits 0-9 on the keypad.
+        case 71, 81, 75, 67, 78, 69, 76, 65,
+             82, 83, 84, 85, 86, 87, 88, 89, 91, 92:
+            return true
+        default:
+            return false
+        }
     }
 
     private func isModifierPressed(_ event: NSEvent) -> Bool {

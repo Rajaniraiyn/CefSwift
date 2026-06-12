@@ -52,6 +52,10 @@ public final class CefMetalHostView: NSView, CefOSRHost {
 
     /// Last reported character bounds for IME candidate placement.
     var currentImeCharacterBounds: [CGRect] = []
+    /// Sticky copy of the most recent caret glyph rect (view DIP, top-left),
+    /// so the emoji palette / accent popup can anchor at the caret even after a
+    /// composition ends. See `firstRect(forCharacterRange:)`.
+    var lastKnownCaretRectDIP: CGRect?
     var currentImeSelectedRange = NSRange(location: NSNotFound, length: 0)
     var currentMarkedRange = NSRange(location: NSNotFound, length: 0)
     var currentSelectedText = ""
@@ -362,6 +366,9 @@ public final class CefMetalHostView: NSView, CefOSRHost {
     public func osrImeCompositionRangeChanged(selectedRange: NSRange, characterBounds: [CGRect]) {
         currentImeSelectedRange = selectedRange
         currentImeCharacterBounds = characterBounds
+        if let first = characterBounds.first {
+            lastKnownCaretRectDIP = first
+        }
     }
 
     public func osrTextSelectionChanged(selectedText: String, selectedRange: NSRange) {
