@@ -107,6 +107,15 @@ extension CefBrowser {
         withHostInternal { $0.pointee.invalidate?($0, PET_VIEW) }
     }
 
+    /// Requests one frame from CEF. Used when the browser is created with
+    /// `external_begin_frame_enabled`: the host drives this each display tick
+    /// (via `CADisplayLink`) so painting is paced to the real display refresh,
+    /// giving vsync-smooth scrolling/animation instead of CEF's free-running
+    /// internal timer.
+    public func sendExternalBeginFrame() {
+        withHostInternal { $0.pointee.send_external_begin_frame?($0) }
+    }
+
     // MARK: IME
 
     /// Begins/updates an IME composition (bridged from `NSTextInputClient.setMarkedText`).

@@ -121,7 +121,9 @@ public enum CefBrowserFactory {
         windowInfo.size = MemoryLayout<cef_window_info_t>.stride
         windowInfo.windowless_rendering_enabled = 1
         windowInfo.shared_texture_enabled = 1
-        windowInfo.external_begin_frame_enabled = 0
+        // Display-synced painting: the host drives begin-frames from a
+        // CADisplayLink so scrolling/animation pace to the real refresh rate.
+        windowInfo.external_begin_frame_enabled = 1
         windowInfo.bounds = cef_rect_t(
             x: 0, y: 0,
             width: Int32(max(1, initialSize.width.rounded())),

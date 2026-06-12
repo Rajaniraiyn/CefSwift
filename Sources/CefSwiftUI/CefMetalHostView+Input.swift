@@ -72,12 +72,31 @@ extension CefMetalHostView {
     }
 
     public override func scrollWheel(with event: NSEvent) {
-        // AppKit scroll deltas: scrollingDeltaY > 0 means content moves down.
-        // CEF expects pixel deltas; precise events report fractional pixels.
-        let scale: CGFloat = event.hasPreciseScrollingDeltas ? 1 : 40
-        let dx = event.scrollingDeltaX * scale
-        let dy = event.scrollingDeltaY * scale
-        osrBrowser?.sendMouseWheel(at: dipPoint(for: event), deltaX: dx, deltaY: dy, modifiers: modifiers)
+        // Smooth, native-matching OSR scrolling uses the CGEvent *point* deltas
+        // (pixel-precise, momentum-aware) — the same source cefclient uses.
+        // Fall back to AppKit deltas (scaled for legacy line-based wheels).
+        var dx = event.scrollingDeltaX
+        var dy = event.scrollingDeltaY
+        if let cg = event.cgEvent {
+            let pointY = cg.getDoubleValueField(.scrollWheelEventPointDeltaAxis1)
+            let pointX = cg.getDoubleValueField(.scrollWheelEventPointDeltaAxis2)
+            if pointX != 0 || pointY != 0 {
+                dx = CGFloat(pointX)
+                dy = CGFloat(pointY)
+            } else if !event.hasPreciseScrollingDeltas {
+                dx *= 40; dy *= 40
+            }
+        } else if !event.hasPreciseScrollingDeltas {
+            dx *= 40; dy *= 40
+        }
+        // Carry the sub-pixel remainder so slow scrolls aren't rounded to zero.
+        let totalX = dx + scrollResidual.x
+        let totalY = dy + scrollResidual.y
+        let sendX = totalX.rounded(.towardZero)
+        let sendY = totalY.rounded(.towardZero)
+        scrollResidual = CGPoint(x: totalX - sendX, y: totalY - sendY)
+        if sendX == 0 && sendY == 0 { return }
+        osrBrowser?.sendMouseWheel(at: dipPoint(for: event), deltaX: sendX, deltaY: sendY, modifiers: modifiers)
     }
 
     // MARK: Keyboard

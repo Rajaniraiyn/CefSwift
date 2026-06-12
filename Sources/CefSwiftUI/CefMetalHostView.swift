@@ -36,6 +36,20 @@ public final class CefMetalHostView: NSView, CefOSRHost {
     /// Tracking area for mouse-move/enter/leave.
     private var trackingAreaRef: NSTrackingArea?
 
+    /// Cursor the page last requested. Re-applied from `cursorUpdate(with:)`
+    /// because AppKit resets the cursor on every mouse-move; a one-shot
+    /// `NSCursor.set()` from `osrDidChangeCursor` alone would not stick.
+    private var currentCursor: NSCursor = .arrow
+
+    /// Drives `sendExternalBeginFrame()` once per display refresh so painting is
+    /// vsync-paced (smooth scrolling). Started while the view is in a window.
+    private var displayLink: CADisplayLink?
+
+    /// Sub-pixel scroll-wheel remainder. CEF takes integer wheel deltas, so we
+    /// carry the fractional part across events instead of rounding it away —
+    /// otherwise slow trackpad scrolls lose sub-pixel motion and feel steppy.
+    var scrollResidual: CGPoint = .zero
+
     /// Last reported character bounds for IME candidate placement.
     var currentImeCharacterBounds: [CGRect] = []
     var currentImeSelectedRange = NSRange(location: NSNotFound, length: 0)
@@ -79,9 +93,32 @@ public final class CefMetalHostView: NSView, CefOSRHost {
 
     public override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        guard window != nil else { return }
+        if window == nil {
+            stopDisplayLink()
+            return
+        }
         createBrowserIfPossible()
         updateScale()
+        startDisplayLink()
+    }
+
+    // MARK: Display-link (external begin-frame pacing)
+
+    private func startDisplayLink() {
+        guard displayLink == nil, window != nil else { return }
+        // macOS 14+ gives a window/display-matched CADisplayLink from the view.
+        let link = displayLink(target: self, selector: #selector(stepBeginFrame))
+        link.add(to: .main, forMode: .common)
+        displayLink = link
+    }
+
+    private func stopDisplayLink() {
+        displayLink?.invalidate()
+        displayLink = nil
+    }
+
+    @objc private func stepBeginFrame() {
+        browser?.sendExternalBeginFrame()
     }
 
     public override func viewDidChangeBackingProperties() {
@@ -140,6 +177,7 @@ public final class CefMetalHostView: NSView, CefOSRHost {
     func tearDown() {
         guard !isTornDown else { return }
         isTornDown = true
+        stopDisplayLink()
         closeBrowser()
         model = nil
     }
@@ -200,7 +238,19 @@ public final class CefMetalHostView: NSView, CefOSRHost {
     }
 
     public func osrDidChangeCursor(_ cursor: CefCursorType) {
-        cursor.nsCursor?.set()
+        currentCursor = cursor.nsCursor ?? .arrow
+        // Apply immediately, and make AppKit re-apply it via cursorUpdate(_:)
+        // on subsequent mouse-moves (otherwise it reverts to the arrow).
+        currentCursor.set()
+        window?.invalidateCursorRects(for: self)
+    }
+
+    public override func cursorUpdate(with event: NSEvent) {
+        currentCursor.set()
+    }
+
+    public override func resetCursorRects() {
+        addCursorRect(bounds, cursor: currentCursor)
     }
 
     public func osrPopupDidChangeVisibility(_ visible: Bool) {
@@ -240,7 +290,7 @@ public final class CefMetalHostView: NSView, CefOSRHost {
         if let trackingAreaRef { removeTrackingArea(trackingAreaRef) }
         let area = NSTrackingArea(
             rect: bounds,
-            options: [.activeInActiveApp, .mouseEnteredAndExited, .mouseMoved, .inVisibleRect],
+            options: [.activeInActiveApp, .mouseEnteredAndExited, .mouseMoved, .cursorUpdate, .inVisibleRect],
             owner: self, userInfo: nil
         )
         addTrackingArea(area)
