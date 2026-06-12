@@ -34,7 +34,15 @@ struct LauncherApp: CefSwiftApp {
             LauncherView()
                 .environment(chrome)
                 .frame(minWidth: 720, minHeight: 480)
-                .task { LauncherDemoPage.registerSchemeHandler() }
+                .task {
+                    LauncherDemoPage.registerSchemeHandler()
+                    // Test hook: auto-open a demo by id (e.g. for screenshots).
+                    if let id = ProcessInfo.processInfo.environment["CEFSWIFT_AUTOLAUNCH"],
+                       let demo = LauncherDemo.catalog.first(where: { $0.id == id }),
+                       case .chromeRuntime(let url) = demo.kind {
+                        chrome.open(url: url)
+                    }
+                }
         }
         .windowResizability(.contentSize)
         .defaultSize(width: 880, height: 560)

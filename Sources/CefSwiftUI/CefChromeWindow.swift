@@ -156,6 +156,12 @@ public final class CefChromeWindow: Identifiable {
             return
         }
         let host = OverlayHostingView(rootView: root)
+        // Critical: an overlay with a finite intrinsic size (e.g. a fixed-height
+        // toolbar) would otherwise drag the CEF window's content view down to
+        // that height — collapsing the web area to nothing. Clearing
+        // sizingOptions stops the hosting view from imposing its intrinsic size;
+        // it simply fills the edge constraints below.
+        host.sizingOptions = []
         host.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(host)   // added last ⇒ above the browser view.
         // Pin to all edges with constraints so the overlay fills the content
