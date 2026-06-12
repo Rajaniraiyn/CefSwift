@@ -33,6 +33,7 @@ final class BrowserClient {
     nonisolated(unsafe) var keyboardPointer: UnsafeMutablePointer<cef_keyboard_handler_t>?
     nonisolated(unsafe) var focusPointer: UnsafeMutablePointer<cef_focus_handler_t>?
     nonisolated(unsafe) var renderPointer: UnsafeMutablePointer<cef_render_handler_t>?
+    nonisolated(unsafe) var accessibilityPointer: UnsafeMutablePointer<cef_accessibility_handler_t>?
 
     /// The OSR host (set for offscreen browsers only). When non-nil,
     /// `makeRenderHandler()` is invoked so CEF's `get_render_handler` returns a

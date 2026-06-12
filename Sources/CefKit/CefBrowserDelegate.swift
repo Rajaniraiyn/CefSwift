@@ -189,5 +189,13 @@ public struct CefBrowserOptions {
     /// or ``CefProfile/persistent(name:)`` for isolated cookies/storage.
     public var profile: CefProfile?
 
+    /// (OSR only) Forward raw trackpad touches to Chromium's own gesture/scroll
+    /// recognizers via `send_touch_event`. Off by default: indirect-trackpad
+    /// touch forwarding is unreliable, and the gesture overrides (pinch-zoom,
+    /// swipe-nav, smart-magnify) plus pixel-precise wheel scrolling already
+    /// cover the common cases robustly. Enable to experiment with letting
+    /// Chromium drive gestures itself.
+    public var forwardsRawTouchEvents: Bool = false
+
     public init() {}
 }

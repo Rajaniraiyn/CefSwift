@@ -64,6 +64,21 @@ public final class CefMetalHostView: NSView, CefOSRHost {
     /// In-flight native context-menu callback (resolved by the menu action).
     var pendingContextMenuCallback: CefRunContextMenuCallback?
 
+    /// Allowed drag operations for an in-flight page-initiated (page→system)
+    /// drag session. Set when `start_dragging` fires; consumed by the
+    /// `NSDraggingSource` callbacks.
+    var currentDragAllowedOps: CefDragOperation = .none
+
+    /// The accessibility bridge that mirrors CEF's AX tree into
+    /// `NSAccessibilityElement` proxies (best-effort; see docs).
+    lazy var axBridge = CefOSRAccessibilityBridge(host: self)
+
+    /// Count of AX nodes last mapped from CEF's tree (diagnostic).
+    public internal(set) var lastMappedAXNodeCount = 0
+
+    /// Observers for window key-state changes (focus follows key window).
+    private var windowKeyObservers: [NSObjectProtocol] = []
+
     // MARK: Init
 
     init() {
@@ -75,10 +90,15 @@ public final class CefMetalHostView: NSView, CefOSRHost {
         root.backgroundColor = NSColor.white.cgColor
         contentLayer.contentsGravity = .resize
         contentLayer.frame = bounds
+        popupLayer.contentsGravity = .resize
         popupLayer.isHidden = true
         root.addSublayer(contentLayer)
         root.addSublayer(popupLayer)
         layer = root
+        // Receive indirect (trackpad) touches for raw-touch forwarding.
+        allowedTouchTypes = [.indirect]
+        // Accept system → page drags.
+        registerDragTypes()
     }
 
     @available(*, unavailable)
@@ -93,6 +113,7 @@ public final class CefMetalHostView: NSView, CefOSRHost {
 
     public override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        removeWindowKeyObservers()
         if window == nil {
             stopDisplayLink()
             return
@@ -100,6 +121,35 @@ public final class CefMetalHostView: NSView, CefOSRHost {
         createBrowserIfPossible()
         updateScale()
         startDisplayLink()
+        installWindowKeyObservers()
+    }
+
+    // MARK: Window key-state → CEF focus
+
+    /// Mirror the window's key state into CEF focus while this view is the
+    /// first responder, so tabbing/clicking between the app and other apps
+    /// keeps the page's focus ring and caret in sync (matching a real browser).
+    private func installWindowKeyObservers() {
+        guard let window else { return }
+        let nc = NotificationCenter.default
+        let becomeKey = nc.addObserver(forName: NSWindow.didBecomeKeyNotification, object: window, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.window?.firstResponder === self else { return }
+                self.browser?.setFocus(true)
+            }
+        }
+        let resignKey = nc.addObserver(forName: NSWindow.didResignKeyNotification, object: window, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.window?.firstResponder === self else { return }
+                self.browser?.setFocus(false)
+            }
+        }
+        windowKeyObservers = [becomeKey, resignKey]
+    }
+
+    private func removeWindowKeyObservers() {
+        for o in windowKeyObservers { NotificationCenter.default.removeObserver(o) }
+        windowKeyObservers = []
     }
 
     // MARK: Display-link (external begin-frame pacing)
@@ -204,6 +254,7 @@ public final class CefMetalHostView: NSView, CefOSRHost {
         guard !isTornDown else { return }
         isTornDown = true
         stopDisplayLink()
+        removeWindowKeyObservers()
         closeBrowser()
         model = nil
     }
@@ -233,20 +284,20 @@ public final class CefMetalHostView: NSView, CefOSRHost {
         )
     }
 
-    public func osrDidPaint(_ frame: CefOSRFrame) {
+    public func osrDidPaint(_ frame: CefOSRFrame, element: CefOSRPaintElement) {
+        // PET_VIEW frames go to the content layer; PET_POPUP frames (the
+        // `<select>` dropdown / autofill widget) go to the popup overlay layer
+        // sized by on_popup_size and shown/hidden by on_popup_show.
+        let target = (element == .popup) ? popupLayer : contentLayer
         switch frame {
         case let .accelerated(surface, _):
-            CATransaction.begin()
-            CATransaction.setDisableActions(true)
             // Setting an IOSurface as layer contents is the proven, correct
             // zero-copy path on macOS. CEF returns the surface to its pool
             // after this call, but CALayer takes its own reference to the
             // surface's contents for the current frame.
-            if popupLayer.isHidden == false, popupRectDIP != .zero {
-                // When a popup is showing, the same surface carries both; the
-                // popup overlay is part of the OSR output for Alloy OSR.
-            }
-            contentLayer.contents = surface
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            target.contents = surface
             CATransaction.commit()
         case let .cpu(buffer, width, height, _):
             // CPU fallback: wrap BGRA bytes in a CGImage.
@@ -257,7 +308,7 @@ public final class CefMetalHostView: NSView, CefOSRHost {
             if let image = CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: bytesPerRow, space: cs, bitmapInfo: info, provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent) {
                 CATransaction.begin()
                 CATransaction.setDisableActions(true)
-                contentLayer.contents = image
+                target.contents = image
                 CATransaction.commit()
             }
         }

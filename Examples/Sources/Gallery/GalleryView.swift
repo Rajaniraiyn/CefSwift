@@ -76,6 +76,14 @@ private struct MetalOSRCard: View {
         ("Animation", "https://animejs.com"),
         ("CSS demo", "https://example.com"),
         ("WebGL", "https://webglsamples.org/aquarium/aquarium.html"),
+        // A form page to exercise <select> popups, focus, and drag sources.
+        ("Form", "data:text/html,<html><body style='font:24px sans-serif;padding:24px'>"
+            + "<h2>OSR input test</h2>"
+            + "<label>Pick: <select><option>Apple</option><option>Banana</option>"
+            + "<option>Cherry</option><option>Durian</option><option>Elderberry</option></select></label>"
+            + "<p><input placeholder='type here' style='font:20px sans-serif;padding:6px'></p>"
+            + "<p><a href='https://example.com' draggable='true'>Drag this link</a></p>"
+            + "</body></html>"),
     ]
 
     @State private var model = CefWebViewModel(url: URL(string: Self.presets[0].url)!)

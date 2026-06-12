@@ -121,6 +121,9 @@ CCEF_SYM(cef_binary_value_t*, cef_binary_value_create,
 CCEF_SYM(cef_dictionary_value_t*, cef_dictionary_value_create, (void), ())
 CCEF_SYM(cef_list_value_t*, cef_list_value_create, (void), ())
 
+// --- Drag and drop (OSR system → page) -----------------------------------------
+CCEF_SYM(cef_drag_data_t*, cef_drag_data_create, (void), ())
+
 // --- Views framework (chrome-style windows) -----------------------------------
 CCEF_SYM(cef_browser_view_t*, cef_browser_view_create,
          (struct _cef_client_t* client, const cef_string_t* url,
