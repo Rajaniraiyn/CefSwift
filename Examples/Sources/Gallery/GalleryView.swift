@@ -11,6 +11,7 @@ struct GalleryView: View {
     var body: some View {
         ScrollView {
             LazyVGrid(columns: columns, spacing: 16) {
+                MetalOSRCard()
                 SwiftJSBridgeCard()
                 AlloyStyleCard()
                 MutedVideoCard()
@@ -62,6 +63,65 @@ struct GalleryCard<Content: View>: View {
         .background(.background.opacity(0.7), in: .rect(cornerRadius: 14))
         .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(.quaternary))
         .shadow(color: .black.opacity(0.08), radius: 6, y: 2)
+    }
+}
+
+// MARK: - Card 0: OSR / Metal — the indistinguishable embedded primitive
+
+/// Renders Chromium offscreen into a shared IOSurface composited in a native
+/// CALayer-backed subview, with a native SwiftUI badge composited ON TOP of the
+/// web pixels — the compositing advantage over Electron's BrowserView.
+private struct MetalOSRCard: View {
+    private static let presets: [(name: String, url: String)] = [
+        ("Animation", "https://animejs.com"),
+        ("CSS demo", "https://example.com"),
+        ("WebGL", "https://webglsamples.org/aquarium/aquarium.html"),
+    ]
+
+    @State private var model = CefWebViewModel(url: URL(string: Self.presets[0].url)!)
+    @State private var selection = MetalOSRCard.presets[0].url
+    @State private var pulse = false
+
+    var body: some View {
+        GalleryCard(title: "OSR / Metal (premium)", symbol: "square.stack.3d.up.fill",
+                    caption: "CefMetalWebView · IOSurface→CALayer") {
+            VStack(spacing: 0) {
+                Picker("Site", selection: $selection) {
+                    ForEach(Self.presets, id: \.url) { Text($0.name).tag($0.url) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .padding(10)
+                .onChange(of: selection) { _, v in
+                    if let url = URL(string: v) { model.load(url) }
+                }
+                Divider()
+                ZStack(alignment: .topTrailing) {
+                    // The offscreen web view: a genuine in-tree subview.
+                    CefMetalWebView(model: model)
+                        .frame(height: 300)
+                    // Native SwiftUI badge composited ON TOP of the web pixels.
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(.green)
+                            .frame(width: 8, height: 8)
+                            .opacity(pulse ? 0.3 : 1)
+                        Text("NATIVE OVERLAY")
+                            .font(.system(.caption2, design: .rounded).weight(.bold))
+                    }
+                    .padding(.horizontal, 10).padding(.vertical, 6)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .overlay(Capsule().strokeBorder(.white.opacity(0.4)))
+                    .padding(12)
+                    .shadow(radius: 4)
+                }
+            }
+        }
+        .onAppear {
+            withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) {
+                pulse = true
+            }
+        }
     }
 }
 

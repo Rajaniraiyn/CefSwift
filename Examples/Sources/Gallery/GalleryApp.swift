@@ -17,6 +17,9 @@ struct GalleryApp: CefSwiftApp {
             .appendingPathComponent("dev.rajaniraiyn.cefswift.gallery/Cache", isDirectory: true)
         config.logSeverity = .warning
         config.userAgentProduct = "CefSwiftGallery/1.0"
+        // Enable offscreen rendering so the OSR / Metal card can paint into a
+        // shared IOSurface composited in a native CALayer-backed subview.
+        config.windowlessRenderingEnabled = true
         // Pluggable chromium switches flow straight through:
         config.extraCommandLineSwitches = [
             "autoplay-policy": "no-user-gesture-required"

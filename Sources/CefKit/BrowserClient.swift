@@ -32,6 +32,16 @@ final class BrowserClient {
     nonisolated(unsafe) var requestPointer: UnsafeMutablePointer<cef_request_handler_t>?
     nonisolated(unsafe) var keyboardPointer: UnsafeMutablePointer<cef_keyboard_handler_t>?
     nonisolated(unsafe) var focusPointer: UnsafeMutablePointer<cef_focus_handler_t>?
+    nonisolated(unsafe) var renderPointer: UnsafeMutablePointer<cef_render_handler_t>?
+
+    /// The OSR host (set for offscreen browsers only). When non-nil,
+    /// `makeRenderHandler()` is invoked so CEF's `get_render_handler` returns a
+    /// live handler and the browser renders windowless.
+    weak var osrHost: CefOSRHost?
+
+    /// The OSR browser wrapper awaiting its async-created raw cef_browser_t
+    /// (adopted in on_after_created).
+    var pendingOSRBrowser: CefBrowser?
 
     // The most recent context-menu params, captured in on_before_context_menu
     // and replayed to the command/dismiss callbacks (which also receive params,
@@ -67,8 +77,23 @@ final class BrowserClient {
     /// creation).
     func makeClient() -> UnsafeMutablePointer<cef_client_t> {
         let lifeSpan = cefAllocate(cef_life_span_handler_t.self, owner: self)
-        lifeSpan.pointee.on_after_created = { _, browser in
-            cefRelease(browser.map(UnsafeMutableRawPointer.init))
+        lifeSpan.pointee.on_after_created = { handlerSelf, browser in
+            // For windowed browsers the wrapper already owns the raw browser
+            // (sync creation), so just release this +1. For OSR browsers
+            // (async creation) the wrapper has no raw yet — adopt it here.
+            guard let browser else { return }
+            guard let client = BrowserClient.owner(handlerSelf.map(UnsafeMutableRawPointer.init)) else {
+                cefRelease(UnsafeMutableRawPointer(browser))
+                return
+            }
+            MainActor.assumeIsolated {
+                if let pending = client.pendingOSRBrowser, !pending.hasRawBrowser {
+                    cefAddRef(UnsafeMutableRawPointer(browser))  // adoptRaw takes a +1 it owns
+                    pending.adoptRaw(browser)
+                    client.pendingOSRBrowser = nil
+                }
+            }
+            cefRelease(UnsafeMutableRawPointer(browser))
         }
         lifeSpan.pointee.do_close = { _, browser in
             cefRelease(browser.map(UnsafeMutableRawPointer.init))
@@ -237,8 +262,10 @@ final class BrowserClient {
         display.pointee.on_cursor_change = { handlerSelf, browser, _, type, _ in
             cefRelease(browser.map(UnsafeMutableRawPointer.init))
             let cursor = CefCursorType(cefValue: type)
-            return BrowserClient.withBrowser(handlerSelf.map(UnsafeMutableRawPointer.init), default: Int32(0)) { _, cefBrowser in
+            return BrowserClient.withBrowser(handlerSelf.map(UnsafeMutableRawPointer.init), default: Int32(0)) { client, cefBrowser in
                 cefBrowser.delegate?.browser(cefBrowser, didChangeCursor: cursor)
+                // OSR has no CEF window, so the host must apply the cursor.
+                client.osrHost?.osrDidChangeCursor(cursor)
                 return 0  // let CEF apply the cursor for windowed browsers
             }
         }
@@ -299,7 +326,19 @@ final class BrowserClient {
 
         makeExtendedHandlers()
 
+        // OSR browsers get a render handler; windowed browsers leave
+        // renderPointer nil so get_render_handler returns NULL.
+        if osrHost != nil {
+            makeRenderHandler()
+        }
+
         let client = cefAllocate(cef_client_t.self, owner: self)
+        client.pointee.get_render_handler = { clientSelf in
+            guard let me = BrowserClient.owner(clientSelf.map(UnsafeMutableRawPointer.init)),
+                  let handler = me.renderPointer else { return nil }
+            cefAddRef(UnsafeMutableRawPointer(handler))
+            return handler
+        }
         client.pointee.get_life_span_handler = { clientSelf in
             guard let me = BrowserClient.owner(clientSelf.map(UnsafeMutableRawPointer.init)),
                   let handler = me.lifeSpanPointer else { return nil }

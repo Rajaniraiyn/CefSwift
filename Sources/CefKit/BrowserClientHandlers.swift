@@ -80,6 +80,29 @@ extension BrowserClient {
                 cefBrowser.delegate?.browser(cefBrowser, configureContextMenu: menu, params: snapshot)
             }
         }
+        handler.pointee.run_context_menu = { handlerSelf, browser, frame, params, model, callback in
+            cefRelease(browser.map(UnsafeMutableRawPointer.init))
+            cefRelease(frame.map(UnsafeMutableRawPointer.init))
+            guard let model, let callback else {
+                cefRelease(model.map(UnsafeMutableRawPointer.init))
+                cefRelease(callback.map(UnsafeMutableRawPointer.init))
+                return 0
+            }
+            // Only intercept for OSR browsers (windowless has no CEF window to
+            // present the default menu in); windowed browsers fall through to
+            // CEF's native menu by returning 0.
+            let menu = CefMenuModel(raw: model)
+            let viewPoint = params.map { CGPoint(x: CGFloat($0.pointee.get_xcoord?($0) ?? 0), y: CGFloat($0.pointee.get_ycoord?($0) ?? 0)) } ?? .zero
+            let wrapper = CefRunContextMenuCallback(raw: callback)  // owns the +1
+            return BrowserClientCallbacks.run(handlerSelf, default: Int32(0)) { client, _ in
+                guard let host = client.osrHost else {
+                    wrapper.cancel()
+                    return 0
+                }
+                host.osrRunContextMenu(menu, at: viewPoint, callback: wrapper)
+                return 1
+            }
+        }
         handler.pointee.on_context_menu_command = { handlerSelf, browser, frame, params, commandID, _ in
             cefRelease(browser.map(UnsafeMutableRawPointer.init))
             cefRelease(frame.map(UnsafeMutableRawPointer.init))

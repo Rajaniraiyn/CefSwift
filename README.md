@@ -224,14 +224,17 @@ updates become routine. Details and required repository settings:
 | [docs/bundling.md](docs/bundling.md) | Bundle anatomy, Info.plist keys, codesigning, distribution |
 | [docs/configuration.md](docs/configuration.md) | Every configuration knob; runtime styles; flavors |
 | [docs/chrome-style.md](docs/chrome-style.md) | Building a full browser on the Chrome runtime style |
+| [docs/osr-metal.md](docs/osr-metal.md) | `CefMetalWebView` — offscreen IOSurface→CALayer embedding, input/IME/cursor/menu |
 | [docs/accessibility.md](docs/accessibility.md) | VoiceOver, keyboard, and IME behavior |
 | [docs/sandbox.md](docs/sandbox.md) | Sandbox status and security posture |
 | [docs/automation.md](docs/automation.md) | The CEF auto-update pipeline |
 
 ## Roadmap
 
-- **Off-screen rendering** — `CefOSRView` with Metal compositing, for views
-  that need SwiftUI effects, transforms, and full a11y-tree control.
+- **OSR accessibility tree** — `CefMetalWebView` already renders offscreen via
+  IOSurface→CALayer with input/IME/cursor/context-menu; the remaining gap is
+  re-exposing CEF's a11y tree to VoiceOver via `NSAccessibility`
+  (see [docs/osr-metal.md](docs/osr-metal.md)).
 - **Chromium sandbox** — adopt `libcef_sandbox.dylib` (the seam is already in
   place; see [docs/sandbox.md](docs/sandbox.md)).
 - **IME polish** — refined composition handling for CJK input in windowed mode.

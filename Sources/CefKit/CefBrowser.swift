@@ -33,7 +33,7 @@ public final class CefBrowser: Identifiable {
 
     /// Owned +1 reference to the underlying cef_browser_t; nil after close.
     private var raw: UnsafeMutablePointer<cef_browser_t>?
-    private let client: BrowserClient?
+    let client: BrowserClient?
 
     init(raw: UnsafeMutablePointer<cef_browser_t>?, client: BrowserClient?, delegate: CefBrowserDelegate?) {
         self.raw = raw
@@ -199,6 +199,11 @@ public final class CefBrowser: Identifiable {
         guard let raw, let host = raw.pointee.get_host?(raw) else { return nil }
         defer { cefRelease(UnsafeMutableRawPointer(host)) }
         return body(host)
+    }
+
+    /// Module-internal host accessor for the OSR input extension.
+    func withHostInternal(_ body: (UnsafeMutablePointer<cef_browser_host_t>) -> Void) {
+        withHost(body)
     }
 
     /// Runs `body` with a +1 main-frame reference, releasing it afterwards.

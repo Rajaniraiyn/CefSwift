@@ -146,4 +146,49 @@ public final class CefMenuModel {
     public func removeItem(at index: Int) -> Bool {
         (raw.pointee.remove_at?(raw, index) ?? 0) != 0
     }
+
+    /// The label of the item at `index`.
+    public func label(at index: Int) -> String {
+        CefStringUtil.takingUserFree(raw.pointee.get_label_at?(raw, index)) ?? ""
+    }
+
+    /// The command ID of the item at `index`.
+    public func commandID(at index: Int) -> Int {
+        Int(raw.pointee.get_command_id_at?(raw, index) ?? -1)
+    }
+
+    /// Whether the item at `index` is a separator.
+    public func isSeparator(at index: Int) -> Bool {
+        raw.pointee.get_type_at?(raw, index) == MENUITEMTYPE_SEPARATOR
+    }
+}
+
+/// Resolves a CEF "run context menu" request: the OSR host presents a native
+/// `NSMenu` from the ``CefMenuModel`` and reports the chosen command (or
+/// cancellation) back through this callback. Owns one +1 reference to the
+/// underlying CEF callback; call exactly one of ``select(commandID:)`` /
+/// ``cancel()`` exactly once.
+@MainActor
+public final class CefRunContextMenuCallback {
+    private var raw: UnsafeMutablePointer<cef_run_context_menu_callback_t>?
+
+    init(raw: UnsafeMutablePointer<cef_run_context_menu_callback_t>) {
+        self.raw = raw
+    }
+
+    /// Completes the menu by selecting `commandID`.
+    public func select(commandID: Int) {
+        guard let raw else { return }
+        raw.pointee.cont?(raw, Int32(commandID), cef_event_flags_t(rawValue: 0))
+        cefRelease(UnsafeMutableRawPointer(raw))
+        self.raw = nil
+    }
+
+    /// Cancels the menu without selecting anything.
+    public func cancel() {
+        guard let raw else { return }
+        raw.pointee.cancel?(raw)
+        cefRelease(UnsafeMutableRawPointer(raw))
+        self.raw = nil
+    }
 }
