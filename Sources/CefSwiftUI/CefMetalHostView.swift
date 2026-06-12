@@ -57,8 +57,24 @@ public final class CefMetalHostView: NSView, CefOSRHost {
     var currentSelectedText = ""
     var currentSelectedTextRange = NSRange(location: NSNotFound, length: 0)
 
+    // Deferred key-input state (mirrors cefclient's text_input_client_osr_mac):
+    // during a `keyDown`, `interpretKeyEvents` only *accumulates* here; the
+    // actual key/char/composition events are sent afterward, so normal typing
+    // goes out as KEYEVENT_KEYDOWN+KEYEVENT_CHAR (firing JS key events) instead
+    // of being silently committed as IME text.
+    var handlingKeyDown = false
+    var textToBeInserted = ""
+    var hasMarkedTextFlag = false
+    var oldHasMarkedText = false
+    var markedTextValue = ""
+    var markedSelectionRange = NSRange(location: NSNotFound, length: 0)
+    var setMarkedReplacement: NSRange?
+    var unmarkTextCalled = false
+
     func clearMarked() {
         currentMarkedRange = NSRange(location: NSNotFound, length: 0)
+        hasMarkedTextFlag = false
+        markedTextValue = ""
     }
 
     /// In-flight native context-menu callback (resolved by the menu action).

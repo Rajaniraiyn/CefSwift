@@ -52,7 +52,11 @@ extension CefMetalHostView {
     }
 
     public override func mouseDown(with event: NSEvent) {
+        // Take key focus on click, and tell CEF explicitly — relying on
+        // becomeFirstResponder alone proved flaky when several browsers share
+        // a window (you'd have to click another view first).
         window?.makeFirstResponder(self)
+        osrBrowser?.setFocus(true)
         osrBrowser?.sendMouseDown(at: dipPoint(for: event), button: .left, clickCount: event.clickCount, modifiers: modifiers)
     }
     public override func mouseUp(with event: NSEvent) {
@@ -102,34 +106,109 @@ extension CefMetalHostView {
     // MARK: Keyboard
 
     public override func keyDown(with event: NSEvent) {
-        sendKey(event, type: KEYEVENT_RAWKEYDOWN)
-        // Let the input system produce characters / IME composition.
+        guard osrBrowser != nil else { return }
+        // Deferred model (mirrors cefclient): interpretKeyEvents only feeds the
+        // NSTextInputClient methods, which *accumulate* state; we then decide
+        // whether this was a plain keypress (→ KEYDOWN+CHAR, so JS key events
+        // fire and the caret moves) or an IME composition/commit.
+        handleKeyEventBeforeTextInputClient()
         interpretKeyEvents([event])
+        let base = makeKeyEvent(event)
+        handleKeyEventAfterTextInputClient(base)
     }
 
     public override func keyUp(with event: NSEvent) {
-        sendKey(event, type: KEYEVENT_KEYUP)
+        var e = makeKeyEvent(event)
+        e.type = KEYEVENT_KEYUP
+        osrBrowser?.sendKeyEvent(e)
     }
 
     public override func flagsChanged(with event: NSEvent) {
-        // Forward modifier-only changes as keydown/up so the page sees them.
-        sendKey(event, type: KEYEVENT_KEYDOWN)
+        // Modifier-only change: down when the modifier is now pressed, else up.
+        var e = makeKeyEvent(event)
+        e.type = isModifierPressed(event) ? KEYEVENT_KEYDOWN : KEYEVENT_KEYUP
+        osrBrowser?.sendKeyEvent(e)
     }
 
-    private func sendKey(_ event: NSEvent, type: cef_key_event_type_t) {
+    /// Builds a `cef_key_event_t` (without a `type`) from an `NSEvent`.
+    func makeKeyEvent(_ event: NSEvent) -> cef_key_event_t {
         var e = cef_key_event_t()
         e.size = MemoryLayout<cef_key_event_t>.stride
-        e.type = type
         e.modifiers = CefMetalHostView.cefModifiers(event.modifierFlags)
         e.native_key_code = Int32(event.keyCode)
-        e.windows_key_code = Int32(CefKeyCodes.windowsKeyCode(forMacKeyCode: event.keyCode, characters: event.charactersIgnoringModifiers))
-        if let chars = event.charactersIgnoringModifiers, let first = chars.utf16.first {
-            e.unmodified_character = first
+        if event.type == .keyDown || event.type == .keyUp {
+            e.windows_key_code = Int32(CefKeyCodes.windowsKeyCode(
+                forMacKeyCode: event.keyCode, characters: event.charactersIgnoringModifiers))
+            if let chars = event.charactersIgnoringModifiers, let first = chars.utf16.first {
+                e.unmodified_character = first
+            }
+            if let chars = event.characters, let first = chars.utf16.first {
+                e.character = first
+            }
         }
-        if let chars = event.characters, let first = chars.utf16.first {
-            e.character = first
+        return e
+    }
+
+    private func isModifierPressed(_ event: NSEvent) -> Bool {
+        let f = event.modifierFlags
+        switch event.keyCode {
+        case 56, 60: return f.contains(.shift)
+        case 59, 62: return f.contains(.control)
+        case 58, 61: return f.contains(.option)
+        case 55, 54: return f.contains(.command)
+        case 57: return f.contains(.capsLock)
+        default: return true
         }
-        osrBrowser?.sendKeyEvent(e)
+    }
+
+    // MARK: Deferred key-input (cefclient text_input_client model)
+
+    private func handleKeyEventBeforeTextInputClient() {
+        oldHasMarkedText = hasMarkedTextFlag
+        handlingKeyDown = true
+        textToBeInserted = ""
+        setMarkedReplacement = nil
+        unmarkTextCalled = false
+    }
+
+    private func handleKeyEventAfterTextInputClient(_ base: cef_key_event_t) {
+        handlingKeyDown = false
+        guard let browser = osrBrowser else { return }
+
+        // Plain keypress (no composition, at most one character produced):
+        // send KEYDOWN then CHAR so the renderer sees a real key event.
+        if !hasMarkedTextFlag, !oldHasMarkedText, textToBeInserted.utf16.count <= 1 {
+            var e = base
+            e.type = KEYEVENT_KEYDOWN
+            browser.sendKeyEvent(e)
+            if let first = textToBeInserted.utf16.first {
+                e.character = first
+            }
+            e.type = KEYEVENT_CHAR
+            browser.sendKeyEvent(e)
+        }
+
+        // Multi-character text (paste, IME result): commit as text.
+        let commitThreshold = (hasMarkedTextFlag || oldHasMarkedText) ? 0 : 1
+        if textToBeInserted.utf16.count > commitThreshold {
+            browser.imeCommitText(textToBeInserted, replacementRange: nil)
+            textToBeInserted = ""
+        }
+
+        // Update or finish/cancel the IME composition.
+        if hasMarkedTextFlag, !markedTextValue.isEmpty {
+            browser.imeSetComposition(
+                text: markedTextValue,
+                selectionRange: markedSelectionRange,
+                replacementRange: setMarkedReplacement)
+        } else if oldHasMarkedText, !hasMarkedTextFlag {
+            if unmarkTextCalled {
+                browser.imeFinishComposing(keepSelection: false)
+            } else {
+                browser.imeCancelComposition()
+            }
+        }
+        setMarkedReplacement = nil
     }
 
     // MARK: Focus

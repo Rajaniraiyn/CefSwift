@@ -10,26 +10,48 @@ extension CefMetalHostView: @preconcurrency NSTextInputClient {
     public func insertText(_ string: Any, replacementRange: NSRange) {
         let text = (string as? NSAttributedString)?.string ?? (string as? String) ?? ""
         guard !text.isEmpty else { return }
-        let range = replacementRange.location == NSNotFound ? nil : replacementRange
-        osrBrowser?.imeCommitText(text, replacementRange: range)
-        clearMarked()
+        if handlingKeyDown {
+            // Accumulate; keyDown's after-handler decides KEYDOWN+CHAR vs commit.
+            textToBeInserted += text
+        } else {
+            // Direct insert (e.g. IME candidate pick outside a keystroke).
+            let range = replacementRange.location == NSNotFound ? nil : replacementRange
+            osrBrowser?.imeCommitText(text, replacementRange: range)
+        }
+        // Inserting text always clears any marked composition.
+        hasMarkedTextFlag = false
+        currentMarkedRange = NSRange(location: NSNotFound, length: 0)
     }
 
     public func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
         let text = (string as? NSAttributedString)?.string ?? (string as? String) ?? ""
-        if text.isEmpty {
-            osrBrowser?.imeCancelComposition()
-            clearMarked()
-            return
-        }
-        currentMarkedRange = NSRange(location: 0, length: text.utf16.count)
+        markedSelectionRange = selectedRange
+        markedTextValue = text
+        hasMarkedTextFlag = !text.isEmpty
+        currentMarkedRange = hasMarkedTextFlag
+            ? NSRange(location: 0, length: text.utf16.count)
+            : NSRange(location: NSNotFound, length: 0)
         let rep = replacementRange.location == NSNotFound ? nil : replacementRange
-        osrBrowser?.imeSetComposition(text: text, selectionRange: selectedRange, replacementRange: rep)
+        if handlingKeyDown {
+            // Defer to the after-handler so it sequences with the key event.
+            setMarkedReplacement = rep
+        } else {
+            if text.isEmpty {
+                osrBrowser?.imeCancelComposition()
+            } else {
+                osrBrowser?.imeSetComposition(text: text, selectionRange: selectedRange, replacementRange: rep)
+            }
+        }
     }
 
     public func unmarkText() {
-        osrBrowser?.imeFinishComposing(keepSelection: true)
-        clearMarked()
+        hasMarkedTextFlag = false
+        markedTextValue = ""
+        if handlingKeyDown {
+            unmarkTextCalled = true
+        } else {
+            osrBrowser?.imeFinishComposing(keepSelection: true)
+        }
     }
 
     public func selectedRange() -> NSRange {
