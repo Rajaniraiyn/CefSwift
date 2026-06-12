@@ -128,13 +128,39 @@ public final class CefMetalHostView: NSView, CefOSRHost {
 
     public override func layout() {
         super.layout()
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        contentLayer.frame = bounds
-        layer?.frame = bounds
-        CATransaction.commit()
+        syncLayerGeometry()
         browser?.wasResized()
         updateTrackingArea()
+    }
+
+    /// `setFrameSize` is invoked synchronously on every step of a live resize —
+    /// keep the layers locked to the new bounds *immediately* (and without
+    /// implicit animation) so the displayed frame never lags the view. Combined
+    /// with `.resize` contents gravity (which stretches the last painted frame
+    /// to fill) this removes the blank/garbage trails that appear when the layer
+    /// grows ahead of CEF's next paint. `wasResized` then asks CEF to repaint at
+    /// the new size; the CADisplayLink (running in `.common` modes, so it keeps
+    /// firing during the resize event loop) delivers the new frames.
+    public override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        syncLayerGeometry()
+        browser?.wasResized()
+    }
+
+    private func syncLayerGeometry() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer?.frame = bounds
+        contentLayer.frame = bounds
+        CATransaction.commit()
+    }
+
+    public override func viewDidEndLiveResize() {
+        super.viewDidEndLiveResize()
+        // Snap a crisp, correctly-sized final frame after the user lets go.
+        syncLayerGeometry()
+        browser?.wasResized()
+        browser?.invalidate()
     }
 
     private func updateScale() {
