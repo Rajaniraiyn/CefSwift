@@ -9,7 +9,7 @@ Three example apps, one package. All consume the parent package via `.package(pa
 | **Gallery** | Embedding web content as ordinary SwiftUI: `CefWebView` cards in a `LazyVGrid`, per-view alloy runtime style, `isAudioMuted`, `onConsoleMessage` bridged into a native list, navigation driven by native `Picker`/`TextField`, live `CefConfiguration` inspection, custom chromium switches |
 
 The Launcher is the place to start: it links every hosting mode and configuration
-behind one window. See **[Links, popups & new windows + context menus](../docs/links-and-context-menus.md)**
+behind one window. See **[configuration.md — Links, popups & new windows](../docs/configuration.md#links-popups--new-windows)**
 for the disposition/context-menu APIs the Browser and Launcher demonstrate.
 
 ## Run with the SwiftPM plugin (recommended)

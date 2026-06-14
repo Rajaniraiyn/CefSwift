@@ -737,9 +737,9 @@ extension BrowserClient {
                 cefBrowser.delegate?.browser(cefBrowser, renderProcessDidTerminate: reason, errorCode: code)
             }
         }
-        // CONTRACT-DEVIATION: get_resource_request_handler left unset (returns
-        // NULL by default) — the custom-scheme path already covers app-served
-        // content; per-response interception is out of scope for v1.
+        // get_resource_request_handler left unset (returns NULL by default) —
+        // the custom-scheme path already covers app-served content; per-response
+        // interception is intentionally out of scope.
         requestPointer = handler
     }
 

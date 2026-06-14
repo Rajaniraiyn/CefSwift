@@ -36,7 +36,8 @@ import Foundation
 /// **Security.** Bridge functions run with full app privileges and are
 /// callable by *any* page loaded in any browser of this app — treat every
 /// payload as untrusted input, validate it, and never expose dangerous
-/// primitives ("run shell command") directly. See `docs/js-bridge.md`.
+/// primitives ("run shell command") directly. See `docs/configuration.md`
+/// (JS ↔ Swift bridge).
 public final class CefBridge: @unchecked Sendable {
     /// The reserved bridge scheme name.
     public static let schemeName = "cefswift"

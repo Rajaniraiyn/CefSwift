@@ -40,7 +40,7 @@ targetTemplates:
     info:
       path: Generated/${target_name}-Info.plist
       properties:
-        # Pinned facts from DESIGN.md — required for CEF on macOS.
+        # Required for CEF on macOS.
         LSEnvironment:
           MallocNanoZone: "0"
         NSPrincipalClass: NSApplication

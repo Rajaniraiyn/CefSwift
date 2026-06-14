@@ -443,9 +443,9 @@ extension CefMetalHostView {
     // MARK: Rotation
 
     public override func rotate(with event: NSEvent) {
-        // CONTRACT-DEVIATION: Chromium's OSR host input has no rotation channel
-        // (no rotate gesture in cef_browser_host_t), and web pages don't consume
-        // a native rotation event. No-op rather than mismap it.
+        // OSR host input has no rotation channel (no rotate gesture in
+        // cef_browser_host_t), and web pages don't consume native rotation
+        // events. No-op rather than mismap it.
     }
 
     // MARK: Three-finger swipe → back/forward navigation

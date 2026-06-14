@@ -35,8 +35,9 @@ Or, without `CefSwiftApp`, pass it to
 | `logFile` | `URL?` | Chromium log destination (default: `debug.log` next to the cache). |
 | `remoteDebuggingPort` | `Int?` | Opens the Chrome DevTools Protocol on `localhost:<port>` — attach Chrome's `chrome://inspect`, Playwright, etc. |
 | `persistSessionCookies` | `Bool` | Keep session cookies across launches. |
-| `safeStorage` | `CefSafeStoragePolicy`, `.automatic` | How cookies are encrypted at rest — real keychain vs mock key. `.automatic` skips the keychain (and its prompt) for ad-hoc-signed dev builds. See [the safe-storage section below](#the-keychain-chromium-safe-storage-prompt). |
+| `safeStorage` | `CefSafeStoragePolicy`, `.automatic` | How cookies are encrypted at rest. `.automatic` skips the keychain (and its prompt) for ad-hoc-signed dev builds. See [the safe-storage section below](#the-keychain-chromium-safe-storage-prompt). |
 | `defaultRuntimeStyle` | `CefRuntimeStyle`, `.default` (= chrome) | Default style for new browsers; see below. |
+| `windowlessRenderingEnabled` | `Bool`, `false` | Required for `CefMetalWebView` (OSR). Process-wide — must be set before `CefRuntime.initialize`. |
 | `externalMessagePump` | `Bool`, `true` | Leave on. SwiftUI owns the run loop; see [architecture.md](architecture.md). |
 | `frameworkDirectory` | `URL?` | Override where the CEF framework is found (default: the app bundle's `Contents/Frameworks/`). Useful for unbundled dev setups. |
 | `browserSubprocessPath` | `URL?` | Override the helper executable path. |
@@ -49,7 +50,7 @@ Or, without `CefSwiftApp`, pass it to
 | Surface | What it does |
 |---|---|
 | `CefRuntime.shared.registerSchemeHandler(scheme:domain:handler:)` | Routes a scheme to a `CefSchemeHandler` (`func response(for: CefSchemeRequest) async -> CefSchemeResponse`, whole-body buffered). Pair with `customSchemes` above; `CefBundleSchemeHandler(directory:indexFile:)` serves local files with UTType-based MIME detection. |
-| `CefRuntime.shared.bridge` | JS ↔ Swift function bridge: `bridge.register("name") { (input: In) in Out }` (Codable) and pages call `await window.cefSwift.invoke('name', {…})`. Shim auto-injection toggle: `bridge.autoInjectsShim`. See [js-bridge.md](js-bridge.md). |
+| `CefRuntime.shared.bridge` | JS ↔ Swift function bridge: `bridge.register("name") { (input: In) in Out }` (Codable) and pages call `await window.cefSwift.invoke('name', {…})`. Shim auto-injection toggle: `bridge.autoInjectsShim`. See [JS ↔ Swift bridge](#js--swift-bridge) below. |
 | Downloads | Per browser: `CefBrowserDelegate.browser(_:decidePolicyForDownload:suggestedName:)` (return `.allow(destination:)` / `.deny`; default saves to `~/Downloads/<suggested name>`) plus `browser(_:downloadDidProgress:)` with a `CefDownload` snapshot (id, url, bytes, completion, path). On `CefWebViewModel`: the `onDownloadDecision` / `onDownloadProgress` closures. |
 
 ## Runtime styles: chrome vs alloy
@@ -70,7 +71,7 @@ The browser view is a real Chrome browser without Chrome's window chrome:
 - Chrome's standard dialogs, permission prompts, find bar behavior, etc.
 
 This is what you want for anything browser-shaped. See
-[chrome-style.md](chrome-style.md).
+[architecture.md — hosting modes](architecture.md#hosting-modes).
 
 ### `.alloy`
 
@@ -178,3 +179,159 @@ dialog on first run.
 
 User-specified switches always win: if you set `use-mock-keychain` yourself
 in `extraCommandLineSwitches`, the policy never duplicates or overrides it.
+
+## JS ↔ Swift bridge
+
+`CefBridge` lets page JavaScript call Swift functions and get a typed reply
+back as a `Promise`. It is built on CefSwift's custom-scheme machinery: the
+reserved `cefswift` scheme (registered automatically in every process) routes
+`POST cefswift://bridge/<name>` requests to functions you register.
+
+```swift
+// Typed (Codable in/out — recommended):
+struct Person: Codable { let name: String }
+struct Greeting: Codable { let message: String }
+
+CefRuntime.shared.bridge.register("greet") { (person: Person) in
+    Greeting(message: "Hello, \(person.name)!")
+}
+
+// Raw (Data in/out) when you want to handle encoding yourself:
+CefRuntime.shared.bridge.register("raw") { (body: Data) async throws -> Data in
+    body
+}
+```
+
+Handlers are `async` and run off the main thread — hop to `@MainActor` for
+UI work. Thrown errors surface in JS as a rejected `Promise` (HTTP 500); an
+unknown function name rejects with a 404.
+
+```js
+const reply = await window.cefSwift.invoke('greet', { name: 'Ada' });
+console.log(reply.message); // "Hello, Ada!"
+```
+
+`window.cefSwift` is defined by a small shim available as
+`CefBridge.javascriptShim` (idempotent). Two delivery options:
+
+1. **Embed the shim in your pages** (recommended for production). If you
+   serve your UI from a custom scheme, put `<script>…shim…</script>` in the
+   HTML — shim present before any page code runs.
+2. **Auto-injection** (`bridge.autoInjectsShim`, default `true`). Injects at
+   load-end, but only while at least one bridge function is registered.
+   Caveat: load-end fires *after* the page's own scripts start, so code
+   running at parse time or `DOMContentLoaded` may not see `window.cefSwift`
+   yet. For deterministic startup, use option 1 with `autoInjectsShim = false`.
+
+Transport: `POST cefswift://bridge/<function-name>`; the scheme is
+`standard | secure | corsEnabled | fetchEnabled`, responses carry
+`Access-Control-Allow-Origin: *`, `OPTIONS` preflights answered. Responses
+fully buffered in v1 — keep payloads reasonably sized.
+
+**Security:** bridge handlers run with your app's full privileges, and any
+page in any browser of your app can call them. Validate and clamp all
+inputs; decode with strict Codable types, not dictionaries. Don't expose
+generic primitives ("run shell command"); design narrow, purpose-specific
+functions. If you load arbitrary third-party content, don't register
+sensitive functions in those browsers. Replies are visible to the page.
+
+The Gallery example ships a "Swift ↔ JS Bridge" card (`gallery://` page
+served by a `CefSchemeHandler` with shim embedded; auto-invokes `greet` on
+load and mirrors each call into a SwiftUI log). See
+`Examples/Sources/Gallery/BridgeCard.swift`.
+
+## Links, popups & new windows
+
+When a page tries to open a link or popup — `target=_blank`, `window.open`,
+⌘/Ctrl-click, middle-click, Shift-click — CefSwift surfaces a
+`CefWindowOpenRequest` to your delegate and asks for a `CefWindowOpenAction`.
+
+```swift
+func browser(_ b: CefBrowser, decideWindowOpenFor request: CefWindowOpenRequest) -> CefWindowOpenAction
+```
+
+`CefWindowOpenRequest` carries: `targetURL`, `frameName`, `disposition`
+(mirrors Chromium's `WindowOpenDisposition` — `.currentTab`,
+`.newForegroundTab`, `.newBackgroundTab`, `.newPopup`, `.newWindow`),
+`userGesture`, popup `features`, and `isSourceOffscreen`. Use
+`disposition.prefersForeground` to decide whether a new tab fronts.
+
+Return one of:
+
+- **`.deny`** — suppress.
+- **`.openInCurrentBrowser`** — load in *this* browser. Safe for OSR.
+- **`.allowNativePopup`** — let CEF create a native popup browser/window.
+  **Only safe for windowed/chrome browsers.** Automatically downgraded to
+  `.openInCurrentBrowser` (or `.deny` with no URL) for OSR — a CEF popup
+  created for an OSR parent gets no render handler and cannot be hosted.
+- **`.handled`** — *you* opened your own tab/window; CEF's native popup is
+  blocked.
+
+If you don't implement the delegate, the default per hosting mode:
+
+| Source | URL present | Default |
+|--------|-------------|---------|
+| OSR | yes | `.openInCurrentBrowser` |
+| OSR | no (`about:blank`) | `.deny` |
+| Windowed / chrome | yes | `.openInCurrentBrowser` |
+| Windowed / chrome | no | `.allowNativePopup` |
+
+Guarantee: an OSR browser never silently spawns an unhosted native popup.
+The downgrade is applied in two places (policy helper + `on_before_popup`).
+
+```swift
+// Arc-style tabs: open links as tabs, honoring the disposition.
+func browser(_ b: CefBrowser, decideWindowOpenFor request: CefWindowOpenRequest) -> CefWindowOpenAction {
+    guard let url = request.targetURL else { return .deny }
+    let tab = BrowserTab(url: url)
+    tabs.append(tab)
+    if request.disposition.prefersForeground { select(tab) }
+    return .handled
+}
+
+// For CefWebView / CefMetalWebView, use the closure instead of subclassing:
+model.onWindowOpen = { request in .openInCurrentBrowser }
+```
+
+The older `requestsPopupFor(_:) -> CefPopupDecision` / `onPopupRequest`
+still work — bridged into the new API (`.allow` → `.allowNativePopup` with
+the OSR downgrade, `.block` → `.deny`, `.openInSameBrowser` →
+`.openInCurrentBrowser`). Prefer the new API for foreground/background-tab
+control and popup features.
+
+## Context menus
+
+The default page context menu already offers Back/Forward/Reload,
+Cut/Copy/Paste (in editable fields), Copy Link Address, Copy/Save Image,
+View Page Source, and Inspect/DevTools, gated to the click target. Leaving
+an item in the menu and returning `false` from the command delegate runs
+CEF's built-in behavior.
+
+```swift
+model.onConfigureContextMenu = { menu, params in
+    menu.addSeparator()
+    if params.linkURL != nil {
+        menu.addItem(commandID: CefMenuModel.userCommandIDFirst + 1, title: "Open Link in This View")
+    }
+    menu.addItem(commandID: CefMenuModel.userCommandIDFirst, title: "Open DevTools")
+}
+model.onContextMenuCommand = { commandID, params in
+    switch commandID {
+    case CefMenuModel.userCommandIDFirst:
+        model.browser?.showDevTools(); return true
+    case CefMenuModel.userCommandIDFirst + 1:
+        if let link = params.linkURL { model.load(link) }; return true
+    default:
+        return false  // let CEF run its built-in command
+    }
+}
+```
+
+App-defined command IDs must be in
+`CefMenuModel.userCommandIDFirst ... userCommandIDLast`. The standard CEF
+command IDs are mirrored by `CefContextMenuCommand` (`.back`, `.copy`,
+`.viewSource`, …); `CefMenuCommandRange` helps classify a command id.
+
+Hosting: windowed/chrome browsers present CEF's own native menu;
+`CefMetalWebView` (OSR) has no CEF window, so CefSwift presents an `NSMenu`
+built from the `CefMenuModel`, then reports the chosen command back to CEF.

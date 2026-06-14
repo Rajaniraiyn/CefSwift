@@ -34,7 +34,7 @@ final class BridgeDemo {
         CefRuntime.shared.registerSchemeHandler(scheme: "gallery", handler: BridgeDemoPageHandler())
 
         // The Swift function the page calls. Runs with app privileges:
-        // treat params as untrusted input (see docs/js-bridge.md).
+        // treat params as untrusted input (see docs/configuration.md).
         CefRuntime.shared.bridge.register("greet") { [weak self] (request: GreetRequest) -> GreetResponse in
             let name = String(request.name.prefix(64))  // validate/clamp input
             await MainActor.run {
