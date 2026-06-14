@@ -71,9 +71,10 @@ public final class CefChromeWindow: Identifiable {
     /// use; prefer this type's API.
     public let chrome: CefChromeBrowser
 
-    // The hosting view carrying the SwiftUI overlay, kept sized to the top
-    // strip (or full window) and stacked above the browser view.
-    private var overlayHost: NSHostingView<AnyView>?
+    // NSTitlebarAccessoryViewController hosting the SwiftUI overlay.
+    // Lives in the window's titlebar area — fully outside CEF's content view —
+    // so text fields, buttons and menus get proper AppKit key-view routing.
+    private var titlebarAccessory: NSTitlebarAccessoryViewController?
     private var insets = NSEdgeInsets()
     private var resizeObserver: NSObjectProtocol?
     private weak var observedWindow: NSWindow?
@@ -141,45 +142,42 @@ public final class CefChromeWindow: Identifiable {
     /// overlay draws an opaque toolbar in the top inset region and is
     /// transparent elsewhere, letting clicks reach the page below — set
     /// `allowsHitTesting`/background accordingly in your SwiftUI view).
+    /// Hosts a SwiftUI view as a **titlebar accessory** — placed immediately
+    /// below the window's traffic-light row, fully outside CEF's content view.
+    /// Text fields, buttons, and menus all receive proper AppKit key-view
+    /// routing with no special handling needed.
+    ///
+    /// Pair with ``setContentInsets(_:)`` so the browser view starts below the
+    /// toolbar (the top inset value = toolbar height).
     public func setOverlay<Content: View>(@ViewBuilder _ content: () -> Content) {
         installOverlay(AnyView(content()))
     }
 
     private func installOverlay(_ root: AnyView) {
-        if let overlayHost {
-            overlayHost.rootView = root
-            return
-        }
-        guard let contentView = chrome.rootView else {
-            // The CEF window's content view isn't realized yet — retry next tick.
+        guard let nsWindow else {
             DispatchQueue.main.async { [weak self] in self?.installOverlay(root) }
             return
         }
-        let host = OverlayHostingView(rootView: root)
-        // Critical: an overlay with a finite intrinsic size (e.g. a fixed-height
-        // toolbar) would otherwise drag the CEF window's content view down to
-        // that height — collapsing the web area to nothing. Clearing
-        // sizingOptions stops the hosting view from imposing its intrinsic size;
-        // it simply fills the edge constraints below.
-        host.sizingOptions = []
+        if let existing = titlebarAccessory {
+            // Update in place — replace the hosted root view.
+            (existing.view as? NSHostingView<AnyView>)?.rootView = root
+            return
+        }
+        let host = NSHostingView(rootView: root)
         host.translatesAutoresizingMaskIntoConstraints = false
-        contentView.addSubview(host)   // added last ⇒ above the browser view.
-        // Pin to all edges with constraints so the overlay fills the content
-        // view regardless of when the window gets its real size (an
-        // autoresizing frame set while bounds are still zero would never grow).
-        NSLayoutConstraint.activate([
-            host.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-            host.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-            host.topAnchor.constraint(equalTo: contentView.topAnchor),
-            host.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
-        ])
-        overlayHost = host
+
+        let vc = NSTitlebarAccessoryViewController()
+        vc.view = host
+        // .bottom places it below the traffic-lights row, above the content.
+        vc.layoutAttribute = .bottom
+        nsWindow.addTitlebarAccessoryViewController(vc)
+        titlebarAccessory = vc
     }
 
     /// Removes the SwiftUI overlay, if any.
     public func clearOverlay() {
-        overlayHost?.removeFromSuperview()
-        overlayHost = nil
+        titlebarAccessory?.removeFromParent()
+        titlebarAccessory = nil
     }
 
     /// Reserves space inside the window so web content isn't hidden under the
@@ -190,7 +188,6 @@ public final class CefChromeWindow: Identifiable {
         self.insets = insets
         chrome.setContentInsets(
             top: insets.top, left: insets.left, bottom: insets.bottom, right: insets.right)
-        layoutOverlay()
     }
 
     // MARK: Window controls
@@ -206,38 +203,18 @@ public final class CefChromeWindow: Identifiable {
 
     // MARK: Internals
 
-    /// Keeps the overlay sized to the window as it resizes. The browser view is
-    /// inset automatically by the CEF BoxLayout (no AppKit work needed there).
     private func bindWindowObservers() {
-        guard let nsWindow else { return }
         observedWindow = nsWindow
-        resizeObserver = NotificationCenter.default.addObserver(
-            forName: NSWindow.didResizeNotification, object: nsWindow, queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.layoutOverlay() }
-        }
-        layoutOverlay()
-    }
-
-    /// Stretches the overlay host across the window's content view. The overlay
-    /// SwiftUI view decides how to use the space (opaque toolbar in the top
-    /// inset, transparent over the page).
-    private func layoutOverlay() {
-        guard let overlayHost, let contentView = chrome.rootView else { return }
-        if overlayHost.frame != contentView.bounds {
-            overlayHost.frame = contentView.bounds
-        }
-        overlayHost.autoresizingMask = [.width, .height]
+        // NSTitlebarAccessoryViewController resizes with the window automatically;
+        // no manual resize observer needed.
     }
 
     private func teardown() {
-        if let resizeObserver {
-            NotificationCenter.default.removeObserver(resizeObserver)
-        }
+        if let resizeObserver { NotificationCenter.default.removeObserver(resizeObserver) }
         resizeObserver = nil
         observedWindow = nil
-        overlayHost?.removeFromSuperview()
-        overlayHost = nil
+        titlebarAccessory?.removeFromParent()
+        titlebarAccessory = nil
     }
 
     // Strong references so fire-and-forget windows live until destroyed.
@@ -253,23 +230,3 @@ extension CefChromeWindow: Hashable {
     }
 }
 
-// MARK: - Overlay hosting view
-
-/// An `NSHostingView` that lets clicks fall through transparent regions to the
-/// browser view below, so a SwiftUI overlay can paint an opaque toolbar in the
-/// top strip while leaving the page interactive.
-private final class OverlayHostingView<Content: View>: NSHostingView<Content> {
-    override func hitTest(_ point: NSPoint) -> NSView? {
-        let hit = super.hitTest(point)
-        // If the deepest hit is the hosting view itself (a transparent area
-        // with no SwiftUI control under the cursor), let the event pass to the
-        // browser view beneath us.
-        return hit === self ? nil : hit
-    }
-
-    required init(rootView: Content) {
-        super.init(rootView: rootView)
-    }
-
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-}

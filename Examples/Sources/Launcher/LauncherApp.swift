@@ -37,9 +37,11 @@ struct LauncherApp: CefSwiftApp {
                 .environment(chrome)
                 .frame(minWidth: 720, minHeight: 480)
                 .task { LauncherDemoPage.registerSchemeHandler() }
+                .onAppear { NSApp.activate(ignoringOtherApps: true) }
         }
         .windowResizability(.contentSize)
         .defaultSize(width: 880, height: 560)
+        .defaultPosition(.center)
 
         // A reusable embedded-demo window opened per catalog entry. SwiftUI
         // can open multiple instances (one per distinct demo id), each closable.
@@ -319,7 +321,9 @@ final class LauncherChromeController {
             initialBounds: CGRect(x: 200, y: 200, width: 1100, height: 760),
             delegate: model
         ) { window in
-            window.setContentInsets(NSEdgeInsets(top: 52, left: 0, bottom: 0, right: 0))
+            // Titlebar accessory auto-sizes; no manual inset needed — CEF's
+            // BoxLayout still keeps the browser view below the standard titlebar.
+            window.setContentInsets(NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0))
             window.setOverlay { ChromeToolbar(model: model) }
         }
         model.window = win
@@ -349,9 +353,10 @@ final class ChromeWindowModel: CefBrowserDelegate {
         if let url = URL(string: text) { browser?.load(url) }
     }
 
-    func goBack() { browser?.goBack() }
-    func goForward() { browser?.goForward() }
-    func reload() { browser?.reload() }
+    func goBack()      { browser?.goBack() }
+    func goForward()   { browser?.goForward() }
+    func reload()      { browser?.reload() }
+    func stopLoading() { browser?.stopLoading() }
 
     nonisolated init() {}
 
@@ -378,20 +383,25 @@ private struct ChromeToolbar: View {
     @Bindable var model: ChromeWindowModel
 
     var body: some View {
-        HStack(spacing: 10) {
+        // Lives in the window's titlebar via NSTitlebarAccessoryViewController —
+        // fully outside CEF's content view, so text fields get proper focus.
+        HStack(spacing: 8) {
             Button { model.goBack() } label: { Image(systemName: "chevron.left") }
                 .disabled(!model.canGoBack)
             Button { model.goForward() } label: { Image(systemName: "chevron.right") }
                 .disabled(!model.canGoForward)
-            Button { model.reload() } label: { Image(systemName: "arrow.clockwise") }
+            Button {
+                model.isLoading ? model.stopLoading() : model.reload()
+            } label: {
+                Image(systemName: model.isLoading ? "xmark" : "arrow.clockwise")
+            }
             TextField("Search or enter address", text: $model.address)
                 .textFieldStyle(.roundedBorder)
                 .onSubmit { model.navigate() }
-            if model.isLoading { ProgressView().controlSize(.small) }
         }
         .padding(.horizontal, 12)
-        .frame(height: 52)
-        .background(.regularMaterial)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity)
         .buttonStyle(.borderless)
     }
 }
