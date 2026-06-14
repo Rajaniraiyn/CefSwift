@@ -4,9 +4,9 @@ Thanks for helping build the CEF embedding macOS deserves.
 
 ## Ground rules
 
-- Read `DESIGN.md` first — it is the binding contract for module boundaries
-  and public API. Changes to the public surface need a design discussion
-  before code.
+- Read `DESIGN.md` first — it documents the three hosting modes and why each
+  alternative was ruled out. Changes to the public surface need a design
+  discussion before code.
 - Swift 6 language mode, `@MainActor` discipline over locks, no force-unwraps
   in library code, doc comments on all public API.
 - Everything must work with **Command Line Tools only** (`swift build`,

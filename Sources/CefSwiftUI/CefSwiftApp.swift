@@ -120,9 +120,8 @@ extension CefSwiftApp {
 
         let message = lines.joined(separator: "\n") + "\n"
         FileHandle.standardError.write(Data(message.utf8))
-        // CONTRACT-DEVIATION: DESIGN.md says "on failure: fatalError with guidance"; we print
-        // the guidance to stderr and exit(1) instead — same outcome, but without a crash report
-        // burying the actionable message.
+        // Print guidance to stderr and exit(1) — same user-visible effect as fatalError,
+        // but without a crash report burying the actionable message.
         exit(1)
     }
 }

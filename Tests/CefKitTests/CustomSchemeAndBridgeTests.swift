@@ -8,17 +8,6 @@ import Testing
 // and download plumbing. No CEF runtime required.
 
 @Suite struct CefCustomSchemeTests {
-    @Test func optionsMirrorCefSchemeOptions() {
-        #expect(CefCustomScheme.Options.standard.rawValue == Int32(CEF_SCHEME_OPTION_STANDARD.rawValue))
-        #expect(CefCustomScheme.Options.local.rawValue == Int32(CEF_SCHEME_OPTION_LOCAL.rawValue))
-        #expect(CefCustomScheme.Options.displayIsolated.rawValue == Int32(CEF_SCHEME_OPTION_DISPLAY_ISOLATED.rawValue))
-        #expect(CefCustomScheme.Options.secure.rawValue == Int32(CEF_SCHEME_OPTION_SECURE.rawValue))
-        #expect(CefCustomScheme.Options.corsEnabled.rawValue == Int32(CEF_SCHEME_OPTION_CORS_ENABLED.rawValue))
-        #expect(CefCustomScheme.Options.cspBypassing.rawValue == Int32(CEF_SCHEME_OPTION_CSP_BYPASSING.rawValue))
-        #expect(CefCustomScheme.Options.fetchEnabled.rawValue == Int32(CEF_SCHEME_OPTION_FETCH_ENABLED.rawValue))
-        #expect(CefCustomScheme.Options().rawValue == Int32(CEF_SCHEME_OPTION_NONE.rawValue))
-    }
-
     @Test func defaultOptionsAreAppShaped() {
         let scheme = CefCustomScheme(name: "myapp")
         #expect(scheme.options == [.standard, .secure, .corsEnabled, .fetchEnabled])

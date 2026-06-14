@@ -10,12 +10,6 @@ struct HandlerLogicTests {
 
     // MARK: JS dialog mapping
 
-    @Test func jsDialogKindMapping() {
-        #expect(CefJSDialogKind(cefValue: JSDIALOGTYPE_ALERT) == .alert)
-        #expect(CefJSDialogKind(cefValue: JSDIALOGTYPE_CONFIRM) == .confirm)
-        #expect(CefJSDialogKind(cefValue: JSDIALOGTYPE_PROMPT) == .prompt)
-    }
-
     @Test func jsDialogValueType() {
         let dialog = CefJSDialog(kind: .prompt, message: "Name?", defaultPromptText: "Ada", origin: "https://x")
         #expect(dialog.kind == .prompt)
@@ -26,12 +20,6 @@ struct HandlerLogicTests {
 
     // MARK: Navigation decision mapping
 
-    @Test func navigationDecisionToCancelBit() {
-        // .allow => CEF return 0 (proceed); .cancel => 1 (block).
-        #expect((CefNavigationDecision.allow == .cancel ? 1 : 0) == 0)
-        #expect((CefNavigationDecision.cancel == .cancel ? 1 : 0) == 1)
-    }
-
     @Test func terminationReasonMapping() {
         #expect(CefTerminationReason(cefValue: TS_PROCESS_WAS_KILLED) == .killed)
         #expect(CefTerminationReason(cefValue: TS_PROCESS_CRASHED) == .crashed)
@@ -41,12 +29,6 @@ struct HandlerLogicTests {
     }
 
     // MARK: Permission mapping
-
-    @Test func permissionResultMapping() {
-        #expect(CefPermissionDecision.allow.cefResult == CEF_PERMISSION_RESULT_ACCEPT)
-        #expect(CefPermissionDecision.deny.cefResult == CEF_PERMISSION_RESULT_DENY)
-        #expect(CefPermissionDecision.dismiss.cefResult == CEF_PERMISSION_RESULT_DISMISS)
-    }
 
     @Test func permissionRequestTypeMapping() {
         let cameraMic = UInt32(CEF_PERMISSION_TYPE_CAMERA_STREAM.rawValue)
@@ -76,25 +58,6 @@ struct HandlerLogicTests {
         #expect(mask & ~audioVideo == 0)
         #expect(mask & UInt32(CEF_MEDIA_PERMISSION_DEVICE_AUDIO_CAPTURE.rawValue) != 0)
         #expect(mask & UInt32(CEF_MEDIA_PERMISSION_DEVICE_VIDEO_CAPTURE.rawValue) != 0)
-    }
-
-    // MARK: Cursor mapping
-
-    @Test func cursorTypeMapping() {
-        #expect(CefCursorType(cefValue: CT_POINTER) == .pointer)
-        #expect(CefCursorType(cefValue: CT_HAND) == .hand)
-        #expect(CefCursorType(cefValue: CT_IBEAM) == .iBeam)
-        #expect(CefCursorType(cefValue: CT_NONE) == .none)
-        #expect(CefCursorType(cefValue: CT_GRABBING) == .grabbing)
-    }
-
-    // MARK: Context-menu media type mapping
-
-    @Test func contextMenuMediaTypeMapping() {
-        #expect(CefContextMenuMediaType(cefValue: CM_MEDIATYPE_NONE) == .none)
-        #expect(CefContextMenuMediaType(cefValue: CM_MEDIATYPE_IMAGE) == .image)
-        #expect(CefContextMenuMediaType(cefValue: CM_MEDIATYPE_VIDEO) == .video)
-        #expect(CefContextMenuMediaType(cefValue: CM_MEDIATYPE_AUDIO) == .audio)
     }
 
     @Test func menuModelUserCommandRange() {

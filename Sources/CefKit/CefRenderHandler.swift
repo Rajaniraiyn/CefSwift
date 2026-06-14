@@ -96,22 +96,12 @@ public protocol CefOSRHost: AnyObject {
 
     /// The drag cursor should reflect `operation` during an in-progress drag.
     func osrUpdateDragCursor(_ operation: CefDragOperation)
-
-    /// The accessibility tree changed. `value` is CEF's serialized AX tree
-    /// (a nested dictionary/list snapshot). Delivered only when accessibility
-    /// has been enabled via ``CefBrowser/setAccessibilityEnabled(_:)``.
-    func osrAccessibilityTreeDidChange(_ value: CefAXValue)
-
-    /// An accessibility node's location changed.
-    func osrAccessibilityLocationDidChange(_ value: CefAXValue)
 }
 
 // Default no-ops so existing hosts (and tests) need not implement every method.
 extension CefOSRHost {
     public func osrStartDragging(_ data: CefDragData, allowedOps: CefDragOperation, at viewPoint: CGPoint) -> Bool { false }
     public func osrUpdateDragCursor(_ operation: CefDragOperation) {}
-    public func osrAccessibilityTreeDidChange(_ value: CefAXValue) {}
-    public func osrAccessibilityLocationDidChange(_ value: CefAXValue) {}
 }
 
 extension BrowserClient {
@@ -120,7 +110,6 @@ extension BrowserClient {
     /// browsers never set `renderPointer`, so `get_render_handler` returns NULL
     /// and CEF uses its native compositor.
     func makeRenderHandler() {
-        makeAccessibilityHandler()
         let handler = cefAllocate(cef_render_handler_t.self, owner: self)
 
         handler.pointee.get_view_rect = { handlerSelf, browser, rect in
@@ -217,13 +206,6 @@ extension BrowserClient {
             BrowserClient.withOSRHost(handlerSelf) { host in
                 host.osrUpdateDragCursor(op)
             }
-        }
-
-        handler.pointee.get_accessibility_handler = { handlerSelf in
-            guard let client = cefOwner(BrowserClient.self, handlerSelf.map(UnsafeMutableRawPointer.init)),
-                  let ax = client.accessibilityPointer else { return nil }
-            cefAddRef(UnsafeMutableRawPointer(ax))
-            return ax
         }
 
         handler.pointee.on_popup_show = { handlerSelf, browser, show in

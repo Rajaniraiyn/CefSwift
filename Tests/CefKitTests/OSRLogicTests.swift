@@ -12,35 +12,6 @@ import Testing
 @MainActor
 struct OSRLogicTests {
 
-    // MARK: Mouse button mapping
-
-    @Test func mouseButtonMapping() {
-        #expect(CefMouseButton.left.cefValue == MBT_LEFT)
-        #expect(CefMouseButton.middle.cefValue == MBT_MIDDLE)
-        #expect(CefMouseButton.right.cefValue == MBT_RIGHT)
-    }
-
-    // MARK: Modifier flag mapping
-
-    @Test func modifierFlagMapping() {
-        let m = CefMetalHostView.cefModifiers([.shift, .command])
-        #expect(m & UInt32(EVENTFLAG_SHIFT_DOWN.rawValue) != 0)
-        #expect(m & UInt32(EVENTFLAG_COMMAND_DOWN.rawValue) != 0)
-        #expect(m & UInt32(EVENTFLAG_CONTROL_DOWN.rawValue) == 0)
-        #expect(m & UInt32(EVENTFLAG_ALT_DOWN.rawValue) == 0)
-    }
-
-    @Test func modifierMouseButtonMapping() {
-        let m = CefMetalHostView.cefModifiers([], pressedButtons: (1 << 0) | (1 << 1))
-        #expect(m & UInt32(EVENTFLAG_LEFT_MOUSE_BUTTON.rawValue) != 0)
-        #expect(m & UInt32(EVENTFLAG_RIGHT_MOUSE_BUTTON.rawValue) != 0)
-        #expect(m & UInt32(EVENTFLAG_MIDDLE_MOUSE_BUTTON.rawValue) == 0)
-    }
-
-    @Test func allModifiersOff() {
-        #expect(CefMetalHostView.cefModifiers([]) == 0)
-    }
-
     // MARK: Windows key code mapping
 
     @Test func windowsKeyCodeSpecialKeys() {

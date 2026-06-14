@@ -137,20 +137,5 @@ CCEF_SYM(cef_browser_view_t*, cef_browser_view_get_for_browser,
 CCEF_SYM(cef_window_t*, cef_window_create_top_level,
          (struct _cef_window_delegate_t* delegate), (delegate))
 
-// --- Cookies ------------------------------------------------------------------------
-CCEF_SYM(cef_cookie_manager_t*, cef_cookie_manager_get_global_manager,
-         (struct _cef_completion_callback_t* callback), (callback))
-
-// --- Native JS binding (v8 + IPC) ---------------------------------------------------
-// Not yet wired up; listed so the render-process handler path (window.<name>
-// injection + Promise round-trip via process messages) can use the native v8
-// bridge rather than the cefswift:// scheme shim. See docs/js-bridge.md.
-CCEF_SYM(cef_v8_context_t*, cef_v8_context_get_current_context, (void), ())
-CCEF_SYM(cef_v8_value_t*, cef_v8_value_create_function,
-         (const cef_string_t* name, struct _cef_v8_handler_t* handler),
-         (name, handler))
-CCEF_SYM(cef_v8_value_t*, cef_v8_value_create_string,
-         (const cef_string_t* value), (value))
-CCEF_SYM(cef_v8_value_t*, cef_v8_value_create_promise, (void), ())
-CCEF_SYM(cef_process_message_t*, cef_process_message_create,
-         (const cef_string_t* name), (name))
+// ponytail: cookie/v8/process_message symbols removed — zero Swift call sites.
+// Add back here (and wire CefKit callers) when task #12 (native JS bridge) ships.

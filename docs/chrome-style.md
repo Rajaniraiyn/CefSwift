@@ -173,8 +173,8 @@ A windowless (OSR) mode where CEF paints into a shared `IOSurface`
 (`on_accelerated_paint`) composited in a `CAMetalLayer`-backed view — a genuine
 in-tree subview, native UI compositable anywhere, retina-correct. Alloy style
 only (no `chrome://`); input/IME/cursor/accessibility/context-menu are wired by
-hand. The "indistinguishable embedded web view" primitive. Not shipping yet —
-see `DESIGN.md`.
+hand. The "indistinguishable embedded web view" primitive. See
+[`docs/osr-metal.md`](osr-metal.md) and [`DESIGN.md`](../DESIGN.md).
 
 ---
 

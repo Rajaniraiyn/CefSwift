@@ -1,5 +1,17 @@
 import Foundation
 
+/// SHA-1 of a file via `/usr/bin/shasum -a 1`.
+private func sha1(of file: URL) throws -> String {
+    let result = try Shell.runChecked(
+        "/usr/bin/shasum", ["-a", "1", file.path],
+        hint: "shasum is part of macOS; if this fails the downloaded file may be unreadable."
+    )
+    guard let hash = result.stdout.split(separator: " ").first else {
+        throw CefPluginError("Could not parse shasum output for \(file.path).")
+    }
+    return String(hash)
+}
+
 /// Downloads, verifies, extracts and prepares a pinned CEF binary distribution
 /// under `<packageRoot>/.cef/` (gitignored).
 ///
@@ -63,7 +75,7 @@ struct Downloader {
     private func download(artifact: CefManifest.Artifact, to tarball: URL) throws {
         let fm = FileManager.default
         if fm.fileExists(atPath: tarball.path) {
-            if (try? Shell.sha1(of: tarball)) == artifact.sha1 {
+            if (try? sha1(of: tarball)) == artifact.sha1 {
                 print("[cef] Using cached download: \(tarball.lastPathComponent)")
                 return
             }
@@ -93,7 +105,7 @@ struct Downloader {
         // curl exits 33 / HTTP 416 when resuming an already-complete file.
         if status != 0 {
             if fm.fileExists(atPath: tarball.path),
-               (try? Shell.sha1(of: tarball)) == artifact.sha1 {
+               (try? sha1(of: tarball)) == artifact.sha1 {
                 return
             }
             throw CefPluginError(
@@ -106,7 +118,7 @@ struct Downloader {
 
     private func verify(artifact: CefManifest.Artifact, tarball: URL) throws {
         print("[cef] Verifying sha1…")
-        let actual = try Shell.sha1(of: tarball)
+        let actual = try sha1(of: tarball)
         guard actual == artifact.sha1 else {
             try? FileManager.default.removeItem(at: tarball)
             throw CefPluginError(

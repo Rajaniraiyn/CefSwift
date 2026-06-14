@@ -1,7 +1,7 @@
 import Foundation
 
 /// Optional per-product overrides, read from `cefapp.json` next to the
-/// product target's sources (DESIGN.md §Plugin).
+/// product target's sources.
 struct CefAppConfig: Decodable {
     var bundleIdentifier: String?
     var displayName: String?
@@ -23,7 +23,7 @@ struct CefAppConfig: Decodable {
     }
 }
 
-/// Assembles a runnable macOS .app bundle per DESIGN.md pinned facts:
+/// Assembles a runnable macOS .app bundle:
 /// main executable, generated Info.plist, the converted CEF framework, five
 /// helper apps (same binary, load-bearing names), then codesign inside-out
 /// (framework → helpers → main app) with the chosen identity ("-" = ad-hoc).

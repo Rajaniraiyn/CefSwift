@@ -19,15 +19,14 @@ itself uses:
 Chromium enables full web accessibility support lazily when an assistive
 technology is detected, so there is no steady-state cost for non-AT users.
 
-### Contrast with OSR (roadmap)
+### Contrast with OSR (`CefMetalWebView`)
 
-Off-screen rendering — planned, see the README roadmap — draws Chromium into
-a texture, which severs the native a11y tree. An OSR view is just pixels until
-the embedder implements CEF's accessibility handler
-(`cef_accessibility_handler_t`) and rebuilds the tree as native accessibility
-elements from CEF's serialized a11y events. That work is part of the OSR
-roadmap item; until then, windowed mode is the accessible mode, and we treat
-that as a feature of the v1 design rather than a limitation.
+Off-screen rendering (`CefMetalWebView`) draws Chromium into a texture, which
+severs the native a11y tree. An OSR view is just pixels until the embedder
+implements CEF's accessibility handler (`cef_accessibility_handler_t`) and
+rebuilds the tree as native accessibility elements from CEF's serialized a11y
+events. This is on the roadmap; until then, windowed `CefWebView` is the
+accessible choice for apps that require VoiceOver support.
 
 ## Keyboard
 

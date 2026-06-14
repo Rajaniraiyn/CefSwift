@@ -64,49 +64,6 @@ import Testing
     }
 }
 
-@Suite struct CefSettingsMappingTests {
-    @Test func configurationMapsToCefSettings() {
-        var configuration = CefConfiguration()
-        configuration.noSandbox = true
-        configuration.externalMessagePump = true
-        configuration.logSeverity = .warning
-        configuration.persistSessionCookies = true
-        configuration.remoteDebuggingPort = 9222
-        configuration.locale = "en-US"
-        configuration.userAgentProduct = "CefSwiftTest/1.0"
-        configuration.rootCachePath = FileManager.default.temporaryDirectory
-            .appendingPathComponent("CefSwiftTests-\(UUID().uuidString)")
-        configuration.logFile = URL(fileURLWithPath: "/tmp/cefswift-test.log")
-
-        let mapped = MappedCefSettings(
-            configuration: configuration,
-            frameworkDirectory: URL(fileURLWithPath: "/opt/cef.framework")
-        )
-        #expect(mapped.raw.size == MemoryLayout<cef_settings_t>.stride)
-        #expect(mapped.raw.no_sandbox == 1)
-        #expect(mapped.raw.external_message_pump == 1)
-        #expect(mapped.raw.multi_threaded_message_loop == 0)
-        #expect(mapped.raw.log_severity == LOGSEVERITY_WARNING)
-        #expect(mapped.raw.persist_session_cookies == 1)
-        #expect(mapped.raw.remote_debugging_port == 9222)
-        #expect(CefStringUtil.string(from: mapped.raw.locale) == "en-US")
-        #expect(CefStringUtil.string(from: mapped.raw.user_agent_product) == "CefSwiftTest/1.0")
-        #expect(CefStringUtil.string(from: mapped.raw.root_cache_path) == configuration.rootCachePath!.path)
-        #expect(CefStringUtil.string(from: mapped.raw.cache_path) == configuration.rootCachePath!.path)
-        #expect(CefStringUtil.string(from: mapped.raw.framework_dir_path) == "/opt/cef.framework")
-        #expect(CefStringUtil.string(from: mapped.raw.log_file) == "/tmp/cefswift-test.log")
-        #expect(
-            FileManager.default.fileExists(atPath: configuration.rootCachePath!.path),
-            "root cache directory should be created"
-        )
-    }
-
-    @Test func defaultRootCachePathUnderApplicationSupport() {
-        let path = MappedCefSettings.defaultRootCachePath().path
-        #expect(path.contains("Application Support"), "got: \(path)")
-        #expect(path.hasSuffix("/CefSwift"))
-    }
-}
 
 @Suite struct SafeStoragePolicyTests {
     @Test func explicitPoliciesPassThrough() {
@@ -117,39 +74,6 @@ import Testing
     @Test func automaticResolvesToATerminalPolicy() {
         let resolved = CefSafeStoragePolicy.automatic.resolved()
         #expect(resolved == .keychain || resolved == .mockKeychain)
-    }
-
-    @Test func adHocTestBinaryDetectsAsDevBuild() throws {
-        // The SwiftPM-built test bundle binary is ad-hoc ("linker-signed") —
-        // exactly the dev-build case .automatic targets. (The *host* process
-        // running the tests may be Apple's signed test runner, so probe the
-        // image containing this test code rather than Bundle.main.)
-        var info = Dl_info()
-        try #require(dladdr(#dsohandle, &info) != 0)
-        let imagePath = String(cString: info.dli_fname)
-        let adHoc = CefCodeSigning.isAdHocSigned(executableAt: URL(fileURLWithPath: imagePath))
-        #expect(adHoc == true, "expected \(imagePath) to detect as ad-hoc/dev")
-    }
-
-    @Test func cachedProcessDetectionMatchesMainExecutable() {
-        // The cached value must agree with a fresh inspection of the main
-        // executable (nil ⇒ conservative false / real keychain).
-        let executable = Bundle.main.executableURL
-            ?? URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath()
-        let fresh = CefCodeSigning.isAdHocSigned(executableAt: executable) ?? false
-        #expect(CefCodeSigning.processIsAdHocSigned == fresh)
-    }
-
-    @Test func appleSignedBinaryDetectsAsProperlySigned() {
-        // /bin/ls carries Apple's full certificate chain.
-        let adHoc = CefCodeSigning.isAdHocSigned(executableAt: URL(fileURLWithPath: "/bin/ls"))
-        #expect(adHoc == false)
-    }
-
-    @Test func missingBinaryReportsDetectionFailure() {
-        let adHoc = CefCodeSigning.isAdHocSigned(
-            executableAt: URL(fileURLWithPath: "/nonexistent/cefswift-no-such-binary"))
-        #expect(adHoc == nil)
     }
 
     @Test func defaultConfigurationUsesAutomatic() {

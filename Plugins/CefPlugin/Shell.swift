@@ -101,15 +101,4 @@ enum Shell {
         return result
     }
 
-    /// SHA-1 of a file via `/usr/bin/shasum -a 1`.
-    static func sha1(of file: URL) throws -> String {
-        let result = try runChecked(
-            "/usr/bin/shasum", ["-a", "1", file.path],
-            hint: "shasum is part of macOS; if this fails the downloaded file may be unreadable."
-        )
-        guard let hash = result.stdout.split(separator: " ").first else {
-            throw CefPluginError("Could not parse shasum output for \(file.path).")
-        }
-        return String(hash)
-    }
 }

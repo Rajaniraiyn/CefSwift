@@ -1,7 +1,9 @@
 import Foundation
 import PackagePlugin
 
-/// Decoded form of `CEF_VERSION.json` (schema pinned in DESIGN.md).
+/// Decoded form of `CEF_VERSION.json`. Schema: `cef`, `chromium`, `channel`,
+/// `platforms` keyed by `macosarm64`/`macosx64`, each with `minimal`/`standard`
+/// artifacts containing `name`, `sha1`, `size`.
 struct CefManifest: Decodable {
     struct Artifact: Decodable {
         let name: String
@@ -59,7 +61,7 @@ struct CefManifest: Decodable {
         } catch {
             throw CefPluginError(
                 "Could not decode \(url.path) as a CEF manifest: \(error). " +
-                "Expected the schema documented in DESIGN.md (§CEF_VERSION.json)."
+                "Expected the schema: {cef, chromium, channel, platforms:{macosarm64|macosx64:{minimal|standard:{name,sha1,size}}}}."
             )
         }
     }
@@ -101,16 +103,5 @@ struct CefManifest: Decodable {
             "Could not find CEF_VERSION.json in \(context.package.directoryURL.path) " +
             "or in any package dependency. Pass --manifest <path> explicitly."
         )
-    }
-}
-
-/// Host platform detection (download default).
-enum HostPlatform {
-    static var cefPlatform: String {
-        #if arch(arm64)
-        return "macosarm64"
-        #else
-        return "macosx64"
-        #endif
     }
 }

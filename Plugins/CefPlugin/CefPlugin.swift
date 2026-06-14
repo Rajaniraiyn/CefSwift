@@ -1,7 +1,13 @@
 import Foundation
 import PackagePlugin
 
-/// `swift package cef <download|bundle|info|clean>` — see DESIGN.md §Plugin.
+#if arch(arm64)
+private let hostCefPlatform = "macosarm64"
+#else
+private let hostCefPlatform = "macosx64"
+#endif
+
+/// `swift package cef <download|bundle|info|clean>`.
 ///
 /// Pre-approve the needed sandbox permissions on the command line:
 ///   swift package --allow-writing-to-package-directory \
@@ -67,7 +73,7 @@ struct CefPlugin: CommandPlugin {
 
     private func download(context: PluginContext, extractor: inout ArgumentExtractor) throws {
         let manifestPath = extractor.extractOption(named: "manifest").last
-        let platform = extractor.extractOption(named: "platform").last ?? HostPlatform.cefPlatform
+        let platform = extractor.extractOption(named: "platform").last ?? hostCefPlatform
         let flavor = extractor.extractOption(named: "flavor").last ?? "minimal"
         let cefVersionOverride = extractor.extractOption(named: "cef-version").last
         try rejectLeftovers(extractor)
@@ -94,7 +100,7 @@ struct CefPlugin: CommandPlugin {
         let manifestPath = extractor.extractOption(named: "manifest").last
         let productName = extractor.extractOption(named: "product").last
         let configurationName = extractor.extractOption(named: "configuration").last ?? "release"
-        let platform = extractor.extractOption(named: "platform").last ?? HostPlatform.cefPlatform
+        let platform = extractor.extractOption(named: "platform").last ?? hostCefPlatform
         let flavor = extractor.extractOption(named: "flavor").last ?? "minimal"
         let outputPath = extractor.extractOption(named: "output").last
         let bundleIDOption = extractor.extractOption(named: "bundle-id").last

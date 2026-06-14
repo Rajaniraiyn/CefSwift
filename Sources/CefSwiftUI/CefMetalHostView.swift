@@ -66,19 +66,22 @@ public final class CefMetalHostView: NSView, CefOSRHost {
     // actual key/char/composition events are sent afterward, so normal typing
     // goes out as KEYEVENT_KEYDOWN+KEYEVENT_CHAR (firing JS key events) instead
     // of being silently committed as IME text.
-    var handlingKeyDown = false
-    var textToBeInserted = ""
-    var hasMarkedTextFlag = false
-    var oldHasMarkedText = false
-    var markedTextValue = ""
-    var markedSelectionRange = NSRange(location: NSNotFound, length: 0)
-    var setMarkedReplacement: NSRange?
-    var unmarkTextCalled = false
+    struct KeyInputState {
+        var handlingKeyDown = false
+        var textToBeInserted = ""
+        var hasMarkedTextFlag = false
+        var oldHasMarkedText = false
+        var markedTextValue = ""
+        var markedSelectionRange = NSRange(location: NSNotFound, length: 0)
+        var setMarkedReplacement: NSRange?
+        var unmarkTextCalled = false
+    }
+    var keyInput = KeyInputState()
 
     func clearMarked() {
         currentMarkedRange = NSRange(location: NSNotFound, length: 0)
-        hasMarkedTextFlag = false
-        markedTextValue = ""
+        keyInput.hasMarkedTextFlag = false
+        keyInput.markedTextValue = ""
     }
 
     /// In-flight native context-menu callback (resolved by the menu action).
@@ -88,13 +91,6 @@ public final class CefMetalHostView: NSView, CefOSRHost {
     /// drag session. Set when `start_dragging` fires; consumed by the
     /// `NSDraggingSource` callbacks.
     var currentDragAllowedOps: CefDragOperation = .none
-
-    /// The accessibility bridge that mirrors CEF's AX tree into
-    /// `NSAccessibilityElement` proxies (best-effort; see docs).
-    lazy var axBridge = CefOSRAccessibilityBridge(host: self)
-
-    /// Count of AX nodes last mapped from CEF's tree (diagnostic).
-    public internal(set) var lastMappedAXNodeCount = 0
 
     /// Observers for window key-state changes (focus follows key window).
     private var windowKeyObservers: [NSObjectProtocol] = []
@@ -249,7 +245,7 @@ public final class CefMetalHostView: NSView, CefOSRHost {
         let url = model.url ?? URL(string: "about:blank")!
         let scale = window?.backingScaleFactor ?? 2.0
         let size = bounds.size == .zero ? CGSize(width: 800, height: 600) : bounds.size
-        let browser = CefBrowserFactory.createOSRBrowser(
+        let browser = CefBrowser.createOSRBrowser(
             initialSize: size,
             scale: scale,
             url: url,
@@ -395,5 +391,294 @@ public final class CefMetalHostView: NSView, CefOSRHost {
         )
         addTrackingArea(area)
         trackingAreaRef = area
+    }
+}
+
+// MARK: - Gestures
+
+/// Trackpad/Multi-Touch gesture forwarding for the OSR web view. These make an
+/// embedded `CefMetalWebView` respond to pinch-zoom, smart-magnify, and
+/// three-finger swipe navigation the way a real browser does.
+///
+/// ## Zoom approach
+/// Pinch-zoom (`magnify(with:)`) drives Chromium's **page zoom** through the
+/// browser host's `set_zoom_level`/`get_zoom_level` (exposed as
+/// ``CefBrowser/zoomLevel``). We accumulate `event.magnification` into the
+/// current zoom level. This is the faithful, header-supported route on macOS
+/// (the ctrl+wheel alternative is coarser and fights the page's own wheel
+/// handlers). `smartMagnify` toggles between 1:1 and a zoomed-in step.
+///
+/// ## Touch approach
+/// Raw `NSTouch` forwarding to `send_touch_event` is gated behind
+/// ``CefBrowserOptions/forwardsRawTouchEvents`` (default off) because indirect
+/// trackpad touches are unreliable as a gesture source; the explicit gesture
+/// overrides below are the robust path. When the flag is on we also forward
+/// raw touches so Chromium's own recognizers can act.
+extension CefMetalHostView {
+
+    /// CEF zoom-level step that maps to ~1.25x per unit (Chromium's scale).
+    private static let smartMagnifyStep: Double = 2.5
+
+    // MARK: Pinch zoom
+
+    public override func magnify(with event: NSEvent) {
+        guard let browser = osrBrowser else { return }
+        // event.magnification is an incremental scale delta (-1...1-ish per
+        // event). Translate into a zoom-level delta; ~4 units of magnification
+        // ≈ one Chromium zoom step, matching trackpad feel.
+        let current = browser.zoomLevel
+        browser.zoomLevel = current + Double(event.magnification) * 4.0
+    }
+
+    public override func smartMagnify(with event: NSEvent) {
+        guard let browser = osrBrowser else { return }
+        // Two-finger double-tap: toggle between default and a zoomed-in step.
+        if abs(browser.zoomLevel) < 0.01 {
+            browser.zoomLevel = CefMetalHostView.smartMagnifyStep
+        } else {
+            browser.zoomLevel = 0
+        }
+    }
+
+    // MARK: Rotation
+
+    public override func rotate(with event: NSEvent) {
+        // CONTRACT-DEVIATION: Chromium's OSR host input has no rotation channel
+        // (no rotate gesture in cef_browser_host_t), and web pages don't consume
+        // a native rotation event. No-op rather than mismap it.
+    }
+
+    // MARK: Three-finger swipe → back/forward navigation
+
+    public override func swipe(with event: NSEvent) {
+        guard let browser = osrBrowser else { return }
+        // deltaX > 0 is a right-to-left swipe → go back; < 0 → go forward.
+        //
+        // Gesture-vs-scroll conflict: AppKit only delivers `swipe(with:)` for
+        // the dedicated 3-finger (or the user-configured 2-finger) navigation
+        // gesture, which is mutually exclusive at the AppKit level with the
+        // `scrollWheel(with:)` momentum stream — so our swipe-nav never
+        // double-fires against a normal two-finger scroll. We deliberately make
+        // this the single navigation path and do NOT also drive Chromium's
+        // built-in horizontal-overscroll navigation from forwarded wheel
+        // deltas, avoiding a double-navigation; see the OSR input docs.
+        if event.deltaX > 0 {
+            browser.goBack()
+        } else if event.deltaX < 0 {
+            browser.goForward()
+        }
+    }
+
+    // MARK: Raw touch forwarding (opt-in)
+
+    /// Whether the hosted browser opted into raw touch forwarding.
+    private var forwardsRawTouches: Bool {
+        model?.options.forwardsRawTouchEvents ?? false
+    }
+
+    public override func touchesBegan(with event: NSEvent) {
+        forwardTouches(event, type: CEF_TET_PRESSED)
+    }
+    public override func touchesMoved(with event: NSEvent) {
+        forwardTouches(event, type: CEF_TET_MOVED)
+    }
+    public override func touchesEnded(with event: NSEvent) {
+        forwardTouches(event, type: CEF_TET_RELEASED)
+    }
+    public override func touchesCancelled(with event: NSEvent) {
+        forwardTouches(event, type: CEF_TET_CANCELLED)
+    }
+
+    private func forwardTouches(_ event: NSEvent, type: cef_touch_event_type_t) {
+        guard forwardsRawTouches, let browser = osrBrowser else { return }
+        let phase: NSTouch.Phase
+        switch type {
+        case CEF_TET_PRESSED: phase = .began
+        case CEF_TET_MOVED: phase = .moved
+        case CEF_TET_RELEASED: phase = .ended
+        default: phase = .cancelled
+        }
+        let touches = event.touches(matching: phase, in: self)
+        let viewSize = bounds.size
+        for touch in touches {
+            // Indirect (trackpad) touches report normalized positions; map them
+            // onto the view rect (top-left origin).
+            let n = touch.normalizedPosition
+            let point = CGPoint(x: n.x * viewSize.width, y: (1 - n.y) * viewSize.height)
+            let id = Int32(truncatingIfNeeded: touch.identity.hash)
+            browser.sendTouchEvent(id: id, point: point, type: type,
+                                   pressure: 1.0, pointerType: CEF_POINTER_TYPE_TOUCH)
+        }
+    }
+}
+
+// MARK: - IME (NSTextInputClient)
+
+/// `NSTextInputClient` bridge so dead-keys and CJK/IME composition route into
+/// the offscreen browser via `imeSetComposition`/`imeCommitText`. AppKit calls
+/// these as a result of `interpretKeyEvents(_:)` in `keyDown`.
+extension CefMetalHostView: @preconcurrency NSTextInputClient {
+
+    public func insertText(_ string: Any, replacementRange: NSRange) {
+        let text = (string as? NSAttributedString)?.string ?? (string as? String) ?? ""
+        guard !text.isEmpty else { return }
+        if keyInput.handlingKeyDown {
+            // Accumulate; keyDown's after-handler decides KEYDOWN+CHAR vs commit.
+            keyInput.textToBeInserted += text
+        } else {
+            // Direct insert (e.g. IME candidate pick outside a keystroke).
+            let range = replacementRange.location == NSNotFound ? nil : replacementRange
+            osrBrowser?.imeCommitText(text, replacementRange: range)
+        }
+        // Inserting text always clears any marked composition.
+        keyInput.hasMarkedTextFlag = false
+        currentMarkedRange = NSRange(location: NSNotFound, length: 0)
+    }
+
+    public func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
+        let text = (string as? NSAttributedString)?.string ?? (string as? String) ?? ""
+        keyInput.markedSelectionRange = selectedRange
+        keyInput.markedTextValue = text
+        keyInput.hasMarkedTextFlag = !text.isEmpty
+        currentMarkedRange = keyInput.hasMarkedTextFlag
+            ? NSRange(location: 0, length: text.utf16.count)
+            : NSRange(location: NSNotFound, length: 0)
+        let rep = replacementRange.location == NSNotFound ? nil : replacementRange
+        if keyInput.handlingKeyDown {
+            // Defer to the after-handler so it sequences with the key event.
+            keyInput.setMarkedReplacement = rep
+        } else {
+            if text.isEmpty {
+                osrBrowser?.imeCancelComposition()
+            } else {
+                osrBrowser?.imeSetComposition(text: text, selectionRange: selectedRange, replacementRange: rep)
+            }
+        }
+    }
+
+    public func unmarkText() {
+        keyInput.hasMarkedTextFlag = false
+        keyInput.markedTextValue = ""
+        if keyInput.handlingKeyDown {
+            keyInput.unmarkTextCalled = true
+        } else {
+            osrBrowser?.imeFinishComposing(keepSelection: true)
+        }
+    }
+
+    public func selectedRange() -> NSRange {
+        currentSelectedTextRange
+    }
+
+    public func markedRange() -> NSRange {
+        currentMarkedRange
+    }
+
+    public func hasMarkedText() -> Bool {
+        currentMarkedRange.location != NSNotFound && currentMarkedRange.length > 0
+    }
+
+    public func attributedSubstring(forProposedRange range: NSRange, actualRange: NSRangePointer?) -> NSAttributedString? {
+        nil
+    }
+
+    public func validAttributesForMarkedText() -> [NSAttributedString.Key] {
+        []
+    }
+
+    /// Returns the screen rect (bottom-left origin) used to position the IME
+    /// candidate window, the emoji & symbols palette (Cmd+Ctrl+Space), and the
+    /// press-and-hold accent popup, anchored at the caret.
+    ///
+    /// Source of the caret rect, in order of fidelity:
+    /// 1. **Live composition bounds** — during an active IME composition CEF
+    ///    delivers exact per-character bounds via
+    ///    `on_ime_composition_range_changed`; we use the first glyph's box.
+    /// 2. **Last-known caret rect** — we cache (1) so that immediately after a
+    ///    composition ends, and for the accent popup that fires on the next
+    ///    key, the anchor stays at the real caret instead of snapping away.
+    /// 3. **Focused-view fallback** — with no composition data at all (a plain
+    ///    caret in an `<input>`), CEF's OSR API exposes no caret rect for a
+    ///    non-composition selection, so we anchor near the top-left of the view
+    ///    rather than at the screen origin. This is an honest limitation, not
+    ///    pixel-perfect; see the OSR input docs.
+    public func firstRect(forCharacterRange range: NSRange, actualRange: NSRangePointer?) -> NSRect {
+        guard let window else { return NSRect(origin: .zero, size: .zero) }
+        if let bounds = currentImeCharacterBounds.first {
+            lastKnownCaretRectDIP = bounds
+        }
+        let caret = lastKnownCaretRectDIP ?? CGRect(x: 4, y: 4, width: 1, height: 16)
+        // Caret bounds are in view DIP (top-left). Build a view-coordinate rect
+        // whose origin is the caret's bottom (palette appears just below the
+        // glyph), then convert to window then screen (bottom-left).
+        let viewRect = NSRect(x: caret.minX, y: caret.maxY,
+                              width: max(caret.width, 1), height: max(caret.height, 1))
+        let inWindow = convert(viewRect, to: nil)
+        return window.convertToScreen(inWindow)
+    }
+
+    public func characterIndex(for point: NSPoint) -> Int {
+        NSNotFound
+    }
+}
+
+// MARK: - Context Menu
+
+/// Presents CEF's context menu as a native `NSMenu` for the offscreen browser,
+/// so right-click feels identical to a native control.
+extension CefMetalHostView {
+
+    public func osrRunContextMenu(_ menu: CefMenuModel, at viewPoint: CGPoint, callback: CefRunContextMenuCallback) {
+        // IMPORTANT: CEF forbids running an OS modal message loop *inside* this
+        // callback (only start_dragging may). So we snapshot the menu items
+        // synchronously, then present the NSMenu on the next runloop tick and
+        // resolve the callback then. We return having retained the callback.
+        struct Item { let label: String; let commandID: Int; let isSeparator: Bool }
+        var items: [Item] = []
+        for i in 0..<menu.count {
+            if menu.isSeparator(at: i) {
+                items.append(Item(label: "", commandID: -1, isSeparator: true))
+            } else {
+                let label = menu.label(at: i).replacingOccurrences(of: "&", with: "")
+                guard !label.isEmpty else { continue }
+                items.append(Item(label: label, commandID: menu.commandID(at: i), isSeparator: false))
+            }
+        }
+        guard !items.isEmpty else {
+            callback.cancel()
+            return
+        }
+
+        pendingContextMenuCallback = callback
+        let location = NSPoint(x: viewPoint.x, y: viewPoint.y)
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { callback.cancel(); return }
+            let nsMenu = NSMenu()
+            nsMenu.autoenablesItems = false
+            for item in items {
+                if item.isSeparator {
+                    nsMenu.addItem(.separator())
+                    continue
+                }
+                let mi = NSMenuItem(title: item.label, action: #selector(self.contextMenuItemSelected(_:)), keyEquivalent: "")
+                mi.target = self
+                mi.tag = item.commandID
+                nsMenu.addItem(mi)
+            }
+            nsMenu.popUp(positioning: nil, at: location, in: self)
+            // popUp is modal; the action selector resolved the callback if an
+            // item was chosen. Otherwise cancel.
+            if let cb = self.pendingContextMenuCallback {
+                cb.cancel()
+                self.pendingContextMenuCallback = nil
+            }
+        }
+    }
+
+    @objc private func contextMenuItemSelected(_ sender: NSMenuItem) {
+        guard let cb = pendingContextMenuCallback else { return }
+        cb.select(commandID: sender.tag)
+        pendingContextMenuCallback = nil
     }
 }

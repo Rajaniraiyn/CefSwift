@@ -140,7 +140,7 @@ public struct CefWebView: NSViewRepresentable {
         }
 
         let url = model.url ?? URL(string: "about:blank") ?? URL(fileURLWithPath: "/")
-        let browser = CefBrowserFactory.createBrowser(
+        let browser = CefBrowser.createBrowser(
             parentView: self,
             bounds: bounds,
             url: url,

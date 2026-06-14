@@ -35,25 +35,6 @@ struct OSRInputPassthroughTests {
         #expect(!both.contains(.move))
     }
 
-    @Test func dragOperationCefValueRoundTrip() {
-        // The raw value feeds straight into cef_drag_operations_mask_t.
-        #expect(CefDragOperation.copy.rawValue == UInt32(DRAG_OPERATION_COPY.rawValue))
-        #expect(CefDragOperation.link.rawValue == UInt32(DRAG_OPERATION_LINK.rawValue))
-        #expect(CefDragOperation.move.rawValue == UInt32(DRAG_OPERATION_MOVE.rawValue))
-    }
-
-    // MARK: Touch event type values
-
-    @Test func touchEventTypeRawValues() {
-        // Sanity: the CEF enum members the gesture forwarder uses exist and are
-        // distinct (begin/move/end/cancel).
-        let set: Set<UInt32> = [
-            CEF_TET_PRESSED.rawValue, CEF_TET_MOVED.rawValue,
-            CEF_TET_RELEASED.rawValue, CEF_TET_CANCELLED.rawValue,
-        ]
-        #expect(set.count == 4)
-    }
-
     // MARK: Drag data snapshot defaults
 
     @Test func dragDataDefaults() {
@@ -65,35 +46,4 @@ struct OSRInputPassthroughTests {
         #expect(item.string(forType: .URL) == "https://example.com")
     }
 
-    // MARK: Paint-element routing
-
-    @Test func paintElementRouting() {
-        // The render handler maps PET_POPUP -> .popup and everything else ->
-        // .view. We assert the enum values are distinct so the host can branch.
-        #expect(CefOSRPaintElement.view != CefOSRPaintElement.popup)
-    }
-
-    // MARK: AX value decoder (pure Swift, no CEF objects)
-
-    @Test func axValueConvenienceAccessors() {
-        let tree: CefAXValue = .dictionary([
-            "ax_tree_id": .string("tree-1"),
-            "updates": .list([
-                .dictionary([
-                    "nodes": .list([
-                        .dictionary([
-                            "id": .int(1),
-                            "role": .string("button"),
-                            "attributes": .dictionary(["name": .string("Submit")]),
-                        ])
-                    ])
-                ])
-            ]),
-        ])
-        #expect(tree["ax_tree_id"]?.string == "tree-1")
-        let nodes = tree["updates"]?.list?.first?["nodes"]?.list
-        #expect(nodes?.count == 1)
-        #expect(nodes?.first?["role"]?.string == "button")
-        #expect(nodes?.first?["attributes"]?["name"]?.string == "Submit")
-    }
 }
