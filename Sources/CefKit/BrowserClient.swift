@@ -563,13 +563,27 @@ extension BrowserClient {
             // Only intercept for OSR browsers (windowless has no CEF window to
             // present the default menu in); windowed browsers fall through to
             // CEF's native menu by returning 0.
+            //
+            // IMPORTANT: when returning 0, we must NOT touch the |callback|
+            // (must not call cont/cancel — those "disconnect" it on CEF's side).
+            // CEF treats a disconnected callback paired with a false return as
+            // an error and force-sets is_handled=true, which suppresses the
+            // native menu entirely. We simply drop our +1 ref on it.
+            let isOSR = BrowserClientCallbacks.run(handlerSelf, default: false) { client, _ in
+                client.osrHost != nil
+            }
+            if !isOSR {
+                cefRelease(UnsafeMutableRawPointer(callback))
+                return 0
+            }
             let menu = CefMenuModel(raw: model)
             let viewPoint = params.map { CGPoint(x: CGFloat($0.pointee.get_xcoord?($0) ?? 0), y: CGFloat($0.pointee.get_ycoord?($0) ?? 0)) } ?? .zero
             let wrapper = CefRunContextMenuCallback(raw: callback)  // owns the +1
             return BrowserClientCallbacks.run(handlerSelf, default: Int32(0)) { client, _ in
                 guard let host = client.osrHost else {
+                    // Defensive: osrHost vanished between the two checks.
                     wrapper.cancel()
-                    return 0
+                    return 1
                 }
                 host.osrRunContextMenu(menu, at: viewPoint, callback: wrapper)
                 return 1
