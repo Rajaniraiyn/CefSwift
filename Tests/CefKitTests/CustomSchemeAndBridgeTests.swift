@@ -124,6 +124,37 @@ import Testing
         bridge.unregister("f")
         #expect(!bridge.hasRegisteredFunctions)
     }
+
+    @Test func shimExposesEventListenerAPI() {
+        let shim = CefBridge.javascriptShim
+        // The on/off/_emit functions and the _listeners backing map must all
+        // be present so Swift→JS broadcasts have something to dispatch to.
+        #expect(shim.contains("on:"))
+        #expect(shim.contains("off:"))
+        #expect(shim.contains("_emit:"))
+        #expect(shim.contains("_listeners"))
+    }
+
+    @Test func eventNameEscapingForJS() {
+        // Backslash, double-quote, control chars, and the JS-only line
+        // separators must all be escaped so they can sit inside a "..." literal.
+        #expect(CefBridge.escapeForJSDoubleQuoted("plain") == "plain")
+        #expect(CefBridge.escapeForJSDoubleQuoted("a\"b") == "a\\\"b")
+        #expect(CefBridge.escapeForJSDoubleQuoted("a\\b") == "a\\\\b")
+        #expect(CefBridge.escapeForJSDoubleQuoted("line1\nline2") == "line1\\nline2")
+        #expect(CefBridge.escapeForJSDoubleQuoted("a\u{2028}b") == "a\\u2028b")
+        #expect(CefBridge.escapeForJSDoubleQuoted("\u{01}") == "\\u0001")
+    }
+
+    @Test func broadcastPayloadEncodesAsJSON() throws {
+        // Mirrors the JSONEncoder() path used by broadcast(event:data:): the
+        // payload must round-trip through JSON so JS receives a real object.
+        struct Tick: Encodable { let count: Int; let label: String }
+        let json = try JSONEncoder().encode(Tick(count: 7, label: "hi"))
+        let decoded = try JSONSerialization.jsonObject(with: json) as? [String: Any]
+        #expect(decoded?["count"] as? Int == 7)
+        #expect(decoded?["label"] as? String == "hi")
+    }
 }
 
 @Suite struct CefDownloadDecisionTests {

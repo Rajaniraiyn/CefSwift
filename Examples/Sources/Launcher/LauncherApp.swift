@@ -169,6 +169,17 @@ enum LauncherDemoPage {
             "Swift received: \"\(message.prefix(120))\" @ "
                 + Date.now.formatted(date: .omitted, time: .standard)
         }
+        // Demo: Swift → JS event broadcast. Each call to startTicks() spawns
+        // a Task that emits a 'tick' event every second; pages subscribe via
+        // window.cefSwift.on('tick', fn).
+        CefRuntime.shared.bridge.register("startTicks") { (_: BridgeEmpty) -> BridgeEmpty in
+            await MainActor.run { LauncherTicker.shared.start() }
+            return BridgeEmpty()
+        }
+        CefRuntime.shared.bridge.register("stopTicks") { (_: BridgeEmpty) -> BridgeEmpty in
+            await MainActor.run { LauncherTicker.shared.stop() }
+            return BridgeEmpty()
+        }
     }
 
     /// URL for a given page path (e.g. `popups`, `dialogs`, `downloads`, `bridge`).
@@ -276,23 +287,86 @@ enum LauncherDemoPage {
         <!DOCTYPE html><html><head><title>Custom Scheme + JS Bridge</title>
         <script>\(CefBridge.javascriptShim)</script>\(head)</head><body>
         <h1>Custom Scheme + JS Bridge</h1>
-        <p class="hint">This page is served over the <code>launcher://</code> custom scheme and
-        calls a Swift function via <code>window.cefSwift.invoke</code>.</p>
+        <p class="hint">This page is served over the <code>launcher://</code> custom scheme.
+        The top section calls Swift with <code>window.cefSwift.invoke</code>; the bottom
+        subscribes to Swift-emitted events via <code>window.cefSwift.on</code>.</p>
+
+        <h2>JS → Swift (invoke)</h2>
         <div class="row"><button onclick="ping()">Call Swift ping()</button></div>
         <div id="out">waiting for first round-trip…</div>
+
+        <h2>Swift → JS (events)</h2>
+        <div class="row">
+          <button id="sub" onclick="toggleTicks()">Subscribe to ticks</button>
+          <span class="hint">— Swift broadcasts a 'tick' every 1s while subscribed</span>
+        </div>
+        <div id="out">latest tick: <span id="ticks">—</span> (received: <span id="recv">0</span>)</div>
+
         <script>
           let n = 0;
           async function ping() {
             n += 1;
             try {
               const reply = await window.cefSwift.invoke('ping', 'hello #' + n);
-              document.getElementById('out').textContent = reply;
-            } catch (e) { document.getElementById('out').textContent = 'bridge error: ' + e.message; }
+              document.querySelector('h2 + .row + #out').textContent = reply;
+            } catch (e) { document.querySelector('h2 + .row + #out').textContent = 'bridge error: ' + e.message; }
           }
           ping();
+
+          let unsubscribe = null;
+          let received = 0;
+          async function toggleTicks() {
+            const btn = document.getElementById('sub');
+            if (unsubscribe) {
+              unsubscribe();
+              unsubscribe = null;
+              await window.cefSwift.invoke('stopTicks', {});
+              btn.textContent = 'Subscribe to ticks';
+              return;
+            }
+            unsubscribe = window.cefSwift.on('tick', data => {
+              received += 1;
+              document.getElementById('ticks').textContent = data.count;
+              document.getElementById('recv').textContent = received;
+            });
+            await window.cefSwift.invoke('startTicks', {});
+            btn.textContent = 'Unsubscribe';
+          }
         </script>
         </body></html>
         """
+}
+
+/// Placeholder Codable for bridge functions that take/return nothing.
+private struct BridgeEmpty: Codable, Sendable {}
+
+/// Drives the Swift → JS `tick` event for the bridge demo. One process-wide
+/// ticker so that every subscribed page sees the same monotonically-increasing
+/// counter; the broadcast itself fans out to all live browsers.
+@MainActor
+private final class LauncherTicker {
+    static let shared = LauncherTicker()
+    private var task: Task<Void, Never>?
+    private var count: Int = 0
+
+    struct TickEvent: Encodable { let count: Int }
+
+    func start() {
+        guard task == nil else { return }
+        task = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                guard let self, !Task.isCancelled else { return }
+                self.count += 1
+                CefRuntime.shared.bridge.broadcast(event: "tick", data: TickEvent(count: self.count))
+            }
+        }
+    }
+
+    func stop() {
+        task?.cancel()
+        task = nil
+    }
 }
 
 // MARK: - Chrome controller

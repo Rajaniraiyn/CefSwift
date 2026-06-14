@@ -1,0 +1,28 @@
+# Tag-driven release. Push `v0.1.0` (etc.) and this drafts a GitHub Release
+# with auto-generated notes. SwiftPM consumers resolve via the tag (no asset
+# upload needed — the source archive GitHub attaches is enough).
+#
+#   git tag v0.1.0 && git push origin v0.1.0
+#
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: Create GitHub Release
+        env: { GH_TOKEN: ${{ secrets.GITHUB_TOKEN }} }
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            --verify-tag

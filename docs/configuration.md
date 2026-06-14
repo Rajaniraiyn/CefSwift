@@ -50,7 +50,7 @@ Or, without `CefSwiftApp`, pass it to
 | Surface | What it does |
 |---|---|
 | `CefRuntime.shared.registerSchemeHandler(scheme:domain:handler:)` | Routes a scheme to a `CefSchemeHandler` (`func response(for: CefSchemeRequest) async -> CefSchemeResponse`, whole-body buffered). Pair with `customSchemes` above; `CefBundleSchemeHandler(directory:indexFile:)` serves local files with UTType-based MIME detection. |
-| `CefRuntime.shared.bridge` | JS ↔ Swift function bridge: `bridge.register("name") { (input: In) in Out }` (Codable) and pages call `await window.cefSwift.invoke('name', {…})`. Shim auto-injection toggle: `bridge.autoInjectsShim`. See [JS ↔ Swift bridge](#js--swift-bridge) below. |
+| `CefRuntime.shared.bridge` | JS ↔ Swift function bridge: `bridge.register("name") { (input: In) in Out }` (Codable) and pages call `await window.cefSwift.invoke('name', {…})`. Push the other way with `bridge.broadcast(event:data:)` → `window.cefSwift.on('name', fn)`. Shim auto-injection toggle: `bridge.autoInjectsShim`. See [JS ↔ Swift bridge](#js--swift-bridge) below. |
 | Downloads | Per browser: `CefBrowserDelegate.browser(_:decidePolicyForDownload:suggestedName:)` (return `.allow(destination:)` / `.deny`; default saves to `~/Downloads/<suggested name>`) plus `browser(_:downloadDidProgress:)` with a `CefDownload` snapshot (id, url, bytes, completion, path). On `CefWebViewModel`: the `onDownloadDecision` / `onDownloadProgress` closures. |
 
 ## Runtime styles: chrome vs alloy
@@ -234,6 +234,23 @@ inputs; decode with strict Codable types, not dictionaries. Don't expose
 generic primitives ("run shell command"); design narrow, purpose-specific
 functions. If you load arbitrary third-party content, don't register
 sensitive functions in those browsers. Replies are visible to the page.
+
+### Swift → JS events
+
+`bridge.broadcast(event:data:)` pushes a JSON-encoded payload to every active
+browser as `window.cefSwift._emit("<event>", <json>)`. Pages subscribe via
+`window.cefSwift.on("<event>", fn)` (returns an unsubscribe closure). Encoding
+errors are logged to stderr and the broadcast dropped; pages without the shim
+or without a listener silently ignore. A pre-encoded JSON string overload
+(`broadcast(event:json:)`) is available for callers using a custom encoder.
+
+```swift
+CefRuntime.shared.bridge.broadcast(event: "tick", data: ["t": Date().timeIntervalSince1970])
+```
+
+```js
+const off = window.cefSwift.on('tick', payload => console.log(payload.t));
+```
 
 The Gallery example ships a "Swift ↔ JS Bridge" card (`gallery://` page
 served by a `CefSchemeHandler` with shim embedded; auto-invokes `greet` on

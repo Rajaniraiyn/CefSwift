@@ -76,7 +76,31 @@ open Examples/dist/Browser.app
 
 macOS only. Requires macOS 14+, Swift 6, and a CEF 148+ distribution (downloaded automatically by the plugin, pinned in [`CEF_VERSION.json`](CEF_VERSION.json), refreshed by a scheduled workflow). Apple silicon and Intel.
 
-Current limitations: the Chromium sandbox is disabled, and JS↔Swift bridging is not yet exposed.
+Current limitations: no native V8 `window.foo` binding (bridge goes through the `cefswift://` scheme); accessibility-tree bridging for OSR is enablement-only (no `NSAccessibility` surface yet).
+
+## JS ↔ Swift bridge
+
+Register Swift functions and call them from page JavaScript as typed promises. Inputs/outputs are `Codable`; handlers are `async` and run off the main thread.
+
+```swift
+// Swift
+CefRuntime.shared.bridge.register("greet") { (name: String) in
+    "Hello, \(name)"
+}
+```
+
+```js
+// JS — window.cefSwift is auto-injected at load-end while any handler is registered
+const reply = await window.cefSwift.invoke('greet', 'World');
+```
+
+Push events the other way with `CefRuntime.shared.bridge.broadcast(event: "tick", data: [...])` — pages subscribe via `window.cefSwift.on('tick', fn)`.
+
+Full reference (typed vs raw handlers, shim auto-injection, transport, security guidance): [docs/configuration.md — JS ↔ Swift bridge](docs/configuration.md#js--swift-bridge).
+
+## Sandbox
+
+The Chromium macOS sandbox is wired end-to-end. Off by default for ad-hoc dev builds; flip `config.noSandbox = false` to enable it in a properly signed bundle. See [docs/sandbox.md](docs/sandbox.md).
 
 ## Documentation
 

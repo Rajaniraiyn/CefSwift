@@ -164,6 +164,68 @@ public final class CefBridge: @unchecked Sendable {
         }
     }
 
+    // MARK: Swift → JS event broadcast
+
+    /// Broadcasts an event to every page that registered a listener via
+    /// `window.cefSwift.on(name, fn)`.
+    ///
+    /// Fire-and-forget: `data` is JSON-encoded (encode failures are logged to
+    /// stderr and the broadcast is dropped) and dispatched into every active
+    /// browser's main frame as `window.cefSwift._emit("<event>", <json>)`.
+    /// Pages that haven't loaded the shim yet (or have no listener for the
+    /// event) silently ignore the call.
+    @MainActor public func broadcast<T: Encodable>(event: String, data: T) {
+        let json: Data
+        do {
+            json = try JSONEncoder().encode(data)
+        } catch {
+            FileHandle.standardError.write(Data(
+                "CefBridge.broadcast: failed to encode '\(event)' payload: \(error)\n".utf8))
+            return
+        }
+        // JSON is valid UTF-8; replacing invalid sequences satisfies the
+        // initialiser without changing valid input.
+        let jsonString = String(data: json, encoding: .utf8) ?? "null"
+        broadcast(event: event, json: jsonString)
+    }
+
+    /// Broadcast escape hatch for callers that have a pre-encoded JSON string
+    /// (e.g. data already routed through a custom encoder).
+    @MainActor public func broadcast(event: String, json: String) {
+        let script = "if(window.cefSwift&&window.cefSwift._emit){window.cefSwift._emit(\""
+            + Self.escapeForJSDoubleQuoted(event) + "\"," + json + ");}"
+        for browser in CefRuntime.shared.activeBrowsers {
+            browser.executeJavaScript(script)
+        }
+    }
+
+    /// Escapes an arbitrary Swift string for embedding inside a JS
+    /// double-quoted string literal.
+    static func escapeForJSDoubleQuoted(_ s: String) -> String {
+        var out = ""
+        out.reserveCapacity(s.count)
+        for scalar in s.unicodeScalars {
+            switch scalar {
+            case "\\": out += "\\\\"
+            case "\"": out += "\\\""
+            case "\n": out += "\\n"
+            case "\r": out += "\\r"
+            case "\t": out += "\\t"
+            case "\u{08}": out += "\\b"
+            case "\u{0C}": out += "\\f"
+            case "\u{2028}": out += "\\u2028"
+            case "\u{2029}": out += "\\u2029"
+            default:
+                if scalar.value < 0x20 {
+                    out += String(format: "\\u%04x", scalar.value)
+                } else {
+                    out.unicodeScalars.append(scalar)
+                }
+            }
+        }
+        return out
+    }
+
     // MARK: JavaScript shim
 
     /// The page-side shim defining `window.cefSwift.invoke(name, params)`.
@@ -173,6 +235,7 @@ public final class CefBridge: @unchecked Sendable {
         (function () {
           if (window.cefSwift && window.cefSwift.invoke) { return; }
           window.cefSwift = {
+            _listeners: {},
             invoke: function (name, params) {
               return fetch('cefswift://bridge/' + encodeURIComponent(name), {
                 method: 'POST',
@@ -188,6 +251,23 @@ public final class CefBridge: @unchecked Sendable {
                   }
                   return text;
                 });
+              });
+            },
+            on: function (name, fn) {
+              (this._listeners[name] = this._listeners[name] || []).push(fn);
+              var self = this;
+              return function () {
+                self._listeners[name] = (self._listeners[name] || []).filter(function (f) { return f !== fn; });
+              };
+            },
+            off: function (name, fn) {
+              if (!this._listeners[name]) { return; }
+              if (fn === undefined) { this._listeners[name] = []; return; }
+              this._listeners[name] = this._listeners[name].filter(function (f) { return f !== fn; });
+            },
+            _emit: function (name, data) {
+              (this._listeners[name] || []).forEach(function (fn) {
+                try { fn(data); } catch (e) { console.error(e); }
               });
             }
           };

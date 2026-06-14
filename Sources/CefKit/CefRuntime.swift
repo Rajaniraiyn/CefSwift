@@ -8,7 +8,7 @@ import Foundation
 /// Owns a fully-populated `cef_settings_t` whose string members are released
 /// on deinit. Kept alive for the duration of `cef_initialize` (CEF copies
 /// what it needs).
-private final class MappedCefSettings {
+final class MappedCefSettings {
     var raw = cef_settings_t()
 
     /// - Parameters:
@@ -393,6 +393,10 @@ public final class CefRuntime {
         guard browser.id >= 0 else { return }
         browsers[browser.id] = browser
     }
+
+    /// All live browsers registered with the runtime. Used by ``CefBridge``
+    /// to broadcast events to every page.
+    var activeBrowsers: [CefBrowser] { Array(browsers.values) }
 
     func unregisterBrowser(id: Int32) {
         browsers[id] = nil
