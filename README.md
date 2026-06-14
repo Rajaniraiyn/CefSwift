@@ -56,11 +56,25 @@ swift package --allow-writing-to-package-directory \
 
 ## Examples
 
-The [`Examples/`](Examples/) directory is a standalone package:
+The [`Examples/`](Examples/) directory is a standalone package with three apps:
 
-- **Browser** — tabbed browser on the Chrome runtime: omnibox, DevTools, popups, `chrome://` menu.
-- **Gallery** — `CefWebView` cards inside ordinary SwiftUI layout.
-- **Launcher** — minimal launcher demonstrating window-open routing and link handling.
+|                                                  |                                                                                                       |
+| :----------------------------------------------: | :---------------------------------------------------------------------------------------------------- |
+|  [![Browser](docs/images/browser.png)][example]  | **Browser** — Arc-style tabbed browser on the Chrome runtime: omnibox, popups, DevTools, `chrome://`. |
+|  [![Gallery](docs/images/gallery.png)][example]  | **Gallery** — embedded `CefWebView` cards mixed with native SwiftUI controls.                         |
+| [![Launcher](docs/images/launcher-catalog.png)][example] | **Launcher** — one app to try every hosting mode and config; click a row, launch its window.  |
+
+[example]: Examples/
+
+### Inside the Launcher
+
+|  Hosting mode                                                   | What you see                                                                       |
+| :-------------------------------------------------------------: | :--------------------------------------------------------------------------------- |
+|     [![Windowed Alloy](docs/images/alloy.png)][example]         | `CefWebView` — CEF renders into a child `NSView` (max compatibility).              |
+|   [![Chrome Window](docs/images/chrome-window.png)][example]    | `CefChromeWindow` — full Chrome runtime, SwiftUI toolbar inline with traffic lights. |
+|     [![OSR / Metal](docs/images/osr-metal.png)][example]        | `CefMetalWebView` — offscreen → `IOSurface` → `CALayer`. Composite native UI over web pixels. |
+|        [![JS Bridge](docs/images/bridge.png)][example]          | `bridge.register` / `window.cefSwift.invoke` — typed Codable round-trips.          |
+|       [![Popups & Tabs](docs/images/popups.png)][example]       | `target=_blank` / `window.open` / ⌘-click routed by the window-open handler.       |
 
 Run any of them:
 
@@ -68,8 +82,8 @@ Run any of them:
 swift package --package-path Examples \
               --allow-writing-to-package-directory \
               --allow-network-connections all \
-              cef bundle --product Browser
-open Examples/dist/Browser.app
+              cef bundle --product Launcher
+open Examples/dist/Launcher.app
 ```
 
 ## Status
