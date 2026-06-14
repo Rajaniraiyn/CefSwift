@@ -1,0 +1,5 @@
+# Vendored CEF headers (upstream BSD-licensed, copied verbatim from the CEF
+# distribution by `swift package cef download`). Excluded from GitHub's
+# language stats and collapsed in PR diffs by default.
+Sources/CCef/include/include/**     linguist-vendored=true
+Sources/CCef/include/LICENSE.CEF.txt linguist-vendored=true
