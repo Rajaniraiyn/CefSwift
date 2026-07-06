@@ -401,6 +401,8 @@
   E_CPONLY(CEF_ColorFrameActive) \
   E_CPONLY(CEF_ColorFrameActiveUnthemed) \
   E_CPONLY(CEF_ColorFrameCaptionButtonUnfocused) \
+  E_CPONLY(CEF_ColorFrameCaptionForegroundActive) \
+  E_CPONLY(CEF_ColorFrameCaptionForegroundInactive) \
   E_CPONLY(CEF_ColorFrameInactive) \
   E_CPONLY(CEF_ColorHelpIconActive) \
   E_CPONLY(CEF_ColorHelpIconInactive) \
@@ -844,6 +846,7 @@
   E_CPONLY(CEF_ColorBnplIssuerLinkedIneligibleBackground) \
   E_CPONLY(CEF_ColorBnplIssuerLinkedPillBackground) \
   E_CPONLY(CEF_ColorBnplIssuerLinkedPillForeground) \
+  E_CPONLY(CEF_ColorAutofillPopupDeactivatedBnplForeground) \
   /* Compose colors */ \
   E_CPONLY(CEF_ColorComposeDialogBackground) \
   E_CPONLY(CEF_ColorComposeDialogDivider) \
@@ -957,6 +960,7 @@
   E_CPONLY(CEF_ColorGlicInactiveTabUnderlineGradient2) \
   E_CPONLY(CEF_ColorGlicInactiveTabUnderlineGradient3) \
   E_CPONLY(CEF_ColorGlicSelectionOverlayToast) \
+  E_CPONLY(CEF_ColorGlicSelectionOverlayToastCancelButton) \
   /* Hover Button colors */ \
   E_CPONLY(CEF_ColorHoverButtonBackgroundHovered) \
   /* Lens overlay colors. */ \
@@ -991,7 +995,7 @@
   E_CPONLY(CEF_ColorTabStripControlButtonInkDrop) \
   E_CPONLY(CEF_ColorTabStripControlButtonInkDropRipple) \
   /* New tab button colors for ChromeRefresh.*/ \
-  /* TODO (crbug.com/1399942) remove when theming works */ \
+  /* TODO (crbug.com/40883407) remove when theming works */ \
   E_CPONLY(CEF_ColorNewTabButtonCRForegroundFrameActive) \
   E_CPONLY(CEF_ColorNewTabButtonCRForegroundFrameInactive) \
   E_CPONLY(CEF_ColorNewTabButtonCRBackgroundFrameActive) \
@@ -1159,6 +1163,7 @@
   E_CPONLY(CEF_ColorOmniboxChipOnSystemBlockedActivityIndicatorBackground) \
   E_CPONLY(CEF_ColorOmniboxChipOnSystemBlockedActivityIndicatorForeground) \
   E_CPONLY(CEF_ColorOmniboxComposeboxChipBackground) \
+  E_CPONLY(CEF_ColorOmniboxComposeboxContextEntrypointBackground) \
   E_CPONLY(CEF_ColorOmniboxComposeboxDivider) \
   E_CPONLY(CEF_ColorOmniboxComposeboxFaviconBackground) \
   E_CPONLY(CEF_ColorOmniboxComposeboxFileThumbnailOverlay) \
@@ -1794,6 +1799,7 @@
   E_CPONLY(CEF_ColorToolbarButtonText) \
   E_CPONLY(CEF_ColorToolbarCloseButtonBackgroundDefault) \
   E_CPONLY(CEF_ColorToolbarContentAreaSeparator) \
+  E_CPONLY(CEF_ColorToolbarContextualTasksButtonShadow) \
   E_CPONLY(CEF_ColorToolbarExtensionSeparatorDisabled) \
   E_CPONLY(CEF_ColorToolbarExtensionSeparatorEnabled) \
   E_CPONLY(CEF_ColorToolbarFeaturePromoHighlight) \
