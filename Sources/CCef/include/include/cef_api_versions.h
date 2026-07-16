@@ -259,30 +259,50 @@
 #define CEF_API_HASH_14800 "aa2de54c143e9ffffd183177f14c325820b5916a"
 #endif
 
-// Next version last updated June 01, 2026.
-#define CEF_API_VERSION_999998 999998
+// Added May 22, 2026.
+#define CEF_API_VERSION_14900 14900
 #if defined(OS_WIN)
-#define CEF_API_HASH_999998 "a9fddb1f86f1fc427a6eee19a370dbedb14468cb"
+#define CEF_API_HASH_14900 "de5114c34e4c0c3d725313c38f4ed5b18cbfdeb4"
 #elif defined(OS_MAC)
-#define CEF_API_HASH_999998 "c4a25b0e7f0beb51b9f5db9fb75904d11dd856a1"
+#define CEF_API_HASH_14900 "22fd845554eb5e3f5516965213efca951a3f8256"
 #elif defined(OS_LINUX)
-#define CEF_API_HASH_999998 "aa2de54c143e9ffffd183177f14c325820b5916a"
+#define CEF_API_HASH_14900 "778f64e58ff024840e29fb49bb7b9c3819f12191"
 #endif
 
-// Experimental version last updated June 01, 2026.
+// Added June 04, 2026.
+#define CEF_API_VERSION_15000 15000
+#if defined(OS_WIN)
+#define CEF_API_HASH_15000 "71146b4350a01d3805e7ea990eb034e6ef4d53db"
+#elif defined(OS_MAC)
+#define CEF_API_HASH_15000 "e85c868aa8a947e1e7c9904c0745c60ae490fa05"
+#elif defined(OS_LINUX)
+#define CEF_API_HASH_15000 "210767725a6feb2e4becd3956b648cab6a006712"
+#endif
+
+// Next version last updated July 09, 2026.
+#define CEF_API_VERSION_999998 999998
+#if defined(OS_WIN)
+#define CEF_API_HASH_999998 "71146b4350a01d3805e7ea990eb034e6ef4d53db"
+#elif defined(OS_MAC)
+#define CEF_API_HASH_999998 "e85c868aa8a947e1e7c9904c0745c60ae490fa05"
+#elif defined(OS_LINUX)
+#define CEF_API_HASH_999998 "210767725a6feb2e4becd3956b648cab6a006712"
+#endif
+
+// Experimental version last updated July 09, 2026.
 #define CEF_API_VERSION_999999 999999
 #if defined(OS_WIN)
-#define CEF_API_HASH_999999 "20da1acee8f84a83324f2b39604a802aa0b2ec0a"
+#define CEF_API_HASH_999999 "c63591fb321ac707f8710f296a8ae1ec05a575db"
 #elif defined(OS_MAC)
-#define CEF_API_HASH_999999 "1de376c05c3f2412726cd0eae00ccdd5a0877e84"
+#define CEF_API_HASH_999999 "0934859000c911cdd75907f63f2ef8e485706e5b"
 #elif defined(OS_LINUX)
-#define CEF_API_HASH_999999 "d04f31fbd7b76ea45e0acce63da1b00718e88592"
+#define CEF_API_HASH_999999 "a5d187477e0cbe23eb1043c2f1868582b7018260"
 #endif
 
 // Oldest supported CEF version.
 #define CEF_API_VERSION_MIN CEF_API_VERSION_13300
 
 // Newest supported CEF version.
-#define CEF_API_VERSION_LAST CEF_API_VERSION_14800
+#define CEF_API_VERSION_LAST CEF_API_VERSION_15000
 
 #endif  // CEF_INCLUDE_CEF_API_VERSIONS_H_
