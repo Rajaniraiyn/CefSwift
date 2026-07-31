@@ -382,14 +382,22 @@ typedef enum {
   /// Stores per origin metadata for cookie controls.
   CEF_CONTENT_SETTING_TYPE_COOKIE_CONTROLS_METADATA,
 
+#if CEF_API_ADDED(14900)
+  CEF_CONTENT_SETTING_TYPE_TPCD_HEURISTICS_GRANTS_DEPRECATED,
+#else
   /// Content Setting for temporary 3PC accesses granted by user behavior
   /// heuristics.
   CEF_CONTENT_SETTING_TYPE_TPCD_HEURISTICS_GRANTS,
+#endif
 
+#if CEF_API_ADDED(14900)
+  CEF_CONTENT_SETTING_TYPE_TPCD_METADATA_GRANTS_DEPRECATED,
+#else
   /// Content Setting for 3PC accesses granted by metadata delivered via the
   /// component updater service. This type will only be used when
   /// `net::features::kTpcdMetadataGrants` is enabled.
   CEF_CONTENT_SETTING_TYPE_TPCD_METADATA_GRANTS,
+#endif
 
 #if CEF_API_ADDED(14400)
   CEF_CONTENT_SETTING_TYPE_TPCD_TRIAL_DEPRECATED,
@@ -452,7 +460,11 @@ typedef enum {
   /// automatically (i.e. without transient activation) should be enabled.
   CEF_CONTENT_SETTING_TYPE_AUTOMATIC_FULLSCREEN,
 
-#if CEF_API_ADDED(14800)
+#if CEF_API_ADDED(15000)
+  /// Content settings used to indicate that a web app is allowed to prompt the
+  /// user for the installation of sub apps.
+  CEF_CONTENT_SETTING_TYPE_SUB_APP_INSTALLATION_PROMPTS,
+#elif CEF_API_ADDED(14800)
   CEF_CONTENT_SETTING_TYPE_SUB_APP_INSTALLATION_PROMPTS_DEPRECATED,
 #else
   /// Content settings used to indicate that a web app is allowed to prompt the
@@ -594,6 +606,17 @@ typedef enum {
   /// Content setting for whether the site is allowed to make loopback network
   /// requests. Split from LOCAL_NETWORK_ACCESS.
   CEF_CONTENT_SETTING_TYPE_LOOPBACK_NETWORK,
+#endif
+
+#if CEF_API_ADDED(15000)
+  /// Content setting for whether an IWA can add sub apps without prompting
+  /// users.
+  CEF_CONTENT_SETTING_TYPE_SUB_APPS_WITHOUT_PROMPTS,
+#endif
+
+#if CEF_API_ADDED(15100)
+  /// Content setting for inline cue menus.
+  CEF_CONTENT_SETTING_TYPE_INLINE_CUE_MENU,
 #endif
 
   CEF_CONTENT_SETTING_TYPE_NUM_VALUES,
