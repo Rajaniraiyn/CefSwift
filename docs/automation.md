@@ -28,6 +28,8 @@ Scripts/cef-update.sh
         │
         ▼
 Workflow: branch cef-update/<version> → commit → push → gh pr create
+        → close older cef-update PRs and delete their branches
+        → dispatch CI explicitly when using the built-in Actions token
         → gh pr merge --auto --squash
         │
         ▼
@@ -51,7 +53,7 @@ Scripts/cef-update.sh   # prints "up to date" or prepares the update in-place
 
 ## Required repository settings
 
-The pipeline needs four things configured once on GitHub:
+The pipeline needs three things configured once on GitHub:
 
 1. **Allow auto-merge** — Settings → General → Pull Requests → check
    *Allow auto-merge*. Without it, `gh pr merge --auto` fails (the workflow
@@ -65,17 +67,10 @@ The pipeline needs four things configured once on GitHub:
 3. **Actions may create PRs** — Settings → Actions → General → check
    *Allow GitHub Actions to create and approve pull requests*.
 
-4. **`CEF_UPDATE_TOKEN` secret (strongly recommended)** — a fine-grained PAT
-   with **contents: read/write** and **pull requests: read/write** on this
-   repository, stored as an Actions secret named `CEF_UPDATE_TOKEN`.
-
-   **Why:** events caused by the default `GITHUB_TOKEN` do not trigger other
-   workflows — GitHub's recursion guard. A PR created with `GITHUB_TOKEN`
-   therefore never gets a CI run, the required check never reports, and
-   auto-merge never completes. The workflow falls back to `GITHUB_TOKEN` if
-   the secret is absent (the PR is still created), but you'd have to kick CI
-   manually (close/reopen the PR, or push an empty commit to its branch).
-   Set the PAT and the loop closes itself.
+An optional fine-grained PAT with **contents: read/write** and **pull requests:
+read/write** may be stored as `CEF_UPDATE_TOKEN`. Without it, the workflow
+uses `GITHUB_TOKEN` and explicitly dispatches `ci.yml`, bypassing GitHub's
+workflow-recursion guard without any manual step.
 
 Also note: **scheduled workflows only run on the default branch** — the cron
 will not fire until `cef-update.yml` is on `main`.
@@ -84,7 +79,7 @@ will not fire until `cef-update.yml` is on `main`.
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| PR created but CI never ran | No `CEF_UPDATE_TOKEN` PAT | Add the PAT; for the stuck PR, close & reopen it |
+| PR created but CI never ran | Explicit CI dispatch failed | Re-run the CEF Update workflow and inspect its final step; verify Actions have read/write workflow permissions |
 | PR open but not merging | Auto-merge disabled, or no required checks on `main` | Settings per above; merge manually meanwhile |
 | PR carries a CEF_API_VERSION warning | New CEF dropped the pinned API version | Bump `CEF_API_VERSION` in `Sources/CCef` (ccef_config.h) to a version listed in the new `include/cef_api_versions.h`, fix any compile fallout, push to the PR branch |
 | Workflow fails in the script | CDN/index change | Run `Scripts/cef-update.sh` locally; it logs each step |

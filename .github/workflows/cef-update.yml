@@ -7,14 +7,9 @@
 #     (auto-merge only fires once required checks pass)
 #   - Settings → Actions → "Allow GitHub Actions to create and approve pull
 #     requests" enabled
-#   - OPTIONAL but strongly recommended: a fine-grained PAT in the secret
-#     CEF_UPDATE_TOKEN (contents: write, pull-requests: write).
-#
-# IMPORTANT PITFALL: pull requests created with the default GITHUB_TOKEN do
-# NOT trigger other workflows — meaning CI never runs on the update PR, the
-# required check never reports, and auto-merge never completes. Set
-# CEF_UPDATE_TOKEN to avoid this; without it the PR is still created but you
-# must close/reopen it (or push to it) manually to kick CI.
+#   - OPTIONAL: a fine-grained PAT in CEF_UPDATE_TOKEN (contents: write,
+#     pull-requests: write). Without it, this workflow dispatches CI directly
+#     to bypass the default GITHUB_TOKEN recursion guard.
 #
 # Note: scheduled workflows only run on the default branch.
 name: CEF Update
@@ -25,6 +20,7 @@ on:
   workflow_dispatch:
 
 permissions:
+  actions: write
   contents: write
   pull-requests: write
 
@@ -40,6 +36,7 @@ jobs:
     env:
       # PAT if configured, else the default token (see pitfall note above).
       GH_TOKEN: ${{ secrets.CEF_UPDATE_TOKEN || github.token }}
+      HAS_UPDATE_TOKEN: ${{ secrets.CEF_UPDATE_TOKEN != '' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -101,6 +98,13 @@ jobs:
               --json url,headRefName \
               --jq ".[] | select(.headRefName | startswith(\"cef-update/\")) | select(.url != \"$PR_URL\") | [.url, .headRefName] | @tsv"
           )
+
+          # A PR created by GITHUB_TOKEN does not emit another workflow event.
+          # Explicit dispatch is allowed, so use it when no PAT is configured.
+          if [ "$HAS_UPDATE_TOKEN" != "true" ]; then
+            echo "Dispatching CI explicitly for $BRANCH"
+            gh workflow run ci.yml --ref "$BRANCH"
+          fi
 
           if [ -n "$WARNING" ]; then
             echo "::warning title=CEF update needs attention::${WARNING}"
