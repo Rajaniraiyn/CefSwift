@@ -102,7 +102,10 @@ import Testing
             .appendingPathComponent("CEF_VERSION.json")
         let data = try Data(contentsOf: url)
         let manifest = try JSONDecoder().decode(Manifest.self, from: data)
-        #expect(manifest.cef.hasPrefix("148."), "pinned CEF major should be 148, got \(manifest.cef)")
+        #expect(
+            manifest.cef.hasSuffix("+chromium-\(manifest.chromium)"),
+            "CEF and Chromium versions should agree, got \(manifest.cef) and \(manifest.chromium)"
+        )
         #expect(manifest.channel == "stable")
         #expect(manifest.platforms["macosarm64"]?["minimal"] != nil)
     }
