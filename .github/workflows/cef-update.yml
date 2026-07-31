@@ -68,7 +68,7 @@ jobs:
           git commit -m "Bump CEF to ${NEW_VERSION}"
           git push --force origin "$BRANCH"
 
-      - name: Open pull request and enable auto-merge
+      - name: Open pull request, retire older bumps, and enable auto-merge
         if: steps.update.outputs.updated == 'true'
         env:
           OLD_VERSION: ${{ steps.update.outputs.old }}
@@ -88,6 +88,20 @@ jobs:
             gh pr edit "$PR_URL" --body-file "$BODY_PATH"
           fi
           echo "PR: $PR_URL"
+
+          # Only the newest generated header set is useful. Close older update
+          # PRs and delete their bot-owned branches so the queue stays clean.
+          while IFS=$'\t' read -r OLD_URL OLD_BRANCH; do
+            [ -n "$OLD_URL" ] || continue
+            echo "Closing superseded CEF update: $OLD_URL ($OLD_BRANCH)"
+            gh pr close "$OLD_URL" --delete-branch \
+              --comment "Superseded by $PR_URL, which pins the latest stable CEF release."
+          done < <(
+            gh pr list --state open --base main --limit 100 \
+              --json url,headRefName \
+              --jq ".[] | select(.headRefName | startswith(\"cef-update/\")) | select(.url != \"$PR_URL\") | [.url, .headRefName] | @tsv"
+          )
+
           if [ -n "$WARNING" ]; then
             echo "::warning title=CEF update needs attention::${WARNING}"
             echo "Skipping auto-merge: manual migration required (CEF_API_VERSION pin and/or bridge symbols — see the PR body)."
