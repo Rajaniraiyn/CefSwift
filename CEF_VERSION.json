@@ -1,30 +1,30 @@
 {
-  "cef": "151.3.24+g2384915+chromium-151.0.7922.174",
-  "chromium": "151.0.7922.174",
+  "cef": "152.0.6+g708dc14+chromium-152.0.7977.83",
+  "chromium": "152.0.7977.83",
   "channel": "stable",
   "platforms": {
     "macosarm64": {
       "minimal": {
-        "name": "cef_binary_151.3.24+g2384915+chromium-151.0.7922.174_macosarm64_minimal.tar.bz2",
-        "sha1": "82af2c0cadaafc4ad057f54c14cb3791cc139852",
-        "size": 130984661
+        "name": "cef_binary_152.0.6+g708dc14+chromium-152.0.7977.83_macosarm64_minimal.tar.bz2",
+        "sha1": "426836139b0ea7b7278aa0915cfae90eb460551f",
+        "size": 131064528
       },
       "standard": {
-        "name": "cef_binary_151.3.24+g2384915+chromium-151.0.7922.174_macosarm64.tar.bz2",
-        "sha1": "0132e8440567c9d1dd8c6dd478c554349ad0bc86",
-        "size": 297936244
+        "name": "cef_binary_152.0.6+g708dc14+chromium-152.0.7977.83_macosarm64.tar.bz2",
+        "sha1": "a614e0f6eab52bd43f3c2823c06d631bb64b2aa9",
+        "size": 301803512
       }
     },
     "macosx64": {
       "minimal": {
-        "name": "cef_binary_151.3.24+g2384915+chromium-151.0.7922.174_macosx64_minimal.tar.bz2",
-        "sha1": "0e3e0fcc35eeb13a8938763049845a8294cf34b9",
-        "size": 136754636
+        "name": "cef_binary_152.0.6+g708dc14+chromium-152.0.7977.83_macosx64_minimal.tar.bz2",
+        "sha1": "fed74cac2af95dec716000e9a35ebed8eb4f9a25",
+        "size": 137177951
       },
       "standard": {
-        "name": "cef_binary_151.3.24+g2384915+chromium-151.0.7922.174_macosx64.tar.bz2",
-        "sha1": "fa0935cd764c7b1e53ddf8c24d1a47a76ba95205",
-        "size": 334797355
+        "name": "cef_binary_152.0.6+g708dc14+chromium-152.0.7977.83_macosx64.tar.bz2",
+        "sha1": "c994beead60894fc9c80942c3037381ad478b0cf",
+        "size": 348250746
       }
     }
   }

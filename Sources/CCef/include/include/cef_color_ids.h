@@ -816,8 +816,18 @@
   E_CPONLY(CEF_ColorAvatarButtonNormalRipple) \
   E_CPONLY(CEF_ColorAvatarStroke) \
   E_CPONLY(CEF_ColorAvatarFillForContrast) \
-  E_CPONLY(CEF_ColorAiSubscriptionRingGradientStart) \
-  E_CPONLY(CEF_ColorAiSubscriptionRingGradientEnd) \
+  E_CPONLY(CEF_ColorAvatarRingGradientStart) \
+  E_CPONLY(CEF_ColorAvatarRingGradientEnd) \
+  E_CPONLY(CEF_ColorAvatarBadgeWaveBase0) \
+  E_CPONLY(CEF_ColorAvatarBadgeWaveBase1) \
+  E_CPONLY(CEF_ColorAvatarBadgeWaveBase2) \
+  E_CPONLY(CEF_ColorAvatarBadgeWaveBase3) \
+  E_CPONLY(CEF_ColorAvatarBadgeWaveOverlay0) \
+  E_CPONLY(CEF_ColorAvatarBadgeWaveOverlay1) \
+  E_CPONLY(CEF_ColorAvatarBadgeWaveOverlay2) \
+  E_CPONLY(CEF_ColorAvatarBadgeWaveOverlay3) \
+  E_CPONLY(CEF_ColorAvatarBadgeShadow) \
+  E_CPONLY(CEF_ColorAvatarBadgeBackground) \
   /* Bookmark Manager page colors. */ \
   E_CPONLY(CEF_ColorBookmarkManagerItemBackgroundSelected) \
   E_CPONLY(CEF_ColorBookmarkManagerItemOutline) \
@@ -1341,15 +1351,6 @@
   E_CPONLY(CEF_ColorProfileMenuPromoButtonsBackground) \
   /* Profiles colors. */ \
   E_CPONLY(CEF_ColorProfilesReauthDialogBorder) \
-  /* Projects Panel colors. */ \
-  E_CPONLY(CEF_ColorProjectsPanelBackground) \
-  E_CPONLY(CEF_ColorProjectsPanelButtonDisabledIcon) \
-  E_CPONLY(CEF_ColorProjectsPanelButtonHoverBackground) \
-  E_CPONLY(CEF_ColorProjectsPanelButtonIcon) \
-  E_CPONLY(CEF_ColorProjectsPanelListsSeparator) \
-  E_CPONLY(CEF_ColorProjectsPanelNoTabGroupsText) \
-  E_CPONLY(CEF_ColorProjectsPanelTabGroupsDragPlaceholder) \
-  E_CPONLY(CEF_ColorProjectsPanelTabGroupsDropIndicator) \
   /* PWA colors. */ \
   E_CPONLY(CEF_ColorPwaBackground) \
   E_CPONLY(CEF_ColorPwaMenuButtonIcon) \

@@ -33,7 +33,7 @@
 // by hand. See the translator.README.txt file in the tools directory for
 // more information.
 //
-// $hash=472a27181d40eee98aedaa8c769c9c4313bdf73b$
+// $hash=4b79dbc9c8add3d687829498e390b5a896c12ce2$
 //
 
 #ifndef CEF_INCLUDE_CAPI_TEST_CEF_TEST_HELPERS_CAPI_H_
@@ -48,7 +48,9 @@
 #error This file can be included for unit tests only
 #endif
 
-#include "include/capi/cef_base_capi.h"
+#include "include/capi/cef_browser_capi.h"
+#include "include/capi/cef_callback_capi.h"
+#include "include/capi/cef_frame_capi.h"
 
 #ifdef __cplusplus
 extern "C" {
