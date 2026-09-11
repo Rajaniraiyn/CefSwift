@@ -33,7 +33,7 @@
 // by hand. See the translator.README.txt file in the tools directory for
 // more information.
 //
-// $hash=cd3f542ad46a2f2d208a3e68239e57e6330b569e$
+// $hash=855cfc2658839372bd1005d6bd70f57f6534723e$
 //
 
 #ifndef CEF_INCLUDE_CAPI_CEF_PARSER_CAPI_H_
@@ -44,7 +44,7 @@
 #error This file cannot be included DLL-side
 #endif
 
-#include "include/capi/cef_base_capi.h"
+#include "include/capi/cef_values_capi.h"
 
 #ifdef __cplusplus
 extern "C" {
