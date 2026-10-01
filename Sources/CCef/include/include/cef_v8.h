@@ -40,6 +40,7 @@
 
 #include <vector>
 
+#include "include/cef_api_hash.h"
 #include "include/cef_base.h"
 #include "include/cef_browser.h"
 #include "include/cef_frame.h"
@@ -51,6 +52,7 @@ class CefV8Handler;
 class CefV8StackFrame;
 class CefV8Value;
 
+#if CEF_API_REMOVED(15400)
 ///
 /// Register a new V8 extension with the specified JavaScript extension code and
 /// handler. Functions implemented by the handler are prototyped using the
@@ -111,10 +113,11 @@ class CefV8Value;
 ///   example.test.increment();
 /// </pre>
 ///
-/*--cef(optional_param=handler)--*/
+/*--cef(optional_param=handler,removed=15400)--*/
 bool CefRegisterExtension(const CefString& extension_name,
                           const CefString& javascript_code,
                           CefRefPtr<CefV8Handler> handler);
+#endif  // CEF_API_REMOVED(15400)
 
 ///
 /// Class representing a V8 context handle. V8 handles can only be accessed from

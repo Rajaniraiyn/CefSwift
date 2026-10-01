@@ -33,7 +33,7 @@
 // by hand. See the translator.README.txt file in the tools directory for
 // more information.
 //
-// $hash=dc2df3036811a967197cfdae3b67270980420f1b$
+// $hash=fa192d9521134c3155a7f37287ef55e8aed5c659$
 //
 
 #ifndef CEF_INCLUDE_CAPI_CEF_V8_CAPI_H_
@@ -48,6 +48,7 @@
 #include "include/capi/cef_browser_capi.h"
 #include "include/capi/cef_frame_capi.h"
 #include "include/capi/cef_task_capi.h"
+#include "include/cef_api_hash.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -1073,6 +1074,7 @@ typedef struct _cef_v8_stack_frame_t {
   int(CEF_CALLBACK* is_constructor)(struct _cef_v8_stack_frame_t* self);
 } cef_v8_stack_frame_t;
 
+#if CEF_API_REMOVED(15400)
 ///
 /// Register a new V8 extension with the specified JavaScript extension code and
 /// handler. Functions implemented by the handler are prototyped using the
@@ -1134,6 +1136,7 @@ typedef struct _cef_v8_stack_frame_t {
 CEF_EXPORT int cef_register_extension(const cef_string_t* extension_name,
                                       const cef_string_t* javascript_code,
                                       cef_v8_handler_t* handler);
+#endif
 
 #ifdef __cplusplus
 }
