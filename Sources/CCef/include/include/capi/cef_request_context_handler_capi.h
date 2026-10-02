@@ -33,7 +33,7 @@
 // by hand. See the translator.README.txt file in the tools directory for
 // more information.
 //
-// $hash=e822cfb0be5742e1234d1404c0efdbf9fedd2650$
+// $hash=0f336d0aa6e4504673279065acf65d2a70adb47f$
 //
 
 #ifndef CEF_INCLUDE_CAPI_CEF_REQUEST_CONTEXT_HANDLER_CAPI_H_
@@ -93,7 +93,9 @@ typedef struct _cef_request_context_handler_t {
   /// cef_resource_request_handler_t object. This function will not be called if
   /// the client associated with |browser| returns a non-NULL value from
   /// cef_request_handler_t::GetResourceRequestHandler for the same request
-  /// (identified by cef_request_t::GetIdentifier).
+  /// (identified by cef_request_t::GetIdentifier). For worker requests without
+  /// an associated frame or process handler, an arbitrary non-NULL handler from
+  /// the contexts sharing the same storage will be used.
   ///
   struct _cef_resource_request_handler_t*(
       CEF_CALLBACK* get_resource_request_handler)(
