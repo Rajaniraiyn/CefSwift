@@ -509,6 +509,24 @@ typedef struct _cef_settings_t {
   ///
   int use_views_default_popup;
 #endif
+
+#if CEF_API_ADDED(15600)
+  ///
+  /// The macOS Keychain service name used by OSCrypt. If this value is empty
+  /// then the default Chromium/Chrome service name will be used. Changing this
+  /// value will create or access a different Keychain item and may make
+  /// previously encrypted data unreadable.
+  ///
+  cef_string_t keychain_service_name;
+
+  ///
+  /// The macOS Keychain account name used by OSCrypt. If this value is empty
+  /// then the default Chromium/Chrome account name will be used. Changing this
+  /// value will create or access a different Keychain item and may make
+  /// previously encrypted data unreadable.
+  ///
+  cef_string_t keychain_account_name;
+#endif
 } cef_settings_t;
 
 ///
@@ -1145,7 +1163,16 @@ typedef enum {
   CEF_RESULT_CODE_INVALID_ISOLATED_BROWSER_PROCESS = 40,
 #endif
 
-#if CEF_API_ADDED(14700)
+#if CEF_API_ADDED(15600)
+  /// A relaunch was requested during shutdown of an isolated browser process.
+  CEF_RESULT_CODE_NORMAL_EXIT_RELAUNCH_REQUESTED = 41,
+
+  /// A relaunch in background mode was requested during shutdown of an
+  /// isolated browser process.
+  CEF_RESULT_CODE_NORMAL_EXIT_RELAUNCH_BACKGROUND = 42,
+
+  CEF_RESULT_CODE_CHROME_LAST = 43,
+#elif CEF_API_ADDED(14700)
   CEF_RESULT_CODE_CHROME_LAST = 41,
 #elif CEF_API_ADDED(13900)
   CEF_RESULT_CODE_CHROME_LAST = 40,
@@ -3935,6 +3962,9 @@ typedef enum {
 #endif
 #if CEF_API_ADDED(14700)
   CEF_PERMISSION_TYPE_SENSORS = 1 << 28,
+#endif
+#if CEF_API_ADDED(15600)
+  CEF_PERMISSION_TYPE_AMBIENT_LOGIN = 1 << 29,
 #endif
 } cef_permission_request_types_t;
 
