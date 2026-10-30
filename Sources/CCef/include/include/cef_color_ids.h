@@ -774,6 +774,9 @@
   E_CPONLY(CEF_ColorAppMenuHighlightPrimary) \
   E_CPONLY(CEF_ColorAppMenuExpandedForegroundDefault) \
   E_CPONLY(CEF_ColorAppMenuExpandedForegroundPrimary) \
+  E_CPONLY(CEF_ColorAppMenuChipBackground) \
+  E_CPONLY(CEF_ColorAppMenuChipBackgroundHovered) \
+  E_CPONLY(CEF_ColorAppMenuChipForeground) \
   E_CPONLY(CEF_ColorAppMenuChipInkDropHover) \
   E_CPONLY(CEF_ColorAppMenuChipInkDropRipple) \
   E_CPONLY(CEF_ColorAppMenuYourChromeBackground) \
@@ -785,6 +788,9 @@
   E_CPONLY(CEF_ColorAppMenuFooterButtonForeground) \
   E_CPONLY(CEF_ColorAppMenuFooterButtonForegroundHovered) \
   E_CPONLY(CEF_ColorAppMenuFooterButtonBackgroundHovered) \
+  E_CPONLY(CEF_ColorAppMenuZoomButtonBackground) \
+  E_CPONLY(CEF_ColorAppMenuZoomButtonHover) \
+  E_CPONLY(CEF_ColorAppMenuZoomSeparator) \
   /* Actor UI colors.*/ \
   E_CPONLY(CEF_ColorActorUiHandoffButtonBackground) \
   E_CPONLY(CEF_ColorActorUiHandoffButtonBorder) \
@@ -1005,6 +1011,7 @@
   E_CPONLY(CEF_ColorGlicBackground) \
   E_CPONLY(CEF_ColorGlicModalBackground) \
   E_CPONLY(CEF_ColorGlicModalForeground) \
+  E_CPONLY(CEF_ColorGlicPlaceholderElem) \
   E_CPONLY(CEF_ColorGlicActiveTabUnderlineGradient1) \
   E_CPONLY(CEF_ColorGlicActiveTabUnderlineGradient2) \
   E_CPONLY(CEF_ColorGlicActiveTabUnderlineGradient3) \
@@ -1051,6 +1058,8 @@
   E_CPONLY(CEF_ColorTabStripComboButtonSeparator) \
   E_CPONLY(CEF_ColorTabStripControlButtonInkDrop) \
   E_CPONLY(CEF_ColorTabStripControlButtonInkDropRipple) \
+  E_CPONLY(CEF_ColorTabStripScrollButtonBackground) \
+  E_CPONLY(CEF_ColorTabStripScrollButtonIcon) \
   /* New tab button colors for ChromeRefresh.*/ \
   /* TODO (crbug.com/40883407) remove when theming works */ \
   E_CPONLY(CEF_ColorNewTabButtonCRForegroundFrameActive) \
@@ -1124,6 +1133,8 @@
   E_CPONLY(CEF_ColorComposeboxLink) \
   E_CPONLY(CEF_ColorComposeboxToolChipBackground) \
   E_CPONLY(CEF_ColorComposeboxVoiceButtonHoverBackground) \
+  E_CPONLY(CEF_ColorComposeboxAimChipHoverBackground) \
+  E_CPONLY(CEF_ColorComposeboxAimChipHoverText) \
   E_CPONLY(CEF_ColorNewTabPageCommonInputPlaceholder) \
   E_CPONLY(CEF_ColorNewTabPageControlBackgroundHovered) \
   E_CPONLY(CEF_ColorNewTabPageControlBackgroundSelected) \
@@ -1604,7 +1615,13 @@
   /* Settings info card colors. */ \
   E_CPONLY(CEF_ColorSettingsInfoCardBackground) \
   /* Settings page colors. */ \
+  E_CPONLY(CEF_ColorSettingsNavMenuItemBackground) \
+  E_CPONLY(CEF_ColorSettingsNavMenuItemForeground) \
+  E_CPONLY(CEF_ColorSettingsNavMenuItemForegroundSelected) \
+  E_CPONLY(CEF_ColorSettingsNavMenuItemIcon) \
   E_CPONLY(CEF_ColorSettingsWebuiPageBackground) \
+  E_CPONLY(CEF_ColorSettingsTitleText) \
+  E_CPONLY(CEF_ColorSettingsSectionBackground) \
   /* Share-this-tab dialog colors. */ \
   E_CPONLY(CEF_ColorShareThisTabAudioToggleBackground) \
   E_CPONLY(CEF_ColorShareThisTabSourceViewBorder) \
@@ -1879,6 +1896,7 @@
   E_CPONLY(CEF_ColorToolbarSeparator) \
   E_CPONLY(CEF_ColorToolbarActionItemEngaged) \
   E_CPONLY(CEF_ColorToolbarSeparatorDefault) \
+  E_CPONLY(CEF_ColorToolbarSearchFieldTextColor) \
   E_CPONLY(CEF_ColorToolbarText) \
   E_CPONLY(CEF_ColorToolbarTextDefault) \
   E_CPONLY(CEF_ColorToolbarTextDisabled) \

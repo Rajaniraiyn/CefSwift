@@ -33,7 +33,7 @@
 // by hand. See the translator.README.txt file in the tools directory for
 // more information.
 //
-// $hash=6c1cc0deec2869e2e08c16a9efa71890e35d95db$
+// $hash=8362f7e46f65e00e57baab77c1641b8303229e64$
 //
 
 #ifndef CEF_INCLUDE_CAPI_CEF_PREFERENCE_CAPI_H_
@@ -77,6 +77,33 @@ typedef struct _cef_preference_registrar_t {
   int(CEF_CALLBACK* add_preference)(struct _cef_preference_registrar_t* self,
                                     const cef_string_t* name,
                                     struct _cef_value_t* default_value);
+
+#if CEF_API_ADDED(15600)
+  ///
+  /// Override the default value of a previously registered preference. |value|
+  /// is required and must have the same type as the registered default. Its
+  /// contents will be copied. User and managed values take precedence over this
+  /// default. Returns false (0) and sets |error| if the preference is not
+  /// registered or |value| is invalid or has the wrong type. This function must
+  /// be called from within OnRegisterCustomPreferences.
+  ///
+  int(CEF_CALLBACK* set_default_preference)(
+      struct _cef_preference_registrar_t* self,
+      const cef_string_t* name,
+      struct _cef_value_t* value,
+      cef_string_t* error);
+#endif
+
+#if CEF_API_ADDED(15600)
+  ///
+  /// Returns a copy of the current default value for the preference with the
+  /// specified |name|, or NULL if the preference is not registered. This
+  /// function must be called from within OnRegisterCustomPreferences.
+  ///
+  struct _cef_value_t*(CEF_CALLBACK* get_default_preference)(
+      struct _cef_preference_registrar_t* self,
+      const cef_string_t* name);
+#endif
 } cef_preference_registrar_t;
 
 #if CEF_API_ADDED(13401)

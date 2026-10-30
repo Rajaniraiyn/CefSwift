@@ -319,30 +319,40 @@
 #define CEF_API_HASH_15400 "5c8344ae7d7f6421bc801401e35d4dbf6d38e101"
 #endif
 
-// Next version last updated October 05, 2026.
-#define CEF_API_VERSION_999998 999998
+// Added October 07, 2026.
+#define CEF_API_VERSION_15600 15600
 #if defined(OS_WIN)
-#define CEF_API_HASH_999998 "726dc73763db22edb289e41af2421a232617f7f4"
+#define CEF_API_HASH_15600 "8f211699a44daedd96ae2a89bbf3a8f2abc229f3"
 #elif defined(OS_MAC)
-#define CEF_API_HASH_999998 "e5cd28047fc1f8bbb972e54692fc665040c7f034"
+#define CEF_API_HASH_15600 "e01e9208f887490aa249d57f56761ab9c0c3f7ac"
 #elif defined(OS_LINUX)
-#define CEF_API_HASH_999998 "5c8344ae7d7f6421bc801401e35d4dbf6d38e101"
+#define CEF_API_HASH_15600 "6dc09eb2834fe5b61d7d8c42bbb8d8c27a2bb1b6"
 #endif
 
-// Experimental version last updated October 05, 2026.
+// Next version last updated October 23, 2026.
+#define CEF_API_VERSION_999998 999998
+#if defined(OS_WIN)
+#define CEF_API_HASH_999998 "8f211699a44daedd96ae2a89bbf3a8f2abc229f3"
+#elif defined(OS_MAC)
+#define CEF_API_HASH_999998 "e01e9208f887490aa249d57f56761ab9c0c3f7ac"
+#elif defined(OS_LINUX)
+#define CEF_API_HASH_999998 "6dc09eb2834fe5b61d7d8c42bbb8d8c27a2bb1b6"
+#endif
+
+// Experimental version last updated October 23, 2026.
 #define CEF_API_VERSION_999999 999999
 #if defined(OS_WIN)
-#define CEF_API_HASH_999999 "f14d20a5b5f2c89e7fe93de28b60278b38300f84"
+#define CEF_API_HASH_999999 "675a366a0df2e2fc012e078c9abbd7c37423b80e"
 #elif defined(OS_MAC)
-#define CEF_API_HASH_999999 "a0751e05d62eb0b55000bb93ed449c395828684e"
+#define CEF_API_HASH_999999 "57391896545d34a4c090c5e2ee5c7a7d902e61a6"
 #elif defined(OS_LINUX)
-#define CEF_API_HASH_999999 "488548509981031433af22af05c9b59e6f0788a9"
+#define CEF_API_HASH_999999 "c90d62adf436038d9633b3bd18225126357b35ac"
 #endif
 
 // Oldest supported CEF version.
 #define CEF_API_VERSION_MIN CEF_API_VERSION_13300
 
 // Newest supported CEF version.
-#define CEF_API_VERSION_LAST CEF_API_VERSION_15400
+#define CEF_API_VERSION_LAST CEF_API_VERSION_15600
 
 #endif  // CEF_INCLUDE_CEF_API_VERSIONS_H_
