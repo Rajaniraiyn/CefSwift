@@ -32,7 +32,7 @@ final class CefBrowserClient {
     private let isDefaultClient: Bool
 
     /// The most recent context-menu target, for commands that arrive later.
-    private var contextMenuParams = CefContextMenuParams()
+    private var contextMenuTarget = CefContextMenuTarget()
 
     init(browser: CefBrowser?, requestFilter: CefRequestFilter?, chromeUI: CefChromeUIConfiguration) {
         self.primary = browser
@@ -380,12 +380,12 @@ final class CefBrowserClient {
                 cefRelease(browser)
                 return
             }
-            let snapshot = CefContextMenuParams(raw: params)
+            let target = CefContextMenuTarget(raw: params)
             let menu = CefMenuModel(raw: model)
             CefBrowserClient.run(s, browser, default: ()) { client, b in
-                client.contextMenuParams = snapshot
-                b.options.contextMenu.apply(to: menu, params: snapshot)
-                b.delegate?.browser(b, configureContextMenu: menu, params: snapshot)
+                client.contextMenuTarget = target
+                b.options.contextMenu.apply(to: menu, for: target)
+                b.delegate?.browser(b, configureContextMenu: menu, for: target)
             }
         }
         h.pointee.run_context_menu = { s, browser, frame, params, model, callback in
@@ -404,9 +404,9 @@ final class CefBrowserClient {
             // presents a native menu from a snapshot of the model.
             let handled = CefBrowserClient.run(s, browser, default: false) { client, _ in
                 guard let host = client.offscreenHost else { return false }
-                host.offscreenRunContextMenu(
+                host.offscreenShowContextMenu(
                     CefMenuModel(raw: model), at: point ?? .zero,
-                    callback: CefRunContextMenuCallback(raw: callback))
+                    completion: CefContextMenuCompletion(raw: callback))
                 return true
             }
             if !handled { cefRelease(callback) }
@@ -414,12 +414,12 @@ final class CefBrowserClient {
         }
         h.pointee.on_context_menu_command = { s, browser, frame, params, commandID, _ in
             cefRelease(frame)
-            let snapshot = params.map { CefContextMenuParams(raw: $0) }
+            let snapshot = params.map { CefContextMenuTarget(raw: $0) }
             cefRelease(params)
             return CefBrowserClient.run(s, browser, default: 0) { client, b in
-                let params = snapshot ?? client.contextMenuParams
-                if b.options.contextMenu.perform(commandID: Int(commandID), in: b, params: params) { return 1 }
-                return (b.delegate?.browser(b, handleContextMenuCommand: Int(commandID), params: params) ?? false) ? 1 : 0
+                let target = snapshot ?? client.contextMenuTarget
+                if b.options.contextMenu.perform(commandID: Int(commandID), in: b, for: target) { return 1 }
+                return (b.delegate?.browser(b, handleContextMenuCommand: Int(commandID), for: target) ?? false) ? 1 : 0
             }
         }
         return h

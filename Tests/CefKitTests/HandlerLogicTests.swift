@@ -60,8 +60,7 @@ struct HandlerLogicTests {
     }
 
     @Test func menuModelUserCommandRange() {
-        #expect(CefMenuModel.userCommandIDFirst == 26500)
-        #expect(CefMenuModel.userCommandIDLast == 28500)
+        #expect(CefMenuModel.userCommandIDs == 26500...28500)
     }
 
     // MARK: Key event mapping
@@ -89,23 +88,23 @@ struct HandlerLogicTests {
 struct ProfilePathTests {
     let root = URL(fileURLWithPath: "/tmp/cefroot")
 
-    @Test func defaultProfileHasNoCachePath() {
-        #expect(CefProfile.cachePath(for: .global, rootCachePath: root) == nil)
+    @Test func defaultProfileHasNoCacheDirectory() {
+        #expect(CefProfile.cacheDirectory(for: .global, rootCacheDirectory: root) == nil)
     }
 
-    @Test func incognitoProfileHasNoCachePath() {
+    @Test func incognitoProfileHasNoCacheDirectory() {
         // Empty cache_path is what puts a context in in-memory/incognito mode.
-        #expect(CefProfile.cachePath(for: .incognito, rootCachePath: root) == nil)
+        #expect(CefProfile.cacheDirectory(for: .incognito, rootCacheDirectory: root) == nil)
     }
 
     @Test func persistentProfileDerivesUnderProfiles() {
-        let path = CefProfile.cachePath(for: .persistent(name: "Work"), rootCachePath: root)
+        let path = CefProfile.cacheDirectory(for: .persistent(name: "Work"), rootCacheDirectory: root)
         #expect(path?.path == "/tmp/cefroot/Profiles/Work")
     }
 
     @Test func persistentProfileSanitizesName() {
         // Path separators and leading dots can't escape the Profiles dir.
-        let path = CefProfile.cachePath(for: .persistent(name: "../../etc"), rootCachePath: root)
+        let path = CefProfile.cacheDirectory(for: .persistent(name: "../../etc"), rootCacheDirectory: root)
         #expect(path != nil)
         #expect(!(path!.path.contains("/etc")))
         #expect(path!.path.hasPrefix("/tmp/cefroot/Profiles/"))
@@ -116,6 +115,6 @@ struct ProfilePathTests {
     }
 
     @Test func persistentProfileWithNilRootYieldsNil() {
-        #expect(CefProfile.cachePath(for: .persistent(name: "Work"), rootCachePath: nil) == nil)
+        #expect(CefProfile.cacheDirectory(for: .persistent(name: "Work"), rootCacheDirectory: nil) == nil)
     }
 }

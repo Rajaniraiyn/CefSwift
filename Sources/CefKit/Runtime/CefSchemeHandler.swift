@@ -64,13 +64,13 @@ public protocol CefSchemeHandler: Sendable {
 /// ```swift
 /// CefRuntime.shared.registerSchemeHandler(
 ///     scheme: "myapp",
-///     handler: CefBundleSchemeHandler(directory: Bundle.main.resourceURL!.appending(path: "web")))
+///     handler: CefDirectorySchemeHandler(directory: Bundle.main.resourceURL!.appending(path: "web")))
 /// ```
 ///
 /// Request paths map to files under ``directory``; directory paths serve
 /// ``indexFile``. Paths that lead outside ``directory`` are not found. The
 /// MIME type comes from the file extension.
-public struct CefBundleSchemeHandler: CefSchemeHandler {
+public struct CefDirectorySchemeHandler: CefSchemeHandler {
     /// The directory served.
     public let directory: URL
     /// The file served for directory paths.

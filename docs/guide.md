@@ -111,11 +111,15 @@ CefWebView(browser)
 instead of interpreting gestures.
 
 To host offscreen frames in a view of your own, implement
-`CefOffscreenHost` and call `browser.host(offscreenIn:size:)`; input goes in
-through `sendMouseDown(at:button:clickCount:modifiers:)`,
+`CefOffscreenHost` and call `browser.host(offscreenIn:size:)`. The view
+drives the browser as AppKit drives a view: `hostViewDidResize()`,
+`hostViewDidHide()` and `hostViewDidUnhide()` as those happen, and
+`displayIfNeeded()` on every display refresh. Input goes in through
+`sendMouseDown(at:button:clickCount:modifiers:)`, `sendMouseExit(at:modifiers:)`,
 `sendKeyEvent(_:)`, `sendTouchEvent(_:)`,
 `setMarkedText(_:selectedRange:replacementRange:)`,
-`insertText(_:replacementRange:)` and the `dragTarget…` methods.
+`insertText(_:replacementRange:)`, and `draggingEntered`, `draggingUpdated`,
+`draggingExited` and `performDrop`, which mirror `NSDraggingDestination`.
 
 ## JavaScript
 
@@ -181,14 +185,14 @@ final class Policy: CefBrowserDelegate {
 options.contextMenu.hiddenCommands = [.viewSource, .print]
 options.contextMenu.showsInspectElement = true
 options.contextMenu.items = [
-    CefContextMenuItem("Search Notes", isVisible: { !$0.selectionText.isEmpty }) { _, target in
-        search(target.selectionText)
+    CefContextMenuItem("Search Notes", isVisible: { !$0.selectedText.isEmpty }) { _, target in
+        search(target.selectedText)
     },
 ]
 ```
 
 `options.contextMenu.isEnabled = false` removes the menu. For menus that
-depend on app state, implement `browser(_:configureContextMenu:params:)`.
+depend on app state, implement `browser(_:configureContextMenu:for:)`.
 
 ## Building a browser
 
@@ -349,7 +353,7 @@ for await event in browser.devTools.events("Network.responseReceived") {
 configuration.customSchemes = [CefCustomScheme(name: "app")]
 // after start-up:
 CefRuntime.shared.registerSchemeHandler(
-    scheme: "app", handler: CefBundleSchemeHandler(directory: webRoot))
+    scheme: "app", handler: CefDirectorySchemeHandler(directory: webRoot))
 // load app://local/index.html
 ```
 

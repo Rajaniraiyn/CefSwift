@@ -43,9 +43,9 @@ struct MenuModelTests {
             menu.clear()
             #expect(MenuModelProbe.clearCount == 1)
 
-            menu.addItem(commandID: CefMenuModel.userCommandIDFirst, title: "Custom")
+            menu.addItem(commandID: CefMenuModel.userCommandIDs.lowerBound, title: "Custom")
             #expect(MenuModelProbe.addItemCount == 1)
-            #expect(MenuModelProbe.lastAddedCommandID == CefMenuModel.userCommandIDFirst)
+            #expect(MenuModelProbe.lastAddedCommandID == CefMenuModel.userCommandIDs.lowerBound)
 
             menu.addSeparator()
             #expect(MenuModelProbe.separatorCount == 1)

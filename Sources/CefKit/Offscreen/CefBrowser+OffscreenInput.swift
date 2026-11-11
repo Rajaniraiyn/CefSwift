@@ -99,12 +99,19 @@ extension CefBrowser {
 
     // MARK: Mouse
 
-    /// Forwards a mouse move, or the mouse leaving the view when `leaving`
-    /// is `true`.
-    public func sendMouseMove(to point: CGPoint, modifiers: CefEventModifiers = [], leaving: Bool = false) {
+    /// Forwards a mouse move.
+    public func sendMouseMove(to point: CGPoint, modifiers: CefEventModifiers = []) {
         withHost { host in
             var event = cef_mouse_event_t(point, modifiers: modifiers)
-            host.pointee.send_mouse_move_event(host, &event, leaving ? 1 : 0)
+            host.pointee.send_mouse_move_event(host, &event, 0)
+        }
+    }
+
+    /// Forwards the mouse leaving the view at `point`.
+    public func sendMouseExit(at point: CGPoint, modifiers: CefEventModifiers = []) {
+        withHost { host in
+            var event = cef_mouse_event_t(point, modifiers: modifiers)
+            host.pointee.send_mouse_move_event(host, &event, 1)
         }
     }
 
@@ -157,33 +164,40 @@ extension CefBrowser {
         withHost { $0.pointee.set_focus($0, focused ? 1 : 0) }
     }
 
-    // MARK: Geometry
+    // MARK: Hosting
 
-    /// Tells Chromium the view size changed, so it reads
+    /// Tells Chromium the host view's size changed, so it reads
     /// ``CefOffscreenHost/offscreenViewInfo`` and repaints.
-    public func wasResized() {
+    public func hostViewDidResize() {
         withHost { $0.pointee.was_resized($0) }
     }
 
-    /// Tells Chromium the scale factor or screen changed.
-    public func notifyScreenInfoChanged() {
+    /// Tells Chromium the host view's scale factor or screen changed.
+    public func hostViewDidChangeBackingProperties() {
         withHost { $0.pointee.notify_screen_info_changed($0) }
     }
 
-    /// Tells Chromium whether the view is hidden. Hidden browsers stop painting.
-    public func wasHidden(_ hidden: Bool) {
-        withHost { $0.pointee.was_hidden($0, hidden ? 1 : 0) }
+    /// Tells Chromium the host view can no longer be seen — hidden,
+    /// occluded or out of a window. Hidden browsers stop painting.
+    public func hostViewDidHide() {
+        withHost { $0.pointee.was_hidden($0, 1) }
     }
 
-    /// Repaints the whole view.
-    public func invalidate() {
+    /// Tells Chromium the host view can be seen again.
+    public func hostViewDidUnhide() {
+        withHost { $0.pointee.was_hidden($0, 0) }
+    }
+
+    /// Marks the whole view as needing to be repainted. The repaint arrives
+    /// with the next frame (``displayIfNeeded()``).
+    public func setNeedsDisplay() {
         withHost { $0.pointee.invalidate($0, PET_VIEW) }
     }
 
-    /// Asks Chromium for a frame. Offscreen browsers are created with
-    /// external begin frames, so the host calls this on every display
-    /// refresh.
-    public func sendExternalBeginFrame() {
+    /// Asks Chromium for a frame, which it paints if anything changed.
+    /// Offscreen browsers are created with external begin frames, so the
+    /// host view calls this on every display refresh while it can be seen.
+    public func displayIfNeeded() {
         withHost { $0.pointee.send_external_begin_frame($0) }
     }
 

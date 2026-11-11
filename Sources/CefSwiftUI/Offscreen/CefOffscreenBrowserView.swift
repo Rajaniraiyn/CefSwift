@@ -26,7 +26,7 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
         didSet {
             guard browser !== oldValue else { return }
             if let oldValue, oldValue.hostView === self {
-                oldValue.wasHidden(true)
+                oldValue.hostViewDidHide()
             }
             hostBrowserIfPossible()
             updateVisibility(notifyingBrowser: true)
@@ -83,8 +83,8 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
     }
     var keyInput = KeyInputState()
 
-    /// The callback of the context menu being shown.
-    var pendingContextMenuCallback: CefRunContextMenuCallback?
+    /// The completion of the context menu being shown.
+    var pendingContextMenuCompletion: CefContextMenuCompletion?
 
     /// The operations allowed for the page-initiated drag in progress.
     var currentDragAllowedOperations: CefDragOperation = .none
@@ -154,7 +154,7 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
     public override func layout() {
         super.layout()
         syncLayerGeometry()
-        browser?.wasResized()
+        browser?.hostViewDidResize()
     }
 
     // Live resize calls this on every step. Resizing the content layer here,
@@ -163,14 +163,14 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
     public override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
         syncLayerGeometry()
-        browser?.wasResized()
+        browser?.hostViewDidResize()
     }
 
     public override func viewDidEndLiveResize() {
         super.viewDidEndLiveResize()
         syncLayerGeometry()
-        browser?.wasResized()
-        browser?.invalidate()
+        browser?.hostViewDidResize()
+        browser?.setNeedsDisplay()
     }
 
     private func syncLayerGeometry() {
@@ -184,8 +184,8 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
         guard let scale = window?.backingScaleFactor else { return }
         contentLayer.contentsScale = scale
         popupLayer.contentsScale = scale
-        browser?.notifyScreenInfoChanged()
-        browser?.wasResized()
+        browser?.hostViewDidChangeBackingProperties()
+        browser?.hostViewDidResize()
     }
 
     private func hostBrowserIfPossible() {
@@ -228,12 +228,12 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
         isDisplaying = visible
         // A browser that has moved to another view is that view's to manage.
         if let browser, browser.hostView === self {
-            browser.wasHidden(!visible)
+            if visible { browser.hostViewDidUnhide() } else { browser.hostViewDidHide() }
         }
     }
 
     @objc private func displayLinkDidFire() {
-        browser?.sendExternalBeginFrame()
+        browser?.displayIfNeeded()
     }
 
     // MARK: Window observation
@@ -318,7 +318,7 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
     }
 
     public func offscreenDidChangeCursor(_ cursor: CefCursorType) {
-        currentCursor = cursor.nsCursor ?? .arrow
+        currentCursor = NSCursor.cursor(for: cursor) ?? .arrow
         currentCursor.set()
         window?.invalidateCursorRects(for: self)
     }
@@ -544,7 +544,7 @@ extension CefOffscreenBrowserView: @preconcurrency NSTextInputClient {
 
 extension CefOffscreenBrowserView {
 
-    public func offscreenRunContextMenu(_ menu: CefMenuModel, at point: CGPoint, callback: CefRunContextMenuCallback) {
+    public func offscreenShowContextMenu(_ menu: CefMenuModel, at point: CGPoint, completion: CefContextMenuCompletion) {
         // Chromium does not allow a nested run loop inside this callback, so
         // the menu is read now and shown on the next turn of the run loop.
         let menuItems: [NSMenuItem] = (0..<menu.count).compactMap { index in
@@ -557,21 +557,21 @@ extension CefOffscreenBrowserView {
             return item
         }
         guard !menuItems.isEmpty else {
-            callback.cancel()
+            completion.cancel()
             return
         }
 
-        pendingContextMenuCallback = callback
+        pendingContextMenuCompletion = completion
         DispatchQueue.main.async { [weak self] in
-            guard let self else { return callback.cancel() }
+            guard let self else { return completion.cancel() }
             let nsMenu = NSMenu()
             nsMenu.autoenablesItems = false
             nsMenu.items = menuItems
             nsMenu.popUp(positioning: nil, at: point, in: self)
-            // `popUp` returns once the menu closes; an unanswered callback
+            // `popUp` returns once the menu closes; an unanswered completion
             // means nothing was chosen.
-            self.pendingContextMenuCallback?.cancel()
-            self.pendingContextMenuCallback = nil
+            self.pendingContextMenuCompletion?.cancel()
+            self.pendingContextMenuCompletion = nil
         }
     }
 
@@ -583,7 +583,7 @@ extension CefOffscreenBrowserView {
     }
 
     @objc private func contextMenuItemSelected(_ sender: NSMenuItem) {
-        pendingContextMenuCallback?.select(commandID: sender.tag)
-        pendingContextMenuCallback = nil
+        pendingContextMenuCompletion?.select(commandID: sender.tag)
+        pendingContextMenuCompletion = nil
     }
 }

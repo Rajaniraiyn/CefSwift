@@ -20,7 +20,7 @@ enum SelfTest {
         configuration.productName = "SelfTestBrowser"
         configuration.preferences["webkit.webprefs.default_font_size"] = 21
         configuration.customSchemes = [CefCustomScheme(name: "selftest")]
-        configuration.rootCachePath = FileManager.default.temporaryDirectory
+        configuration.rootCacheDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("cefswift-selftest-\(ProcessInfo.processInfo.processIdentifier)")
         do {
             try CefRuntime.shared.initialize(configuration: configuration)

@@ -73,7 +73,7 @@ import Testing
     }
 }
 
-@Suite struct CefBundleSchemeHandlerTests {
+@Suite struct CefDirectorySchemeHandlerTests {
     @Test func servesIndexAndGuardsTraversal() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("cefswift-bundle-scheme-\(UUID().uuidString)", isDirectory: true)
@@ -82,7 +82,7 @@ import Testing
         try Data("<html>index</html>".utf8).write(to: root.appendingPathComponent("index.html"))
         try Data("body{}".utf8).write(to: root.appendingPathComponent("app.css"))
 
-        let handler = CefBundleSchemeHandler(directory: root)
+        let handler = CefDirectorySchemeHandler(directory: root)
         #expect(handler.resolveFile(forRequestPath: "/")?.lastPathComponent == "index.html")
         #expect(handler.resolveFile(forRequestPath: "")?.lastPathComponent == "index.html")
         #expect(handler.resolveFile(forRequestPath: "/app.css")?.lastPathComponent == "app.css")
@@ -91,10 +91,10 @@ import Testing
     }
 
     @Test func mimeDetection() {
-        #expect(CefBundleSchemeHandler.mimeType(forPathExtension: "html") == "text/html")
-        #expect(CefBundleSchemeHandler.mimeType(forPathExtension: "css") == "text/css")
-        #expect(CefBundleSchemeHandler.mimeType(forPathExtension: "png") == "image/png")
-        #expect(CefBundleSchemeHandler.mimeType(forPathExtension: "") == "application/octet-stream")
-        #expect(CefBundleSchemeHandler.mimeType(forPathExtension: "nonsense-ext") == "application/octet-stream")
+        #expect(CefDirectorySchemeHandler.mimeType(forPathExtension: "html") == "text/html")
+        #expect(CefDirectorySchemeHandler.mimeType(forPathExtension: "css") == "text/css")
+        #expect(CefDirectorySchemeHandler.mimeType(forPathExtension: "png") == "image/png")
+        #expect(CefDirectorySchemeHandler.mimeType(forPathExtension: "") == "application/octet-stream")
+        #expect(CefDirectorySchemeHandler.mimeType(forPathExtension: "nonsense-ext") == "application/octet-stream")
     }
 }

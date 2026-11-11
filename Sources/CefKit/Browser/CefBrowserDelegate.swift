@@ -46,9 +46,9 @@ public protocol CefBrowserDelegate: AnyObject {
     /// `true` to consume it.
     func browser(_ browser: CefBrowser, handleKeyEvent event: CefKeyEvent, isBeforePage: Bool) -> Bool
     /// Customize the context menu before it is shown.
-    func browser(_ browser: CefBrowser, configureContextMenu menu: CefMenuModel, params: CefContextMenuParams)
+    func browser(_ browser: CefBrowser, configureContextMenu menu: CefMenuModel, for target: CefContextMenuTarget)
     /// A context-menu command was chosen. Return `true` if you handled it.
-    func browser(_ browser: CefBrowser, handleContextMenuCommand commandID: Int, params: CefContextMenuParams) -> Bool
+    func browser(_ browser: CefBrowser, handleContextMenuCommand commandID: Int, for target: CefContextMenuTarget) -> Bool
     /// Chrome is about to run one of its commands (see ``CefChromeCommand``)
     /// — new tab, find, print, zoom, … Return `true` to handle it yourself.
     /// Chrome-style browsers only.
@@ -96,8 +96,8 @@ extension CefBrowserDelegate {
         .default(for: request)
     }
     public func browser(_ browser: CefBrowser, handleKeyEvent event: CefKeyEvent, isBeforePage: Bool) -> Bool { false }
-    public func browser(_ browser: CefBrowser, configureContextMenu menu: CefMenuModel, params: CefContextMenuParams) {}
-    public func browser(_ browser: CefBrowser, handleContextMenuCommand commandID: Int, params: CefContextMenuParams) -> Bool {
+    public func browser(_ browser: CefBrowser, configureContextMenu menu: CefMenuModel, for target: CefContextMenuTarget) {}
+    public func browser(_ browser: CefBrowser, handleContextMenuCommand commandID: Int, for target: CefContextMenuTarget) -> Bool {
         false
     }
     public func browser(_ browser: CefBrowser, handleChromeCommand command: CefChromeCommand, disposition: CefWindowOpenDisposition) -> Bool {

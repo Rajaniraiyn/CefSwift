@@ -48,12 +48,17 @@ public enum CefCursorType: Sendable, Equatable {
         default: self = .other
         }
     }
+}
 
-    /// The closest standard `NSCursor`, or `nil` when the page hides the
-    /// cursor.
+extension NSCursor {
+    /// The standard cursor closest to `type`, or `nil` when the page hides
+    /// the cursor (``CefCursorType/none``).
+    ///
+    /// A static method rather than an initializer because it returns
+    /// AppKit's shared cursors, such as `NSCursor.pointingHand`.
     @MainActor
-    public var nsCursor: NSCursor? {
-        switch self {
+    public static func cursor(for type: CefCursorType) -> NSCursor? {
+        switch type {
         case .pointer, .other: return .arrow
         case .hand: return .pointingHand
         case .grab: return .openHand
