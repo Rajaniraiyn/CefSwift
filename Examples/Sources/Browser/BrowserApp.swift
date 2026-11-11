@@ -17,6 +17,8 @@ struct BrowserApp: CefSwiftApp {
         // internal pages free of buttons that would open Chrome windows.
         configuration.chromeUI.hiddenAppMenuCommands = [.newWindow, .newIncognitoWindow]
         configuration.customSchemes = [CefCustomScheme(name: BrowserPages.scheme)]
+        // Quit immediately on ⌘Q instead of Chromium's "Hold ⌘Q to Quit".
+        configuration.preferences["browser.confirm_to_quit"] = false
         return configuration
     }
 

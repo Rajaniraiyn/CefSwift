@@ -52,15 +52,82 @@ public struct CefBrowserOptions {
 
 /// A script injected into every document a browser loads, before the page's
 /// own scripts run.
+///
+/// Scripts run on every page the browser shows, Chromium's own `chrome://`
+/// pages included, which makes them the tool for customizing those pages:
+///
+/// ```swift
+/// options.userScripts = [
+///     // Hide Chromium's update status on the settings About page.
+///     .styleSheet("settings-about-page #updateStatusContainer { display: none }",
+///                 matching: "chrome://settings/*"),
+/// ]
+/// ```
 public struct CefUserScript: Sendable, Equatable {
     public var source: String
+    /// Limits the script to pages whose URL matches this pattern, where `*`
+    /// stands for any run of characters: `"chrome://settings/*"`,
+    /// `"https://*.example.com/*"`. `nil` runs it everywhere. A scoped script
+    /// runs inside a function, so its top-level declarations are not global.
+    public var urlPattern: String?
     /// Run in an isolated world with this name instead of the page's own
     /// JavaScript context (the page cannot see or tamper with it).
     public var isolatedWorldName: String?
 
-    public init(source: String, isolatedWorldName: String? = nil) {
+    public init(source: String, matching urlPattern: String? = nil, isolatedWorldName: String? = nil) {
         self.source = source
+        self.urlPattern = urlPattern
         self.isolatedWorldName = isolatedWorldName
+    }
+
+    /// A script that adds `css` to matching pages.
+    ///
+    /// Pages built from web components — every `chrome://` page — keep their
+    /// markup inside shadow roots that ordinary stylesheets cannot reach.
+    /// With `includingShadowRoots` the rules are applied inside each shadow
+    /// root as well, so a selector written for a component's internals
+    /// matches there.
+    public static func styleSheet(
+        _ css: String, matching urlPattern: String? = nil, includingShadowRoots: Bool = true
+    ) -> CefUserScript {
+        // Covers shadow roots that already exist and those created later.
+        let shadowRoots = """
+              const visit = root => {
+                for (const element of root.querySelectorAll('*')) {
+                  if (element.shadowRoot) { adopt(element.shadowRoot); visit(element.shadowRoot); }
+                }
+              };
+              visit(document);
+              const attachShadow = Element.prototype.attachShadow;
+              Element.prototype.attachShadow = function (options) {
+                const root = attachShadow.call(this, options);
+                adopt(root);
+                return root;
+              };
+            """
+        return CefUserScript(
+            source: """
+                (() => {
+                  const sheet = new CSSStyleSheet();
+                  sheet.replaceSync(\(CefJSON.string(css).text));
+                  const adopt = root => { root.adoptedStyleSheets = [...root.adoptedStyleSheets, sheet]; };
+                  adopt(document);
+                \(includingShadowRoots ? shadowRoots : "")
+                })();
+                """,
+            matching: urlPattern)
+    }
+
+    /// The source as injected: wrapped in a URL check when scoped.
+    var injectedSource: String {
+        guard let urlPattern else { return source }
+        let expression = NSRegularExpression.escapedPattern(for: urlPattern).replacingOccurrences(of: "\\*", with: ".*")
+        return """
+            (() => {
+              if (!new RegExp(\(CefJSON.string("^" + expression + "$").text)).test(location.href)) return;
+              \(source)
+            })();
+            """
     }
 }
 
@@ -245,7 +312,7 @@ public final class CefBrowser: Identifiable {
     /// page's own scripts. For scripts known up front prefer
     /// ``CefBrowserOptions/userScripts``, which also cover the first page.
     public func addUserScript(_ script: CefUserScript) async throws {
-        var params: [String: CefJSON] = ["source": .string(script.source)]
+        var params: [String: CefJSON] = ["source": .string(script.injectedSource)]
         if let world = script.isolatedWorldName {
             params["worldName"] = .string(world)
         }
@@ -618,6 +685,18 @@ extension CefBrowser {
 // MARK: - Callbacks from the client
 
 extension CefBrowser {
+    /// Chromium does not run document-start scripts in its own `chrome://`
+    /// pages, so user scripts are evaluated there as each page starts
+    /// loading instead.
+    func mainFrameDidStartLoading(_ url: URL?) {
+        guard !isBootstrapping, url?.scheme == "chrome", !options.userScripts.isEmpty else { return }
+        Task {
+            for script in options.userScripts where script.isolatedWorldName == nil {
+                _ = try? await devTools.send("Runtime.evaluate", ["expression": .string(script.injectedSource)])
+            }
+        }
+    }
+
     func applyTitle(_ title: String) {
         guard !isBootstrapping else { return }
         self.title = title

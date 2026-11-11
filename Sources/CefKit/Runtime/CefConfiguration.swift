@@ -146,6 +146,17 @@ public struct CefConfiguration: Sendable {
     /// Chromium features to switch off (`--disable-features`), by name.
     public var disabledFeatures: Set<String> = []
 
+    /// Chromium preferences — the settings behind `chrome://settings` — to
+    /// apply to every profile when it is first used, by dotted name.
+    ///
+    /// ```swift
+    /// configuration.preferences["browser.confirm_to_quit"] = false   // no "Hold ⌘Q to Quit"
+    /// configuration.preferences["credentials_enable_service"] = false
+    /// ```
+    ///
+    /// Change them later, per profile, with ``CefProfile/setPreference(_:to:)``.
+    public var preferences: [String: CefJSON] = [:]
+
     /// Trims Chrome's own UI in Chrome-style windows.
     public var chromeUI = CefChromeUIConfiguration()
 

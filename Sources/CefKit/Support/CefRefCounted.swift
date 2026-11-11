@@ -95,6 +95,13 @@ final class CefRef<T>: @unchecked Sendable {
 }
 
 extension CefRef {
+    /// Gives up ownership: returns the pointer with an extra reference for
+    /// the caller, typically to hand to CEF.
+    func detach() -> UnsafeMutablePointer<T> {
+        cefAddRef(pointer)
+        return pointer
+    }
+
     convenience init?(adopting pointer: UnsafeMutablePointer<T>?) {
         guard let pointer else { return nil }
         self.init(adopting: pointer)
