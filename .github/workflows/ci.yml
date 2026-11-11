@@ -1,11 +1,12 @@
-# CefSwift CI — build, test, bundle the Browser example, and smoke-test a real
-# CEF launch on every push/PR to main.
+# Builds, tests, audits the C bridge, bundles SelfTest and runs it against the
+# real Chromium. Also the gate for the auto-merged CEF update pull requests,
+# which start it with workflow_dispatch (docs/automation.md).
 #
 # Cost notes (keep this cheap):
-#   - Single macos-15 job (arm64). macos-latest currently aliases macos-26 and
-#     macos-14 is deprecating, so the runner is pinned explicitly.
+#   - One macos-15 (arm64) job. The runner is pinned so an image change never
+#     arrives unannounced; macos-latest moves.
 #   - Only the minimal arm64 CEF flavor is downloaded, and `.cef/downloads`
-#     (~120 MB) is cached keyed on the pinned CEF version.
+#     (~135 MB) is cached keyed on the pinned CEF version.
 name: CI
 
 on:
@@ -15,35 +16,33 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
-permissions:
-  contents: read
-
 jobs:
   ci:
-    # Job name intentionally just "ci" — docs/automation.md tells users to mark
-    # it as the required status check that gates auto-merged CEF update PRs.
+    # Keep the job name "ci": it is the required status check that gates the
+    # auto-merged CEF update pull requests.
     runs-on: macos-15
     timeout-minutes: 45
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Read pinned CEF version
+      - name: Read the pinned CEF version
         id: cef
         run: echo "version=$(jq -r .cef CEF_VERSION.json)" >> "$GITHUB_OUTPUT"
 
-      - name: Build (root package)
-        run: swift build
+      # Offline checks of the update logic (release selection, manifest,
+      # archive extraction, API-version handling).
+      - name: Update script self-test
+        run: Scripts/update-cef.py --self-test
 
-      - name: Test
-        run: swift test
-
-      # Cache the downloaded CEF tarball; the key matches the scheme used by
-      # Scripts/cef-update.sh and the CefPlugin: cef-<version>-<platform>-<flavor>.
+      # Same key as the update workflow saves, so an update branch restores
+      # the archive that workflow already downloaded.
       - name: Cache CEF downloads
         uses: actions/cache@v4
         with:
@@ -57,10 +56,19 @@ jobs:
             --allow-network-connections all \
             cef download
 
-      # Audit the dlsym bridge: every symbol in Sources/CCef/.../ccef_symbols.h
-      # must be an exported global of the just-downloaded framework binary.
-      - name: Generated C bridge is up to date
-        run: Scripts/generate-bindings.py --check
+      # The generated bridge must match the vendored headers, and every
+      # function it binds must be exported by the framework it will load —
+      # a mismatch would otherwise abort at first call.
+      - name: C bridge matches the headers and the framework
+        env:
+          FRAMEWORK: .cef/dist/${{ steps.cef.outputs.version }}_macosarm64_minimal/Release/Chromium Embedded Framework.framework
+        run: Scripts/generate-bindings.py --check --framework "$FRAMEWORK"
+
+      - name: Build
+        run: swift build
+
+      - name: Test
+        run: swift test
 
       - name: Build examples
         run: swift build --package-path Examples
