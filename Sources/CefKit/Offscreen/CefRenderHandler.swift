@@ -29,9 +29,9 @@ public enum CefOffscreenPaintElement: Sendable {
 
 /// The geometry an offscreen host reports to Chromium.
 ///
-/// Call ``CefBrowser/wasResized()`` after the size changes and
-/// ``CefBrowser/notifyScreenInfoChanged()`` after the scale or screen
-/// changes.
+/// Call ``CefBrowser/hostViewDidResize()`` after the size changes and
+/// ``CefBrowser/hostViewDidChangeBackingProperties()`` after the scale or
+/// screen changes.
 public struct CefOffscreenViewInfo: Sendable {
     /// The view size in points.
     public var size: CGSize
@@ -79,13 +79,12 @@ public protocol CefOffscreenHost: AnyObject {
     /// The text selection changed.
     func offscreenDidChangeSelection(_ selectedText: String, selectedRange: NSRange)
     /// The page asks for a context menu at `point`, in view points. Present
-    /// `menu`, then report the choice through `callback`.
-    func offscreenRunContextMenu(_ menu: CefMenuModel, at point: CGPoint, callback: CefRunContextMenuCallback)
+    /// `menu`, then report the choice through `completion`.
+    func offscreenShowContextMenu(_ menu: CefMenuModel, at point: CGPoint, completion: CefContextMenuCompletion)
     /// The page started dragging `data` from `point`, in view points. Begin
     /// a system drag session and, when it ends, call
-    /// ``CefBrowser/dragSourceEnded(at:operation:)`` and
-    /// ``CefBrowser/dragSourceSystemDragEnded()``. Return `false` to cancel
-    /// the drag. The default returns `false`.
+    /// ``CefBrowser/draggingSessionEnded(at:operation:)``. Return `false` to
+    /// cancel the drag. The default returns `false`.
     func offscreenStartDragging(_ data: CefDragData, allowedOperations: CefDragOperation, at point: CGPoint) -> Bool
     /// The drag cursor should show `operation`. The default does nothing.
     func offscreenUpdateDragCursor(_ operation: CefDragOperation)

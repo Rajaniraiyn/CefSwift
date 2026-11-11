@@ -20,30 +20,34 @@ public struct CefDragOperation: OptionSet, Sendable {
         cef_drag_operations_mask_t(rawValue)
     }
 
-    /// The equivalent `NSDragOperation`. ``every`` maps to copy, link, move
-    /// and generic.
-    public var nsOperation: NSDragOperation {
-        if self == .every { return [.copy, .link, .move, .generic] }
-        var op: NSDragOperation = []
-        if contains(.copy) { op.insert(.copy) }
-        if contains(.link) { op.insert(.link) }
-        if contains(.move) { op.insert(.move) }
-        if contains(.generic) { op.insert(.generic) }
-        if contains(.delete) { op.insert(.delete) }
-        if contains(.private) { op.insert(.private) }
-        return op
-    }
-
     /// Creates the mask equivalent to an `NSDragOperation`.
-    public init(_ ns: NSDragOperation) {
+    public init(_ operation: NSDragOperation) {
         var raw: UInt32 = 0
-        if ns.contains(.copy) { raw |= CefDragOperation.copy.rawValue }
-        if ns.contains(.link) { raw |= CefDragOperation.link.rawValue }
-        if ns.contains(.move) { raw |= CefDragOperation.move.rawValue }
-        if ns.contains(.generic) { raw |= CefDragOperation.generic.rawValue }
-        if ns.contains(.delete) { raw |= CefDragOperation.delete.rawValue }
-        if ns.contains(.private) { raw |= CefDragOperation.private.rawValue }
+        if operation.contains(.copy) { raw |= CefDragOperation.copy.rawValue }
+        if operation.contains(.link) { raw |= CefDragOperation.link.rawValue }
+        if operation.contains(.move) { raw |= CefDragOperation.move.rawValue }
+        if operation.contains(.generic) { raw |= CefDragOperation.generic.rawValue }
+        if operation.contains(.delete) { raw |= CefDragOperation.delete.rawValue }
+        if operation.contains(.private) { raw |= CefDragOperation.private.rawValue }
         self.init(rawValue: raw)
+    }
+}
+
+extension NSDragOperation {
+    /// Creates the operation equivalent to a ``CefDragOperation``.
+    /// ``CefDragOperation/every`` maps to copy, link, move and generic.
+    public init(_ operation: CefDragOperation) {
+        if operation == .every {
+            self = [.copy, .link, .move, .generic]
+            return
+        }
+        self = []
+        if operation.contains(.copy) { insert(.copy) }
+        if operation.contains(.link) { insert(.link) }
+        if operation.contains(.move) { insert(.move) }
+        if operation.contains(.generic) { insert(.generic) }
+        if operation.contains(.delete) { insert(.delete) }
+        if operation.contains(.private) { insert(.private) }
     }
 }
 
@@ -96,10 +100,11 @@ extension CefBrowser {
 
     // MARK: Dragging into the page
 
-    /// Tells the page a drag entered the view, carrying the given content.
-    public func dragTargetEnter(
+    /// Tells the page a drag entered the view, carrying the given content,
+    /// as `NSDraggingDestination.draggingEntered(_:)` reports it.
+    public func draggingEntered(
         at point: CGPoint, modifiers: CefEventModifiers = [], allowedOperations: CefDragOperation,
-        text: String? = nil, html: String? = nil, urls: [URL] = [], files: [String] = []
+        text: String? = nil, html: String? = nil, urls: [URL] = [], fileURLs: [URL] = []
     ) {
         guard let data = cef_drag_data_create() else { return }
         data.pointee.reset_file_contents(data)
@@ -112,9 +117,9 @@ extension CefBrowser {
         if let first = urls.first {
             CefStringUtil.withCefString(first.absoluteString) { data.pointee.set_link_url(data, $0) }
         }
-        for file in files {
-            CefStringUtil.withCefString(file) { path in
-                CefStringUtil.withCefString((file as NSString).lastPathComponent) { name in
+        for file in fileURLs {
+            CefStringUtil.withCefString(file.path) { path in
+                CefStringUtil.withCefString(file.lastPathComponent) { name in
                     data.pointee.add_file(data, path, name)
                 }
             }
@@ -128,8 +133,9 @@ extension CefBrowser {
         if delivered == nil { cefRelease(data) }
     }
 
-    /// Tells the page the drag moved.
-    public func dragTargetOver(at point: CGPoint, modifiers: CefEventModifiers = [], allowedOperations: CefDragOperation) {
+    /// Tells the page the drag moved, as
+    /// `NSDraggingDestination.draggingUpdated(_:)` reports it.
+    public func draggingUpdated(at point: CGPoint, modifiers: CefEventModifiers = [], allowedOperations: CefDragOperation) {
         withHost { host in
             var event = cef_mouse_event_t(point, modifiers: modifiers)
             host.pointee.drag_target_drag_over(host, &event, allowedOperations.cefValue)
@@ -137,12 +143,12 @@ extension CefBrowser {
     }
 
     /// Tells the page the drag left the view.
-    public func dragTargetLeave() {
+    public func draggingExited() {
         withHost { $0.pointee.drag_target_drag_leave($0) }
     }
 
-    /// Tells the page the drag was dropped.
-    public func dragTargetDrop(at point: CGPoint, modifiers: CefEventModifiers = []) {
+    /// Drops the drag on the page.
+    public func performDrop(at point: CGPoint, modifiers: CefEventModifiers = []) {
         withHost { host in
             var event = cef_mouse_event_t(point, modifiers: modifiers)
             host.pointee.drag_target_drop(host, &event)
@@ -151,17 +157,14 @@ extension CefBrowser {
 
     // MARK: Dragging out of the page
 
-    /// Tells the page a drag it started ended at `point`, in view points,
-    /// with `operation`.
-    public func dragSourceEnded(at point: CGPoint, operation: CefDragOperation) {
+    /// Tells the page that the drag it started — see
+    /// ``CefOffscreenHost/offscreenStartDragging(_:allowedOperations:at:)``
+    /// — ended at `point`, in view points, with `operation`.
+    public func draggingSessionEnded(at point: CGPoint, operation: CefDragOperation) {
         withHost {
             $0.pointee.drag_source_ended_at(
                 $0, Int32(point.x.rounded()), Int32(point.y.rounded()), operation.cefValue)
+            $0.pointee.drag_source_system_drag_ended($0)
         }
-    }
-
-    /// Tells the page the system drag session it started has finished.
-    public func dragSourceSystemDragEnded() {
-        withHost { $0.pointee.drag_source_system_drag_ended($0) }
     }
 }

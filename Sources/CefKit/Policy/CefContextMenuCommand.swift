@@ -4,7 +4,7 @@ import Foundation
 /// `cef_types.h` as its raw value.
 ///
 /// Chromium performs these itself unless
-/// ``CefBrowserDelegate/browser(_:handleContextMenuCommand:params:)`` returns
+/// ``CefBrowserDelegate/browser(_:handleContextMenuCommand:for:)`` returns
 /// `true`. Hide them with ``CefContextMenuConfiguration/hiddenCommands``.
 public enum CefContextMenuCommand: Int, Sendable, Hashable, CaseIterable {
     case back = 100

@@ -26,7 +26,7 @@ public final class CefProfile {
         self.kind = kind
     }
 
-    /// The default profile, stored at ``CefConfiguration/cachePath``.
+    /// The default profile, stored at ``CefConfiguration/cacheDirectory``.
     public static let `default` = CefProfile(kind: .global)
 
     /// A fresh in-memory profile; nothing is written to disk and everything
@@ -36,7 +36,7 @@ public final class CefProfile {
     }
 
     /// The on-disk profile called `name`, stored under
-    /// `<rootCachePath>/Profiles/<name>`. The same name always yields the
+    /// `<rootCacheDirectory>/Profiles/<name>`. The same name always yields the
     /// same profile.
     public static func persistent(name: String) -> CefProfile {
         if let existing = persistentProfiles[name] { return existing }
@@ -192,9 +192,9 @@ public final class CefProfile {
             var settings = cef_request_context_settings_t()
             settings.size = MemoryLayout<cef_request_context_settings_t>.stride
             let configuration = CefRuntime.shared.configuration
-            let root = configuration?.rootCachePath ?? MappedCefSettings.defaultRootCachePath()
+            let root = configuration?.rootCacheDirectory ?? MappedCefSettings.defaultRootCacheDirectory()
             // An empty cache_path means in-memory, which is what incognito wants.
-            if let path = Self.cachePath(for: kind, rootCachePath: root) {
+            if let path = Self.cacheDirectory(for: kind, rootCacheDirectory: root) {
                 try? FileManager.default.createDirectory(at: path, withIntermediateDirectories: true)
                 CefStringUtil.set(path.path, into: &settings.cache_path)
                 settings.persist_session_cookies = configuration?.persistsSessionCookies == true ? 1 : 0
@@ -241,9 +241,9 @@ public final class CefProfile {
 
     /// Where a profile kind lives on disk; nil for in-memory and the default
     /// profile.
-    static func cachePath(for kind: Kind, rootCachePath: URL?) -> URL? {
+    static func cacheDirectory(for kind: Kind, rootCacheDirectory: URL?) -> URL? {
         guard case .persistent(let name) = kind else { return nil }
-        return rootCachePath?
+        return rootCacheDirectory?
             .appendingPathComponent("Profiles", isDirectory: true)
             .appendingPathComponent(sanitize(name), isDirectory: true)
     }

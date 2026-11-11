@@ -20,58 +20,53 @@ public enum CefContextMenuMediaType: Sendable, Equatable {
 }
 
 /// What a context menu was invoked on.
-public struct CefContextMenuParams: Sendable, Equatable {
-    /// The horizontal position of the click, in view points.
-    public var x: Int
-    /// The vertical position of the click, in view points.
-    public var y: Int
+public struct CefContextMenuTarget: Sendable, Equatable {
+    /// Where the click was, in view points with a top-left origin.
+    public var location: CGPoint
     /// URL of the enclosing link, if any.
     public var linkURL: URL?
     /// Source URL of the media element (img/audio/video), if any.
     public var sourceURL: URL?
     /// URL of the top-level page.
     public var pageURL: URL?
-    /// Selected text, if any.
-    public var selectionText: String
+    /// The selected text, or an empty string when nothing is selected.
+    public var selectedText: String
     /// The media element type the menu was invoked on.
     public var mediaType: CefContextMenuMediaType
     /// Whether the node is editable, such as a text field.
     public var isEditable: Bool
 
     public init(
-        x: Int = 0,
-        y: Int = 0,
+        location: CGPoint = .zero,
         linkURL: URL? = nil,
         sourceURL: URL? = nil,
         pageURL: URL? = nil,
-        selectionText: String = "",
+        selectedText: String = "",
         mediaType: CefContextMenuMediaType = .none,
         isEditable: Bool = false
     ) {
-        self.x = x
-        self.y = y
+        self.location = location
         self.linkURL = linkURL
         self.sourceURL = sourceURL
         self.pageURL = pageURL
-        self.selectionText = selectionText
+        self.selectedText = selectedText
         self.mediaType = mediaType
         self.isEditable = isEditable
     }
 }
 
-extension CefContextMenuParams {
+extension CefContextMenuTarget {
     /// Reads a borrowed `cef_context_menu_params_t`.
     init(raw params: UnsafeMutablePointer<cef_context_menu_params_t>) {
         func url(_ value: cef_string_userfree_t?) -> URL? {
             CefStringUtil.takingUserFree(value).flatMap { $0.isEmpty ? nil : URL(string: $0) }
         }
         self.init(
-            x: Int(params.pointee.get_xcoord(params)),
-            y: Int(params.pointee.get_ycoord(params)),
+            location: CGPoint(x: Int(params.pointee.get_xcoord(params)), y: Int(params.pointee.get_ycoord(params))),
             linkURL: url(params.pointee.get_link_url(params)),
             sourceURL: url(params.pointee.get_source_url(params)),
             pageURL: url(params.pointee.get_page_url(params)),
-            selectionText: CefStringUtil.takingUserFree(params.pointee.get_selection_text(params)) ?? "",
+            selectedText: CefStringUtil.takingUserFree(params.pointee.get_selection_text(params)) ?? "",
             mediaType: CefContextMenuMediaType(cefValue: params.pointee.get_media_type(params)),
             isEditable: params.pointee.is_editable(params) != 0
         )
@@ -81,18 +76,16 @@ extension CefContextMenuParams {
 /// A context menu about to be shown.
 ///
 /// A menu model is valid only during the call that provides it, such as
-/// ``CefBrowserDelegate/browser(_:configureContextMenu:params:)``; do not
+/// ``CefBrowserDelegate/browser(_:configureContextMenu:for:)``; do not
 /// keep it.
 ///
-/// Give your own items command IDs from ``userCommandIDFirst`` through
-/// ``userCommandIDLast``. Choosing one calls
-/// ``CefBrowserDelegate/browser(_:handleContextMenuCommand:params:)``.
+/// Give your own items command IDs from ``userCommandIDs``. Choosing one
+/// calls ``CefBrowserDelegate/browser(_:handleContextMenuCommand:for:)``.
 @MainActor
 public final class CefMenuModel {
-    /// The first command ID available to your items (`MENU_ID_USER_FIRST`).
-    public nonisolated static let userCommandIDFirst = Int(MENU_ID_USER_FIRST.rawValue)
-    /// The last command ID available to your items (`MENU_ID_USER_LAST`).
-    public nonisolated static let userCommandIDLast = Int(MENU_ID_USER_LAST.rawValue)
+    /// The command IDs available to your items (`MENU_ID_USER_FIRST`
+    /// through `MENU_ID_USER_LAST`).
+    public nonisolated static let userCommandIDs = Int(MENU_ID_USER_FIRST.rawValue)...Int(MENU_ID_USER_LAST.rawValue)
 
     private let raw: UnsafeMutablePointer<cef_menu_model_t>
 
@@ -179,9 +172,9 @@ public final class CefMenuModel {
 /// Reports the outcome of a context menu an offscreen host presented.
 ///
 /// Call ``select(commandID:)`` or ``cancel()`` once; later calls do nothing.
-/// A callback released without either cancels the menu.
+/// A completion released without either cancels the menu.
 @MainActor
-public final class CefRunContextMenuCallback {
+public final class CefContextMenuCompletion {
     /// The reference CEF passed to `run_context_menu`, released exactly once:
     /// by ``select(commandID:)``, ``cancel()`` or `deinit`, whichever runs
     /// first.
@@ -222,14 +215,14 @@ public struct CefContextMenuItem {
     public var title: String
     /// Decides for each menu whether the item appears, for example only on
     /// links. `nil` always shows it.
-    public var isVisible: ((CefContextMenuParams) -> Bool)?
+    public var isVisible: ((CefContextMenuTarget) -> Bool)?
     /// Runs when the item is chosen.
-    public var action: (CefBrowser, CefContextMenuParams) -> Void
+    public var action: (CefBrowser, CefContextMenuTarget) -> Void
 
     public init(
         _ title: String,
-        isVisible: ((CefContextMenuParams) -> Bool)? = nil,
-        action: @escaping (CefBrowser, CefContextMenuParams) -> Void
+        isVisible: ((CefContextMenuTarget) -> Bool)? = nil,
+        action: @escaping (CefBrowser, CefContextMenuTarget) -> Void
     ) {
         self.title = title
         self.isVisible = isVisible
@@ -251,7 +244,7 @@ public struct CefContextMenuItem {
 /// ```
 ///
 /// For menus that depend on more than the click target, implement
-/// ``CefBrowserDelegate/browser(_:configureContextMenu:params:)``, which
+/// ``CefBrowserDelegate/browser(_:configureContextMenu:for:)``, which
 /// runs after this configuration is applied.
 @MainActor
 public struct CefContextMenuConfiguration {
@@ -267,10 +260,10 @@ public struct CefContextMenuConfiguration {
     public init() {}
 
     /// Inspect Element takes the last user ID; ``items`` count up from the first.
-    static let inspectCommandID = CefMenuModel.userCommandIDLast
+    static let inspectCommandID = CefMenuModel.userCommandIDs.upperBound
 
     /// Applies the configuration to a menu about to be shown.
-    func apply(to menu: CefMenuModel, params: CefContextMenuParams) {
+    func apply(to menu: CefMenuModel, for target: CefContextMenuTarget) {
         guard isEnabled else {
             menu.clear()
             return
@@ -278,13 +271,13 @@ public struct CefContextMenuConfiguration {
         for command in hiddenCommands {
             menu.removeItem(commandID: command.rawValue)
         }
-        let visible = items.enumerated().filter { $0.element.isVisible?(params) ?? true }
+        let visible = items.enumerated().filter { $0.element.isVisible?(target) ?? true }
         if !visible.isEmpty || showsInspectElement {
             menu.trimSeparators()
             if menu.count > 0 { menu.addSeparator() }
         }
         for (index, item) in visible {
-            menu.addItem(commandID: CefMenuModel.userCommandIDFirst + index, title: item.title)
+            menu.addItem(commandID: CefMenuModel.userCommandIDs.lowerBound + index, title: item.title)
         }
         if showsInspectElement {
             if !visible.isEmpty { menu.addSeparator() }
@@ -293,14 +286,14 @@ public struct CefContextMenuConfiguration {
     }
 
     /// Runs the item for `commandID`. Returns whether the ID was one of ours.
-    func perform(commandID: Int, in browser: CefBrowser, params: CefContextMenuParams) -> Bool {
+    func perform(commandID: Int, in browser: CefBrowser, for target: CefContextMenuTarget) -> Bool {
         if showsInspectElement, commandID == Self.inspectCommandID {
-            browser.showDevTools(inspecting: CGPoint(x: params.x, y: params.y))
+            browser.showDevTools(inspecting: target.location)
             return true
         }
-        let index = commandID - CefMenuModel.userCommandIDFirst
+        let index = commandID - CefMenuModel.userCommandIDs.lowerBound
         guard items.indices.contains(index) else { return false }
-        items[index].action(browser, params)
+        items[index].action(browser, target)
         return true
     }
 }

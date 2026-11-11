@@ -4,7 +4,7 @@ import Foundation
 /// The command line Chromium is about to process, passed to
 /// ``CefConfiguration/onBeforeCommandLineProcessing``. Valid only during
 /// that call; do not keep it.
-public struct CefCommandLine: @unchecked Sendable {
+public struct CefCommandLine: @unchecked Sendable, CustomStringConvertible {
     let raw: UnsafeMutablePointer<cef_command_line_t>
 
     init(raw: UnsafeMutablePointer<cef_command_line_t>) {
@@ -57,7 +57,7 @@ public struct CefCommandLine: @unchecked Sendable {
     }
 
     /// The whole command line as one string, for diagnostics.
-    public var commandLineString: String {
+    public var description: String {
         CefStringUtil.takingUserFree(raw.pointee.get_command_line_string(raw)) ?? ""
     }
 }

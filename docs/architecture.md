@@ -30,8 +30,9 @@ CefSwift talks to CEF through its C API and never links the framework.
   misbehaving.
 
 Because the API version is pinned, CEF binaries can be updated without
-touching Swift code; adopting newer C APIs means bumping the pin in
-`ccef_config.h` and regenerating.
+touching Swift code; adopting newer C APIs is a deliberate step:
+`Scripts/update-cef.py --api-version latest` moves the pin and regenerates
+the bridge, reporting which functions changed.
 
 ## Object ownership
 

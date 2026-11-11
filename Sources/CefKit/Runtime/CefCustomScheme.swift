@@ -14,7 +14,7 @@ import Foundation
 /// // … after initialize:
 /// CefRuntime.shared.registerSchemeHandler(
 ///     scheme: "myapp",
-///     handler: CefBundleSchemeHandler(directory: webRootURL))
+///     handler: CefDirectorySchemeHandler(directory: webRootURL))
 /// // pages can now load myapp://anyhost/index.html
 /// ```
 public struct CefCustomScheme: Sendable, Equatable {

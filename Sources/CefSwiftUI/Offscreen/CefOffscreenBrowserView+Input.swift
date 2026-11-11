@@ -41,7 +41,7 @@ extension CefOffscreenBrowserView {
     }
 
     public override func mouseExited(with event: NSEvent) {
-        browser?.sendMouseMove(to: viewPoint(for: event), modifiers: modifiers, leaving: true)
+        browser?.sendMouseExit(at: viewPoint(for: event), modifiers: modifiers)
     }
 
     public override func mouseDown(with event: NSEvent) {

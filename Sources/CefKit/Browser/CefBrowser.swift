@@ -197,7 +197,7 @@ public final class CefBrowser: Identifiable {
     /// indicator from it. CefSwiftUI's offscreen view updates it; offscreen
     /// rendering only.
     public package(set) var navigationGestureProgress = 0.0
-    /// The latest result of ``find(_:forward:matchCase:)``.
+    /// The latest result of ``find(_:backwards:caseSensitive:)``.
     public private(set) var findResult: CefFindResult?
 
     // MARK: Configuration
@@ -335,13 +335,14 @@ public final class CefBrowser: Identifiable {
     }
 
     /// Searches the page, or advances to the next match when `text` repeats
-    /// the previous search. Results arrive in ``findResult``.
-    public func find(_ text: String, forward: Bool = true, matchCase: Bool = false) {
+    /// the previous search — the previous one when `backwards` is set.
+    /// Results arrive in ``findResult``.
+    public func find(_ text: String, backwards: Bool = false, caseSensitive: Bool = false) {
         let isRepeat = text == lastFindText
         lastFindText = text
         withHost { host in
             CefStringUtil.withCefString(text) {
-                host.pointee.find(host, $0, forward ? 1 : 0, matchCase ? 1 : 0, isRepeat ? 1 : 0)
+                host.pointee.find(host, $0, backwards ? 0 : 1, caseSensitive ? 1 : 0, isRepeat ? 1 : 0)
             }
         }
     }
@@ -413,7 +414,8 @@ public final class CefBrowser: Identifiable {
         withHost { $0.pointee.close_dev_tools($0) }
     }
 
-    public var hasDevTools: Bool {
+    /// Whether this browser's DevTools window is open.
+    public var isShowingDevTools: Bool {
         withHost { $0.pointee.has_dev_tools($0) != 0 } ?? false
     }
 
@@ -563,8 +565,8 @@ extension CefBrowser {
         guard client.offscreenHost !== host else { return }
         client.offscreenHost = host
         hostView = host as? NSView
-        wasResized()
-        invalidate()
+        hostViewDidResize()
+        setNeedsDisplay()
     }
 
     private func createWindowed(in parentView: NSView) {

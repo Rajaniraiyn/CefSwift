@@ -71,11 +71,11 @@ public struct CefConfiguration: Sendable {
 
     /// Root directory for all CEF profile data. Defaults to
     /// `~/Library/Application Support/<bundle id>/CefSwift`.
-    public var rootCachePath: URL?
+    public var rootCacheDirectory: URL?
 
-    /// Global cache (profile) directory. Must be ``rootCachePath`` itself or
-    /// a child of it. Defaults to ``rootCachePath``.
-    public var cachePath: URL?
+    /// Global cache (profile) directory. Must be ``rootCacheDirectory`` itself or
+    /// a child of it. Defaults to ``rootCacheDirectory``.
+    public var cacheDirectory: URL?
 
     /// UI locale, e.g. `"en-US"`. Defaults to the system locale.
     public var locale: String?
@@ -108,9 +108,9 @@ public struct CefConfiguration: Sendable {
     /// then from the `CEF_FRAMEWORK_PATH` environment variable.
     public var frameworkDirectory: URL?
 
-    /// Explicit helper executable path (rarely needed; CEF derives the
+    /// The helper executable to launch (rarely needed; CEF derives the
     /// helper apps from the bundle layout by default).
-    public var browserSubprocessPath: URL?
+    public var helperExecutableURL: URL?
 
     /// Whether Chromium keeps its encryption key in the keychain. The
     /// default, ``CefSafeStoragePolicy/automatic``, uses the keychain only

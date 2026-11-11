@@ -28,18 +28,18 @@ final class MappedCefSettings {
         raw.windowless_rendering_enabled = configuration.isOffscreenRenderingEnabled ? 1 : 0
 
         // CEF requires cache_path to equal or live under root_cache_path. When only
-        // cachePath is given, derive the root from it so the pair is always valid.
+        // cacheDirectory is given, derive the root from it so the pair is always valid.
         let rootCache: URL
-        if let explicitRoot = configuration.rootCachePath {
+        if let explicitRoot = configuration.rootCacheDirectory {
             rootCache = explicitRoot
-        } else if let cache = configuration.cachePath {
+        } else if let cache = configuration.cacheDirectory {
             rootCache = cache.deletingLastPathComponent()
         } else {
-            rootCache = Self.defaultRootCachePath()
+            rootCache = Self.defaultRootCacheDirectory()
         }
         try? FileManager.default.createDirectory(at: rootCache, withIntermediateDirectories: true)
         CefStringUtil.set(rootCache.path, into: &raw.root_cache_path)
-        CefStringUtil.set((configuration.cachePath ?? rootCache).path, into: &raw.cache_path)
+        CefStringUtil.set((configuration.cacheDirectory ?? rootCache).path, into: &raw.cache_path)
 
         CefStringUtil.set(configuration.locale, into: &raw.locale)
         CefStringUtil.set(configuration.userAgentProduct, into: &raw.user_agent_product)
@@ -47,12 +47,12 @@ final class MappedCefSettings {
         CefStringUtil.set(configuration.acceptLanguages.joined(separator: ","), into: &raw.accept_language_list)
         CefStringUtil.set(configuration.logFile?.path, into: &raw.log_file)
         CefStringUtil.set(frameworkDirectory?.path, into: &raw.framework_dir_path)
-        CefStringUtil.set(configuration.browserSubprocessPath?.path, into: &raw.browser_subprocess_path)
+        CefStringUtil.set(configuration.helperExecutableURL?.path, into: &raw.browser_subprocess_path)
     }
 
     /// Default per-app CEF data directory:
     /// `~/Library/Application Support/<bundle id | "CefSwift">/CefSwift`.
-    static func defaultRootCachePath() -> URL {
+    static func defaultRootCacheDirectory() -> URL {
         let appSupport = FileManager.default.urls(
             for: .applicationSupportDirectory, in: .userDomainMask
         ).first ?? FileManager.default.temporaryDirectory

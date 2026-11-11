@@ -13,14 +13,14 @@ struct OffscreenTypesTests {
     // MARK: Drag operations
 
     @Test func dragOperationToNS() {
-        #expect(CefDragOperation.copy.nsOperation == .copy)
-        #expect(CefDragOperation.link.nsOperation == .link)
-        #expect(CefDragOperation.move.nsOperation == .move)
-        let combo = CefDragOperation([.copy, .move]).nsOperation
+        #expect(NSDragOperation(CefDragOperation.copy) == .copy)
+        #expect(NSDragOperation(CefDragOperation.link) == .link)
+        #expect(NSDragOperation(CefDragOperation.move) == .move)
+        let combo = NSDragOperation(CefDragOperation([.copy, .move]))
         #expect(combo.contains(.copy))
         #expect(combo.contains(.move))
         // .every widens to the common set.
-        let every = CefDragOperation.every.nsOperation
+        let every = NSDragOperation(CefDragOperation.every)
         #expect(every.contains(.copy) && every.contains(.move) && every.contains(.link))
     }
 
@@ -42,9 +42,9 @@ struct OffscreenTypesTests {
 
     @Test func cursorMapping() {
         #expect(CefCursorType(cefValue: CT_HAND) == .hand)
-        #expect(CefCursorType(cefValue: CT_HAND).nsCursor == .pointingHand)
-        #expect(CefCursorType(cefValue: CT_IBEAM).nsCursor == .iBeam)
-        #expect(CefCursorType(cefValue: CT_NONE).nsCursor == nil)
+        #expect(NSCursor.cursor(for: CefCursorType(cefValue: CT_HAND)) == .pointingHand)
+        #expect(NSCursor.cursor(for: CefCursorType(cefValue: CT_IBEAM)) == .iBeam)
+        #expect(NSCursor.cursor(for: CefCursorType(cefValue: CT_NONE)) == nil)
         #expect(CefCursorType(cefValue: CT_DND_NONE) == .other)
     }
 

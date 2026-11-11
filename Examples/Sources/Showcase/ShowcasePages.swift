@@ -2,7 +2,7 @@ import CefSwiftUI
 import Foundation
 
 /// The app's own pages, served from `showcase://app/…`. A real app would
-/// point `CefBundleSchemeHandler` at a folder of bundled web resources.
+/// point `CefDirectorySchemeHandler` at a folder of bundled web resources.
 struct ShowcasePages: CefSchemeHandler {
     func response(for request: CefSchemeRequest) async -> CefSchemeResponse {
         switch request.url?.path {

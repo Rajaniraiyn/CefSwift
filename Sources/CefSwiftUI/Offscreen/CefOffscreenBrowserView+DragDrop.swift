@@ -26,37 +26,37 @@ extension CefOffscreenBrowserView: NSDraggingSource {
         guard let browser else { return [] }
         let pasteboard = sender.draggingPasteboard
         var urls: [URL] = []
-        var files: [String] = []
+        var fileURLs: [URL] = []
         for url in pasteboard.readObjects(forClasses: [NSURL.self]) as? [URL] ?? [] {
-            if url.isFileURL { files.append(url.path) } else { urls.append(url) }
+            if url.isFileURL { fileURLs.append(url) } else { urls.append(url) }
         }
         let allowed = CefDragOperation(sender.draggingSourceOperationMask)
-        browser.dragTargetEnter(
+        browser.draggingEntered(
             at: viewPoint(for: sender), modifiers: dragModifiers, allowedOperations: allowed,
             text: pasteboard.string(forType: .string), html: pasteboard.string(forType: .html),
-            urls: urls, files: files)
-        browser.dragTargetOver(at: viewPoint(for: sender), modifiers: dragModifiers, allowedOperations: allowed)
+            urls: urls, fileURLs: fileURLs)
+        browser.draggingUpdated(at: viewPoint(for: sender), modifiers: dragModifiers, allowedOperations: allowed)
         return sender.draggingSourceOperationMask
     }
 
     public override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
         guard let browser else { return [] }
-        browser.dragTargetOver(
+        browser.draggingUpdated(
             at: viewPoint(for: sender), modifiers: dragModifiers,
             allowedOperations: CefDragOperation(sender.draggingSourceOperationMask))
         return sender.draggingSourceOperationMask
     }
 
     public override func draggingExited(_ sender: NSDraggingInfo?) {
-        browser?.dragTargetLeave()
+        browser?.draggingExited()
     }
 
     public override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
         guard let browser else { return false }
-        browser.dragTargetOver(
+        browser.draggingUpdated(
             at: viewPoint(for: sender), modifiers: dragModifiers,
             allowedOperations: CefDragOperation(sender.draggingSourceOperationMask))
-        browser.dragTargetDrop(at: viewPoint(for: sender), modifiers: dragModifiers)
+        browser.performDrop(at: viewPoint(for: sender), modifiers: dragModifiers)
         return true
     }
 
@@ -83,7 +83,7 @@ extension CefOffscreenBrowserView: NSDraggingSource {
         _ session: NSDraggingSession,
         sourceOperationMaskFor context: NSDraggingContext
     ) -> NSDragOperation {
-        currentDragAllowedOperations.nsOperation
+        NSDragOperation(currentDragAllowedOperations)
     }
 
     public func draggingSession(
@@ -92,8 +92,7 @@ extension CefOffscreenBrowserView: NSDraggingSource {
         currentDragAllowedOperations = .none
         guard let browser else { return }
         let inWindow = window?.convertPoint(fromScreen: screenPoint) ?? screenPoint
-        browser.dragSourceEnded(at: convert(inWindow, from: nil), operation: CefDragOperation(operation))
-        browser.dragSourceSystemDragEnded()
+        browser.draggingSessionEnded(at: convert(inWindow, from: nil), operation: CefDragOperation(operation))
     }
 
     private func syntheticDragEvent(at viewPoint: CGPoint) -> NSEvent? {

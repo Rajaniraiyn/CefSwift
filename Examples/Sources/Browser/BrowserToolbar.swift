@@ -166,11 +166,11 @@ private struct DownloadRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(download.fullPath?.lastPathComponent ?? download.url?.lastPathComponent ?? "Download")
+            Text(download.destinationURL?.lastPathComponent ?? download.url?.lastPathComponent ?? "Download")
                 .lineLimit(1)
             if download.isComplete {
                 Button("Show in Finder") {
-                    if let path = download.fullPath { NSWorkspace.shared.activateFileViewerSelecting([path]) }
+                    if let path = download.destinationURL { NSWorkspace.shared.activateFileViewerSelecting([path]) }
                 }
                 .buttonStyle(.link)
             } else if download.isCancelled {
