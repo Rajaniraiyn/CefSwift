@@ -2,29 +2,29 @@ import AppKit
 import CCef
 import Foundation
 
-/// The kind of JavaScript dialog the page is asking to display.
-public enum CefJSDialogKind: Sendable, Equatable {
-    /// `window.alert` — message only, single OK button.
-    case alert
-    /// `window.confirm` — message with OK/Cancel.
-    case confirm
-    /// `window.prompt` — message with a text field and OK/Cancel.
-    case prompt
-
-    init(cefValue: cef_jsdialog_type_t) {
-        switch cefValue {
-        case JSDIALOGTYPE_CONFIRM: self = .confirm
-        case JSDIALOGTYPE_PROMPT: self = .prompt
-        default: self = .alert
-        }
-    }
-}
-
 /// A JavaScript dialog request delivered to
 /// ``CefBrowserDelegate/browser(_:runJavaScriptDialog:)``.
-public struct CefJSDialog: Sendable, Equatable {
+public struct CefJavaScriptDialog: Sendable, Equatable {
+    /// The kind of JavaScript dialog the page is asking to display.
+    public enum Kind: Sendable, Equatable {
+        /// `window.alert` — message only, single OK button.
+        case alert
+        /// `window.confirm` — message with OK/Cancel.
+        case confirm
+        /// `window.prompt` — message with a text field and OK/Cancel.
+        case prompt
+
+        init(cefValue: cef_jsdialog_type_t) {
+            switch cefValue {
+            case JSDIALOGTYPE_CONFIRM: self = .confirm
+            case JSDIALOGTYPE_PROMPT: self = .prompt
+            default: self = .alert
+            }
+        }
+    }
+
     /// Whether this is an alert, confirm, or prompt dialog.
-    public var kind: CefJSDialogKind
+    public var kind: Kind
     /// The message text supplied by the page.
     public var message: String
     /// The default text for a prompt's input field (empty for alert/confirm).
@@ -32,7 +32,7 @@ public struct CefJSDialog: Sendable, Equatable {
     /// The origin URL that requested the dialog, for display.
     public var origin: String
 
-    public init(kind: CefJSDialogKind, message: String, defaultPromptText: String = "", origin: String = "") {
+    public init(kind: Kind, message: String, defaultPromptText: String = "", origin: String = "") {
         self.kind = kind
         self.message = message
         self.defaultPromptText = defaultPromptText
@@ -47,7 +47,7 @@ public struct CefJSDialog: Sendable, Equatable {
 @MainActor
 public enum CefDialogPresenter {
     /// Presents `dialog` and returns the user's answer.
-    public static func present(_ dialog: CefJSDialog, in window: NSWindow?) async -> CefJSDialogResponse {
+    public static func present(_ dialog: CefJavaScriptDialog, in window: NSWindow?) async -> CefJavaScriptDialogResponse {
         let alert = NSAlert()
         alert.messageText = dialog.origin
         alert.informativeText = dialog.message
@@ -81,7 +81,7 @@ public enum CefDialogPresenter {
 
     /// Presents a name-and-password prompt for HTTP or proxy authentication.
     /// Returns `nil` if the user cancels.
-    public static func requestCredential(for challenge: CefAuthChallenge, in window: NSWindow?) async -> CefCredential? {
+    public static func requestCredential(for challenge: CefAuthenticationChallenge, in window: NSWindow?) async -> CefCredential? {
         let alert = NSAlert()
         alert.messageText = "Sign in"
         alert.informativeText = challenge.isProxy

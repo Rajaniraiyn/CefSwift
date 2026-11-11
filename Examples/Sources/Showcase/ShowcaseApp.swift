@@ -8,7 +8,7 @@ import SwiftUI
 struct ShowcaseApp: CefSwiftApp {
     static var cefConfiguration: CefConfiguration {
         var configuration = CefConfiguration.embedded
-        configuration.windowlessRenderingEnabled = true
+        configuration.isOffscreenRenderingEnabled = true
         configuration.customSchemes = [CefCustomScheme(name: "showcase")]
         return configuration
     }
@@ -40,7 +40,7 @@ struct ShowcaseView: View {
         }
     }
 
-    /// Launch with `-demo "Docked DevTools"` to open a specific demo.
+    /// Launch with `-demo "JavaScript Bridge"` to open a specific demo.
     @State private var selection: Demo? = Demo(rawValue: UserDefaults.standard.string(forKey: "demo") ?? "") ?? .webView
 
     var body: some View {

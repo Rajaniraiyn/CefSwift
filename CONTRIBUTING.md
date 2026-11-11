@@ -7,7 +7,10 @@ swift build
 swift test
 ```
 
-Command Line Tools alone is enough — Xcode is not required.
+Command Line Tools alone is enough — Xcode is not required. `CefKitTests`
+covers CefKit and `CefSwiftUITests` the SwiftUI and AppKit views; neither
+launches Chromium. Loader tests need `CEF_FRAMEWORK_PATH` set to an absolute
+framework path, such as one under `.cef/dist/`.
 
 ## Run the examples
 
@@ -36,7 +39,7 @@ Other example products: `Showcase`, `SelfTest`.
 ## Pull requests
 
 - Run `swift test` before submitting.
-- Keep PRs focused. Tests that need a downloaded CEF framework should `XCTSkip` when one isn't present.
+- Keep PRs focused. Tests that need a downloaded CEF framework should be conditioned on its presence with `.enabled(if:)`, as `LoaderTests` are.
 
 ## Reporting issues
 

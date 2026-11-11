@@ -10,7 +10,7 @@ struct HandlerLogicTests {
     // MARK: JS dialog mapping
 
     @Test func jsDialogValueType() {
-        let dialog = CefJSDialog(kind: .prompt, message: "Name?", defaultPromptText: "Ada", origin: "https://x")
+        let dialog = CefJavaScriptDialog(kind: .prompt, message: "Name?", defaultPromptText: "Ada", origin: "https://x")
         #expect(dialog.kind == .prompt)
         #expect(dialog.message == "Name?")
         #expect(dialog.defaultPromptText == "Ada")
@@ -75,9 +75,9 @@ struct HandlerLogicTests {
         raw.focus_on_editable_field = 1
         let event = CefKeyEvent(raw: raw)
         #expect(event.phase == .keyDown)
-        #expect(event.hasCommand)
-        #expect(event.hasShift)
-        #expect(!event.hasControl)
+        #expect(event.modifiers.contains(.command))
+        #expect(event.modifiers.contains(.shift))
+        #expect(!event.modifiers.contains(.control))
         #expect(event.windowsKeyCode == 65)
         #expect(event.character == "a")
         #expect(event.isEditableFieldFocused)

@@ -60,7 +60,11 @@ let package = Package(
         ),
         .testTarget(
             name: "CefKitTests",
-            dependencies: ["CefKit", "CefSwiftUI"]
+            dependencies: ["CefKit"]
+        ),
+        .testTarget(
+            name: "CefSwiftUITests",
+            dependencies: ["CefSwiftUI"]
         ),
     ],
     cLanguageStandard: .c11

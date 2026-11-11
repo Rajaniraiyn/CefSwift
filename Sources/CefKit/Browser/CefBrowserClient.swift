@@ -186,7 +186,7 @@ final class CefBrowserClient {
                     targetURL: url,
                     frameName: frameName,
                     disposition: CefWindowOpenDisposition(cefValue: disposition),
-                    userGesture: userGesture != 0,
+                    hasUserGesture: userGesture != 0,
                     features: popupFeatures,
                     isSourceOffscreen: b.isOffscreen,
                     isSourceChromeStyle: b.isChromeStyle
@@ -329,8 +329,8 @@ final class CefBrowserClient {
     private func makeJSDialogHandler() -> UnsafeMutablePointer<cef_jsdialog_handler_t> {
         let h = cefAllocate(cef_jsdialog_handler_t.self, owner: self)
         h.pointee.on_jsdialog = { s, browser, originURL, dialogType, message, defaultPrompt, callback, _ in
-            let dialog = CefJSDialog(
-                kind: CefJSDialogKind(cefValue: dialogType),
+            let dialog = CefJavaScriptDialog(
+                kind: CefJavaScriptDialog.Kind(cefValue: dialogType),
                 message: CefStringUtil.string(from: message),
                 defaultPromptText: CefStringUtil.string(from: defaultPrompt),
                 origin: CefStringUtil.string(from: originURL)
@@ -419,7 +419,7 @@ final class CefBrowserClient {
             return CefBrowserClient.run(s, browser, default: 0) { client, b in
                 let params = snapshot ?? client.contextMenuParams
                 if b.options.contextMenu.perform(commandID: Int(commandID), in: b, params: params) { return 1 }
-                return (b.delegate?.browser(b, contextMenuCommand: Int(commandID), params: params) ?? false) ? 1 : 0
+                return (b.delegate?.browser(b, handleContextMenuCommand: Int(commandID), params: params) ?? false) ? 1 : 0
             }
         }
         return h
@@ -438,7 +438,7 @@ final class CefBrowserClient {
                 return 0
             }
             return CefBrowserClient.run(s, browser, default: 0) { _, b in
-                b.decide { await $0.browser(b, decidePermission: request) } then: { decision in
+                b.decide { await $0.browser(b, decidePermissionFor: request) } then: { decision in
                     if decision == .allow {
                         callback.pointer.pointee.cont(callback.pointer, kinds.mediaMask(within: requested))
                     } else {
@@ -458,7 +458,7 @@ final class CefBrowserClient {
                 return 0
             }
             return CefBrowserClient.run(s, browser, default: 0) { _, b in
-                b.decide { await $0.browser(b, decidePermission: request) } then: { decision in
+                b.decide { await $0.browser(b, decidePermissionFor: request) } then: { decision in
                     callback.pointer.pointee.cont(callback.pointer, decision.cefResult)
                 }
                 return 1
@@ -494,7 +494,7 @@ final class CefBrowserClient {
                 let request = CefWindowOpenRequest(
                     targetURL: url,
                     disposition: CefWindowOpenDisposition(cefValue: disposition),
-                    userGesture: userGesture != 0,
+                    hasUserGesture: userGesture != 0,
                     isSourceOffscreen: b.isOffscreen,
                     isSourceChromeStyle: b.isChromeStyle
                 )
@@ -523,7 +523,7 @@ final class CefBrowserClient {
         // IO thread. The decision is made on the main actor and delivered
         // through the callback, which CEF accepts from any thread.
         h.pointee.get_auth_credentials = { s, browser, originURL, isProxy, host, port, realm, scheme, callback in
-            let challenge = CefAuthChallenge(
+            let challenge = CefAuthenticationChallenge(
                 origin: CefStringUtil.string(from: originURL),
                 isProxy: isProxy != 0,
                 host: CefStringUtil.string(from: host),

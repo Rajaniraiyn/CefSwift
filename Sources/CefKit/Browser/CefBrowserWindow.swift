@@ -12,7 +12,8 @@ import Observation
 /// You still decide what the window looks like:
 ///
 /// - ``Toolbar/none`` shows only the page; add your own chrome with
-///   ``topAccessory`` (CefSwiftUI adds `setToolbar { … }` for SwiftUI views).
+///   ``topAccessory`` (CefSwiftUI adds `setToolbar(leading:principal:trailing:)`
+///   and `setTabAccessory(_:)` for SwiftUI views).
 /// - ``Toolbar/chrome`` shows Chrome's own toolbar and omnibox.
 ///
 /// ```swift

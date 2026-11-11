@@ -39,9 +39,10 @@ struct MyApp: CefSwiftApp {
   authentication, downloads, certificate errors) with native defaults.
 - **`CefProfile`** — isolated or persistent profiles with cookies, Chromium
   preferences and theming.
-- **Customization** — context-menu entries, request filtering, user scripts,
-  Chrome commands, extensions, feature flags, and your product name in place
-  of "Chromium".
+- **Customization** — context-menu entries, request filtering, user scripts
+  and stylesheets, Chromium preferences, Chrome commands, extensions, feature
+  flags, and your product name in place of "Chromium" — on Chromium's own
+  `chrome://` pages as well as yours.
 
 See the [guide](docs/guide.md) for each of these in use.
 

@@ -197,7 +197,7 @@ public final class CefProfile {
             if let path = Self.cachePath(for: kind, rootCachePath: root) {
                 try? FileManager.default.createDirectory(at: path, withIntermediateDirectories: true)
                 CefStringUtil.set(path.path, into: &settings.cache_path)
-                settings.persist_session_cookies = configuration?.persistSessionCookies == true ? 1 : 0
+                settings.persist_session_cookies = configuration?.persistsSessionCookies == true ? 1 : 0
             }
             defer { ccef_string_clear(&settings.cache_path) }
             // A new context finishes initializing asynchronously; its

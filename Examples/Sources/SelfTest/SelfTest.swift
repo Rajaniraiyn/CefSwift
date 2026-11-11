@@ -16,7 +16,7 @@ enum SelfTest {
     static func main() {
         setvbuf(stdout, nil, _IONBF, 0)
         var configuration = CefConfiguration.embedded
-        configuration.windowlessRenderingEnabled = true
+        configuration.isOffscreenRenderingEnabled = true
         configuration.productName = "SelfTestBrowser"
         configuration.preferences["webkit.webprefs.default_font_size"] = 21
         configuration.customSchemes = [CefCustomScheme(name: "selftest")]

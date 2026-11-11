@@ -15,17 +15,93 @@ public enum CefMouseButton: Sendable {
     }
 }
 
+/// A touch sent to an offscreen browser with ``CefBrowser/sendTouchEvent(_:)``.
+public struct CefTouchEvent: Sendable, Equatable {
+    /// Where the touch is in its sequence. A touch begins, moves zero or
+    /// more times, then ends or is cancelled.
+    public enum Phase: Sendable, Equatable {
+        case began, moved, ended, cancelled
+
+        var cefValue: cef_touch_event_type_t {
+            switch self {
+            case .began: CEF_TET_PRESSED
+            case .moved: CEF_TET_MOVED
+            case .ended: CEF_TET_RELEASED
+            case .cancelled: CEF_TET_CANCELLED
+            }
+        }
+    }
+
+    /// The device producing the touch.
+    public enum PointerType: Sendable, Equatable {
+        case touch, mouse, pen, eraser, unknown
+
+        var cefValue: cef_pointer_type_t {
+            switch self {
+            case .touch: CEF_POINTER_TYPE_TOUCH
+            case .mouse: CEF_POINTER_TYPE_MOUSE
+            case .pen: CEF_POINTER_TYPE_PEN
+            case .eraser: CEF_POINTER_TYPE_ERASER
+            case .unknown: CEF_POINTER_TYPE_UNKNOWN
+            }
+        }
+    }
+
+    /// Identifies the touch across its phases.
+    public var id: Int
+    /// The touch position in view points.
+    public var location: CGPoint
+    public var phase: Phase
+    /// The touch's radii in view points, or zero when unknown.
+    public var radius: CGSize
+    /// The rotation of the touch ellipse in degrees, from 0 to 90.
+    public var rotationAngle: Double
+    /// The pressure, from 0 to 1, or 0 when unknown.
+    public var pressure: Double
+    public var modifiers: CefEventModifiers
+    public var pointerType: PointerType
+
+    public init(
+        id: Int, location: CGPoint, phase: Phase,
+        radius: CGSize = .zero, rotationAngle: Double = 0, pressure: Double = 0,
+        modifiers: CefEventModifiers = [], pointerType: PointerType = .touch
+    ) {
+        self.id = id
+        self.location = location
+        self.phase = phase
+        self.radius = radius
+        self.rotationAngle = rotationAngle
+        self.pressure = pressure
+        self.modifiers = modifiers
+        self.pointerType = pointerType
+    }
+
+    var cefValue: cef_touch_event_t {
+        var event = cef_touch_event_t()
+        event.id = Int32(truncatingIfNeeded: id)
+        event.x = Float(location.x)
+        event.y = Float(location.y)
+        event.radius_x = Float(radius.width)
+        event.radius_y = Float(radius.height)
+        event.rotation_angle = Float(rotationAngle)
+        event.pressure = Float(pressure)
+        event.type = phase.cefValue
+        event.modifiers = modifiers.rawValue
+        event.pointer_type = pointerType.cefValue
+        return event
+    }
+}
+
 // MARK: - Offscreen input
 
-// Points are in view points with a top-left origin; `modifiers` is a
-// `cef_event_flags_t` mask.
+// Points are in view points with a top-left origin.
 extension CefBrowser {
 
     // MARK: Mouse
 
     /// Forwards a mouse move, or the mouse leaving the view when `leaving`
     /// is `true`.
-    public func sendMouseMove(to point: CGPoint, modifiers: UInt32, leaving: Bool = false) {
+    public func sendMouseMove(to point: CGPoint, modifiers: CefEventModifiers = [], leaving: Bool = false) {
         withHost { host in
             var event = cef_mouse_event_t(point, modifiers: modifiers)
             host.pointee.send_mouse_move_event(host, &event, leaving ? 1 : 0)
@@ -33,7 +109,7 @@ extension CefBrowser {
     }
 
     /// Forwards a mouse button press.
-    public func sendMouseDown(at point: CGPoint, button: CefMouseButton, clickCount: Int, modifiers: UInt32) {
+    public func sendMouseDown(at point: CGPoint, button: CefMouseButton, clickCount: Int, modifiers: CefEventModifiers = []) {
         withHost { host in
             var event = cef_mouse_event_t(point, modifiers: modifiers)
             host.pointee.send_mouse_click_event(host, &event, button.cefValue, 0, Int32(clickCount))
@@ -41,7 +117,7 @@ extension CefBrowser {
     }
 
     /// Forwards a mouse button release.
-    public func sendMouseUp(at point: CGPoint, button: CefMouseButton, clickCount: Int, modifiers: UInt32) {
+    public func sendMouseUp(at point: CGPoint, button: CefMouseButton, clickCount: Int, modifiers: CefEventModifiers = []) {
         withHost { host in
             var event = cef_mouse_event_t(point, modifiers: modifiers)
             host.pointee.send_mouse_click_event(host, &event, button.cefValue, 1, Int32(clickCount))
@@ -49,7 +125,7 @@ extension CefBrowser {
     }
 
     /// Forwards a scroll. Deltas are in points.
-    public func sendMouseWheel(at point: CGPoint, deltaX: CGFloat, deltaY: CGFloat, modifiers: UInt32) {
+    public func sendMouseWheel(at point: CGPoint, deltaX: CGFloat, deltaY: CGFloat, modifiers: CefEventModifiers = []) {
         withHost { host in
             var event = cef_mouse_event_t(point, modifiers: modifiers)
             host.pointee.send_mouse_wheel_event(host, &event, Int32(deltaX.rounded()), Int32(deltaY.rounded()))
@@ -59,10 +135,18 @@ extension CefBrowser {
     // MARK: Keyboard
 
     /// Forwards a key event.
-    public func sendKeyEvent(_ event: cef_key_event_t) {
+    public func sendKeyEvent(_ event: CefKeyEvent) {
         withHost { host in
-            var event = event
+            var event = event.cefValue
             host.pointee.send_key_event(host, &event)
+        }
+    }
+
+    /// Forwards a touch.
+    public func sendTouchEvent(_ event: CefTouchEvent) {
+        withHost { host in
+            var event = event.cefValue
+            host.pointee.send_touch_event(host, &event)
         }
     }
 
@@ -103,14 +187,15 @@ extension CefBrowser {
         withHost { $0.pointee.send_external_begin_frame($0) }
     }
 
-    // MARK: IME
+    // MARK: Text input
 
-    /// Starts or updates an IME composition, as from
-    /// `NSTextInputClient.setMarkedText(_:selectedRange:replacementRange:)`.
-    public func imeSetComposition(text: String, selectionRange: NSRange, replacementRange: NSRange?) {
+    /// Starts or updates the marked text of an input-method composition, as
+    /// `NSTextInputClient.setMarkedText(_:selectedRange:replacementRange:)`
+    /// does. `replacementRange` is a range of existing text to replace.
+    public func setMarkedText(_ text: String, selectedRange: NSRange, replacementRange: NSRange? = nil) {
         withHost { host in
             CefStringUtil.withCefString(text) { cefText in
-                var selection = cef_range_t(selectionRange)
+                var selection = cef_range_t(selectedRange)
                 var underline = cef_composition_underline_t(
                     size: MemoryLayout<cef_composition_underline_t>.stride,
                     range: cef_range_t(from: 0, to: UInt32(text.utf16.count)),
@@ -125,8 +210,10 @@ extension CefBrowser {
         }
     }
 
-    /// Commits text, as from `NSTextInputClient.insertText(_:replacementRange:)`.
-    public func imeCommitText(_ text: String, replacementRange: NSRange?) {
+    /// Inserts text, completing any composition, as
+    /// `NSTextInputClient.insertText(_:replacementRange:)` does.
+    /// `replacementRange` is a range of existing text to replace.
+    public func insertText(_ text: String, replacementRange: NSRange? = nil) {
         withHost { host in
             CefStringUtil.withCefString(text) { cefText in
                 if let replacementRange {
@@ -139,13 +226,15 @@ extension CefBrowser {
         }
     }
 
-    /// Commits the current composition.
-    public func imeFinishComposing(keepSelection: Bool = true) {
-        withHost { $0.pointee.ime_finish_composing_text($0, keepSelection ? 1 : 0) }
+    /// Accepts the marked text as it stands, as
+    /// `NSTextInputClient.unmarkText()` does. Unless `keepingSelection` is
+    /// set, the current selection, if any, is discarded.
+    public func unmarkText(keepingSelection: Bool = true) {
+        withHost { $0.pointee.ime_finish_composing_text($0, keepingSelection ? 1 : 0) }
     }
 
-    /// Discards the current composition.
-    public func imeCancelComposition() {
+    /// Discards the marked text of the current composition.
+    public func cancelComposition() {
         withHost { $0.pointee.ime_cancel_composition($0) }
     }
 

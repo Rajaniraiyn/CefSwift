@@ -9,7 +9,6 @@ import IOSurface
 /// ``CefOffscreenHost/offscreenDidPaint(_:element:)``: Chromium reuses the
 /// surface or buffer once the call returns, so display it there and do not
 /// keep it.
-@MainActor
 public enum CefOffscreenFrame {
     /// A shared `IOSurface` Chromium rendered into; `size` is in pixels. Set
     /// it as a layer's `contents`.
@@ -35,25 +34,25 @@ public enum CefOffscreenPaintElement: Sendable {
 /// changes.
 public struct CefOffscreenViewInfo: Sendable {
     /// The view size in points.
-    public var sizeDIP: CGSize
+    public var size: CGSize
     /// The backing scale factor, such as `2` on Retina displays.
     public var deviceScaleFactor: CGFloat
     /// The view's top-left corner in screen points (top-left origin), used
     /// to place popups and convert view coordinates to screen coordinates.
-    public var screenOriginDIP: CGPoint
-    /// The screen's bounds in points, used to keep popups on screen.
-    public var screenRectDIP: CGRect
+    public var screenOrigin: CGPoint
+    /// The screen's frame in points, used to keep popups on screen.
+    public var screenFrame: CGRect
 
     public init(
-        sizeDIP: CGSize = CGSize(width: 1, height: 1),
+        size: CGSize = CGSize(width: 1, height: 1),
         deviceScaleFactor: CGFloat = 1,
-        screenOriginDIP: CGPoint = .zero,
-        screenRectDIP: CGRect = CGRect(x: 0, y: 0, width: 1, height: 1)
+        screenOrigin: CGPoint = .zero,
+        screenFrame: CGRect = CGRect(x: 0, y: 0, width: 1, height: 1)
     ) {
-        self.sizeDIP = sizeDIP
+        self.size = size
         self.deviceScaleFactor = deviceScaleFactor
-        self.screenOriginDIP = screenOriginDIP
-        self.screenRectDIP = screenRectDIP
+        self.screenOrigin = screenOrigin
+        self.screenFrame = screenFrame
     }
 }
 
@@ -74,25 +73,26 @@ public protocol CefOffscreenHost: AnyObject {
     func offscreenPopupDidChangeVisibility(_ visible: Bool)
     /// The popup widget moved or resized to `rect`, in view points.
     func offscreenPopupDidResize(_ rect: CGRect)
-    /// The IME composition changed. `characterBounds` are in view points and
-    /// position the candidate window.
-    func offscreenImeCompositionRangeChanged(selectedRange: NSRange, characterBounds: [CGRect])
+    /// The range of an input-method composition changed. `characterBounds`
+    /// are in view points and position the candidate window.
+    func offscreenDidChangeCompositionRange(_ range: NSRange, characterBounds: [CGRect])
     /// The text selection changed.
-    func offscreenTextSelectionChanged(selectedText: String, selectedRange: NSRange)
-    /// The page asks for a context menu at `viewPoint`. Present `menu`, then
-    /// report the choice through `callback`.
-    func offscreenRunContextMenu(_ menu: CefMenuModel, at viewPoint: CGPoint, callback: CefRunContextMenuCallback)
-    /// The page started dragging `data`. Begin a system drag session and,
-    /// when it ends, call ``CefBrowser/dragSourceEndedAt(viewPoint:operation:)``
-    /// and ``CefBrowser/dragSourceSystemDragEnded()``. Return `false` to
-    /// cancel the drag. The default returns `false`.
-    func offscreenStartDragging(_ data: CefDragData, allowedOps: CefDragOperation, at viewPoint: CGPoint) -> Bool
+    func offscreenDidChangeSelection(_ selectedText: String, selectedRange: NSRange)
+    /// The page asks for a context menu at `point`, in view points. Present
+    /// `menu`, then report the choice through `callback`.
+    func offscreenRunContextMenu(_ menu: CefMenuModel, at point: CGPoint, callback: CefRunContextMenuCallback)
+    /// The page started dragging `data` from `point`, in view points. Begin
+    /// a system drag session and, when it ends, call
+    /// ``CefBrowser/dragSourceEnded(at:operation:)`` and
+    /// ``CefBrowser/dragSourceSystemDragEnded()``. Return `false` to cancel
+    /// the drag. The default returns `false`.
+    func offscreenStartDragging(_ data: CefDragData, allowedOperations: CefDragOperation, at point: CGPoint) -> Bool
     /// The drag cursor should show `operation`. The default does nothing.
     func offscreenUpdateDragCursor(_ operation: CefDragOperation)
 }
 
 extension CefOffscreenHost {
-    public func offscreenStartDragging(_ data: CefDragData, allowedOps: CefDragOperation, at viewPoint: CGPoint) -> Bool { false }
+    public func offscreenStartDragging(_ data: CefDragData, allowedOperations: CefDragOperation, at point: CGPoint) -> Bool { false }
     public func offscreenUpdateDragCursor(_ operation: CefDragOperation) {}
 }
 
@@ -105,14 +105,14 @@ extension CefBrowserClient {
             cefRelease(browser)
             guard let rect else { return }
             let info = CefBrowserClient.offscreenViewInfo(s)
-            rect.pointee = cef_rect_t(CGRect(origin: .zero, size: info.sizeDIP))
+            rect.pointee = cef_rect_t(CGRect(origin: .zero, size: info.size))
         }
 
         handler.pointee.get_screen_info = { s, browser, screenInfo in
             cefRelease(browser)
             guard let screenInfo else { return 0 }
             let info = CefBrowserClient.offscreenViewInfo(s)
-            let screen = cef_rect_t(info.screenRectDIP)
+            let screen = cef_rect_t(info.screenFrame)
             screenInfo.pointee.device_scale_factor = Float(info.deviceScaleFactor)
             screenInfo.pointee.depth = 24
             screenInfo.pointee.depth_per_component = 8
@@ -125,7 +125,7 @@ extension CefBrowserClient {
         handler.pointee.get_screen_point = { s, browser, viewX, viewY, screenX, screenY in
             cefRelease(browser)
             guard let screenX, let screenY else { return 0 }
-            let origin = CefBrowserClient.offscreenViewInfo(s).screenOriginDIP
+            let origin = CefBrowserClient.offscreenViewInfo(s).screenOrigin
             screenX.pointee = Int32((origin.x + CGFloat(viewX)).rounded())
             screenY.pointee = Int32((origin.y + CGFloat(viewY)).rounded())
             return 1
@@ -161,7 +161,7 @@ extension CefBrowserClient {
             guard let client = cefOwner(CefBrowserClient.self, s) else { return 0 }
             return MainActor.assumeIsolated {
                 guard let host = client.offscreenHost else { return 0 }
-                return host.offscreenStartDragging(data, allowedOps: operations, at: point) ? 1 : 0
+                return host.offscreenStartDragging(data, allowedOperations: operations, at: point) ? 1 : 0
             }
         }
 
@@ -189,7 +189,7 @@ extension CefBrowserClient {
             let range = selectedRange.map { NSRange($0.pointee) } ?? NSRange(location: 0, length: 0)
             let rects = CGRect.array(characterBounds, count: boundsCount)
             CefBrowserClient.withOffscreenHost(s) {
-                $0.offscreenImeCompositionRangeChanged(selectedRange: range, characterBounds: rects)
+                $0.offscreenDidChangeCompositionRange(range, characterBounds: rects)
             }
         }
 
@@ -198,7 +198,7 @@ extension CefBrowserClient {
             let text = CefStringUtil.string(from: selectedText)
             let range = selectedRange.map { NSRange($0.pointee) } ?? NSRange(location: 0, length: 0)
             CefBrowserClient.withOffscreenHost(s) {
-                $0.offscreenTextSelectionChanged(selectedText: text, selectedRange: range)
+                $0.offscreenDidChangeSelection(text, selectedRange: range)
             }
         }
 
@@ -260,7 +260,7 @@ extension cef_range_t {
 
 extension cef_mouse_event_t {
     /// A mouse event at `point`, in view points.
-    init(_ point: CGPoint, modifiers: UInt32) {
-        self.init(x: Int32(point.x.rounded()), y: Int32(point.y.rounded()), modifiers: modifiers)
+    init(_ point: CGPoint, modifiers: CefEventModifiers) {
+        self.init(x: Int32(point.x.rounded()), y: Int32(point.y.rounded()), modifiers: modifiers.rawValue)
     }
 }

@@ -1,15 +1,13 @@
 import AppKit
-import CCef
 import Foundation
 import Testing
 
-@testable import CefKit
 @testable import CefSwiftUI
 
-/// Key codes and geometry used when forwarding AppKit input to offscreen
+/// Key codes and menu titles used when forwarding AppKit input to offscreen
 /// browsers.
 @MainActor
-struct OSRLogicTests {
+struct OffscreenLogicTests {
 
     // MARK: Windows key code mapping
 
@@ -27,14 +25,10 @@ struct OSRLogicTests {
         #expect(CefKeyCodes.windowsKeyCode(forMacKeyCode: 0x12, characters: "1") == 0x31)
     }
 
-    // MARK: View info
+    // MARK: Menu titles
 
-    @Test func offscreenViewInfoDefaults() {
-        let info = CefOffscreenViewInfo()
-        #expect(info.deviceScaleFactor == 1)
-        #expect(info.sizeDIP == CGSize(width: 1, height: 1))
-        let retina = CefOffscreenViewInfo(sizeDIP: CGSize(width: 400, height: 300), deviceScaleFactor: 2)
-        #expect(retina.deviceScaleFactor == 2)
-        #expect(retina.sizeDIP.width == 400)
+    @Test func menuTitleDropsMnemonics() {
+        #expect(CefOffscreenBrowserView.menuTitle(fromCefTitle: "&Copy") == "Copy")
+        #expect(CefOffscreenBrowserView.menuTitle(fromCefTitle: "Save && &Quit") == "Save & Quit")
     }
 }

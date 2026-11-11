@@ -173,7 +173,7 @@ private struct DownloadRow: View {
                     if let path = download.fullPath { NSWorkspace.shared.activateFileViewerSelecting([path]) }
                 }
                 .buttonStyle(.link)
-            } else if download.isCanceled {
+            } else if download.isCancelled {
                 Text("Canceled").foregroundStyle(.secondary)
             } else {
                 HStack {

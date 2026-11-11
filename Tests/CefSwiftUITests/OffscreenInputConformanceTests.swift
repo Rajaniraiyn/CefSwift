@@ -1,15 +1,13 @@
 import AppKit
-import CCef
 import Foundation
 import Testing
 
-@testable import CefKit
 @testable import CefSwiftUI
 
 /// Key-equivalent forwarding, modifier flags and extra mouse buttons in the
 /// offscreen browser view.
 @MainActor
-struct OSRInputConformanceTests {
+struct OffscreenInputConformanceTests {
 
     // MARK: performKeyEquivalent forwarding policy
 
@@ -58,21 +56,15 @@ struct OSRInputConformanceTests {
     // MARK: Modifier mapping
 
     @Test func modifierFlagsMapToCefBits() {
-        let m = CefOffscreenBrowserView.cefModifiers([.command, .shift, .control, .option, .capsLock])
-        #expect(m & UInt32(EVENTFLAG_COMMAND_DOWN.rawValue) != 0)
-        #expect(m & UInt32(EVENTFLAG_SHIFT_DOWN.rawValue) != 0)
-        #expect(m & UInt32(EVENTFLAG_CONTROL_DOWN.rawValue) != 0)
-        #expect(m & UInt32(EVENTFLAG_ALT_DOWN.rawValue) != 0)
-        #expect(m & UInt32(EVENTFLAG_CAPS_LOCK_ON.rawValue) != 0)
+        let m = CefOffscreenBrowserView.eventModifiers([.command, .shift, .control, .option, .capsLock])
+        #expect(m == [.command, .shift, .control, .option, .capsLock])
     }
 
     @Test func pressedMouseButtonsMapToFlags() {
-        let left = CefOffscreenBrowserView.cefModifiers([], pressedButtons: 1 << 0)
-        #expect(left & UInt32(EVENTFLAG_LEFT_MOUSE_BUTTON.rawValue) != 0)
-        let right = CefOffscreenBrowserView.cefModifiers([], pressedButtons: 1 << 1)
-        #expect(right & UInt32(EVENTFLAG_RIGHT_MOUSE_BUTTON.rawValue) != 0)
-        let middle = CefOffscreenBrowserView.cefModifiers([], pressedButtons: 1 << 2)
-        #expect(middle & UInt32(EVENTFLAG_MIDDLE_MOUSE_BUTTON.rawValue) != 0)
+        #expect(CefOffscreenBrowserView.eventModifiers([], pressedButtons: 1 << 0) == .leftMouseButton)
+        #expect(CefOffscreenBrowserView.eventModifiers([], pressedButtons: 1 << 1) == .rightMouseButton)
+        #expect(CefOffscreenBrowserView.eventModifiers([], pressedButtons: 1 << 2) == .middleMouseButton)
+        #expect(CefOffscreenBrowserView.eventModifiers([.shift], pressedButtons: 1 << 0) == [.shift, .leftMouseButton])
     }
 
     // MARK: Mouse-button → navigation mapping
