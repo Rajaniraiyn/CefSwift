@@ -1,5 +1,4 @@
 import SwiftUI
-import CCefAppKit
 @_exported import CefKit
 
 /// A SwiftUI `App` that embeds Chromium.
@@ -45,7 +44,7 @@ extension CefSwiftApp {
     /// it, and exits with status 1.
     @MainActor public static func main() {
         // Must precede every other NSApp access, including SwiftUI's.
-        CEFApplication.install()
+        CefApplication.install()
         do {
             try CefRuntime.shared.initialize(configuration: Self.cefConfiguration)
         } catch .anotherInstanceRunning {

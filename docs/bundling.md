@@ -73,7 +73,7 @@ your target's sources, or `--bundle-id` / `--name` flags):
 | Key | Value | Why |
 |---|---|---|
 | `LSEnvironment` | `{ MallocNanoZone = "0" }` | **Required.** Chromium's allocator is incompatible with the Nano malloc zone; without this the app can crash deep inside CEF at startup. |
-| `NSPrincipalClass` | `NSApplication` | CefSwift installs its own `CEFApplication` programmatically; the plist still declares the AppKit principal class. |
+| `NSPrincipalClass` | `NSApplication` | CefSwift installs its own `CefApplication` programmatically; the plist still declares the AppKit principal class. |
 | `LSMinimumSystemVersion` | `14.0` | Package floor. |
 | `NSSupportsAutomaticGraphicsSwitching` | `true` | Lets dual-GPU Macs use the integrated GPU. |
 

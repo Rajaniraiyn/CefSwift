@@ -7,8 +7,7 @@ CefSwiftUI   CefSwiftApp, CefWebView, host views, CefBrowserWindow.setToolbar
     │
 CefKit       CefRuntime, CefBrowser, CefBrowserWindow, CefBridge, CefDevTools,
     │        CefProfile, CefBrowserDelegate, configuration types
-    ├── CCef         vendored CEF C headers + runtime loader (C)
-    └── CCefAppKit   CEFApplication, the NSApplication subclass CEF requires (ObjC)
+    └── CCef         vendored CEF C headers + runtime loader (C)
 
 cef-helper   the helper-process executable, bundled five times by the plugin
 CefPlugin    `swift package cef download | bundle | info | clean`

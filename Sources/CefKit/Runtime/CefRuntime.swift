@@ -1,6 +1,5 @@
 import AppKit
 import CCef
-import CCefAppKit
 import Foundation
 import Observation
 
@@ -78,16 +77,6 @@ final class MappedCefSettings {
 
 // MARK: -
 
-/// Routes CEFApplication's terminate: through the runtime so quitting closes
-/// CEF browsers cleanly first. Returns true when termination may proceed.
-private let cefTerminateHandler: CEFApplicationTerminateHandler = { () -> ObjCBool in
-    ObjCBool(
-        MainActor.assumeIsolated {
-            CefRuntime.shared.handleTerminationRequest()
-        }
-    )
-}
-
 /// Process-wide CEF lifecycle: loading the framework, `cef_initialize`, the
 /// message pump, the set of live browsers, and shutdown.
 ///
@@ -124,17 +113,12 @@ public final class CefRuntime {
 
     /// Initializes CEF in the browser (main) process. Call once, on the main
     /// thread, before creating browsers and before anything else creates
-    /// `NSApp` — CEF needs the application object to be a `CEFApplication`,
+    /// `NSApp` — CEF needs the application object to be a `CefApplication`,
     /// which this installs.
     public func initialize(configuration: CefConfiguration = .default) throws(CefError) {
         guard !isInitialized else { throw CefError.alreadyInitialized }
 
-        if NSApp == nil {
-            CEFApplication.install()
-        }
-        precondition(
-            NSApp is CEFApplication,
-            "NSApp is \(type(of: NSApp!)), not CEFApplication. Initialize CefRuntime before anything touches NSApp.")
+        CefApplication.install()
 
         let frameworkBinary = try Self.resolveFrameworkBinary(override: configuration.frameworkDirectory)
         guard ccef_load_framework(frameworkBinary.path) != 0 else {
@@ -167,7 +151,6 @@ public final class CefRuntime {
         self.configuration = configuration
         messagePump = pump
         pump.start()
-        CEFApplication.setTerminateHandler(cefTerminateHandler)
         isInitialized = true
     }
 
@@ -221,7 +204,6 @@ public final class CefRuntime {
         guard isInitialized else { return }
         messagePump?.stop()
         messagePump = nil
-        CEFApplication.setTerminateHandler(nil)
         cef_shutdown()
         appContext = nil
         settings = nil
@@ -395,7 +377,7 @@ public final class CefRuntime {
         browsersByIdentifier[identifier]
     }
 
-    /// Called from CEFApplication's terminate:. Quitting closes every
+    /// Called from `CefApplication.terminate(_:)`. Quitting closes every
     /// browser first (so pages can run `beforeunload` and state is flushed),
     /// then terminates once the last one is gone.
     func handleTerminationRequest() -> Bool {

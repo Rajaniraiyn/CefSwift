@@ -1,4 +1,5 @@
 import Foundation
+import Security
 
 /// Whether Chromium keeps the key that encrypts cookies and other secrets in
 /// the user's keychain, as the "Chromium Safe Storage" item.
@@ -9,8 +10,10 @@ import Foundation
 /// are asked again each time. The prompt belongs to macOS and cannot be
 /// customized.
 public enum CefSafeStoragePolicy: Sendable {
-    /// ``mockKeychain`` in debug builds and ``keychain`` in release builds.
-    /// The default.
+    /// ``keychain`` when the app is signed with a developer identity, where
+    /// the user's Always Allow sticks; ``mockKeychain`` when it is unsigned
+    /// or ad-hoc signed, as local builds are, where it would not. The
+    /// default.
     case automatic
 
     /// Keep the key in the keychain, as Chrome does.
@@ -23,17 +26,28 @@ public enum CefSafeStoragePolicy: Sendable {
 }
 
 extension CefSafeStoragePolicy {
-    /// The policy with ``automatic`` replaced by the policy for this build.
+    /// The policy with ``automatic`` replaced by the policy for this app.
     func resolved() -> CefSafeStoragePolicy {
         switch self {
         case .keychain, .mockKeychain:
             return self
         case .automatic:
-            #if DEBUG
-            return .mockKeychain
-            #else
-            return .keychain
-            #endif
+            return Self.hasDeveloperSignature ? .keychain : .mockKeychain
         }
     }
+
+    /// Whether the running app is signed with a team identity, as opposed to
+    /// unsigned or ad-hoc signed.
+    private static let hasDeveloperSignature: Bool = {
+        var code: SecCode?
+        var staticCode: SecStaticCode?
+        var information: CFDictionary?
+        guard SecCodeCopySelf([], &code) == errSecSuccess, let code,
+              SecCodeCopyStaticCode(code, [], &staticCode) == errSecSuccess, let staticCode,
+              SecCodeCopySigningInformation(
+                staticCode, SecCSFlags(rawValue: kSecCSSigningInformation), &information) == errSecSuccess,
+              let details = information as? [String: Any]
+        else { return false }
+        return details[kSecCodeInfoTeamIdentifier as String] is String
+    }()
 }

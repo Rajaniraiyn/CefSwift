@@ -114,7 +114,7 @@ public struct CefConfiguration: Sendable {
 
     /// Whether Chromium keeps its encryption key in the keychain. The
     /// default, ``CefSafeStoragePolicy/automatic``, uses the keychain only
-    /// in release builds.
+    /// when the app is signed with a developer identity.
     public var safeStorage: CefSafeStoragePolicy = .automatic
 
     /// Custom URL schemes registered in every CEF process (browser, renderer,
