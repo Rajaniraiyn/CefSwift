@@ -143,7 +143,7 @@ public final class CefRuntime {
         let pump = CefMessagePump()
         // Browsers created through Chrome's own UI have no CefBrowser asking
         // for them; this client adopts them as they appear.
-        let defaultClient = BrowserClient(browser: nil, requestFilter: nil, chromeUI: configuration.chromeUI)
+        let defaultClient = CefBrowserClient(browser: nil, requestFilter: nil, chromeUI: configuration.chromeUI)
         let context = CefAppContext(
             configuration: configuration, pump: pump, defaultClient: defaultClient.makeClient())
         let mapped = MappedCefSettings(

@@ -43,7 +43,14 @@ final class BrowserController: CefBrowserDelegate {
         configuration.tabbingIdentifier = "browser"
         configuration.frame = windows.last?.nsWindow?.frame
         let window = CefBrowserWindow(browser: browser, configuration: configuration)
-        window.setToolbar { BrowserToolbar(browser: browser, controller: self, isPrivate: isPrivate) }
+        window.setToolbar {
+            NavigationButtons(browser: browser)
+        } principal: {
+            AddressBar(browser: browser, controller: self, isPrivate: isPrivate)
+        } trailing: {
+            TrailingButtons(browser: browser, controller: self)
+        }
+        window.setTabAccessory { TabIcon(browser: browser) }
         window.onClose = { [weak self, weak window] in
             self?.windows.removeAll { $0 === window }
         }

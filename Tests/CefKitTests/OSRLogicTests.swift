@@ -30,12 +30,12 @@ struct OSRLogicTests {
 
     // MARK: OSR view info defaults
 
-    @Test func osrViewInfoDefaults() {
-        let info = CefOSRViewInfo()
+    @Test func offscreenViewInfoDefaults() {
+        let info = CefOffscreenViewInfo()
         #expect(info.deviceScaleFactor == 1)
         #expect(info.sizeDIP == CGSize(width: 1, height: 1))
         // Custom retina geometry round-trips.
-        let retina = CefOSRViewInfo(sizeDIP: CGSize(width: 400, height: 300), deviceScaleFactor: 2)
+        let retina = CefOffscreenViewInfo(sizeDIP: CGSize(width: 400, height: 300), deviceScaleFactor: 2)
         #expect(retina.deviceScaleFactor == 2)
         #expect(retina.sizeDIP.width == 400)
     }

@@ -1,26 +1,28 @@
 import CefSwiftUI
 import SwiftUI
 
-/// The toolbar above each page: navigation, address bar, downloads.
-struct BrowserToolbar: View {
+/// Back and forward, beside the window buttons.
+struct NavigationButtons: View {
     let browser: CefBrowser
-    let controller: BrowserController
-    let isPrivate: Bool
 
     var body: some View {
-        HStack(spacing: 6) {
+        ControlGroup {
             Button("Back", systemImage: "chevron.left", action: browser.goBack)
                 .disabled(!browser.canGoBack)
             Button("Forward", systemImage: "chevron.right", action: browser.goForward)
                 .disabled(!browser.canGoForward)
-            if browser.isLoading {
-                Button("Stop", systemImage: "xmark", action: browser.stopLoading)
-            } else {
-                Button("Reload", systemImage: "arrow.clockwise") { browser.reload() }
-            }
+        }
+        .controlGroupStyle(.navigation)
+    }
+}
 
-            AddressBar(browser: browser, controller: controller, isPrivate: isPrivate)
+/// Downloads and New Tab, at the trailing edge.
+struct TrailingButtons: View {
+    let browser: CefBrowser
+    let controller: BrowserController
 
+    var body: some View {
+        HStack(spacing: 10) {
             if !browser.downloads.isEmpty {
                 DownloadsButton(browser: browser)
             }
@@ -28,12 +30,31 @@ struct BrowserToolbar: View {
         }
         .labelStyle(.iconOnly)
         .buttonStyle(.borderless)
-        .controlSize(.large)
-        .padding(.horizontal, 4)
     }
 }
 
-private struct AddressBar: View {
+/// A favicon, or a spinner while the page loads, shown in the tab itself.
+struct TabIcon: View {
+    let browser: CefBrowser
+
+    var body: some View {
+        Group {
+            if browser.isLoading {
+                ProgressView().controlSize(.small)
+            } else {
+                AsyncImage(url: browser.faviconURL) { image in
+                    image.resizable().interpolation(.high)
+                } placeholder: {
+                    Image(systemName: "globe").foregroundStyle(.secondary)
+                }
+            }
+        }
+        .frame(width: 14, height: 14)
+    }
+}
+
+/// The address field: site status, editable location, reload and progress.
+struct AddressBar: View {
     let browser: CefBrowser
     let controller: BrowserController
     let isPrivate: Bool
@@ -49,9 +70,15 @@ private struct AddressBar: View {
                 .textFieldStyle(.plain)
                 .focused($isFocused)
                 .onSubmit(navigate)
+            Button(browser.isLoading ? "Stop" : "Reload", systemImage: browser.isLoading ? "xmark" : "arrow.clockwise") {
+                if browser.isLoading { browser.stopLoading() } else { browser.reload() }
+            }
+            .labelStyle(.iconOnly)
+            .buttonStyle(.borderless)
+            .foregroundStyle(.secondary)
         }
         .padding(.horizontal, 10)
-        .padding(.vertical, 6)
+        .frame(height: 28)
         .background(.quaternary.opacity(isFocused ? 1 : 0.6), in: .capsule)
         .overlay(alignment: .bottom) {
             // Load progress, drawn as a hairline along the field's lower edge.

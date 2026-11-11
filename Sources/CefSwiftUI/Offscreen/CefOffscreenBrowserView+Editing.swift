@@ -45,7 +45,7 @@ extension CefOffscreenBrowserView: NSMenuItemValidation, NSUserInterfaceValidati
     ///   (Spotlight) — and any combo while no browser is focused.
     /// - Plain function keys / media keys (no Cmd) — AppKit/system own these.
     public override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        guard let browser = osrBrowser, window?.firstResponder === self else {
+        guard let browser = offscreenBrowser, window?.firstResponder === self else {
             return super.performKeyEquivalent(with: event)
         }
         guard Self.shouldForwardKeyEquivalent(
@@ -119,14 +119,14 @@ extension CefOffscreenBrowserView: NSMenuItemValidation, NSUserInterfaceValidati
 
     // MARK: Standard responder actions (Edit menu + Services)
 
-    @objc public func copy(_ sender: Any?) { osrBrowser?.copySelection() }
-    @objc public func cut(_ sender: Any?) { osrBrowser?.cutSelection() }
-    @objc public func paste(_ sender: Any?) { osrBrowser?.paste() }
-    @objc public func pasteAsPlainText(_ sender: Any?) { osrBrowser?.pasteAndMatchStyle() }
-    @objc public func delete(_ sender: Any?) { osrBrowser?.deleteSelection() }
-    @objc public override func selectAll(_ sender: Any?) { osrBrowser?.selectAll() }
-    @objc public func undo(_ sender: Any?) { osrBrowser?.undo() }
-    @objc public func redo(_ sender: Any?) { osrBrowser?.redo() }
+    @objc public func copy(_ sender: Any?) { offscreenBrowser?.copySelection() }
+    @objc public func cut(_ sender: Any?) { offscreenBrowser?.cutSelection() }
+    @objc public func paste(_ sender: Any?) { offscreenBrowser?.paste() }
+    @objc public func pasteAsPlainText(_ sender: Any?) { offscreenBrowser?.pasteAndMatchStyle() }
+    @objc public func delete(_ sender: Any?) { offscreenBrowser?.deleteSelection() }
+    @objc public override func selectAll(_ sender: Any?) { offscreenBrowser?.selectAll() }
+    @objc public func undo(_ sender: Any?) { offscreenBrowser?.undo() }
+    @objc public func redo(_ sender: Any?) { offscreenBrowser?.redo() }
 
     // MARK: Menu / toolbar item validation
 
@@ -137,7 +137,7 @@ extension CefOffscreenBrowserView: NSMenuItemValidation, NSUserInterfaceValidati
     /// which matches how WKWebView behaves for these items.
     public func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         if isEditingAction(menuItem.action) {
-            return osrBrowser != nil && window?.firstResponder === self
+            return offscreenBrowser != nil && window?.firstResponder === self
         }
         // Not one of our editing actions: enable by default (items we don't
         // own are validated by their own targets elsewhere in the chain).
@@ -146,7 +146,7 @@ extension CefOffscreenBrowserView: NSMenuItemValidation, NSUserInterfaceValidati
 
     public func validateUserInterfaceItem(_ item: NSValidatedUserInterfaceItem) -> Bool {
         if isEditingAction(item.action) {
-            return osrBrowser != nil && window?.firstResponder === self
+            return offscreenBrowser != nil && window?.firstResponder === self
         }
         return true
     }
