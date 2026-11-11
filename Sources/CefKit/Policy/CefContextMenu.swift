@@ -19,12 +19,11 @@ public enum CefContextMenuMediaType: Sendable, Equatable {
     }
 }
 
-/// Information about the node a context menu was invoked on. Mirrors
-/// `cef_context_menu_params_t` (Electron's `context-menu` params).
+/// What a context menu was invoked on.
 public struct CefContextMenuParams: Sendable, Equatable {
-    /// X coordinate of the invocation, relative to the view origin.
+    /// The horizontal position of the click, in view points.
     public var x: Int
-    /// Y coordinate of the invocation, relative to the view origin.
+    /// The vertical position of the click, in view points.
     public var y: Int
     /// URL of the enclosing link, if any.
     public var linkURL: URL?
@@ -36,7 +35,7 @@ public struct CefContextMenuParams: Sendable, Equatable {
     public var selectionText: String
     /// The media element type the menu was invoked on.
     public var mediaType: CefContextMenuMediaType
-    /// Whether the node is editable (text field, contentEditable, …).
+    /// Whether the node is editable, such as a text field.
     public var isEditable: Bool
 
     public init(
@@ -61,40 +60,39 @@ public struct CefContextMenuParams: Sendable, Equatable {
 }
 
 extension CefContextMenuParams {
-    /// Reads a snapshot out of a borrowed `cef_context_menu_params_t`.
+    /// Reads a borrowed `cef_context_menu_params_t`.
     init(raw params: UnsafeMutablePointer<cef_context_menu_params_t>) {
-        func url(_ s: String) -> URL? { s.isEmpty ? nil : URL(string: s) }
-        let linkURLString = CefStringUtil.takingUserFree(params.pointee.get_link_url?(params)) ?? ""
-        let sourceURLString = CefStringUtil.takingUserFree(params.pointee.get_source_url?(params)) ?? ""
-        let pageURLString = CefStringUtil.takingUserFree(params.pointee.get_page_url?(params)) ?? ""
-        let selection = CefStringUtil.takingUserFree(params.pointee.get_selection_text?(params)) ?? ""
+        func url(_ value: cef_string_userfree_t?) -> URL? {
+            CefStringUtil.takingUserFree(value).flatMap { $0.isEmpty ? nil : URL(string: $0) }
+        }
         self.init(
-            x: Int(params.pointee.get_xcoord?(params) ?? 0),
-            y: Int(params.pointee.get_ycoord?(params) ?? 0),
-            linkURL: url(linkURLString),
-            sourceURL: url(sourceURLString),
-            pageURL: url(pageURLString),
-            selectionText: selection,
-            mediaType: CefContextMenuMediaType(cefValue: params.pointee.get_media_type?(params) ?? CM_MEDIATYPE_NONE),
-            isEditable: (params.pointee.is_editable?(params) ?? 0) != 0
+            x: Int(params.pointee.get_xcoord(params)),
+            y: Int(params.pointee.get_ycoord(params)),
+            linkURL: url(params.pointee.get_link_url(params)),
+            sourceURL: url(params.pointee.get_source_url(params)),
+            pageURL: url(params.pointee.get_page_url(params)),
+            selectionText: CefStringUtil.takingUserFree(params.pointee.get_selection_text(params)) ?? "",
+            mediaType: CefContextMenuMediaType(cefValue: params.pointee.get_media_type(params)),
+            isEditable: params.pointee.is_editable(params) != 0
         )
     }
 }
 
-/// A mutable wrapper around CEF's `cef_menu_model_t` exposing the common
-/// add/remove/clear/insert operations needed to customize the page context
-/// menu. Valid only inside ``CefBrowserDelegate/browser(_:configureContextMenu:params:)``;
-/// do not retain it.
+/// A context menu about to be shown.
 ///
-/// User-defined command IDs must be between ``userCommandIDFirst`` and
-/// ``userCommandIDLast``; selecting one fires
+/// A menu model is valid only during the call that provides it, such as
+/// ``CefBrowserDelegate/browser(_:configureContextMenu:params:)``; do not
+/// keep it.
+///
+/// Give your own items command IDs from ``userCommandIDFirst`` through
+/// ``userCommandIDLast``. Choosing one calls
 /// ``CefBrowserDelegate/browser(_:contextMenuCommand:params:)``.
 @MainActor
 public final class CefMenuModel {
-    /// Lower bound for app-defined command IDs (`MENU_ID_USER_FIRST`).
-    public nonisolated static let userCommandIDFirst = 26500
-    /// Upper bound for app-defined command IDs (`MENU_ID_USER_LAST`).
-    public nonisolated static let userCommandIDLast = 28500
+    /// The first command ID available to your items (`MENU_ID_USER_FIRST`).
+    public nonisolated static let userCommandIDFirst = Int(MENU_ID_USER_FIRST.rawValue)
+    /// The last command ID available to your items (`MENU_ID_USER_LAST`).
+    public nonisolated static let userCommandIDLast = Int(MENU_ID_USER_LAST.rawValue)
 
     private let raw: UnsafeMutablePointer<cef_menu_model_t>
 
@@ -102,73 +100,84 @@ public final class CefMenuModel {
         self.raw = raw
     }
 
-    /// Number of items currently in the menu.
+    /// The number of items, separators included.
     public var count: Int {
-        Int(raw.pointee.get_count?(raw) ?? 0)
+        Int(raw.pointee.get_count(raw))
     }
 
-    /// Removes every item (show no menu, or build a fully custom one).
+    /// Removes every item. A menu left empty is not shown.
     public func clear() {
-        _ = raw.pointee.clear?(raw)
+        _ = raw.pointee.clear(raw)
     }
 
-    /// Appends a command item. `commandID` should be within the user range.
+    /// Appends an item.
     public func addItem(commandID: Int, title: String) {
         CefStringUtil.withCefString(title) { label in
-            _ = raw.pointee.add_item?(raw, Int32(commandID), label)
+            _ = raw.pointee.add_item(raw, Int32(commandID), label)
         }
     }
 
     /// Appends a separator.
     public func addSeparator() {
-        _ = raw.pointee.add_separator?(raw)
+        _ = raw.pointee.add_separator(raw)
     }
 
-    /// Inserts a command item at `index`.
+    /// Inserts an item at `index`.
     public func insertItem(at index: Int, commandID: Int, title: String) {
         CefStringUtil.withCefString(title) { label in
-            _ = raw.pointee.insert_item_at?(raw, index, Int32(commandID), label)
+            _ = raw.pointee.insert_item_at(raw, index, Int32(commandID), label)
         }
     }
 
     /// Inserts a separator at `index`.
     public func insertSeparator(at index: Int) {
-        _ = raw.pointee.insert_separator_at?(raw, index)
+        _ = raw.pointee.insert_separator_at(raw, index)
     }
 
-    /// Removes the item with the given command ID. Returns whether it existed.
+    /// Removes the item with `commandID`. Returns whether it was found.
     @discardableResult
     public func remove(commandID: Int) -> Bool {
-        (raw.pointee.remove?(raw, Int32(commandID)) ?? 0) != 0
+        raw.pointee.remove(raw, Int32(commandID)) != 0
     }
 
-    /// Removes the item at `index`. Returns whether it existed.
+    /// Removes the item at `index`. Returns whether it was found.
     @discardableResult
     public func removeItem(at index: Int) -> Bool {
-        (raw.pointee.remove_at?(raw, index) ?? 0) != 0
+        raw.pointee.remove_at(raw, index) != 0
     }
 
-    /// The label of the item at `index`.
+    /// The title of the item at `index`.
     public func label(at index: Int) -> String {
-        CefStringUtil.takingUserFree(raw.pointee.get_label_at?(raw, index)) ?? ""
+        CefStringUtil.takingUserFree(raw.pointee.get_label_at(raw, index)) ?? ""
     }
 
-    /// The command ID of the item at `index`.
+    /// The command ID of the item at `index`, or `-1` for a separator.
     public func commandID(at index: Int) -> Int {
-        Int(raw.pointee.get_command_id_at?(raw, index) ?? -1)
+        Int(raw.pointee.get_command_id_at(raw, index))
     }
 
     /// Whether the item at `index` is a separator.
     public func isSeparator(at index: Int) -> Bool {
-        raw.pointee.get_type_at?(raw, index) == MENUITEMTYPE_SEPARATOR
+        raw.pointee.get_type_at(raw, index) == MENUITEMTYPE_SEPARATOR
+    }
+
+    /// Removes leading, trailing and doubled separators, such as those left
+    /// after removing items.
+    public func trimSeparators() {
+        var index = count - 1
+        while index >= 0 {
+            let isEdge = index == 0 || index == count - 1
+            if isSeparator(at: index), isEdge || isSeparator(at: index - 1) {
+                removeItem(at: index)
+            }
+            index -= 1
+        }
     }
 }
 
-/// Resolves a CEF "run context menu" request: the OSR host presents a native
-/// `NSMenu` from the ``CefMenuModel`` and reports the chosen command (or
-/// cancellation) back through this callback. Owns one +1 reference to the
-/// underlying CEF callback; call exactly one of ``select(commandID:)`` /
-/// ``cancel()`` exactly once.
+/// Reports the outcome of a context menu an offscreen host presented.
+///
+/// Call ``select(commandID:)`` or ``cancel()`` once; later calls do nothing.
 @MainActor
 public final class CefRunContextMenuCallback {
     private var raw: UnsafeMutablePointer<cef_run_context_menu_callback_t>?
@@ -177,32 +186,33 @@ public final class CefRunContextMenuCallback {
         self.raw = raw
     }
 
-    /// Completes the menu by selecting `commandID`.
+    /// Reports that the user chose the item with `commandID`.
     public func select(commandID: Int) {
         guard let raw else { return }
-        raw.pointee.cont?(raw, Int32(commandID), cef_event_flags_t(rawValue: 0))
-        cefRelease(UnsafeMutableRawPointer(raw))
+        raw.pointee.cont(raw, Int32(commandID), cef_event_flags_t(rawValue: 0))
+        cefRelease(raw)
         self.raw = nil
     }
 
-    /// Cancels the menu without selecting anything.
+    /// Reports that the menu closed without a choice.
     public func cancel() {
         guard let raw else { return }
-        raw.pointee.cancel?(raw)
-        cefRelease(UnsafeMutableRawPointer(raw))
+        raw.pointee.cancel(raw)
+        cefRelease(raw)
         self.raw = nil
     }
 }
 
 // MARK: - Declarative configuration
 
-/// A custom entry in a browser's context menu.
+/// An item you add to a browser's context menu.
 @MainActor
 public struct CefContextMenuItem {
     public var title: String
-    /// Decides per click whether the item appears — for example only on
-    /// links, or only with a selection. `nil` always shows it.
+    /// Decides for each menu whether the item appears, for example only on
+    /// links. `nil` always shows it.
     public var isVisible: ((CefContextMenuParams) -> Bool)?
+    /// Runs when the item is chosen.
     public var action: (CefBrowser, CefContextMenuParams) -> Void
 
     public init(
@@ -216,8 +226,8 @@ public struct CefContextMenuItem {
     }
 }
 
-/// Shapes a browser's context menu without writing a delegate: drop
-/// Chromium's entries you don't want, add your own, opt into Inspect Element.
+/// Shapes a browser's context menu without a delegate: hide Chromium's
+/// items, add your own, and optionally add Inspect Element.
 ///
 /// ```swift
 /// options.contextMenu.hiddenCommands = [.viewSource, .print]
@@ -236,15 +246,16 @@ public struct CefContextMenuItem {
 public struct CefContextMenuConfiguration {
     /// `false` suppresses the context menu entirely.
     public var isEnabled = true
-    /// Built-in entries to remove.
+    /// Chromium items to remove.
     public var hiddenCommands: Set<CefContextMenuCommand> = []
     /// Adds "Inspect Element", opening DevTools on the clicked node.
     public var showsInspectElement = false
-    /// Your entries, appended below Chromium's.
+    /// Your items, added below Chromium's.
     public var items: [CefContextMenuItem] = []
 
     public init() {}
 
+    /// Inspect Element takes the last user ID; ``items`` count up from the first.
     static let inspectCommandID = CefMenuModel.userCommandIDLast
 
     /// Applies the configuration to a menu about to be shown.
@@ -270,7 +281,7 @@ public struct CefContextMenuConfiguration {
         }
     }
 
-    /// Runs the custom command `commandID`. Returns whether it was one of ours.
+    /// Runs the item for `commandID`. Returns whether the ID was one of ours.
     func perform(commandID: Int, in browser: CefBrowser, params: CefContextMenuParams) -> Bool {
         if showsInspectElement, commandID == Self.inspectCommandID {
             browser.showDevTools(inspecting: CGPoint(x: params.x, y: params.y))
@@ -280,20 +291,5 @@ public struct CefContextMenuConfiguration {
         guard items.indices.contains(index) else { return false }
         items[index].action(browser, params)
         return true
-    }
-}
-
-extension CefMenuModel {
-    /// Removes leading, trailing and doubled separators left behind after
-    /// entries were removed.
-    public func trimSeparators() {
-        var index = count - 1
-        while index >= 0 {
-            let isEdge = index == 0 || index == count - 1
-            if isSeparator(at: index), isEdge || isSeparator(at: index - 1) {
-                removeItem(at: index)
-            }
-            index -= 1
-        }
     }
 }

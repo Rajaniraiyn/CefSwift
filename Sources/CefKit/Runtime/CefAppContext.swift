@@ -70,9 +70,8 @@ final class CefAppContext: @unchecked Sendable {
             cefRetained(cefOwner(CefAppContext.self, s)?.resourceBundleHandler)
         }
         app.pointee.on_register_custom_schemes = { s, registrar in
-            // The registrar is scoped, not refcounted: borrow only.
             guard let registrar, let owner = cefOwner(CefAppContext.self, s) else { return }
-            CefSchemeRegistration.register(owner.customSchemes, with: registrar)
+            CefCustomScheme.register(owner.customSchemes, with: registrar)
         }
         app.pointee.on_before_command_line_processing = { s, processType, commandLine in
             defer { cefRelease(commandLine) }
@@ -119,7 +118,7 @@ final class CefHelperAppContext: @unchecked Sendable {
         let app = cefAllocate(cef_app_t.self, owner: self)
         app.pointee.on_register_custom_schemes = { s, registrar in
             guard let registrar, let owner = cefOwner(CefHelperAppContext.self, s) else { return }
-            CefSchemeRegistration.register(owner.customSchemes, with: registrar)
+            CefCustomScheme.register(owner.customSchemes, with: registrar)
         }
         return app
     }

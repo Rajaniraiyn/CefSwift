@@ -1,9 +1,7 @@
 import CCef
 import Foundation
 
-/// A class of permission a page can request. Maps the
-/// `cef_permission_request_types_t` and `cef_media_access_permission_types_t`
-/// bit flags onto a Swift `OptionSet`.
+/// The kinds of permission a page can request.
 public struct CefPermissionKind: OptionSet, Sendable, Hashable {
     public let rawValue: UInt32
     public init(rawValue: UInt32) { self.rawValue = rawValue }
@@ -19,51 +17,40 @@ public struct CefPermissionKind: OptionSet, Sendable, Hashable {
     public static let sensors = CefPermissionKind(rawValue: 1 << 8)
     public static let windowManagement = CefPermissionKind(rawValue: 1 << 9)
     public static let downloads = CefPermissionKind(rawValue: 1 << 10)
-    /// Any requested permission not mapped to a more specific case above.
+    /// A permission with no more specific kind.
     public static let other = CefPermissionKind(rawValue: 1 << 31)
 
-    /// Maps `cef_permission_request_types_t` flags (used by
-    /// `on_show_permission_prompt`).
+    private static let requestTypes: [(cef_permission_request_types_t, CefPermissionKind)] = [
+        (CEF_PERMISSION_TYPE_CAMERA_STREAM, .camera),
+        (CEF_PERMISSION_TYPE_CAMERA_PAN_TILT_ZOOM, .camera),
+        (CEF_PERMISSION_TYPE_MIC_STREAM, .microphone),
+        (CEF_PERMISSION_TYPE_GEOLOCATION, .geolocation),
+        (CEF_PERMISSION_TYPE_NOTIFICATIONS, .notifications),
+        (CEF_PERMISSION_TYPE_CLIPBOARD, .clipboard),
+        (CEF_PERMISSION_TYPE_MIDI_SYSEX, .midi),
+        (CEF_PERMISSION_TYPE_POINTER_LOCK, .pointerLock),
+        (CEF_PERMISSION_TYPE_STORAGE_ACCESS, .storageAccess),
+        (CEF_PERMISSION_TYPE_TOP_LEVEL_STORAGE_ACCESS, .storageAccess),
+        (CEF_PERMISSION_TYPE_SENSORS, .sensors),
+        (CEF_PERMISSION_TYPE_WINDOW_MANAGEMENT, .windowManagement),
+        (CEF_PERMISSION_TYPE_MULTIPLE_DOWNLOADS, .downloads),
+    ]
+
+    /// Maps the `cef_permission_request_types_t` mask passed to
+    /// `on_show_permission_prompt`. Types without a kind become ``other``.
     static func fromRequestTypes(_ value: UInt32) -> CefPermissionKind {
         var kinds: CefPermissionKind = []
-        func test(_ cef: cef_permission_request_types_t, _ kind: CefPermissionKind) {
-            if value & UInt32(cef.rawValue) != 0 { kinds.insert(kind) }
+        var unmapped = value
+        for (type, kind) in requestTypes where value & UInt32(type.rawValue) != 0 {
+            kinds.insert(kind)
+            unmapped &= ~UInt32(type.rawValue)
         }
-        test(CEF_PERMISSION_TYPE_CAMERA_STREAM, .camera)
-        test(CEF_PERMISSION_TYPE_CAMERA_PAN_TILT_ZOOM, .camera)
-        test(CEF_PERMISSION_TYPE_MIC_STREAM, .microphone)
-        test(CEF_PERMISSION_TYPE_GEOLOCATION, .geolocation)
-        test(CEF_PERMISSION_TYPE_NOTIFICATIONS, .notifications)
-        test(CEF_PERMISSION_TYPE_CLIPBOARD, .clipboard)
-        test(CEF_PERMISSION_TYPE_MIDI_SYSEX, .midi)
-        test(CEF_PERMISSION_TYPE_POINTER_LOCK, .pointerLock)
-        test(CEF_PERMISSION_TYPE_STORAGE_ACCESS, .storageAccess)
-        test(CEF_PERMISSION_TYPE_TOP_LEVEL_STORAGE_ACCESS, .storageAccess)
-        test(CEF_PERMISSION_TYPE_SENSORS, .sensors)
-        test(CEF_PERMISSION_TYPE_WINDOW_MANAGEMENT, .windowManagement)
-        test(CEF_PERMISSION_TYPE_MULTIPLE_DOWNLOADS, .downloads)
-        // Anything requested but unmapped: surface as .other so the app can
-        // make an informed allow/deny decision rather than silently dropping.
-        let mappedMask: UInt32 =
-            UInt32(CEF_PERMISSION_TYPE_CAMERA_STREAM.rawValue)
-            | UInt32(CEF_PERMISSION_TYPE_CAMERA_PAN_TILT_ZOOM.rawValue)
-            | UInt32(CEF_PERMISSION_TYPE_MIC_STREAM.rawValue)
-            | UInt32(CEF_PERMISSION_TYPE_GEOLOCATION.rawValue)
-            | UInt32(CEF_PERMISSION_TYPE_NOTIFICATIONS.rawValue)
-            | UInt32(CEF_PERMISSION_TYPE_CLIPBOARD.rawValue)
-            | UInt32(CEF_PERMISSION_TYPE_MIDI_SYSEX.rawValue)
-            | UInt32(CEF_PERMISSION_TYPE_POINTER_LOCK.rawValue)
-            | UInt32(CEF_PERMISSION_TYPE_STORAGE_ACCESS.rawValue)
-            | UInt32(CEF_PERMISSION_TYPE_TOP_LEVEL_STORAGE_ACCESS.rawValue)
-            | UInt32(CEF_PERMISSION_TYPE_SENSORS.rawValue)
-            | UInt32(CEF_PERMISSION_TYPE_WINDOW_MANAGEMENT.rawValue)
-            | UInt32(CEF_PERMISSION_TYPE_MULTIPLE_DOWNLOADS.rawValue)
-        if value & ~mappedMask != 0 { kinds.insert(.other) }
+        if unmapped != 0 { kinds.insert(.other) }
         return kinds
     }
 
-    /// Maps `cef_media_access_permission_types_t` flags (used by
-    /// `on_request_media_access_permission`).
+    /// Maps the `cef_media_access_permission_types_t` mask passed to
+    /// `on_request_media_access_permission`.
     static func fromMediaTypes(_ value: UInt32) -> CefPermissionKind {
         var kinds: CefPermissionKind = []
         if value & UInt32(CEF_MEDIA_PERMISSION_DEVICE_AUDIO_CAPTURE.rawValue) != 0 { kinds.insert(.microphone) }
@@ -73,9 +60,8 @@ public struct CefPermissionKind: OptionSet, Sendable, Hashable {
         return kinds
     }
 
-    /// Re-encodes media kinds back to `cef_media_access_permission_types_t`
-    /// flags for the allow path (CEF requires the allowed mask to be a subset
-    /// of the requested mask).
+    /// The media permission mask to grant: these kinds, limited to what was
+    /// requested, as CEF requires.
     func mediaMask(within requested: UInt32) -> UInt32 {
         var mask: UInt32 = 0
         if contains(.microphone) {
@@ -90,22 +76,22 @@ public struct CefPermissionKind: OptionSet, Sendable, Hashable {
     }
 }
 
-/// How to resolve a ``CefPermissionRequest``.
+/// The answer to a ``CefPermissionRequest``.
 public enum CefPermissionDecision: Sendable, Equatable {
     /// Grant the request.
     case allow
     /// Refuse the request.
     case deny
-    /// Dismiss without a decision (the page may ask again).
+    /// Dismiss the prompt without deciding; the page may ask again.
     case dismiss
 }
 
 /// A permission request delivered to
 /// ``CefBrowserDelegate/browser(_:decidePermission:)``.
 public struct CefPermissionRequest: Sendable, Equatable {
-    /// The permission classes requested (may combine several).
+    /// The permissions requested; a request can combine several.
     public var kinds: CefPermissionKind
-    /// The origin (scheme + host) requesting permission.
+    /// The origin asking for permission.
     public var origin: String
 
     public init(kinds: CefPermissionKind, origin: String) {
@@ -115,7 +101,6 @@ public struct CefPermissionRequest: Sendable, Equatable {
 }
 
 extension CefPermissionDecision {
-    /// Maps to the `cef_permission_request_result_t` continue value.
     var cefResult: cef_permission_request_result_t {
         switch self {
         case .allow: return CEF_PERMISSION_RESULT_ACCEPT

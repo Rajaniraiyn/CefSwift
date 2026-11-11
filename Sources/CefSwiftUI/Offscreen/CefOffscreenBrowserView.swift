@@ -12,19 +12,25 @@ import Foundation
 /// forwarding mouse, keyboard, scroll, IME and drag input, applying cursors,
 /// and presenting context menus.
 ///
+/// Frames are requested once per display refresh while the view can be seen.
+/// When its window is occluded or miniaturized, or the view is hidden, the
+/// view stops requesting frames and tells the browser it is hidden.
+///
 /// `CefWebView` uses this for browsers whose ``CefBrowserOptions/rendering``
 /// is `.offscreen`; use it directly in AppKit by assigning ``browser``.
 @MainActor
 public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
-
-    // MARK: Stored state
 
     /// The browser shown in this view. Assigning a browser that is already
     /// live moves it here from wherever it was shown before.
     public var browser: CefBrowser? {
         didSet {
             guard browser !== oldValue else { return }
+            if let oldValue, oldValue.hostView === self {
+                oldValue.wasHidden(true)
+            }
             hostBrowserIfPossible()
+            updateVisibility(notifyingBrowser: true)
         }
     }
 
@@ -33,45 +39,39 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
     var closesBrowserOnTeardown = false
     private var isTornDown = false
 
-    /// Layer that displays the IOSurface (the web pixels).
+    /// Displays the page.
     private let contentLayer = CALayer()
-    /// Layer for the `<select>`-style popup widget (composited above content).
+    /// Displays popup widgets such as an open `<select>`, above the page.
     private let popupLayer = CALayer()
-    private var popupRectDIP: CGRect = .zero
 
-    /// Tracking area for mouse-move/enter/leave.
-    private var trackingAreaRef: NSTrackingArea?
-
-    /// Cursor the page last requested. Re-applied from `cursorUpdate(with:)`
-    /// because AppKit resets the cursor on every mouse-move; a one-shot
-    /// `NSCursor.set()` from `offscreenDidChangeCursor` alone would not stick.
+    /// The cursor the page last requested. AppKit resets the cursor as the
+    /// mouse moves, so it is re-applied from `cursorUpdate(with:)`.
     private var currentCursor: NSCursor = .arrow
 
-    /// Drives `sendExternalBeginFrame()` once per display refresh so painting is
-    /// vsync-paced (smooth scrolling). Started while the view is in a window.
+    /// Requests a frame from Chromium on every display refresh while the view
+    /// is visible.
     private var displayLink: CADisplayLink?
+    /// Whether the browser was last told it is visible.
+    private var isDisplaying = false
 
-    /// Sub-pixel scroll-wheel remainder. CEF takes integer wheel deltas, so we
-    /// carry the fractional part across events instead of rounding it away —
-    /// otherwise slow trackpad scrolls lose sub-pixel motion and feel steppy.
+    private var windowObservers: [NSObjectProtocol] = []
+
+    /// The fractional part of scroll deltas not yet sent. Chromium takes
+    /// whole-point wheel deltas; carrying the remainder keeps slow trackpad
+    /// scrolls smooth.
     var scrollResidual: CGPoint = .zero
 
-    /// Last reported character bounds for IME candidate placement.
-    var currentImeCharacterBounds: [CGRect] = []
-    /// Sticky copy of the most recent caret glyph rect (view DIP, top-left),
-    /// so the emoji palette / accent popup can anchor at the caret even after a
-    /// composition ends. See `firstRect(forCharacterRange:)`.
-    var lastKnownCaretRectDIP: CGRect?
-    var currentImeSelectedRange = NSRange(location: NSNotFound, length: 0)
+    /// The most recent caret rect from IME composition bounds, in view
+    /// coordinates. Kept after the composition ends so the candidate window,
+    /// emoji palette and accent popup stay anchored at the caret.
+    var lastKnownCaretRect: CGRect?
     var currentMarkedRange = NSRange(location: NSNotFound, length: 0)
-    var currentSelectedText = ""
     var currentSelectedTextRange = NSRange(location: NSNotFound, length: 0)
 
-    // Deferred key-input state (mirrors cefclient's text_input_client_osr_mac):
-    // during a `keyDown`, `interpretKeyEvents` only *accumulates* here; the
-    // actual key/char/composition events are sent afterward, so normal typing
-    // goes out as KEYEVENT_KEYDOWN+KEYEVENT_CHAR (firing JS key events) instead
-    // of being silently committed as IME text.
+    /// Text input gathered while `interpretKeyEvents(_:)` runs inside
+    /// `keyDown(with:)`. The `NSTextInputClient` methods only record into
+    /// this; `keyDown` then decides whether the keystroke goes to Chromium
+    /// as a key event (so the page sees `keydown`/`keypress`) or as IME text.
     struct KeyInputState {
         var handlingKeyDown = false
         var textToBeInserted = ""
@@ -84,42 +84,32 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
     }
     var keyInput = KeyInputState()
 
-    func clearMarked() {
-        currentMarkedRange = NSRange(location: NSNotFound, length: 0)
-        keyInput.hasMarkedTextFlag = false
-        keyInput.markedTextValue = ""
-    }
-
-    /// In-flight native context-menu callback (resolved by the menu action).
+    /// The callback of the context menu being shown.
     var pendingContextMenuCallback: CefRunContextMenuCallback?
 
-    /// Allowed drag operations for an in-flight page-initiated (page→system)
-    /// drag session. Set when `start_dragging` fires; consumed by the
-    /// `NSDraggingSource` callbacks.
+    /// The operations allowed for the page-initiated drag in progress.
     var currentDragAllowedOps: CefDragOperation = .none
 
-    /// Observers for window key-state changes (focus follows key window).
-    private var windowKeyObservers: [NSObjectProtocol] = []
-
-    // MARK: Init
+    // MARK: Initialization
 
     public init() {
         super.init(frame: .zero)
         wantsLayer = true
         layerContentsRedrawPolicy = .onSetNeedsDisplay
-        // The view's own backing layer hosts the content + popup sublayers.
         let root = CALayer()
         root.backgroundColor = NSColor.white.cgColor
         contentLayer.contentsGravity = .resize
-        contentLayer.frame = bounds
         popupLayer.contentsGravity = .resize
         popupLayer.isHidden = true
         root.addSublayer(contentLayer)
         root.addSublayer(popupLayer)
         layer = root
-        // Receive indirect (trackpad) touches for raw-touch forwarding.
+
+        addTrackingArea(NSTrackingArea(
+            rect: .zero,
+            options: [.activeInActiveApp, .mouseEnteredAndExited, .mouseMoved, .cursorUpdate, .inVisibleRect],
+            owner: self, userInfo: nil))
         allowedTouchTypes = [.indirect]
-        // Accept system → page drags.
         registerDragTypes()
     }
 
@@ -135,62 +125,26 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
 
     public override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        removeWindowKeyObservers()
-        if window == nil {
-            stopDisplayLink()
-            return
-        }
-        hostBrowserIfPossible()
-        updateScale()
-        startDisplayLink()
-        installWindowKeyObservers()
-    }
-
-    // MARK: Window key-state → CEF focus
-
-    /// Mirror the window's key state into CEF focus while this view is the
-    /// first responder, so tabbing/clicking between the app and other apps
-    /// keeps the page's focus ring and caret in sync (matching a real browser).
-    private func installWindowKeyObservers() {
-        guard let window else { return }
-        let nc = NotificationCenter.default
-        let becomeKey = nc.addObserver(forName: NSWindow.didBecomeKeyNotification, object: window, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self, self.window?.firstResponder === self else { return }
-                self.browser?.setFocus(true)
-            }
-        }
-        let resignKey = nc.addObserver(forName: NSWindow.didResignKeyNotification, object: window, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self, self.window?.firstResponder === self else { return }
-                self.browser?.setFocus(false)
-            }
-        }
-        windowKeyObservers = [becomeKey, resignKey]
-    }
-
-    private func removeWindowKeyObservers() {
-        for o in windowKeyObservers { NotificationCenter.default.removeObserver(o) }
-        windowKeyObservers = []
-    }
-
-    // MARK: Display-link (external begin-frame pacing)
-
-    private func startDisplayLink() {
-        guard displayLink == nil, window != nil else { return }
-        // macOS 14+ gives a window/display-matched CADisplayLink from the view.
-        let link = displayLink(target: self, selector: #selector(stepBeginFrame))
-        link.add(to: .main, forMode: .common)
-        displayLink = link
-    }
-
-    private func stopDisplayLink() {
+        removeWindowObservers()
+        // A display link follows the display of the window it was made for.
         displayLink?.invalidate()
         displayLink = nil
+        if window != nil {
+            hostBrowserIfPossible()
+            updateScale()
+            installWindowObservers()
+        }
+        updateVisibility(notifyingBrowser: window != nil)
     }
 
-    @objc private func stepBeginFrame() {
-        browser?.sendExternalBeginFrame()
+    public override func viewDidHide() {
+        super.viewDidHide()
+        updateVisibility()
+    }
+
+    public override func viewDidUnhide() {
+        super.viewDidUnhide()
+        updateVisibility()
     }
 
     public override func viewDidChangeBackingProperties() {
@@ -202,46 +156,35 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
         super.layout()
         syncLayerGeometry()
         browser?.wasResized()
-        updateTrackingArea()
     }
 
-    /// `setFrameSize` is invoked synchronously on every step of a live resize —
-    /// keep the layers locked to the new bounds *immediately* (and without
-    /// implicit animation) so the displayed frame never lags the view. Combined
-    /// with `.resize` contents gravity (which stretches the last painted frame
-    /// to fill) this removes the blank/garbage trails that appear when the layer
-    /// grows ahead of CEF's next paint. `wasResized` then asks CEF to repaint at
-    /// the new size; the CADisplayLink (running in `.common` modes, so it keeps
-    /// firing during the resize event loop) delivers the new frames.
+    // Live resize calls this on every step. Resizing the content layer here,
+    // without animation, keeps the last frame stretched over the whole view
+    // until Chromium paints at the new size.
     public override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
         syncLayerGeometry()
         browser?.wasResized()
     }
 
-    private func syncLayerGeometry() {
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        layer?.frame = bounds
-        contentLayer.frame = bounds
-        CATransaction.commit()
-    }
-
     public override func viewDidEndLiveResize() {
         super.viewDidEndLiveResize()
-        // Snap a crisp, correctly-sized final frame after the user lets go.
         syncLayerGeometry()
         browser?.wasResized()
         browser?.invalidate()
     }
 
+    private func syncLayerGeometry() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        contentLayer.frame = bounds
+        CATransaction.commit()
+    }
+
     private func updateScale() {
         guard let scale = window?.backingScaleFactor else { return }
-        if layer?.contentsScale != scale {
-            layer?.contentsScale = scale
-            contentLayer.contentsScale = scale
-            popupLayer.contentsScale = scale
-        }
+        contentLayer.contentsScale = scale
+        popupLayer.contentsScale = scale
         browser?.notifyScreenInfoChanged()
         browser?.wasResized()
     }
@@ -254,74 +197,129 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
     func tearDown() {
         guard !isTornDown else { return }
         isTornDown = true
-        stopDisplayLink()
-        removeWindowKeyObservers()
+        removeWindowObservers()
+        updateVisibility()
         if closesBrowserOnTeardown {
             browser?.close(force: true)
         }
         browser = nil
     }
 
+    // MARK: Visibility
+
+    private var canBeSeen: Bool {
+        guard !isTornDown, !isHiddenOrHasHiddenAncestor, let window else { return false }
+        return window.occlusionState.contains(.visible)
+    }
+
+    /// Starts or stops requesting frames to match whether the view can be
+    /// seen, and tells the browser when that changes — or regardless, when
+    /// `notifyingBrowser` is set because the browser has just been hosted.
+    private func updateVisibility(notifyingBrowser: Bool = false) {
+        let visible = canBeSeen
+        if visible, displayLink == nil {
+            let link = displayLink(target: self, selector: #selector(displayLinkDidFire))
+            link.add(to: .main, forMode: .common)
+            displayLink = link
+        } else if !visible {
+            displayLink?.invalidate()
+            displayLink = nil
+        }
+        guard visible != isDisplaying || notifyingBrowser else { return }
+        isDisplaying = visible
+        // A browser that has moved to another view is that view's to manage.
+        if let browser, browser.hostView === self {
+            browser.wasHidden(!visible)
+        }
+    }
+
+    @objc private func displayLinkDidFire() {
+        browser?.sendExternalBeginFrame()
+    }
+
+    // MARK: Window observation
+
+    private func installWindowObservers() {
+        guard let window else { return }
+        let center = NotificationCenter.default
+        // The page's focus follows the window's key state while this view
+        // is first responder, so its caret and focus ring behave as in a
+        // browser window.
+        windowObservers = [
+            center.addObserver(forName: NSWindow.didBecomeKeyNotification, object: window, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.windowKeyStateDidChange(isKey: true) }
+            },
+            center.addObserver(forName: NSWindow.didResignKeyNotification, object: window, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.windowKeyStateDidChange(isKey: false) }
+            },
+            center.addObserver(forName: NSWindow.didChangeOcclusionStateNotification, object: window, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.updateVisibility() }
+            },
+        ]
+    }
+
+    private func removeWindowObservers() {
+        for observer in windowObservers {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        windowObservers = []
+    }
+
+    private func windowKeyStateDidChange(isKey: Bool) {
+        guard window?.firstResponder === self else { return }
+        browser?.setFocus(isKey)
+    }
+
     // MARK: CefOffscreenHost
 
     public var offscreenViewInfo: CefOffscreenViewInfo {
-        let scale = window?.backingScaleFactor ?? 2.0
         var origin = CGPoint.zero
         var screenRect = CGRect(x: 0, y: 0, width: 1, height: 1)
-        if let window {
-            // Convert view origin (top-left, flipped) to screen DIP top-left.
-            let inWindow = convert(bounds, to: nil)
-            let onScreen = window.convertToScreen(inWindow)
-            if let screen = window.screen ?? NSScreen.main {
-                let sf = screen.frame
-                // AppKit screen coords are bottom-left; CEF wants top-left DIP.
-                origin = CGPoint(x: onScreen.minX, y: sf.maxY - onScreen.maxY)
-                screenRect = CGRect(x: 0, y: 0, width: sf.width, height: sf.height)
-            }
+        if let window, let screen = window.screen ?? NSScreen.main {
+            // Chromium uses top-left screen coordinates; AppKit's are bottom-left.
+            let onScreen = window.convertToScreen(convert(bounds, to: nil))
+            let screenFrame = screen.frame
+            origin = CGPoint(x: onScreen.minX, y: screenFrame.maxY - onScreen.maxY)
+            screenRect = CGRect(origin: .zero, size: screenFrame.size)
         }
         return CefOffscreenViewInfo(
             sizeDIP: bounds.size == .zero ? CGSize(width: 1, height: 1) : bounds.size,
-            deviceScaleFactor: scale,
+            deviceScaleFactor: window?.backingScaleFactor ?? 2,
             screenOriginDIP: origin,
             screenRectDIP: screenRect
         )
     }
 
     public func offscreenDidPaint(_ frame: CefOffscreenFrame, element: CefOffscreenPaintElement) {
-        // PET_VIEW frames go to the content layer; PET_POPUP frames (the
-        // `<select>` dropdown / autofill widget) go to the popup overlay layer
-        // sized by on_popup_size and shown/hidden by on_popup_show.
-        let target = (element == .popup) ? popupLayer : contentLayer
+        let target = element == .popup ? popupLayer : contentLayer
+        let contents: Any
         switch frame {
         case let .accelerated(surface, _):
-            // Setting an IOSurface as layer contents is the proven, correct
-            // zero-copy path on macOS. CEF returns the surface to its pool
-            // after this call, but CALayer takes its own reference to the
-            // surface's contents for the current frame.
-            CATransaction.begin()
-            CATransaction.setDisableActions(true)
-            target.contents = surface
-            CATransaction.commit()
+            // The layer keeps its own reference to the surface's pixels, so
+            // Chromium may reuse the surface once this returns.
+            contents = surface
         case let .cpu(buffer, width, height, _):
-            // CPU fallback: wrap BGRA bytes in a CGImage.
+            // The buffer is only valid during this call; the image copies it.
             let bytesPerRow = width * 4
-            let cs = CGColorSpace(name: CGColorSpace.sRGB)!
-            let info = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue)
-            // The buffer is only valid during this call, so the image needs its own copy.
-            guard let provider = CGDataProvider(data: Data(bytes: buffer, count: bytesPerRow * height) as CFData) else { return }
-            if let image = CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: bytesPerRow, space: cs, bitmapInfo: info, provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent) {
-                CATransaction.begin()
-                CATransaction.setDisableActions(true)
-                target.contents = image
-                CATransaction.commit()
-            }
+            let bitmapInfo = CGBitmapInfo(
+                rawValue: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue)
+            guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
+                  let provider = CGDataProvider(data: Data(bytes: buffer, count: bytesPerRow * height) as CFData),
+                  let image = CGImage(
+                      width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32,
+                      bytesPerRow: bytesPerRow, space: colorSpace, bitmapInfo: bitmapInfo,
+                      provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)
+            else { return }
+            contents = image
         }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        target.contents = contents
+        CATransaction.commit()
     }
 
     public func offscreenDidChangeCursor(_ cursor: CefCursorType) {
         currentCursor = cursor.nsCursor ?? .arrow
-        // Apply immediately, and make AppKit re-apply it via cursorUpdate(_:)
-        // on subsequent mouse-moves (otherwise it reverts to the arrow).
         currentCursor.set()
         window?.invalidateCursorRects(for: self)
     }
@@ -336,11 +334,9 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
 
     public func offscreenPopupDidChangeVisibility(_ visible: Bool) {
         popupLayer.isHidden = !visible
-        if !visible { popupRectDIP = .zero }
     }
 
     public func offscreenPopupDidResize(_ rect: CGRect) {
-        popupRectDIP = rect
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         popupLayer.frame = rect
@@ -348,95 +344,47 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
     }
 
     public func offscreenImeCompositionRangeChanged(selectedRange: NSRange, characterBounds: [CGRect]) {
-        currentImeSelectedRange = selectedRange
-        currentImeCharacterBounds = characterBounds
         if let first = characterBounds.first {
-            lastKnownCaretRectDIP = first
+            lastKnownCaretRect = first
         }
     }
 
     public func offscreenTextSelectionChanged(selectedText: String, selectedRange: NSRange) {
-        currentSelectedText = selectedText
         currentSelectedTextRange = selectedRange
     }
 
-    // MARK: Coordinate conversion (AppKit → CEF DIP)
-
-    /// Converts an `NSEvent`'s location to view DIP (top-left origin). The view
-    /// is flipped, so `convert(_:from:nil)` already yields top-left coords.
+    /// An event's location in view coordinates, which are Chromium's: the
+    /// view is flipped, so the origin is at the top left.
     func dipPoint(for event: NSEvent) -> CGPoint {
         convert(event.locationInWindow, from: nil)
-    }
-
-    // MARK: Tracking area
-
-    private func updateTrackingArea() {
-        if let trackingAreaRef { removeTrackingArea(trackingAreaRef) }
-        let area = NSTrackingArea(
-            rect: bounds,
-            options: [.activeInActiveApp, .mouseEnteredAndExited, .mouseMoved, .cursorUpdate, .inVisibleRect],
-            owner: self, userInfo: nil
-        )
-        addTrackingArea(area)
-        trackingAreaRef = area
     }
 }
 
 // MARK: - Gestures
 
-/// Trackpad/Multi-Touch gesture forwarding for the OSR web view. These make an
-/// embedded `CefMetalWebView` respond to pinch-zoom, smart-magnify, and
-/// three-finger swipe navigation the way a real browser does.
-///
-/// ## Zoom approach
-/// Pinch-zoom (`magnify(with:)`) drives Chromium's **page zoom** through the
-/// browser host's `set_zoom_level`/`get_zoom_level` (exposed as
-/// ``CefBrowser/zoomLevel``). We accumulate `event.magnification` into the
-/// current zoom level. This is the faithful, header-supported route on macOS
-/// (the ctrl+wheel alternative is coarser and fights the page's own wheel
-/// handlers). `smartMagnify` toggles between 1:1 and a zoomed-in step.
-///
-/// ## Touch approach
-/// Raw `NSTouch` forwarding to `send_touch_event` is gated behind
-/// ``CefBrowserOptions/forwardsRawTouchEvents`` (default off) because indirect
-/// trackpad touches are unreliable as a gesture source; the explicit gesture
-/// overrides below are the robust path. When the flag is on we also forward
-/// raw touches so Chromium's own recognizers can act.
+// Pinch and smart magnify change the page zoom (``CefBrowser/zoomLevel``),
+// swipes navigate when ``CefBrowserOptions/allowsBackForwardNavigationGestures``
+// is set, and raw trackpad touches reach the page only when
+// ``CefBrowserOptions/forwardsRawTouchEvents`` is set.
 extension CefOffscreenBrowserView {
 
-    /// CEF zoom-level step that maps to ~1.25x per unit (Chromium's scale).
-    private static let smartMagnifyStep: Double = 2.5
-
-    // MARK: Pinch zoom
+    /// The zoom level a smart magnify toggles to; each level is a factor of
+    /// 1.2, so this is about 1.6x.
+    private static let smartMagnifyZoomLevel = 2.5
 
     public override func magnify(with event: NSEvent) {
-        guard let browser = offscreenBrowser else { return }
-        // event.magnification is an incremental scale delta (-1...1-ish per
-        // event). Translate into a zoom-level delta; ~4 units of magnification
-        // ≈ one Chromium zoom step, matching trackpad feel.
-        let current = browser.zoomLevel
-        browser.zoomLevel = current + Double(event.magnification) * 4.0
+        guard let browser else { return }
+        // A magnification of 0.25 changes the zoom by one level.
+        browser.zoomLevel += Double(event.magnification) * 4
     }
 
     public override func smartMagnify(with event: NSEvent) {
-        guard let browser = offscreenBrowser else { return }
-        // Two-finger double-tap: toggle between default and a zoomed-in step.
-        if abs(browser.zoomLevel) < 0.01 {
-            browser.zoomLevel = CefOffscreenBrowserView.smartMagnifyStep
-        } else {
-            browser.zoomLevel = 0
-        }
+        guard let browser else { return }
+        browser.zoomLevel = abs(browser.zoomLevel) < 0.01 ? Self.smartMagnifyZoomLevel : 0
     }
 
-    // MARK: Rotation
-
-    public override func rotate(with event: NSEvent) {
-        // OSR host input has no rotation channel (no rotate gesture in
-        // cef_browser_host_t), and web pages don't consume native rotation
-        // events. No-op rather than mismap it.
-    }
-
-    // MARK: Swipe navigation
+    /// Pages have no use for rotation; consume it rather than pass it on.
+    public override func rotate(with event: NSEvent) {}
 
     /// The dedicated navigation swipe (three fingers, or as configured in
     /// System Settings).
@@ -471,90 +419,78 @@ extension CefOffscreenBrowserView {
         return true
     }
 
-    // MARK: Raw touch forwarding (opt-in)
-
-    /// Whether the hosted browser opted into raw touch forwarding.
-    private var forwardsRawTouches: Bool {
-        browser?.options.forwardsRawTouchEvents ?? false
-    }
-
     public override func touchesBegan(with event: NSEvent) {
-        forwardTouches(event, type: CEF_TET_PRESSED)
-    }
-    public override func touchesMoved(with event: NSEvent) {
-        forwardTouches(event, type: CEF_TET_MOVED)
-    }
-    public override func touchesEnded(with event: NSEvent) {
-        forwardTouches(event, type: CEF_TET_RELEASED)
-    }
-    public override func touchesCancelled(with event: NSEvent) {
-        forwardTouches(event, type: CEF_TET_CANCELLED)
+        forwardTouches(in: event, phase: .began, as: CEF_TET_PRESSED)
     }
 
-    private func forwardTouches(_ event: NSEvent, type: cef_touch_event_type_t) {
-        guard forwardsRawTouches, let browser = offscreenBrowser else { return }
-        let phase: NSTouch.Phase
-        switch type {
-        case CEF_TET_PRESSED: phase = .began
-        case CEF_TET_MOVED: phase = .moved
-        case CEF_TET_RELEASED: phase = .ended
-        default: phase = .cancelled
-        }
-        let touches = event.touches(matching: phase, in: self)
-        let viewSize = bounds.size
-        for touch in touches {
-            // Indirect (trackpad) touches report normalized positions; map them
-            // onto the view rect (top-left origin).
-            let n = touch.normalizedPosition
-            let point = CGPoint(x: n.x * viewSize.width, y: (1 - n.y) * viewSize.height)
-            let id = Int32(truncatingIfNeeded: touch.identity.hash)
-            browser.sendTouchEvent(id: id, point: point, type: type,
-                                   pressure: 1.0, pointerType: CEF_POINTER_TYPE_TOUCH)
+    public override func touchesMoved(with event: NSEvent) {
+        forwardTouches(in: event, phase: .moved, as: CEF_TET_MOVED)
+    }
+
+    public override func touchesEnded(with event: NSEvent) {
+        forwardTouches(in: event, phase: .ended, as: CEF_TET_RELEASED)
+    }
+
+    public override func touchesCancelled(with event: NSEvent) {
+        forwardTouches(in: event, phase: .cancelled, as: CEF_TET_CANCELLED)
+    }
+
+    private func forwardTouches(in event: NSEvent, phase: NSTouch.Phase, as type: cef_touch_event_type_t) {
+        guard let browser, browser.options.forwardsRawTouchEvents else { return }
+        let size = bounds.size
+        for touch in event.touches(matching: phase, in: self) {
+            // Trackpad touches have normalized, bottom-left positions.
+            let position = touch.normalizedPosition
+            let point = CGPoint(x: position.x * size.width, y: (1 - position.y) * size.height)
+            browser.sendTouchEvent(
+                id: Int32(truncatingIfNeeded: touch.identity.hash), point: point, type: type,
+                pressure: 1, pointerType: CEF_POINTER_TYPE_TOUCH)
         }
     }
 }
 
-// MARK: - IME (NSTextInputClient)
+// MARK: - Text input
 
-/// `NSTextInputClient` bridge so dead-keys and CJK/IME composition route into
-/// the offscreen browser via `imeSetComposition`/`imeCommitText`. AppKit calls
-/// these as a result of `interpretKeyEvents(_:)` in `keyDown`.
+// Dead keys, accents and input methods reach the page through
+// `NSTextInputClient`. During `keyDown(with:)` these methods only record what
+// AppKit asked for; see `keyInput`.
 extension CefOffscreenBrowserView: @preconcurrency NSTextInputClient {
 
+    private static func plainText(_ string: Any) -> String {
+        (string as? NSAttributedString)?.string ?? (string as? String) ?? ""
+    }
+
+    private static func optionalRange(_ range: NSRange) -> NSRange? {
+        range.location == NSNotFound ? nil : range
+    }
+
     public func insertText(_ string: Any, replacementRange: NSRange) {
-        let text = (string as? NSAttributedString)?.string ?? (string as? String) ?? ""
+        let text = Self.plainText(string)
         guard !text.isEmpty else { return }
         if keyInput.handlingKeyDown {
-            // Accumulate; keyDown's after-handler decides KEYDOWN+CHAR vs commit.
             keyInput.textToBeInserted += text
         } else {
-            // Direct insert (e.g. IME candidate pick outside a keystroke).
-            let range = replacementRange.location == NSNotFound ? nil : replacementRange
-            offscreenBrowser?.imeCommitText(text, replacementRange: range)
+            browser?.imeCommitText(text, replacementRange: Self.optionalRange(replacementRange))
         }
-        // Inserting text always clears any marked composition.
         keyInput.hasMarkedTextFlag = false
         currentMarkedRange = NSRange(location: NSNotFound, length: 0)
     }
 
     public func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
-        let text = (string as? NSAttributedString)?.string ?? (string as? String) ?? ""
+        let text = Self.plainText(string)
         keyInput.markedSelectionRange = selectedRange
         keyInput.markedTextValue = text
         keyInput.hasMarkedTextFlag = !text.isEmpty
         currentMarkedRange = keyInput.hasMarkedTextFlag
             ? NSRange(location: 0, length: text.utf16.count)
             : NSRange(location: NSNotFound, length: 0)
-        let rep = replacementRange.location == NSNotFound ? nil : replacementRange
+        let replacement = Self.optionalRange(replacementRange)
         if keyInput.handlingKeyDown {
-            // Defer to the after-handler so it sequences with the key event.
-            keyInput.setMarkedReplacement = rep
+            keyInput.setMarkedReplacement = replacement
+        } else if text.isEmpty {
+            browser?.imeCancelComposition()
         } else {
-            if text.isEmpty {
-                offscreenBrowser?.imeCancelComposition()
-            } else {
-                offscreenBrowser?.imeSetComposition(text: text, selectionRange: selectedRange, replacementRange: rep)
-            }
+            browser?.imeSetComposition(text: text, selectionRange: selectedRange, replacementRange: replacement)
         }
     }
 
@@ -564,7 +500,7 @@ extension CefOffscreenBrowserView: @preconcurrency NSTextInputClient {
         if keyInput.handlingKeyDown {
             keyInput.unmarkTextCalled = true
         } else {
-            offscreenBrowser?.imeFinishComposing(keepSelection: true)
+            browser?.imeFinishComposing(keepSelection: true)
         }
     }
 
@@ -588,35 +524,17 @@ extension CefOffscreenBrowserView: @preconcurrency NSTextInputClient {
         []
     }
 
-    /// Returns the screen rect (bottom-left origin) used to position the IME
-    /// candidate window, the emoji & symbols palette (Cmd+Ctrl+Space), and the
-    /// press-and-hold accent popup, anchored at the caret.
+    /// The screen rect below which the candidate window, the emoji palette
+    /// and the accent popup appear.
     ///
-    /// Source of the caret rect, in order of fidelity:
-    /// 1. **Live composition bounds** — during an active IME composition CEF
-    ///    delivers exact per-character bounds via
-    ///    `on_ime_composition_range_changed`; we use the first glyph's box.
-    /// 2. **Last-known caret rect** — we cache (1) so that immediately after a
-    ///    composition ends, and for the accent popup that fires on the next
-    ///    key, the anchor stays at the real caret instead of snapping away.
-    /// 3. **Focused-view fallback** — with no composition data at all (a plain
-    ///    caret in an `<input>`), CEF's OSR API exposes no caret rect for a
-    ///    non-composition selection, so we anchor near the top-left of the view
-    ///    rather than at the screen origin. This is an honest limitation, not
-    ///    pixel-perfect; see the OSR input docs.
+    /// Chromium reports the caret only during a composition, so this uses the
+    /// last composition's caret, or the view's top-left corner if there has
+    /// been none.
     public func firstRect(forCharacterRange range: NSRange, actualRange: NSRangePointer?) -> NSRect {
-        guard let window else { return NSRect(origin: .zero, size: .zero) }
-        if let bounds = currentImeCharacterBounds.first {
-            lastKnownCaretRectDIP = bounds
-        }
-        let caret = lastKnownCaretRectDIP ?? CGRect(x: 4, y: 4, width: 1, height: 16)
-        // Caret bounds are in view DIP (top-left). Build a view-coordinate rect
-        // whose origin is the caret's bottom (palette appears just below the
-        // glyph), then convert to window then screen (bottom-left).
-        let viewRect = NSRect(x: caret.minX, y: caret.maxY,
-                              width: max(caret.width, 1), height: max(caret.height, 1))
-        let inWindow = convert(viewRect, to: nil)
-        return window.convertToScreen(inWindow)
+        guard let window else { return .zero }
+        let caret = lastKnownCaretRect ?? CGRect(x: 4, y: 4, width: 1, height: 16)
+        let rect = NSRect(x: caret.minX, y: caret.maxY, width: max(caret.width, 1), height: max(caret.height, 1))
+        return window.convertToScreen(convert(rect, to: nil))
     }
 
     public func characterIndex(for point: NSPoint) -> Int {
@@ -624,63 +542,50 @@ extension CefOffscreenBrowserView: @preconcurrency NSTextInputClient {
     }
 }
 
-// MARK: - Context Menu
+// MARK: - Context menu
 
-/// Presents CEF's context menu as a native `NSMenu` for the offscreen browser,
-/// so right-click feels identical to a native control.
 extension CefOffscreenBrowserView {
 
     public func offscreenRunContextMenu(_ menu: CefMenuModel, at viewPoint: CGPoint, callback: CefRunContextMenuCallback) {
-        // IMPORTANT: CEF forbids running an OS modal message loop *inside* this
-        // callback (only start_dragging may). So we snapshot the menu items
-        // synchronously, then present the NSMenu on the next runloop tick and
-        // resolve the callback then. We return having retained the callback.
-        struct Item { let label: String; let commandID: Int; let isSeparator: Bool }
-        var items: [Item] = []
-        for i in 0..<menu.count {
-            if menu.isSeparator(at: i) {
-                items.append(Item(label: "", commandID: -1, isSeparator: true))
-            } else {
-                let label = menu.label(at: i).replacingOccurrences(of: "&", with: "")
-                guard !label.isEmpty else { continue }
-                items.append(Item(label: label, commandID: menu.commandID(at: i), isSeparator: false))
-            }
+        // Chromium does not allow a nested run loop inside this callback, so
+        // the menu is read now and shown on the next turn of the run loop.
+        let menuItems: [NSMenuItem] = (0..<menu.count).compactMap { index in
+            if menu.isSeparator(at: index) { return .separator() }
+            let title = Self.menuTitle(fromCefLabel: menu.label(at: index))
+            guard !title.isEmpty else { return nil }
+            let item = NSMenuItem(title: title, action: #selector(contextMenuItemSelected(_:)), keyEquivalent: "")
+            item.target = self
+            item.tag = menu.commandID(at: index)
+            return item
         }
-        guard !items.isEmpty else {
+        guard !menuItems.isEmpty else {
             callback.cancel()
             return
         }
 
         pendingContextMenuCallback = callback
-        let location = NSPoint(x: viewPoint.x, y: viewPoint.y)
-
         DispatchQueue.main.async { [weak self] in
-            guard let self else { callback.cancel(); return }
+            guard let self else { return callback.cancel() }
             let nsMenu = NSMenu()
             nsMenu.autoenablesItems = false
-            for item in items {
-                if item.isSeparator {
-                    nsMenu.addItem(.separator())
-                    continue
-                }
-                let mi = NSMenuItem(title: item.label, action: #selector(self.contextMenuItemSelected(_:)), keyEquivalent: "")
-                mi.target = self
-                mi.tag = item.commandID
-                nsMenu.addItem(mi)
-            }
-            nsMenu.popUp(positioning: nil, at: location, in: self)
-            // popUp is modal; the action selector resolved the callback if an
-            // item was chosen. Otherwise cancel.
-            if let cb = self.pendingContextMenuCallback {
-                cb.cancel()
-                self.pendingContextMenuCallback = nil
-            }
+            nsMenu.items = menuItems
+            nsMenu.popUp(positioning: nil, at: viewPoint, in: self)
+            // `popUp` returns once the menu closes; an unanswered callback
+            // means nothing was chosen.
+            self.pendingContextMenuCallback?.cancel()
+            self.pendingContextMenuCallback = nil
         }
     }
 
+    /// Chromium marks mnemonics with `&` and writes a literal ampersand as `&&`.
+    static func menuTitle(fromCefLabel label: String) -> String {
+        label.components(separatedBy: "&&")
+            .map { $0.replacingOccurrences(of: "&", with: "") }
+            .joined(separator: "&")
+    }
+
     @objc private func contextMenuItemSelected(_ sender: NSMenuItem) {
-        guard let cb = pendingContextMenuCallback else { return }
-        cb.select(commandID: sender.tag)
+        pendingContextMenuCallback?.select(commandID: sender.tag)
         pendingContextMenuCallback = nil
     }
 }

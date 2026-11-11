@@ -6,10 +6,8 @@ import Testing
 @testable import CefKit
 @testable import CefSwiftUI
 
-/// Pure-logic tests for the OSR input-conformance work: the
-/// `performKeyEquivalent` forwarding policy, modifier mapping (incl. command/
-/// control/option/shift/capsLock and keypad), and the mouse-button → navigation
-/// mapping. None require `cef_initialize` / the framework.
+/// Key-equivalent forwarding, modifier flags and extra mouse buttons in the
+/// offscreen browser view.
 @MainActor
 struct OSRInputConformanceTests {
 

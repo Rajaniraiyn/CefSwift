@@ -89,6 +89,13 @@ final class BrowserController: CefBrowserDelegate {
 
     // MARK: CefBrowserDelegate
 
+    func browser(_ browser: CefBrowser, decidePolicyFor navigation: CefNavigationAction) -> CefNavigationDecision {
+        // Show this app's About page in place of Chromium's.
+        guard BrowserPages.replacesChromiumPage(navigation.url) else { return .allow }
+        browser.load(BrowserPages.about)
+        return .cancel
+    }
+
     func browser(_ browser: CefBrowser, decideWindowOpenFor request: CefWindowOpenRequest) -> CefWindowOpenAction {
         // Real popups (sign-in windows and the like) keep Chromium's handling.
         guard request.disposition != .newPopup, let url = request.targetURL else { return .allowNativePopup }

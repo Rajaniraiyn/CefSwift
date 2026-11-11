@@ -6,8 +6,8 @@ struct CefAppConfig: Decodable {
     var bundleIdentifier: String?
     var displayName: String?
     var minimumSystemVersion: String?
-    /// Codesigning identity ("-" = ad-hoc). Precedence: --sign flag >
-    /// cefapp.json > auto-detected identity.
+    /// The codesigning identity, or "-" for ad hoc. `--sign` takes
+    /// precedence.
     var signingIdentity: String?
 
     static func load(near targetDirectory: URL?) -> CefAppConfig? {
@@ -23,12 +23,11 @@ struct CefAppConfig: Decodable {
     }
 }
 
-/// Assembles a runnable macOS .app bundle:
-/// main executable, generated Info.plist, the converted CEF framework, five
-/// helper apps (same binary, load-bearing names), then codesign inside-out
-/// (framework → helpers → main app) with the chosen identity ("-" = ad-hoc).
+/// Assembles a runnable .app: the main executable and its Info.plist, the CEF
+/// framework, and five helper apps sharing one binary; then signs them
+/// inside out — framework, helpers, app. See docs/bundling.md.
 struct AppBundler {
-    /// Helper suffix → bundle-id suffix. Order is the signing order.
+    /// Each helper's name suffix and bundle identifier suffix.
     static let helpers: [(suffix: String?, bundleIDSuffix: String)] = [
         (nil, ".helper"),
         ("Alerts", ".helper.alerts"),
@@ -49,7 +48,6 @@ struct AppBundler {
 
     var appURL: URL { outputDirectory.appendingPathComponent("\(appName).app") }
 
-    @discardableResult
     func assemble() throws -> URL {
         let fm = FileManager.default
         try FrameworkLayout.validate(framework: frameworkSource)
@@ -64,29 +62,22 @@ struct AppBundler {
         try fm.createDirectory(at: macOS, withIntermediateDirectories: true)
         try fm.createDirectory(at: frameworks, withIntermediateDirectories: true)
 
-        // Main executable.
         try fm.copyItem(at: mainExecutable, to: macOS.appendingPathComponent(appName))
 
-        // Main Info.plist + PkgInfo.
         try writePlist(mainInfoPlist(), to: contents.appendingPathComponent("Info.plist"))
         try Data("APPL????".utf8).write(to: contents.appendingPathComponent("PkgInfo"))
 
-        // CEF framework — copy preserving the versioned-bundle symlinks.
+        // `cp -R` keeps the framework's symlinks.
         let frameworkDest = frameworks.appendingPathComponent(frameworkSource.lastPathComponent)
         try Shell.runChecked(
             "/bin/cp", ["-R", frameworkSource.path, frameworkDest.path],
             hint: "Could not copy the CEF framework into the app bundle. Check disk space and permissions."
         )
 
-        // Five helper apps.
-        var helperAppURLs: [URL] = []
-        for helper in Self.helpers {
-            helperAppURLs.append(try makeHelperApp(
-                in: frameworks, suffix: helper.suffix, bundleIDSuffix: helper.bundleIDSuffix
-            ))
+        let helperAppURLs = try Self.helpers.map {
+            try makeHelperApp(in: frameworks, suffix: $0.suffix, bundleIDSuffix: $0.bundleIDSuffix)
         }
 
-        // Codesign, inside-out: framework first, then helpers, then the app.
         try codesign(frameworkDest)
         for helperApp in helperAppURLs { try codesign(helperApp) }
         try codesign(appURL)
@@ -98,7 +89,7 @@ struct AppBundler {
 
     private func makeHelperApp(in frameworks: URL, suffix: String?, bundleIDSuffix: String) throws -> URL {
         let fm = FileManager.default
-        // Names are load-bearing: "<App> Helper" / "<App> Helper (Suffix)".
+        // Chromium finds helpers by these exact names.
         let helperName = suffix.map { "\(appName) Helper (\($0))" } ?? "\(appName) Helper"
         let helperApp = frameworks.appendingPathComponent("\(helperName).app")
         let contents = helperApp.appendingPathComponent("Contents")
@@ -129,7 +120,7 @@ struct AppBundler {
             "NSPrincipalClass": "NSApplication",
             "NSHighResolutionCapable": true,
             "NSSupportsAutomaticGraphicsSwitching": true,
-            // Required by CEF/Chromium on macOS.
+            // Chromium's allocator does not work with the nano malloc zone.
             "LSEnvironment": ["MallocNanoZone": "0"],
         ]
     }
@@ -147,7 +138,6 @@ struct AppBundler {
             "CFBundleVersion": "1",
             "LSMinimumSystemVersion": minimumSystemVersion,
             "NSSupportsAutomaticGraphicsSwitching": true,
-            // No dock icon / app switcher entry for helper processes.
             "LSUIElement": true,
             "LSFileQuarantineEnabled": true,
         ]
@@ -161,15 +151,14 @@ struct AppBundler {
     }
 
     private func codesign(_ path: URL) throws {
-        // No hardened runtime (it would break dlopen of the CEF framework
-        // without extra entitlements); --timestamp=none keeps real-identity
-        // signing fast and offline-safe.
+        // No hardened runtime: loading the framework would need entitlements.
+        // No secure timestamp, so signing works offline.
         try Shell.runChecked(
             "/usr/bin/codesign",
             ["--force", "--timestamp=none", "--sign", signingIdentity, path.path],
             hint: signingIdentity == "-"
-                ? "Ad-hoc signing requires no certificates; if this fails, the bundle layout may be invalid " +
-                  "(codesign is picky about framework symlinks). Re-run 'swift package cef download' to rebuild the framework."
+                ? "Ad-hoc signing needs no certificate, so the bundle layout is likely invalid. Run " +
+                  "'swift package cef clean', then bundle again to re-download the framework."
                 : "Check that the identity '\(signingIdentity)' is valid ('security find-identity -v -p codesigning') " +
                   "and that its private key is accessible, or pass '--sign -' for ad-hoc signing."
         )

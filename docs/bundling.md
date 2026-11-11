@@ -93,8 +93,11 @@ container:
 2. each of the five helper apps
 3. the main app
 
-The plugin performs ad-hoc signing (`codesign -s -`) in that order, which is
-sufficient to run locally on the build machine.
+The plugin signs in that order with, in order of precedence, the identity
+given by `--sign`, the `signingIdentity` in `cefapp.json`, or the first
+"Apple Development" or "Developer ID Application" identity in your keychain.
+With none of those it signs ad hoc (`--sign -`), which is enough to run on
+the build machine.
 
 ## Distributing outside your machine
 
@@ -121,6 +124,6 @@ Ad-hoc-signed apps are for development. If you hand the app to someone else:
 | `minimal` | Release framework only (~120 MB download) | Default; CI |
 | `standard` | Release + Debug builds | Debugging CEF itself |
 
-Select with `cef download --flavor standard` / `cef bundle --flavor standard`,
-and pin a different CEF entirely with `--cef-version`. See
-[configuration.md](configuration.md).
+Select with `cef download --flavor standard` / `cef bundle --flavor standard`.
+To use a different CEF version, pass `--manifest` with a `CEF_VERSION.json`
+pinned to it.

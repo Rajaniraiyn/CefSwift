@@ -53,19 +53,18 @@ public struct CefWebView: View {
     /// Keeps the view-owned browser alive across view updates.
     private struct OwnedHost: View {
         let url: URL
-        let options: CefBrowserOptions
-        @State private var browser: CefBrowser?
+        // SwiftUI keeps the first browser and discards the ones later
+        // initializers make; a browser does nothing in Chromium until hosted.
+        @State private var browser: CefBrowser
 
-        var body: some View {
-            Host(browser: browser ?? makeBrowser(), ownsBrowser: true)
-                .onChange(of: url) { _, newURL in browser?.load(newURL) }
+        init(url: URL, options: CefBrowserOptions) {
+            self.url = url
+            _browser = State(initialValue: CefBrowser(url: url, options: options))
         }
 
-        private func makeBrowser() -> CefBrowser {
-            let created = CefBrowser(url: url, options: options)
-            // Publishing during a view update is not allowed; store it after.
-            Task { @MainActor in if browser == nil { browser = created } }
-            return created
+        var body: some View {
+            Host(browser: browser, ownsBrowser: true)
+                .onChange(of: url) { _, newURL in browser.load(newURL) }
         }
     }
 
@@ -140,10 +139,15 @@ public final class CefWindowedBrowserView: NSView {
     public var browser: CefBrowser? {
         didSet {
             guard browser !== oldValue else { return }
+            if let previous = oldValue?.nativeView, previous.superview === self {
+                previous.removeFromSuperview()
+            }
             hostBrowserIfPossible()
         }
     }
 
+    /// Whether dismantling the view closes its browser. `CefWebView(url:)`
+    /// sets this for the browser it owns.
     var closesBrowserOnTeardown = false
     private var isTornDown = false
 

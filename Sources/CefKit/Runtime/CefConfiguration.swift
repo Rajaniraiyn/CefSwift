@@ -103,13 +103,8 @@ public struct CefConfiguration: Sendable {
     /// when SwiftUI/AppKit owns the run loop). Leave `true`.
     public var externalMessagePump: Bool = true
 
-    /// Enable Chromium offscreen (windowless) rendering process-wide. Required
-    /// for the OSR hosting mode, where CEF paints into a shared `IOSurface`
-    /// that CefSwift composites in a Metal/`CALayer`-backed SwiftUI view rather
-    /// than a CEF-owned window. Has no effect on windowed or chrome-window
-    /// browsers. Note: windowless rendering always uses Alloy style — the
-    /// Chrome runtime (chrome:// internals, extensions) is unavailable in this
-    /// mode (a CEF/Chromium constraint on macOS).
+    /// Allows offscreen rendering, which ``CefRendering/offscreen(frameRate:)``
+    /// browsers require. Offscreen browsers always use Alloy style.
     public var windowlessRenderingEnabled: Bool = false
 
     /// Explicit path to `Chromium Embedded Framework.framework`. When `nil`
@@ -121,13 +116,9 @@ public struct CefConfiguration: Sendable {
     /// helper apps from the bundle layout by default).
     public var browserSubprocessPath: URL?
 
-    /// How Chromium encrypts cookies at rest — i.e. whether it creates the
-    /// "Chromium Safe Storage" keychain item (and triggers the one-time
-    /// macOS keychain ACL prompt). See ``CefSafeStoragePolicy``.
-    ///
-    /// The default, ``CefSafeStoragePolicy/automatic``, uses a mock key for
-    /// ad-hoc-signed/unsigned dev builds (no prompt) and the real keychain
-    /// for properly signed builds (Chrome-like; "Always Allow" sticks).
+    /// Whether Chromium keeps its encryption key in the keychain. The
+    /// default, ``CefSafeStoragePolicy/automatic``, uses the keychain only
+    /// in release builds.
     public var safeStorage: CefSafeStoragePolicy = .automatic
 
     /// Custom URL schemes registered in every CEF process (browser, renderer,

@@ -1,21 +1,20 @@
 import CCef
 import Foundation
 
-/// A snapshot of one file download's state, delivered through
-/// ``CefBrowserDelegate/browser(_:decideDestinationFor:suggestedName:)``
-/// and ``CefBrowser/downloads``.
+/// The state of a download, as listed in ``CefBrowser/downloads`` and
+/// passed to ``CefBrowserDelegate``.
 public struct CefDownload: Sendable, Equatable, Identifiable {
-    /// CEF's identifier for this download (stable across updates).
+    /// Chromium's identifier for the download, stable across updates.
     public var id: UInt32
     /// The download URL.
     public var url: URL?
     /// Bytes received so far.
     public var receivedBytes: Int64
-    /// Total bytes, or 0 when the server didn't say.
+    /// The expected size in bytes, or 0 when unknown.
     public var totalBytes: Int64
     /// Whether the download finished successfully.
     public var isComplete: Bool
-    /// Whether the download was canceled or interrupted.
+    /// Whether the download was cancelled or interrupted.
     public var isCanceled: Bool
     /// Where the file is being written, once a destination is known.
     public var fullPath: URL?
@@ -39,18 +38,17 @@ public struct CefDownload: Sendable, Equatable, Identifiable {
     }
 }
 
-/// Verdict for a download that is about to begin.
+/// Whether and where to save a download.
 public enum CefDownloadDecision: Sendable {
-    /// Proceed. `destination` is the full file path to write (including the
-    /// file name); `nil` saves to `~/Downloads/<suggestedName>`.
+    /// Save the download to `destination`, a file URL including the file
+    /// name, or to `~/Downloads` under the suggested name when `nil`.
     case allow(destination: URL?)
     /// Cancel the download.
     case deny
 }
 
-/// Resolves a ``CefDownloadDecision`` into a concrete destination path
-/// (nil = canceled). Internal so tests can exercise the plumbing.
 enum CefDownloadDestination {
+    /// The file a decision saves to, or `nil` when it cancels the download.
     static func resolve(decision: CefDownloadDecision, suggestedName: String) -> URL? {
         switch decision {
         case .deny:
@@ -59,7 +57,7 @@ enum CefDownloadDestination {
             if let destination { return destination }
             let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
                 ?? FileManager.default.temporaryDirectory
-            // Never write outside the directory on a hostile suggested name.
+            // A suggested name must not lead outside the directory.
             let safeName = (suggestedName as NSString).lastPathComponent
             return downloads.appendingPathComponent(safeName.isEmpty ? "download" : safeName)
         }
@@ -67,18 +65,17 @@ enum CefDownloadDestination {
 }
 
 extension CefDownload {
-    /// Reads a snapshot out of a borrowed `cef_download_item_t`.
+    /// Reads a borrowed `cef_download_item_t`.
     init(item: UnsafeMutablePointer<cef_download_item_t>) {
-        let urlString = CefStringUtil.takingUserFree(item.pointee.get_url?(item)) ?? ""
-        let path = CefStringUtil.takingUserFree(item.pointee.get_full_path?(item)) ?? ""
+        let urlString = CefStringUtil.takingUserFree(item.pointee.get_url(item)) ?? ""
+        let path = CefStringUtil.takingUserFree(item.pointee.get_full_path(item)) ?? ""
         self.init(
-            id: item.pointee.get_id?(item) ?? 0,
+            id: item.pointee.get_id(item),
             url: URL(string: urlString),
-            receivedBytes: item.pointee.get_received_bytes?(item) ?? 0,
-            totalBytes: item.pointee.get_total_bytes?(item) ?? 0,
-            isComplete: (item.pointee.is_complete?(item) ?? 0) != 0,
-            isCanceled: (item.pointee.is_canceled?(item) ?? 0) != 0
-                || (item.pointee.is_interrupted?(item) ?? 0) != 0,
+            receivedBytes: item.pointee.get_received_bytes(item),
+            totalBytes: item.pointee.get_total_bytes(item),
+            isComplete: item.pointee.is_complete(item) != 0,
+            isCanceled: item.pointee.is_canceled(item) != 0 || item.pointee.is_interrupted(item) != 0,
             fullPath: path.isEmpty ? nil : URL(fileURLWithPath: path)
         )
     }

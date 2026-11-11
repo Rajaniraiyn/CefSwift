@@ -6,9 +6,8 @@ import Testing
 @testable import CefKit
 @testable import CefSwiftUI
 
-/// Pure-logic tests for the OSR (offscreen / Metal) hosting mode. None require
-/// `cef_initialize` — they exercise the value-type and coordinate mappings that
-/// route AppKit input into CEF's windowless browser.
+/// Key codes and geometry used when forwarding AppKit input to offscreen
+/// browsers.
 @MainActor
 struct OSRLogicTests {
 
@@ -28,13 +27,12 @@ struct OSRLogicTests {
         #expect(CefKeyCodes.windowsKeyCode(forMacKeyCode: 0x12, characters: "1") == 0x31)
     }
 
-    // MARK: OSR view info defaults
+    // MARK: View info
 
     @Test func offscreenViewInfoDefaults() {
         let info = CefOffscreenViewInfo()
         #expect(info.deviceScaleFactor == 1)
         #expect(info.sizeDIP == CGSize(width: 1, height: 1))
-        // Custom retina geometry round-trips.
         let retina = CefOffscreenViewInfo(sizeDIP: CGSize(width: 400, height: 300), deviceScaleFactor: 2)
         #expect(retina.deviceScaleFactor == 2)
         #expect(retina.sizeDIP.width == 400)

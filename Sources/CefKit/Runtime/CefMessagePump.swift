@@ -1,79 +1,92 @@
 import CCef
 import Foundation
 
-/// Drives CEF's message loop from the main run loop (external message pump).
+/// Runs Chromium's message loop from the main run loop.
 ///
-/// CEF requests work via `on_schedule_message_pump_work(delay_ms)`; we honor
-/// those requests with one-shot timers clamped to 33 ms, and additionally run
-/// a steady ~30 fps fallback timer while the runtime is alive so work is
-/// never starved (the official cefclient pattern, simplified per its own
-/// recommendation). All work happens on the main thread, with a re-entrancy
-/// guard around `cef_do_message_loop_work()`.
+/// Chromium asks for work through `on_schedule_message_pump_work`. A single
+/// one-shot timer serves those requests: it fires at the earliest requested
+/// time, never more than 1/30 s away, and is re-armed after every slice of
+/// work, so work is never starved. This follows cefclient's
+/// `MainMessageLoopExternalPump`.
 @MainActor
 final class CefMessagePump {
-    /// Maximum delay between work slices (33 ms ≈ 30 Hz).
-    private static let maxDelay: TimeInterval = 0.033
+    private static let maximumDelay: TimeInterval = 1.0 / 30
 
-    private var fallbackTimer: Timer?
-    private var scheduledTimer: Timer?
-    private var isPerformingWork = false
+    private var timer: Timer?
     private var isRunning = false
+    private var isPerformingWork = false
+    private var wasReentered = false
 
     func start() {
         guard !isRunning else { return }
         isRunning = true
-        let timer = Timer(timeInterval: Self.maxDelay, repeats: true) { _ in
-            // Timer fires on the main run loop; CEF's UI thread is the main
-            // thread with an external pump.
-            MainActor.assumeIsolated {
-                CefRuntime.shared.messagePump?.performWork()
-            }
-        }
-        // .common so the pump keeps running during window drags/menus.
-        RunLoop.main.add(timer, forMode: .common)
-        fallbackTimer = timer
+        schedule(after: Self.maximumDelay)
     }
 
     func stop() {
         isRunning = false
-        fallbackTimer?.invalidate()
-        fallbackTimer = nil
-        scheduledTimer?.invalidate()
-        scheduledTimer = nil
+        timer?.invalidate()
+        timer = nil
     }
 
-    /// Entry point for `on_schedule_message_pump_work`. May be called from
-    /// any thread.
+    /// Handles `on_schedule_message_pump_work`, which CEF calls from any thread.
     nonisolated func scheduleWork(delayMilliseconds: Int64) {
         DispatchQueue.main.async {
             MainActor.assumeIsolated {
-                self.scheduleOnMain(delayMilliseconds: delayMilliseconds)
+                self.workRequested(delayMilliseconds: delayMilliseconds)
             }
         }
     }
 
-    private func scheduleOnMain(delayMilliseconds: Int64) {
+    private func workRequested(delayMilliseconds: Int64) {
         guard isRunning else { return }
-        scheduledTimer?.invalidate()
-        scheduledTimer = nil
         if delayMilliseconds <= 0 {
+            timer?.invalidate()
+            timer = nil
             performWork()
+        } else {
+            schedule(after: min(TimeInterval(delayMilliseconds) / 1000, Self.maximumDelay))
+        }
+    }
+
+    /// Arms the timer to fire after `delay`, unless it is already due sooner.
+    private func schedule(after delay: TimeInterval) {
+        let fireDate = Date(timeIntervalSinceNow: delay)
+        if let timer {
+            guard fireDate < timer.fireDate else { return }
+            timer.invalidate()
+        }
+        let timer = Timer(fire: fireDate, interval: 0, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.timer = nil
+                self?.performWork()
+            }
+        }
+        // Common modes keep the pump running during window drags and menu
+        // tracking.
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
+    }
+
+    private func performWork() {
+        guard isRunning else { return }
+        // Work can trigger a nested run loop that fires the timer again.
+        // Chromium does not support re-entering its loop, so note the
+        // request and run it once the outer call returns.
+        guard !isPerformingWork else {
+            wasReentered = true
             return
         }
-        let delay = min(TimeInterval(delayMilliseconds) / 1000.0, Self.maxDelay)
-        let timer = Timer(timeInterval: delay, repeats: false) { _ in
-            MainActor.assumeIsolated {
-                CefRuntime.shared.messagePump?.performWork()
-            }
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        scheduledTimer = timer
-    }
-
-    func performWork() {
-        guard isRunning, !isPerformingWork else { return }
         isPerformingWork = true
+        wasReentered = false
         cef_do_message_loop_work()
         isPerformingWork = false
+
+        guard isRunning else { return }
+        if wasReentered {
+            schedule(after: 0)
+        } else if timer == nil {
+            schedule(after: Self.maximumDelay)
+        }
     }
 }

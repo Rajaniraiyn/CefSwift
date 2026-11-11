@@ -2,23 +2,22 @@ import CCef
 import CoreGraphics
 import Foundation
 
-// Internal helpers for the "extended struct" trick: CEF handler structs are
-// allocated through ccef_object_alloc(), which prepends a hidden header
-// holding an atomic refcount plus a retained Swift owner pointer. The owner
-// is recovered inside C callbacks via ccef_object_get_swift().
+// Structs CefSwift implements are allocated by ccef_object_alloc, which
+// places a hidden header before the struct holding an atomic reference count
+// and a retained Swift owner. Callbacks recover the owner with
+// ccef_object_get_swift.
 
-/// Releases the retained Swift owner when a ccef object's refcount hits zero.
+/// Releases the Swift owner when an object's reference count reaches zero.
 private let cefObjectOnZero: @convention(c) (UnsafeMutableRawPointer?) -> Void = { opaque in
     guard let opaque else { return }
     Unmanaged<AnyObject>.fromOpaque(opaque).release()
 }
 
-/// Allocates a zeroed, refcounted CEF struct (first member must be
-/// `cef_base_ref_counted_t`) whose hidden header retains `owner`.
-/// Initial refcount is 1, owned by the caller; handing the struct to CEF
-/// transfers that reference.
+/// Allocates a zeroed CEF struct whose first member is
+/// `cef_base_ref_counted_t`, retaining `owner` until the last reference is
+/// released. The caller holds the one initial reference.
 func cefAllocate<T>(_ type: T.Type, owner: AnyObject) -> UnsafeMutablePointer<T> {
-    let opaque = Unmanaged.passRetained(owner as AnyObject).toOpaque()
+    let opaque = Unmanaged.passRetained(owner).toOpaque()
     guard let raw = ccef_object_alloc(MemoryLayout<T>.stride, opaque, cefObjectOnZero) else {
         Unmanaged<AnyObject>.fromOpaque(opaque).release()
         fatalError("CefSwift: out of memory allocating \(T.self)")
@@ -26,58 +25,56 @@ func cefAllocate<T>(_ type: T.Type, owner: AnyObject) -> UnsafeMutablePointer<T>
     return raw.assumingMemoryBound(to: T.self)
 }
 
-/// Recovers the Swift owner installed by `cefAllocate` from the `self`
-/// pointer CEF passes to a struct callback.
+/// The owner passed to `cefAllocate`, recovered from the `self` pointer of a
+/// callback.
 func cefOwner<T: AnyObject>(_ type: T.Type, _ cefSelf: UnsafeMutableRawPointer?) -> T? {
     guard let cefSelf, let opaque = ccef_object_get_swift(cefSelf) else { return nil }
     return Unmanaged<AnyObject>.fromOpaque(opaque).takeUnretainedValue() as? T
 }
 
-/// Adds a reference to any CEF object (ours or CEF's) given a pointer to a
-/// struct whose first member is `cef_base_ref_counted_t`.
+/// Adds a reference to a reference-counted CEF object, ours or Chromium's.
 func cefAddRef(_ object: UnsafeMutableRawPointer?) {
     guard let object else { return }
     let base = object.assumingMemoryBound(to: cef_base_ref_counted_t.self)
-    base.pointee.add_ref?(base)
+    base.pointee.add_ref(base)
 }
 
-/// Releases a reference on any CEF object given a pointer to a struct whose
-/// first member is `cef_base_ref_counted_t`.
+/// Releases a reference to a reference-counted CEF object, ours or Chromium's.
 func cefRelease(_ object: UnsafeMutableRawPointer?) {
     guard let object else { return }
     let base = object.assumingMemoryBound(to: cef_base_ref_counted_t.self)
-    _ = base.pointee.release?(base)
+    _ = base.pointee.release(base)
 }
 
-// MARK: - Typed conveniences
+// MARK: - Typed pointers
 
-/// Adds a reference to a CEF object given its typed pointer.
+/// Adds a reference to a reference-counted CEF object.
 func cefAddRef<T>(_ object: UnsafeMutablePointer<T>?) {
     cefAddRef(UnsafeMutableRawPointer(object))
 }
 
-/// Releases a reference on a CEF object given its typed pointer.
+/// Releases a reference to a reference-counted CEF object.
 func cefRelease<T>(_ object: UnsafeMutablePointer<T>?) {
     cefRelease(UnsafeMutableRawPointer(object))
 }
 
-/// Recovers the Swift owner from the typed `self` pointer of a CEF callback.
+/// The owner passed to `cefAllocate`, recovered from the `self` pointer of a
+/// callback.
 func cefOwner<T: AnyObject, S>(_ type: T.Type, _ cefSelf: UnsafeMutablePointer<S>?) -> T? {
     cefOwner(type, UnsafeMutableRawPointer(cefSelf))
 }
 
-/// Returns `handler` with an extra reference for the caller, the shape CEF
-/// expects from every `get_*_handler` callback.
-func cefRetained<T>(_ handler: UnsafeMutablePointer<T>?) -> UnsafeMutablePointer<T>? {
-    cefAddRef(handler)
-    return handler
+/// `object` with a reference added for the caller, as `get_*_handler`
+/// callbacks must return it.
+func cefRetained<T>(_ object: UnsafeMutablePointer<T>?) -> UnsafeMutablePointer<T>? {
+    cefAddRef(object)
+    return object
 }
 
 /// Owns one reference to a CEF object and releases it on deinit.
 ///
-/// CEF objects are thread-safe refcounted, so the box is `Sendable`; whether
-/// the *methods* of the wrapped object may be called off the UI thread is
-/// documented per CEF type.
+/// Reference counting is thread-safe, so the box is `Sendable`; which
+/// threads may call the object's methods depends on its CEF type.
 final class CefRef<T>: @unchecked Sendable {
     let pointer: UnsafeMutablePointer<T>
 
@@ -104,8 +101,7 @@ extension CefRef {
     }
 }
 
-/// Reads a `cef_string_list_t` into Swift strings (the list stays owned by
-/// the caller).
+/// The strings in a borrowed `cef_string_list_t`.
 func cefStrings(from list: cef_string_list_t?) -> [String] {
     guard let list else { return [] }
     return (0..<cef_string_list_size(list)).compactMap { index in
@@ -116,7 +112,8 @@ func cefStrings(from list: cef_string_list_t?) -> [String] {
     }
 }
 
-/// Converts an sRGB-convertible color to CEF's ARGB `cef_color_t`.
+/// A color as CEF's sRGB ARGB `cef_color_t`, or transparent black when the
+/// color cannot be converted.
 func cefColor(_ color: CGColor) -> cef_color_t {
     guard let srgb = color.converted(to: CGColorSpace(name: CGColorSpace.sRGB)!, intent: .defaultIntent, options: nil),
           let c = srgb.components, c.count >= 4

@@ -1,16 +1,12 @@
 import CCef
 import Foundation
 
-/// A custom URL scheme registered with CEF in every process.
+/// A URL scheme of your own, such as `myapp://`.
 ///
-/// Declare custom schemes up front via ``CefConfiguration/customSchemes``;
-/// CEF requires scheme registration to happen identically in the browser
-/// process *and* every subprocess, before initialization. CefSwift automates
-/// the subprocess side: the browser process forwards the scheme list to each
-/// helper on its command line (`--cefswift-schemes=…`) and
-/// ``CefRuntime/helperMain()`` re-registers them there.
-///
-/// Serve content for a custom scheme with
+/// Declare schemes in ``CefConfiguration/customSchemes``. Chromium requires
+/// every process to register the same schemes; CefSwift passes the list to
+/// helper processes on their command line and ``CefRuntime/helperMain()``
+/// registers it there. Serve content with
 /// ``CefRuntime/registerSchemeHandler(scheme:domain:handler:)``.
 ///
 /// ```swift
@@ -22,36 +18,35 @@ import Foundation
 /// // pages can now load myapp://anyhost/index.html
 /// ```
 public struct CefCustomScheme: Sendable, Equatable {
-    /// Scheme behavior flags, mirroring CEF's `cef_scheme_options_t`.
+    /// How Chromium treats the scheme, mirroring `cef_scheme_options_t`.
     public struct Options: OptionSet, Sendable, Equatable {
         public let rawValue: Int32
         public init(rawValue: Int32) { self.rawValue = rawValue }
 
-        /// Standard-scheme semantics (URL canonicalization, host/origin,
-        /// relative URL resolution). Most app schemes want this.
+        /// URLs have a host and resolve relative URLs like `https`. Most app
+        /// schemes want this.
         public static let standard = Options(rawValue: 1 << 0)
-        /// Same security rules as `file://` (no cross-origin loads into it).
+        /// The security rules of `file` URLs.
         public static let local = Options(rawValue: 1 << 1)
-        /// Content can only be displayed from same-scheme pages.
+        /// Only pages of the same scheme can display its content.
         public static let displayIsolated = Options(rawValue: 1 << 2)
-        /// Treated as secure context (like `https://`); unblocks service
-        /// workers, secure cookies, mixed-content rules.
+        /// Pages are secure contexts, like `https`, so service workers and
+        /// secure cookies work.
         public static let secure = Options(rawValue: 1 << 3)
-        /// May receive CORS requests from other origins (requires
-        /// ``standard``).
+        /// Other origins may make CORS requests to it. Requires ``standard``.
         public static let corsEnabled = Options(rawValue: 1 << 4)
-        /// May bypass Content-Security-Policy (requires ``standard``).
+        /// Its content bypasses Content Security Policy. Requires ``standard``.
         public static let cspBypassing = Options(rawValue: 1 << 5)
-        /// May be the target of Fetch API requests.
+        /// The Fetch API can load it.
         public static let fetchEnabled = Options(rawValue: 1 << 6)
     }
 
-    /// The scheme name, e.g. `"myapp"` (lowercase, no `://`). Must not be a
-    /// built-in scheme (http, https, file, ftp, about, data).
+    /// The scheme name in lowercase, without `://`, such as `"myapp"`. It
+    /// must not be a built-in scheme such as `http` or `file`.
     public var name: String
 
-    /// Behavior flags. The default makes the scheme a fetchable, secure,
-    /// CORS-capable standard scheme — the right shape for serving app UI.
+    /// How Chromium treats the scheme. The default suits serving an app's
+    /// own web content.
     public var options: Options
 
     /// Creates a custom scheme declaration.
@@ -61,21 +56,19 @@ public struct CefCustomScheme: Sendable, Equatable {
     }
 }
 
-// MARK: - Cross-process plumbing (browser → helper command line)
+// MARK: - Registration in every process
 
 extension CefCustomScheme {
-    /// The switch the browser process appends to every child process command
-    /// line so helpers can mirror the scheme registration
-    /// (`--cefswift-schemes=name:options,name:options`).
+    /// The switch that carries the scheme list to helper processes, as
+    /// `--cefswift-schemes=name:options,name:options`.
     static let childProcessSwitchName = "cefswift-schemes"
 
-    /// Serializes a scheme list into the child-process switch value.
+    /// Encodes a scheme list as the switch value.
     static func serialize(_ schemes: [CefCustomScheme]) -> String {
         schemes.map { "\($0.name):\($0.options.rawValue)" }.joined(separator: ",")
     }
 
-    /// Parses a child-process switch value back into a scheme list.
-    /// Malformed entries are dropped (a helper must never crash on argv).
+    /// Decodes a switch value, skipping malformed entries.
     static func parse(_ serialized: String) -> [CefCustomScheme] {
         serialized.split(separator: ",").compactMap { entry in
             let parts = entry.split(separator: ":", maxSplits: 1)
@@ -87,27 +80,22 @@ extension CefCustomScheme {
         }
     }
 
-    /// Extracts the scheme list from a helper process's argv, or `[]` when
-    /// the switch is absent.
+    /// The scheme list in a helper's arguments, or `[]` without the switch.
     static func parse(fromArguments arguments: [String]) -> [CefCustomScheme] {
         let prefix = "--\(childProcessSwitchName)="
         guard let argument = arguments.first(where: { $0.hasPrefix(prefix) }) else { return [] }
         return parse(String(argument.dropFirst(prefix.count)))
     }
-}
 
-/// Shared scheme-registrar plumbing for `cef_app_t.on_register_custom_schemes`
-/// (used by both the browser-process app handler and the helper-process one).
-enum CefSchemeRegistration {
-    /// Registers `schemes` with a CEF scheme registrar. The registrar is a
-    /// scoped (non-refcounted) object borrowed for the duration of the call.
+    /// Registers `schemes` from `on_register_custom_schemes`. The registrar
+    /// is not reference-counted and is only borrowed.
     static func register(
         _ schemes: [CefCustomScheme],
         with registrar: UnsafeMutablePointer<cef_scheme_registrar_t>
     ) {
         for scheme in schemes {
             CefStringUtil.withCefString(scheme.name) { name in
-                _ = registrar.pointee.add_custom_scheme?(registrar, name, scheme.options.rawValue)
+                _ = registrar.pointee.add_custom_scheme(registrar, name, scheme.options.rawValue)
             }
         }
     }

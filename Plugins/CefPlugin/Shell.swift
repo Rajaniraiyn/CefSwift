@@ -1,7 +1,6 @@
 import Foundation
 
-/// Error thrown by every plugin code path. Each message states what went wrong
-/// *and* how to fix it (Apple-quality diagnostics).
+/// An error whose message says what went wrong and how to fix it.
 struct CefPluginError: Error, CustomStringConvertible {
     let message: String
     var description: String { message }
@@ -9,8 +8,8 @@ struct CefPluginError: Error, CustomStringConvertible {
     init(_ message: String) { self.message = message }
 }
 
-/// Thin wrapper over Foundation `Process` for the handful of system tools the
-/// plugin shells out to (`curl`, `tar`, `codesign`, `shasum`, `cp`, `swift`).
+/// Runs the system tools the plugin relies on: `curl`, `tar`, `shasum`, `cp`,
+/// `codesign`, `security` and `swift`.
 enum Shell {
     struct Result {
         let exitCode: Int32
@@ -18,87 +17,78 @@ enum Shell {
         let stderr: String
     }
 
-    /// Runs `tool` with `arguments`, capturing stdout/stderr.
-    @discardableResult
-    static func run(
-        _ tool: String,
-        _ arguments: [String],
-        currentDirectory: URL? = nil
-    ) throws -> Result {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: tool)
-        process.arguments = arguments
-        if let currentDirectory { process.currentDirectoryURL = currentDirectory }
-
+    /// Runs `tool` and captures its output.
+    static func run(_ tool: String, _ arguments: [String]) throws -> Result {
+        let process = makeProcess(tool, arguments)
         let outPipe = Pipe()
         let errPipe = Pipe()
         process.standardOutput = outPipe
         process.standardError = errPipe
+        try launch(process)
 
-        do {
-            try process.run()
-        } catch {
-            throw CefPluginError(
-                "Could not launch '\(tool)': \(error.localizedDescription). " +
-                "Verify the tool exists at that path (it ships with macOS / the Command Line Tools)."
-            )
+        // Drain stderr on another thread so neither pipe can fill up and
+        // block the tool.
+        let stderr = Output()
+        let group = DispatchGroup()
+        DispatchQueue.global().async(group: group) {
+            stderr.data = errPipe.fileHandleForReading.readDataToEndOfFile()
         }
-        // Read concurrently to avoid pipe-buffer deadlock on large output.
         let outData = outPipe.fileHandleForReading.readDataToEndOfFile()
-        let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
+        group.wait()
         process.waitUntilExit()
 
         return Result(
             exitCode: process.terminationStatus,
-            stdout: String(data: outData, encoding: .utf8) ?? "",
-            stderr: String(data: errData, encoding: .utf8) ?? ""
+            stdout: String(decoding: outData, as: UTF8.self),
+            stderr: String(decoding: stderr.data, as: UTF8.self)
         )
     }
 
-    /// Runs `tool`, streaming its output straight to the user's terminal
-    /// (used for `curl` progress bars and `tar`).
-    static func runStreaming(
-        _ tool: String,
-        _ arguments: [String],
-        currentDirectory: URL? = nil
-    ) throws -> Int32 {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: tool)
-        process.arguments = arguments
-        if let currentDirectory { process.currentDirectoryURL = currentDirectory }
-        // Inherit stdio so progress renders live.
+    /// Runs `tool` with its output going straight to the terminal, so
+    /// progress shows as it happens. Returns the exit status.
+    static func runStreaming(_ tool: String, _ arguments: [String]) throws -> Int32 {
+        let process = makeProcess(tool, arguments)
         process.standardOutput = FileHandle.standardOutput
         process.standardError = FileHandle.standardError
-
-        do {
-            try process.run()
-        } catch {
-            throw CefPluginError(
-                "Could not launch '\(tool)': \(error.localizedDescription). " +
-                "Verify the tool exists at that path (it ships with macOS / the Command Line Tools)."
-            )
-        }
+        try launch(process)
         process.waitUntilExit()
         return process.terminationStatus
     }
 
-    /// Runs a tool and throws a descriptive error when it exits non-zero.
+    /// Runs `tool` and throws, including its error output and `hint`, if it
+    /// fails.
     @discardableResult
-    static func runChecked(
-        _ tool: String,
-        _ arguments: [String],
-        currentDirectory: URL? = nil,
-        hint: String? = nil
-    ) throws -> Result {
-        let result = try run(tool, arguments, currentDirectory: currentDirectory)
+    static func runChecked(_ tool: String, _ arguments: [String], hint: String) throws -> Result {
+        let result = try run(tool, arguments)
         guard result.exitCode == 0 else {
-            var message = "'\(tool) \(arguments.joined(separator: " "))' failed with exit code \(result.exitCode)."
+            var message = "'\(([tool] + arguments).joined(separator: " "))' failed with exit code \(result.exitCode)."
             let stderr = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !stderr.isEmpty { message += "\n  stderr: \(stderr)" }
-            if let hint { message += "\n  Hint: \(hint)" }
+            if !stderr.isEmpty { message += "\n  \(stderr)" }
+            message += "\n  \(hint)"
             throw CefPluginError(message)
         }
         return result
     }
 
+    private static func makeProcess(_ tool: String, _ arguments: [String]) -> Process {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: tool)
+        process.arguments = arguments
+        return process
+    }
+
+    private static func launch(_ process: Process) throws {
+        do {
+            try process.run()
+        } catch {
+            throw CefPluginError(
+                "Could not run \(process.executableURL?.path ?? "a tool"): \(error.localizedDescription)"
+            )
+        }
+    }
+
+    /// Output read on a background thread; read only after it finishes.
+    private final class Output: @unchecked Sendable {
+        var data = Data()
+    }
 }
