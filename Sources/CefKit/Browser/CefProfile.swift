@@ -183,9 +183,11 @@ public final class CefProfile {
     private func requestContext() -> CefRef<cef_request_context_t>? {
         if let context { return context }
         guard CefRuntime.shared.isInitialized else { return nil }
+        let preferences = CefRuntime.shared.configuration?.preferences ?? [:]
         switch kind {
         case .global:
             context = CefRef(adopting: cef_request_context_get_global_context())
+            applyConfigured(preferences)
         case .incognito, .persistent:
             var settings = cef_request_context_settings_t()
             settings.size = MemoryLayout<cef_request_context_settings_t>.stride
@@ -198,9 +200,24 @@ public final class CefProfile {
                 settings.persist_session_cookies = configuration?.persistSessionCookies == true ? 1 : 0
             }
             defer { ccef_string_clear(&settings.cache_path) }
-            context = CefRef(adopting: cef_request_context_create_context(&settings, nil))
+            // A new context finishes initializing asynchronously; its
+            // preferences can only be set once it reports ready.
+            let handler = preferences.isEmpty
+                ? nil
+                : ContextHandler { [weak self] in self?.applyConfigured(preferences) }.makeHandler()
+            context = CefRef(adopting: cef_request_context_create_context(&settings, handler))
         }
         return context
+    }
+
+    private func applyConfigured(_ preferences: [String: CefJSON]) {
+        for (name, value) in preferences {
+            do {
+                try setPreference(name, to: value)
+            } catch {
+                CefLog.error("\(error)")
+            }
+        }
     }
 
     /// A +1 request context for browser creation, which consumes it.
@@ -239,6 +256,28 @@ public final class CefProfile {
             .replacingOccurrences(of: "\\", with: "_")
         let trimmed = cleaned.drop(while: { $0 == "." })
         return trimmed.isEmpty ? "Profile" : String(trimmed)
+    }
+}
+
+// MARK: - Context readiness
+
+/// Owner of a `cef_request_context_handler_t` that reports when a new
+/// context is ready. The callback arrives on the UI thread.
+private final class ContextHandler: @unchecked Sendable {
+    private let onInitialized: @MainActor () -> Void
+
+    init(onInitialized: @escaping @MainActor () -> Void) {
+        self.onInitialized = onInitialized
+    }
+
+    func makeHandler() -> UnsafeMutablePointer<cef_request_context_handler_t> {
+        let handler = cefAllocate(cef_request_context_handler_t.self, owner: self)
+        handler.pointee.on_request_context_initialized = { s, context in
+            cefRelease(context)
+            guard let owner = cefOwner(ContextHandler.self, s) else { return }
+            MainActor.assumeIsolated { owner.onInitialized() }
+        }
+        return handler
     }
 }
 

@@ -27,6 +27,7 @@ final class BrowserController: CefBrowserDelegate {
     func openTab(url: URL? = nil, isPrivate: Bool = false, inBackground: Bool = false) -> CefBrowser {
         var options = CefBrowserOptions()
         options.profile = isPrivate ? .incognito() : .default
+        options.userScripts = Self.internalPageStyles
         options.contextMenu.showsInspectElement = true
         options.contextMenu.hiddenCommands = [.viewSource]
         options.contextMenu.items = [
@@ -51,6 +52,13 @@ final class BrowserController: CefBrowserDelegate {
             TrailingButtons(browser: browser, controller: self)
         }
         window.setTabAccessory { TabIcon(browser: browser) }
+        // Frame the page as a rounded card inset from the window edges.
+        window.contentInsets = NSEdgeInsets(top: 0, left: 6, bottom: 6, right: 6)
+        window.contentCornerRadius = 10
+        window.onPopup = { [weak window] popup in
+            guard let window else { return }
+            Self.present(popup, over: window)
+        }
         window.onClose = { [weak self, weak window] in
             self?.windows.removeAll { $0 === window }
         }
@@ -63,6 +71,33 @@ final class BrowserController: CefBrowserDelegate {
             window.show()
         }
         return browser
+    }
+
+    /// Trims Chromium's settings to what this browser supports: its About
+    /// entry is replaced by the app's own page, so the built-in one and its
+    /// updater status are hidden.
+    private static let internalPageStyles: [CefUserScript] = [
+        .styleSheet(
+            "#about-menu, settings-about-page #updateStatusMessage { display: none !important }",
+            matching: "chrome://settings/*"),
+    ]
+
+    /// Shows a page's popup (a sign-in window, say) as a panel layered over
+    /// the window that opened it: centered, always above it, moving with it.
+    private static func present(_ popup: CefBrowserWindow, over opener: CefBrowserWindow) {
+        guard let parent = opener.nsWindow, let panel = popup.nsWindow else {
+            popup.show()
+            return
+        }
+        let size = CGSize(width: min(560, parent.frame.width - 80), height: min(680, parent.frame.height - 80))
+        panel.setFrame(
+            CGRect(
+                x: parent.frame.midX - size.width / 2, y: parent.frame.midY - size.height / 2,
+                width: size.width, height: size.height),
+            display: false)
+        panel.tabbingMode = .disallowed
+        parent.addChildWindow(panel, ordered: .above)
+        popup.show()
     }
 
     /// Chromium sometimes opens a window of its own — following a link from

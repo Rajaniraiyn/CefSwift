@@ -68,6 +68,14 @@ public final class CefBrowserWindow: Identifiable {
     /// Called after the window is destroyed.
     @ObservationIgnored public var onClose: (() -> Void)?
 
+    /// Called when the page opens a popup window (`window.open` with
+    /// features, sign-in flows). The popup arrives as a hidden
+    /// `CefBrowserWindow` of its own, still connected to its opener — give
+    /// it your toolbar, add it to a tab group, and show it.
+    ///
+    /// When `nil`, Chromium shows popups in a window of its own design.
+    @ObservationIgnored public var onPopup: ((CefBrowserWindow) -> Void)?
+
     public nonisolated var id: ObjectIdentifier { ObjectIdentifier(self) }
 
     /// Every open browser window, in creation order.
@@ -84,14 +92,46 @@ public final class CefBrowserWindow: Identifiable {
         self.configuration = configuration
         Self.all.append(self)
 
-        let viewDelegate = BrowserViewDelegate(toolbar: configuration.toolbar)
+        let viewDelegate = BrowserViewDelegate(toolbar: configuration.toolbar, window: self)
         browserView = CefRef(adopting: browser.createBrowserView(delegate: viewDelegate.makeDelegate()))
+        createWindow()
+    }
+
+    /// Wraps a popup's browser view, created by Chromium, in a window.
+    fileprivate init(popupView: CefRef<cef_browser_view_t>, browser: CefBrowser, opener: CefBrowserWindow) {
+        self.browser = browser
+        var configuration = opener.configuration
+        configuration.frame = nil
+        self.configuration = configuration
+        self.isPopup = true
+        Self.all.append(self)
+        browserView = popupView
+        createWindow()
+    }
+
+    @ObservationIgnored private var isPopup = false
+
+    private func createWindow() {
         // Creation is synchronous: windowCreated(_:) has run by the time
         // this returns.
         window = CefRef(adopting: cef_window_create_top_level(WindowDelegate(owner: self).makeDelegate()))
         if configuration.titleFollowsPage {
             mirrorPageTitle()
         }
+    }
+
+    /// Hands a popup's browser view to ``onPopup``. Returns whether the
+    /// popup was taken; otherwise Chromium gives it a window.
+    fileprivate func adoptPopup(_ popupView: CefRef<cef_browser_view_t>) -> Bool {
+        // The view must be in a window before this callback returns, so the
+        // popup's browser is wrapped now even if Chromium has not announced
+        // it yet. Popups share their opener's client.
+        guard let onPopup, let client = browser.client,
+              let raw = popupView.pointer.pointee.get_browser(popupView.pointer)
+        else { return false }
+        let popup = client.wrapper(adopting: raw)
+        onPopup(CefBrowserWindow(popupView: popupView, browser: popup, opener: self))
+        return true
     }
 
     private func mirrorPageTitle() {
@@ -155,7 +195,38 @@ public final class CefBrowserWindow: Identifiable {
         didSet { applyLayout() }
     }
 
+    /// Rounds the corners of the page area. Combined with ``contentInsets``
+    /// this frames the page as an inset card — the window's background
+    /// shows around it.
+    public var contentCornerRadius: CGFloat = 0 {
+        didSet { applyLayout() }
+    }
+
+    @ObservationIgnored private var contentFrame: ContentFrameView?
+
+    /// Chromium draws the whole content area in one layer, so the frame is a
+    /// native view laid over it that paints everything except the page.
+    private func updateContentFrame() {
+        let isFramed = contentCornerRadius > 0
+            || contentInsets.top + contentInsets.left + contentInsets.bottom + contentInsets.right > 0
+        guard isFramed, let contentView = nsWindow?.contentView else {
+            contentFrame?.removeFromSuperview()
+            contentFrame = nil
+            return
+        }
+        let frame = contentFrame ?? ContentFrameView()
+        if frame.superview !== contentView {
+            frame.frame = contentView.bounds
+            frame.autoresizingMask = [.width, .height]
+            contentView.addSubview(frame, positioned: .above, relativeTo: nil)
+            contentFrame = frame
+        }
+        frame.insets = contentInsets
+        frame.cornerRadius = contentCornerRadius
+    }
+
     private func applyLayout() {
+        updateContentFrame()
         guard let window = window?.pointer else { return }
         var settings = cef_box_layout_settings_t()
         settings.size = MemoryLayout<cef_box_layout_settings_t>.stride
@@ -186,7 +257,7 @@ public final class CefBrowserWindow: Identifiable {
         }
         self.window = CefRef(retaining: window)
         applyLayout()
-        if configuration.frame == nil {
+        if configuration.frame == nil, !isPopup {
             var size = cef_size_t(width: 1200, height: 800)
             window.pointee.center_window(window, &size)
         }
@@ -210,15 +281,64 @@ public final class CefBrowserWindow: Identifiable {
     }
 }
 
+// MARK: - Content frame
+
+/// Paints the window background everywhere except a rounded rectangle over
+/// the page, and lets every event through to Chromium beneath it.
+private final class ContentFrameView: NSView {
+    var insets = NSEdgeInsets() { didSet { needsLayout = true } }
+    var cornerRadius: CGFloat = 0 { didSet { needsLayout = true } }
+
+    private let cutout = CAShapeLayer()
+
+    init() {
+        super.init(frame: .zero)
+        wantsLayer = true
+        cutout.fillRule = .evenOdd
+        layer?.mask = cutout
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { nil }
+
+    override var wantsUpdateLayer: Bool { true }
+
+    override func updateLayer() {
+        layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+    }
+
+    override func layout() {
+        super.layout()
+        // AppKit's y axis points up, so the top inset comes off maxY.
+        let page = CGRect(
+            x: insets.left, y: insets.bottom,
+            width: bounds.width - insets.left - insets.right,
+            height: bounds.height - insets.top - insets.bottom)
+        let path = CGMutablePath()
+        path.addRect(bounds)
+        if page.width > 0, page.height > 0 {
+            let radius = min(cornerRadius, page.width / 2, page.height / 2)
+            path.addRoundedRect(in: page, cornerWidth: radius, cornerHeight: radius)
+        }
+        cutout.frame = bounds
+        cutout.path = path
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
 // MARK: - Views delegates
 
 /// Owner of a `cef_browser_view_delegate_t`. Popups opened from the view get
 /// a delegate of their own showing Chrome's location bar.
-private final class BrowserViewDelegate: Sendable {
+private final class BrowserViewDelegate: @unchecked Sendable {
     let toolbar: CefBrowserWindow.Toolbar
+    /// The window whose page may open popups; UI thread only.
+    private weak var window: CefBrowserWindow?
 
-    init(toolbar: CefBrowserWindow.Toolbar) {
+    init(toolbar: CefBrowserWindow.Toolbar, window: CefBrowserWindow?) {
         self.toolbar = toolbar
+        self.window = window
     }
 
     func makeDelegate() -> UnsafeMutablePointer<cef_browser_view_delegate_t> {
@@ -232,15 +352,27 @@ private final class BrowserViewDelegate: Sendable {
             cefRelease(view)
             cefRelease(browser)
         }
-        d.pointee.get_delegate_for_popup_browser_view = { _, view, _, client, _ in
+        d.pointee.get_delegate_for_popup_browser_view = { s, view, _, client, isDevTools in
             cefRelease(view)
             cefRelease(client)
-            return BrowserViewDelegate(toolbar: .location).makeDelegate()
+            // A popup the app will host keeps the opener's toolbar choice;
+            // one Chromium hosts shows its location bar.
+            guard isDevTools == 0, let owner = cefOwner(BrowserViewDelegate.self, s) else {
+                return BrowserViewDelegate(toolbar: .location, window: nil).makeDelegate()
+            }
+            return MainActor.assumeIsolated {
+                let hosted = owner.window?.onPopup != nil
+                return CefRef(adopting: BrowserViewDelegate(
+                    toolbar: hosted ? owner.toolbar : .location, window: nil).makeDelegate())
+            }.detach()
         }
-        d.pointee.on_popup_browser_view_created = { _, view, popupView, _ in
+        d.pointee.on_popup_browser_view_created = { s, view, popupView, isDevTools in
             cefRelease(view)
-            cefRelease(popupView)
-            return 0  // let CEF give the popup a default window
+            guard isDevTools == 0, let popupView = CefRef(adopting: popupView),
+                  let owner = cefOwner(BrowserViewDelegate.self, s)
+            else { return 0 }
+            // Non-zero tells CEF the app is giving the popup a window.
+            return MainActor.assumeIsolated { owner.window?.adoptPopup(popupView) == true ? 1 : 0 }
         }
         d.pointee.get_chrome_toolbar_type = { s, view in
             cefRelease(view)

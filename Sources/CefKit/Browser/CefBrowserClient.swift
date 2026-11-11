@@ -69,13 +69,22 @@ final class CefBrowserClient {
         return CefRuntime.shared.browser(withIdentifier: identifier)
     }
 
-    /// Takes ownership of the +1 `browser` reference from `on_after_created`.
-    private func browserCreated(_ browser: UnsafeMutablePointer<cef_browser_t>) {
+    /// Returns the `CefBrowser` for a live `cef_browser_t`, wrapping it on
+    /// first sight. Takes ownership of the +1 `browser` reference.
+    ///
+    /// Normally first sight is `on_after_created`; a popup's browser view
+    /// can reach a window delegate just before that, and asks here too.
+    @discardableResult
+    func wrapper(adopting browser: UnsafeMutablePointer<cef_browser_t>) -> CefBrowser {
+        if let existing = CefRuntime.shared.browser(withIdentifier: browser.pointee.get_identifier(browser)) {
+            cefRelease(browser)
+            return existing
+        }
         liveBrowserCount += 1
         if let pending {
             self.pending = nil
             pending.adopt(CefRef(adopting: browser))
-            return
+            return pending
         }
         // Chromium created this one itself: a native popup, a DevTools
         // window, or a tab opened through Chrome's own UI.
@@ -87,6 +96,7 @@ final class CefBrowserClient {
             opener.delegate?.browser(opener, didOpen: wrapper)
         }
         CefRuntime.shared.onBrowserCreated?(wrapper)
+        return wrapper
     }
 
     private func browserClosed(_ wrapper: CefBrowser) {
@@ -153,7 +163,7 @@ final class CefBrowserClient {
                 return
             }
             nonisolated(unsafe) let created = browser
-            MainActor.assumeIsolated { client.browserCreated(created) }
+            MainActor.assumeIsolated { _ = client.wrapper(adopting: created) }
         }
         h.pointee.do_close = { s, browser in
             // Non-zero means "the app closes the host itself". Left to CEF, a
@@ -194,6 +204,14 @@ final class CefBrowserClient {
         h.pointee.on_loading_state_change = { s, browser, isLoading, canGoBack, canGoForward in
             CefBrowserClient.run(s, browser, default: ()) { _, b in
                 b.applyLoadingState(isLoading: isLoading != 0, canGoBack: canGoBack != 0, canGoForward: canGoForward != 0)
+            }
+        }
+        h.pointee.on_load_start = { s, browser, frame, _ in
+            let isMain = frame.map { $0.pointee.is_main($0) != 0 } ?? false
+            let url = frame.flatMap { CefStringUtil.takingUserFree($0.pointee.get_url($0)) }
+            cefRelease(frame)
+            CefBrowserClient.run(s, browser, default: ()) { _, b in
+                if isMain { b.mainFrameDidStartLoading(url.flatMap(URL.init(string:))) }
             }
         }
         h.pointee.on_load_end = { s, browser, frame, httpStatus in

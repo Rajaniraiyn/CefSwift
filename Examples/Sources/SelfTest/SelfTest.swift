@@ -18,6 +18,7 @@ enum SelfTest {
         var configuration = CefConfiguration.embedded
         configuration.windowlessRenderingEnabled = true
         configuration.productName = "SelfTestBrowser"
+        configuration.preferences["webkit.webprefs.default_font_size"] = 21
         configuration.customSchemes = [CefCustomScheme(name: "selftest")]
         configuration.rootCachePath = FileManager.default.temporaryDirectory
             .appendingPathComponent("cefswift-selftest-\(ProcessInfo.processInfo.processIdentifier)")
@@ -32,7 +33,11 @@ enum SelfTest {
         window = NSWindow(
             contentRect: NSRect(x: 80, y: 80, width: 900, height: 600),
             styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        // Offscreen views pause while they cannot be seen, so keep the test
+        // window in front of whatever else is on screen.
+        window.level = .floating
         window.makeKeyAndOrderFront(nil)
+        NSApp.activate()
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 90) {
             print("FAIL watchdog: checks did not finish in 90s")
@@ -162,7 +167,11 @@ enum SelfTest {
         view.browser = browser
 
         check("offscreen: loads", await waitUntil { browser.title == "second" }, detail: browser.title)
-        check("offscreen: paints", await waitUntil { view.layer?.sublayers?.first?.contents != nil })
+        if window.occlusionState.contains(.visible) {
+            check("offscreen: paints", await waitUntil { view.layer?.sublayers?.first?.contents != nil })
+        } else {
+            print("SKIP offscreen: paints — the test window is not visible (screen locked or asleep?)")
+        }
         await expect("offscreen: evaluateJavaScript") { try await browser.evaluateJavaScript("document.title").stringValue == "second" }
         browser.close(force: true)
         check("offscreen: closes", await waitUntil { browser.state == .closed })
@@ -172,6 +181,8 @@ enum SelfTest {
     static func profileChecks() async {
         let profile = CefProfile.default
         check("profile: preferences readable", (profile.allPreferences().objectValue?.count ?? 0) > 10)
+        check("profile: configured preference applied",
+              profile.preference("webkit.webprefs.default_font_size")?.intValue == 21)
         do {
             try profile.setPreference("webkit.webprefs.default_font_size", to: 19)
             check("profile: preference round-trips", profile.preference("webkit.webprefs.default_font_size")?.intValue == 19)
@@ -195,11 +206,22 @@ enum SelfTest {
 
         let isolated = CefProfile.incognito()
         check("profile: incognito is isolated", await isolated.cookies().isEmpty)
+        check("profile: configured preference reaches new profiles", await waitUntil {
+            isolated.preference("webkit.webprefs.default_font_size")?.intValue == 21
+        })
     }
 
     static func browserWindowChecks() async {
-        let browser = CefBrowser(url: URL(string: "chrome://version")!)
+        var options = CefBrowserOptions()
+        options.userScripts = [
+            CefUserScript(source: "window.__scoped = 1", matching: "chrome://version/*"),
+            CefUserScript(source: "window.__elsewhere = 1", matching: "https://*"),
+            .styleSheet("body { --cefswift-probe: 7 }", matching: "chrome://*"),
+        ]
+        let browser = CefBrowser(url: URL(string: "chrome://version")!, options: options)
         let browserWindow = CefBrowserWindow(browser: browser)
+        var popups: [CefBrowserWindow] = []
+        browserWindow.onPopup = { popups.append($0) }
         browserWindow.show()
 
         check("browser window: chrome:// page loads", await waitUntil { browser.state == .live && !browser.isLoading && !browser.title.isEmpty }, detail: browser.title)
@@ -209,6 +231,23 @@ enum SelfTest {
             return text.contains("SelfTestBrowser")
         }
         check("browser window: chrome commands", browser.canExecute(.find))
+        await expect("internal page: scoped script runs, others don't") {
+            _ = await waitUntilAsync(timeout: .seconds(3)) {
+                (try? await browser.evaluateJavaScript("window.__scoped === 1").boolValue) == true
+            }
+            return try await browser.evaluateJavaScript("window.__scoped === 1 && window.__elsewhere === undefined").boolValue == true
+        }
+        await expect("internal page: stylesheet applies") {
+            try await browser.evaluateJavaScript(
+                "getComputedStyle(document.body).getPropertyValue('--cefswift-probe').trim()").stringValue == "7"
+        }
+        await expect("browser window: popup is hosted by the app") {
+            try await browser.evaluateJavaScript("window.open('about:blank', '_blank', 'width=320,height=240'); 0")
+            let arrived = await waitUntil(timeout: .seconds(5)) { !popups.isEmpty }
+            return arrived && popups[0].nsWindow != nil && popups[0].browser.opener === browser
+        }
+        for popup in popups { popup.close() }
+        check("browser window: popup closes", await waitUntil { popups.allSatisfy(\.isClosed) })
 
         browserWindow.close()
         check("browser window: closes", await waitUntil { browserWindow.isClosed && browser.state == .closed })
