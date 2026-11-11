@@ -24,14 +24,14 @@ swift package --package-path Examples \
 open Examples/dist/Browser.app
 ```
 
-Other example products: `Gallery`, `Launcher`.
+Other example products: `Showcase`, `SelfTest`.
 
 ## Coding notes
 
 - Swift 6 language mode. `@MainActor` over locks, no force-unwraps in library code, doc comments on public API.
-- The C bridge dlsym-resolves CEF symbols from one X-macro list: `Sources/CCef/include/ccef_symbols.h`. To wire a new CEF C API call, add one `CCEF_SYM(...)` line there and write the Swift wrapper in `Sources/CefKit`.
-- `Scripts/check-symbols.sh` validates that every listed symbol exists in the downloaded CEF binary. CI runs it; run it locally before sending a PR that touches `ccef_symbols.h`.
-- Don't hand-edit the vendored headers under `Sources/CCef/.../include` or `CEF_VERSION.json` — both are refreshed by `Scripts/cef-update.sh`.
+- The C bridge is generated: `Scripts/generate-bindings.py` writes `ccef_capi.h` and `ccef_symbols.h` from the vendored headers, exposing the whole CEF C API. Never edit those two files by hand.
+- `Examples/Sources/SelfTest` checks behavior against the real Chromium runtime. Add a check there for anything that crosses into CEF; bundle and run it before sending a change.
+- Don't hand-edit the vendored headers under `Sources/CCef/include/include` or `CEF_VERSION.json` — `Scripts/update-cef.py` refreshes both.
 
 ## Pull requests
 

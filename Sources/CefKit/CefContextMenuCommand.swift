@@ -10,7 +10,7 @@ import Foundation
 /// built-in behavior (navigate, clipboard, view-source, …). This enum lets
 /// apps reason about which standard items are present, gate them, or perform
 /// them explicitly.
-public enum CefContextMenuCommand: Int, Sendable, CaseIterable {
+public enum CefContextMenuCommand: Int, Sendable, Hashable, CaseIterable {
     case back = 100
     case forward = 101
     case reload = 102

@@ -129,7 +129,7 @@ extension CefBrowser {
                 }
             }
         }
-        withHostInternal { host in
+        withHost { host in
             guard let enter = host.pointee.drag_target_drag_enter else { return }
             var event = cef_mouse_event_t(x: Int32(point.x.rounded()), y: Int32(point.y.rounded()), modifiers: modifiers)
             enter(host, data, &event, allowedOps.cefValue)
@@ -139,7 +139,7 @@ extension CefBrowser {
 
     /// Forwards a drag-over (call repeatedly as the mouse moves during a drag).
     public func dragTargetOver(at point: CGPoint, modifiers: UInt32, allowedOps: CefDragOperation) {
-        withHostInternal { host in
+        withHost { host in
             var event = cef_mouse_event_t(x: Int32(point.x.rounded()), y: Int32(point.y.rounded()), modifiers: modifiers)
             host.pointee.drag_target_drag_over?(host, &event, allowedOps.cefValue)
         }
@@ -147,12 +147,12 @@ extension CefBrowser {
 
     /// Forwards a drag-leave.
     public func dragTargetLeave() {
-        withHostInternal { $0.pointee.drag_target_drag_leave?($0) }
+        withHost { $0.pointee.drag_target_drag_leave?($0) }
     }
 
     /// Forwards a drop.
     public func dragTargetDrop(at point: CGPoint, modifiers: UInt32) {
-        withHostInternal { host in
+        withHost { host in
             var event = cef_mouse_event_t(x: Int32(point.x.rounded()), y: Int32(point.y.rounded()), modifiers: modifiers)
             host.pointee.drag_target_drop?(host, &event)
         }
@@ -162,12 +162,12 @@ extension CefBrowser {
 
     /// Tells the page a page-initiated system drag ended at `viewPoint`.
     public func dragSourceEndedAt(viewPoint: CGPoint, operation: CefDragOperation) {
-        withHostInternal { $0.pointee.drag_source_ended_at?($0, Int32(viewPoint.x.rounded()), Int32(viewPoint.y.rounded()), operation.cefValue) }
+        withHost { $0.pointee.drag_source_ended_at?($0, Int32(viewPoint.x.rounded()), Int32(viewPoint.y.rounded()), operation.cefValue) }
     }
 
     /// Tells the page the page-initiated system drag fully completed.
     public func dragSourceSystemDragEnded() {
-        withHostInternal { $0.pointee.drag_source_system_drag_ended?($0) }
+        withHost { $0.pointee.drag_source_system_drag_ended?($0) }
     }
 
     // MARK: Touch
@@ -179,7 +179,7 @@ extension CefBrowser {
         modifiers: UInt32 = 0, pressure: Float = 0,
         pointerType: cef_pointer_type_t = CEF_POINTER_TYPE_TOUCH
     ) {
-        withHostInternal { host in
+        withHost { host in
             var event = cef_touch_event_t()
             event.id = id
             event.x = Float(point.x)

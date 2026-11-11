@@ -35,7 +35,7 @@ public enum CefWindowOpenDisposition: Sendable, Equatable {
     case newSplitView
 
     /// Maps a raw `cef_window_open_disposition_t` value.
-    public init(cefValue: cef_window_open_disposition_t) {
+    init(cefValue: cef_window_open_disposition_t) {
         switch cefValue {
         case CEF_WOD_CURRENT_TAB: self = .currentTab
         case CEF_WOD_SINGLETON_TAB: self = .singletonTab
@@ -50,6 +50,24 @@ public enum CefWindowOpenDisposition: Sendable, Equatable {
         case CEF_WOD_NEW_PICTURE_IN_PICTURE: self = .newPictureInPicture
         case CEF_WOD_NEW_SPLIT_VIEW: self = .newSplitView
         default: self = .unknown
+        }
+    }
+
+    var cefValue: cef_window_open_disposition_t {
+        switch self {
+        case .unknown: return CEF_WOD_UNKNOWN
+        case .currentTab: return CEF_WOD_CURRENT_TAB
+        case .singletonTab: return CEF_WOD_SINGLETON_TAB
+        case .newForegroundTab: return CEF_WOD_NEW_FOREGROUND_TAB
+        case .newBackgroundTab: return CEF_WOD_NEW_BACKGROUND_TAB
+        case .newPopup: return CEF_WOD_NEW_POPUP
+        case .newWindow: return CEF_WOD_NEW_WINDOW
+        case .saveToDisk: return CEF_WOD_SAVE_TO_DISK
+        case .offTheRecord: return CEF_WOD_OFF_THE_RECORD
+        case .ignoreAction: return CEF_WOD_IGNORE_ACTION
+        case .switchToTab: return CEF_WOD_SWITCH_TO_TAB
+        case .newPictureInPicture: return CEF_WOD_NEW_PICTURE_IN_PICTURE
+        case .newSplitView: return CEF_WOD_NEW_SPLIT_VIEW
         }
     }
 
@@ -116,6 +134,9 @@ public struct CefWindowOpenRequest: Sendable, Equatable {
     /// ``CefWindowOpenAction/openInCurrentBrowser`` or
     /// ``CefWindowOpenAction/handled`` here.
     public var isSourceOffscreen: Bool
+    /// Whether the source browser runs Chrome style, where Chromium itself
+    /// knows how to open tabs and windows.
+    public var isSourceChromeStyle: Bool
 
     public init(
         targetURL: URL?,
@@ -123,7 +144,8 @@ public struct CefWindowOpenRequest: Sendable, Equatable {
         disposition: CefWindowOpenDisposition = .unknown,
         userGesture: Bool = false,
         features: CefPopupFeatures = .init(),
-        isSourceOffscreen: Bool = false
+        isSourceOffscreen: Bool = false,
+        isSourceChromeStyle: Bool = false
     ) {
         self.targetURL = targetURL
         self.frameName = frameName
@@ -131,6 +153,7 @@ public struct CefWindowOpenRequest: Sendable, Equatable {
         self.userGesture = userGesture
         self.features = features
         self.isSourceOffscreen = isSourceOffscreen
+        self.isSourceChromeStyle = isSourceChromeStyle
     }
 }
 
@@ -154,8 +177,7 @@ public enum CefWindowOpenAction: Sendable, Equatable {
     case handled
 }
 
-/// The policy CefSwift applies when no delegate is present, or when bridging
-/// the legacy ``CefPopupDecision`` API. Pure logic, unit-tested.
+/// The policy CefSwift applies when the delegate does not decide. Pure logic.
 public enum CefWindowOpenPolicy {
     /// The safe default action for a request when the delegate does not
     /// override ``CefBrowserDelegate/browser(_:decideWindowOpenFor:)``.
@@ -166,6 +188,10 @@ public enum CefWindowOpenPolicy {
     ///   is safe everywhere; apps that want native popups or tabs opt in via
     ///   the delegate.
     public static func defaultAction(for request: CefWindowOpenRequest) -> CefWindowOpenAction {
+        // Chrome style opens tabs and popup windows natively.
+        if request.isSourceChromeStyle {
+            return .allowNativePopup
+        }
         if request.targetURL != nil {
             return .openInCurrentBrowser
         }
@@ -181,15 +207,5 @@ public enum CefWindowOpenPolicy {
     public static func resolve(_ action: CefWindowOpenAction, for request: CefWindowOpenRequest) -> CefWindowOpenAction {
         guard action == .allowNativePopup, request.isSourceOffscreen else { return action }
         return request.targetURL != nil ? .openInCurrentBrowser : .deny
-    }
-
-    /// Bridges a legacy ``CefPopupDecision`` into a ``CefWindowOpenAction`` so
-    /// the old `requestsPopupFor` delegate method keeps working.
-    public static func action(for legacy: CefPopupDecision, request: CefWindowOpenRequest) -> CefWindowOpenAction {
-        switch legacy {
-        case .allow: return resolve(.allowNativePopup, for: request)
-        case .block: return .deny
-        case .openInSameBrowser: return .openInCurrentBrowser
-        }
     }
 }

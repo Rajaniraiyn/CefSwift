@@ -93,13 +93,12 @@ struct MaintenanceTests {
             if: MaintenanceTests.sourcesAvailable,
             "Sources/CCef not found relative to the test file; requires a repo checkout."))
     func loaderIncludesTheSymbolTable() throws {
-        // Drift guard: the loader must generate its pointer table, dlsym pass,
-        // and trampolines from the same X-macro file the audit tools parse.
+        // The loader's trampolines must come from the generated symbol list.
         let loaderURL = try #require(Self.ccefFile(named: "ccef_loader.c"))
         let loader = try String(contentsOf: loaderURL, encoding: .utf8)
         let includeCount = loader.components(separatedBy: "#include \"ccef_symbols.h\"").count - 1
         #expect(
-            includeCount >= 2,
-            "ccef_loader.c should expand ccef_symbols.h multiple times (table + resolve + trampolines); found \(includeCount) include(s)")
+            includeCount >= 1,
+            "ccef_loader.c must expand ccef_symbols.h into its trampolines")
     }
 }

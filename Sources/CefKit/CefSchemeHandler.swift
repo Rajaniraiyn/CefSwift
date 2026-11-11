@@ -265,6 +265,10 @@ final class SchemeResourceHandler: @unchecked Sendable {
             CefStringUtil.withCefString(response.mimeType) { mime in
                 cefResponse.pointee.set_mime_type?(cefResponse, mime)
             }
+            // Swift strings are UTF-8; say so, or Chromium guesses Latin-1.
+            if response.mimeType.hasPrefix("text/") || response.mimeType.hasSuffix("json") {
+                CefStringUtil.withCefString("utf-8") { cefResponse.pointee.set_charset?(cefResponse, $0) }
+            }
             if !response.headers.isEmpty, let map = cef_string_multimap_alloc() {
                 for (name, value) in response.headers {
                     CefStringUtil.withCefString(name) { cefName in

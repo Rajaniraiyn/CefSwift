@@ -2,8 +2,9 @@ import AppKit
 import CCef
 import CCefAppKit
 import Foundation
+import Observation
 
-// MARK: - Settings mapping (inlined from CefSettingsMapping.swift)
+// MARK: - Settings mapping
 
 /// Owns a fully-populated `cef_settings_t` whose string members are released
 /// on deinit. Kept alive for the duration of `cef_initialize` (CEF copies
@@ -41,6 +42,8 @@ final class MappedCefSettings {
 
         CefStringUtil.set(configuration.locale, into: &raw.locale)
         CefStringUtil.set(configuration.userAgentProduct, into: &raw.user_agent_product)
+        CefStringUtil.set(configuration.userAgent, into: &raw.user_agent)
+        CefStringUtil.set(configuration.acceptLanguages.joined(separator: ","), into: &raw.accept_language_list)
         CefStringUtil.set(configuration.logFile?.path, into: &raw.log_file)
         CefStringUtil.set(frameworkDirectory?.path, into: &raw.framework_dir_path)
         CefStringUtil.set(configuration.browserSubprocessPath?.path, into: &raw.browser_subprocess_path)
@@ -63,6 +66,8 @@ final class MappedCefSettings {
         ccef_string_clear(&raw.cache_path)
         ccef_string_clear(&raw.locale)
         ccef_string_clear(&raw.user_agent_product)
+        ccef_string_clear(&raw.user_agent)
+        ccef_string_clear(&raw.accept_language_list)
         ccef_string_clear(&raw.log_file)
         ccef_string_clear(&raw.framework_dir_path)
         ccef_string_clear(&raw.browser_subprocess_path)
@@ -81,108 +86,77 @@ private let cefTerminateHandler: CEFApplicationTerminateHandler = { () -> ObjCBo
     )
 }
 
-/// Process-wide CEF lifecycle: framework loading, `cef_initialize`,
-/// the external message pump, and shutdown.
+/// Process-wide CEF lifecycle: loading the framework, `cef_initialize`, the
+/// message pump, the set of live browsers, and shutdown.
 ///
-/// ```swift
-/// try CefRuntime.shared.initialize()
-/// ```
-///
-/// `initialize` must be called on the main thread before any browser is
-/// created and before SwiftUI/AppKit start delivering events. It installs
-/// ``CEFApplication`` automatically when no NSApplication exists yet.
+/// SwiftUI apps get all of this from `CefSwiftApp`. In an AppKit app, call
+/// ``initialize(configuration:)`` first thing in `main`, before anything
+/// touches `NSApp`.
 @MainActor
+@Observable
 public final class CefRuntime {
-    /// The shared runtime.
     public static let shared = CefRuntime()
 
     /// Whether `cef_initialize` has completed successfully.
     public private(set) var isInitialized = false
 
-    /// The configuration passed to ``initialize(configuration:)``; `nil`
-    /// before initialization.
+    /// The configuration CEF was initialized with.
     public private(set) var configuration: CefConfiguration?
 
-    /// The JS ↔ Swift function bridge. Register functions any time; pages
-    /// call them via `window.cefSwift.invoke(name, params)`. See ``CefBridge``.
-    public let bridge = CefBridge()
+    /// Every live browser in the process, in creation order — including
+    /// popups and tabs opened through Chrome's own UI.
+    public private(set) var browsers: [CefBrowser] = []
 
-    var messagePump: CefMessagePump?
-    private var appContext: CefAppContext?
-    private var settings: MappedCefSettings?
-    private var browsers: [Int32: CefBrowser] = [:]
-    private var isTerminationRequested = false
+    /// Called for each browser Chromium creates on its own initiative: a
+    /// native popup, a DevTools window, a tab or window opened through
+    /// Chrome's UI. Assign a delegate here to manage those browsers.
+    @ObservationIgnored public var onBrowserCreated: ((CefBrowser) -> Void)?
+
+    @ObservationIgnored var messagePump: CefMessagePump?
+    @ObservationIgnored private var appContext: CefAppContext?
+    @ObservationIgnored private var settings: MappedCefSettings?
+    @ObservationIgnored private var browsersByIdentifier: [Int32: CefBrowser] = [:]
+    @ObservationIgnored private var isTerminationRequested = false
 
     private init() {}
 
-    /// Initializes CEF in the browser (main) process.
-    ///
-    /// Call exactly once, on the main thread, before creating browsers.
-    /// If `NSApp` does not exist yet, ``CEFApplication`` is installed first;
-    /// if another NSApplication subclass was already instantiated this is a
-    /// fatal programmer error (CEF requires the NSApplication to conform to
-    /// CefAppProtocol from the very first event).
+    /// Initializes CEF in the browser (main) process. Call once, on the main
+    /// thread, before creating browsers and before anything else creates
+    /// `NSApp` — CEF needs the application object to be a `CEFApplication`,
+    /// which this installs.
     public func initialize(configuration: CefConfiguration = .default) throws(CefError) {
-        precondition(Thread.isMainThread, "CefRuntime.initialize must run on the main thread.")
         guard !isInitialized else { throw CefError.alreadyInitialized }
 
-        // CEFApplication must exist before cef_initialize.
         if NSApp == nil {
             CEFApplication.install()
-        } else {
-            precondition(
-                NSApp is CEFApplication,
-                """
-                NSApp is \(type(of: NSApp!)), not CEFApplication. Call \
-                CefRuntime.initialize() (or CEFApplication.install()) before \
-                anything else touches NSApp — i.e. before NSApplicationMain \
-                or SwiftUI's App.main().
-                """
-            )
         }
+        precondition(
+            NSApp is CEFApplication,
+            "NSApp is \(type(of: NSApp!)), not CEFApplication. Initialize CefRuntime before anything touches NSApp.")
 
         let frameworkBinary = try Self.resolveFrameworkBinary(override: configuration.frameworkDirectory)
         guard ccef_load_framework(frameworkBinary.path) != 0 else {
             throw CefError.loadFailed(String(cString: ccef_loader_error()))
         }
-
-        // Configure the API version and verify ABI compatibility before any
-        // other CEF call.
-        do {
-            try Self.verifyAPIHash()
-        } catch {
-            ccef_unload_framework()
-            throw error
-        }
-
-        // Custom schemes must be registered identically in every process;
-        // the reserved bridge scheme is always present so CefBridge works
-        // without configuration.
-        var customSchemes = configuration.customSchemes
-        if !customSchemes.contains(where: { $0.name == CefBridge.schemeName }) {
-            customSchemes.append(CefBridge.customScheme)
-        }
+        try Self.verifyAPIHash()
 
         let pump = CefMessagePump()
+        // Browsers created through Chrome's own UI have no CefBrowser asking
+        // for them; this client adopts them as they appear.
+        let defaultClient = BrowserClient(browser: nil, requestFilter: nil, chromeUI: configuration.chromeUI)
         let context = CefAppContext(
-            extraSwitches: configuration.extraCommandLineSwitches,
-            useMockKeychain: configuration.safeStorage.resolved() == .mockKeychain,
-            userCommandLineHook: configuration.onBeforeCommandLineProcessing,
-            customSchemes: customSchemes,
-            pump: pump
-        )
-        let app = context.makeApp()
+            configuration: configuration, pump: pump, defaultClient: defaultClient.makeClient())
         let mapped = MappedCefSettings(
             configuration: configuration,
             frameworkDirectory: frameworkBinary.deletingLastPathComponent()
         )
 
         var mainArgs = cef_main_args_t(argc: CommandLine.argc, argv: CommandLine.unsafeArgv)
-        // cef_initialize consumes our +1 reference on `app`.
-        let result = cef_initialize(&mainArgs, &mapped.raw, app, nil)
-        guard result != 0 else {
+        guard cef_initialize(&mainArgs, &mapped.raw, context.makeApp(), nil) != 0 else {
             let exitCode = cef_get_exit_code()
-            ccef_unload_framework()
+            if exitCode == CEF_RESULT_CODE_NORMAL_EXIT_PROCESS_NOTIFIED.rawValue {
+                throw CefError.anotherInstanceRunning
+            }
             throw CefError.initializationFailed(exitCode: exitCode)
         }
 
@@ -193,9 +167,22 @@ public final class CefRuntime {
         pump.start()
         CEFApplication.setTerminateHandler(cefTerminateHandler)
         isInitialized = true
+    }
 
-        // Route cefswift://bridge/* to the bridge dispatcher.
-        registerSchemeHandler(scheme: CefBridge.schemeName, handler: CefBridgeSchemeHandler(bridge: bridge))
+    /// Opens a window drawn entirely by Chrome — tab strip, omnibox, menus,
+    /// extension toolbar — showing `url`. The fastest route to a complete
+    /// browser; trim or rebrand it with ``CefConfiguration/chromeUI`` and
+    /// ``CefConfiguration/productName``.
+    ///
+    /// Tabs and windows the user opens from there are reported through
+    /// ``onBrowserCreated`` and listed in ``browsers``.
+    @discardableResult
+    public func openChromeWindow(
+        url: URL, frame: CGRect? = nil, options: CefBrowserOptions = .init(), delegate: CefBrowserDelegate? = nil
+    ) -> CefBrowser {
+        let browser = CefBrowser(url: url, options: options, delegate: delegate)
+        browser.createInChromeUIWindow(frame: frame)
+        return browser
     }
 
     // MARK: Custom scheme handlers
@@ -222,8 +209,7 @@ public final class CefRuntime {
             return cef_register_scheme_handler_factory(cefScheme, nil, factoryPointer)
         }
         if registered == 0 {
-            FileHandle.standardError.write(
-                Data("CefSwift: cef_register_scheme_handler_factory failed for scheme '\(scheme)'.\n".utf8))
+            CefLog.error("cef_register_scheme_handler_factory failed for scheme '\(scheme)'")
         }
     }
 
@@ -235,7 +221,6 @@ public final class CefRuntime {
         messagePump = nil
         CEFApplication.setTerminateHandler(nil)
         cef_shutdown()
-        ccef_unload_framework()
         appContext = nil
         settings = nil
         configuration = nil
@@ -377,11 +362,12 @@ public final class CefRuntime {
     /// Configures the API version (first CEF call in every process) and
     /// verifies the platform API hash against the vendored headers.
     nonisolated static func verifyAPIHash() throws(CefError) {
-        guard let hash = cef_api_hash(CCEF_API_VERSION_VALUE, 0) else {
-            throw CefError.loadFailed("cef_api_hash returned NULL for API version \(CCEF_API_VERSION_VALUE).")
+        let version = ccef_pinned_api_version()
+        guard let hash = cef_api_hash(version, 0) else {
+            throw CefError.loadFailed("cef_api_hash returned NULL for API version \(version).")
         }
         let actual = String(cString: hash)
-        let expected = CCEF_EXPECTED_API_HASH_PLATFORM
+        let expected = String(cString: ccef_pinned_api_hash())
         guard actual == expected else {
             throw CefError.apiHashMismatch(expected: expected, actual: actual)
         }
@@ -389,25 +375,27 @@ public final class CefRuntime {
 
     // MARK: Browser registry / termination
 
-    func registerBrowser(_ browser: CefBrowser) {
-        guard browser.id >= 0 else { return }
-        browsers[browser.id] = browser
+    func register(_ browser: CefBrowser) {
+        browsersByIdentifier[browser.identifier] = browser
+        browsers.append(browser)
     }
 
-    /// All live browsers registered with the runtime. Used by ``CefBridge``
-    /// to broadcast events to every page.
-    var activeBrowsers: [CefBrowser] { Array(browsers.values) }
-
-    func unregisterBrowser(id: Int32) {
-        browsers[id] = nil
+    func unregister(_ browser: CefBrowser) {
+        browsersByIdentifier[browser.identifier] = nil
+        browsers.removeAll { $0 === browser }
         if isTerminationRequested && browsers.isEmpty {
             // Re-enter terminate:; with no browsers left it now proceeds.
             NSApp.terminate(nil)
         }
     }
 
-    /// Called from CEFApplication's terminate:. Returns true when the app
-    /// may terminate immediately.
+    func browser(withIdentifier identifier: Int32) -> CefBrowser? {
+        browsersByIdentifier[identifier]
+    }
+
+    /// Called from CEFApplication's terminate:. Quitting closes every
+    /// browser first (so pages can run `beforeunload` and state is flushed),
+    /// then terminates once the last one is gone.
     func handleTerminationRequest() -> Bool {
         guard isInitialized else { return true }
         if browsers.isEmpty {
@@ -415,8 +403,8 @@ public final class CefRuntime {
             return true
         }
         isTerminationRequested = true
-        for browser in browsers.values {
-            browser.close(force: false)
+        for browser in browsers {
+            browser.close()
         }
         return false
     }

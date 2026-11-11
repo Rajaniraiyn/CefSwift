@@ -124,7 +124,7 @@ struct Downloader {
             throw CefPluginError(
                 "sha1 mismatch for \(tarball.lastPathComponent): expected \(artifact.sha1), got \(actual). " +
                 "The corrupt file was deleted — run the download again. If it keeps failing, the manifest " +
-                "(CEF_VERSION.json) may be stale; re-run Scripts/cef-update.sh."
+                "(CEF_VERSION.json) may be stale; re-run Scripts/update-cef.py."
             )
         }
     }

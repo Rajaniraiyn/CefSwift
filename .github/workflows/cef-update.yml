@@ -1,22 +1,19 @@
-# CEF auto-update — polls cef-builds.spotifycdn.com twice a week and opens an
-# auto-merging PR when a newer stable CEF is available.
+# Keeps the pinned CEF on the newest stable release.
 #
-# Required repository setup (see docs/automation.md for the full walkthrough):
-#   - Settings → General → "Allow auto-merge" enabled
-#   - Branch protection on main with the `ci` job as a required status check
-#     (auto-merge only fires once required checks pass)
-#   - Settings → Actions → "Allow GitHub Actions to create and approve pull
-#     requests" enabled
-#   - OPTIONAL: a fine-grained PAT in CEF_UPDATE_TOKEN (contents: write,
-#     pull-requests: write). Without it, this workflow dispatches CI directly
-#     to bypass the default GITHUB_TOKEN recursion guard.
+# Twice a week this runs Scripts/update-cef.py. When CEF has moved, it opens
+# (or refreshes) a pull request that merges itself once CI is green.
 #
-# Note: scheduled workflows only run on the default branch.
+# Repository setup, once:
+#   - Settings → General → enable "Allow auto-merge".
+#   - Protect `main` with the `ci` job as a required status check.
+#   - Settings → Actions → General → allow Actions to create pull requests.
+#   - Optional: variable CEF_UPDATE_COAUTHOR ("Name <email>") to change who
+#     is credited as co-author of the update commits.
 name: CEF Update
 
 on:
   schedule:
-    - cron: '17 6 * * 1,4'   # Mon & Thu, 06:17 UTC
+    - cron: '17 6 * * 1,4'   # Monday and Thursday, 06:17 UTC
   workflow_dispatch:
 
 permissions:
@@ -28,89 +25,44 @@ concurrency:
   group: cef-update
   cancel-in-progress: false
 
+env:
+  GH_TOKEN: ${{ github.token }}
+  COAUTHOR: ${{ vars.CEF_UPDATE_COAUTHOR || 'Rajaniraiyn <Rajaniraiyn@users.noreply.github.com>' }}
+
 jobs:
   update:
-    name: Check for new stable CEF
-    runs-on: ubuntu-24.04
+    runs-on: macos-15   # the C bridge is generated with Apple clang
     timeout-minutes: 30
-    env:
-      # PAT if configured, else the default token (see pitfall note above).
-      GH_TOKEN: ${{ secrets.CEF_UPDATE_TOKEN || github.token }}
-      HAS_UPDATE_TOKEN: ${{ secrets.CEF_UPDATE_TOKEN != '' }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.CEF_UPDATE_TOKEN || github.token }}
+      - uses: actions/checkout@v4
 
-      - name: Run update check
-        id: update
-        run: Scripts/cef-update.sh
+      - name: Update to the newest stable CEF
+        id: cef
+        run: Scripts/update-cef.py
 
-      - name: Report up to date
-        if: steps.update.outputs.updated != 'true'
-        run: echo "CEF pin ${{ steps.update.outputs.old }} is the latest stable. Nothing to do."
-
-      - name: Create update branch and commit
-        if: steps.update.outputs.updated == 'true'
-        env:
-          NEW_VERSION: ${{ steps.update.outputs.new }}
+      - name: Commit and push
+        if: steps.cef.outputs.updated == 'true'
         run: |
-          BRANCH="cef-update/${NEW_VERSION}"
-          echo "BRANCH=$BRANCH" >> "$GITHUB_ENV"
-          git config user.name "cef-update[bot]"
-          git config user.email "cef-update-bot@users.noreply.github.com"
-          git checkout -B "$BRANCH"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch --force-create cef-update
           git add CEF_VERSION.json Sources/CCef
-          git commit -m "Bump CEF to ${NEW_VERSION}"
-          git push --force origin "$BRANCH"
+          git commit \
+            --message "Update CEF to ${{ steps.cef.outputs.new }}" \
+            --message "From ${{ steps.cef.outputs.old }}." \
+            --message "Co-authored-by: ${COAUTHOR}"
+          git push --force origin cef-update
 
-      - name: Open pull request, retire older bumps, and enable auto-merge
-        if: steps.update.outputs.updated == 'true'
-        env:
-          OLD_VERSION: ${{ steps.update.outputs.old }}
-          NEW_VERSION: ${{ steps.update.outputs.new }}
-          BODY_PATH: ${{ steps.update.outputs.body_path }}
-          WARNING: ${{ steps.update.outputs.warning }}
+      - name: Open or refresh the pull request
+        if: steps.cef.outputs.updated == 'true'
         run: |
-          # Reuse an existing open PR for this branch if a previous run made one.
-          PR_URL="$(gh pr list --head "$BRANCH" --state open --json url --jq '.[0].url')"
-          if [ -z "$PR_URL" ]; then
-            PR_URL="$(gh pr create \
-              --base main \
-              --head "$BRANCH" \
-              --title "Bump CEF to ${NEW_VERSION}" \
-              --body-file "$BODY_PATH")"
+          TITLE="Update CEF to ${{ steps.cef.outputs.new }}"
+          if gh pr view cef-update --json state --jq .state 2>/dev/null | grep -q OPEN; then
+            gh pr edit cef-update --title "$TITLE" --body-file .cef/update-summary.md
           else
-            gh pr edit "$PR_URL" --body-file "$BODY_PATH"
+            gh pr create --base main --head cef-update --title "$TITLE" --body-file .cef/update-summary.md
           fi
-          echo "PR: $PR_URL"
-
-          # Only the newest generated header set is useful. Close older update
-          # PRs and delete their bot-owned branches so the queue stays clean.
-          while IFS=$'\t' read -r OLD_URL OLD_BRANCH; do
-            [ -n "$OLD_URL" ] || continue
-            echo "Closing superseded CEF update: $OLD_URL ($OLD_BRANCH)"
-            gh pr close "$OLD_URL" --delete-branch \
-              --comment "Superseded by $PR_URL, which pins the latest stable CEF release."
-          done < <(
-            gh pr list --state open --base main --limit 100 \
-              --json url,headRefName \
-              --jq ".[] | select(.headRefName | startswith(\"cef-update/\")) | select(.url != \"$PR_URL\") | [.url, .headRefName] | @tsv"
-          )
-
-          # A PR created by GITHUB_TOKEN does not emit another workflow event.
-          # Explicit dispatch is allowed, so use it when no PAT is configured.
-          if [ "$HAS_UPDATE_TOKEN" != "true" ]; then
-            echo "Dispatching CI explicitly for $BRANCH"
-            gh workflow run ci.yml --ref "$BRANCH"
-          fi
-
-          if [ -n "$WARNING" ]; then
-            echo "::warning title=CEF update needs attention::${WARNING}"
-            echo "Skipping auto-merge: manual migration required (CEF_API_VERSION pin and/or bridge symbols — see the PR body)."
-          else
-            # Requires "Allow auto-merge" + required status checks on main.
-            gh pr merge --auto --squash "$PR_URL" \
-              || echo "::warning::Could not enable auto-merge — check that 'Allow auto-merge' is enabled and main has required status checks."
-          fi
+          # Pull requests opened with the workflow token do not trigger other
+          # workflows, so start CI for the branch explicitly.
+          gh workflow run ci.yml --ref cef-update
+          gh pr merge cef-update --auto --squash

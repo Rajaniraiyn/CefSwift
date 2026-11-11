@@ -1,622 +1,789 @@
 import AppKit
 import CCef
 import Foundation
+import Observation
 
-// MARK: - CefMouseButton
+// MARK: - Options
 
-/// A mouse button for OSR input forwarding.
-public enum CefMouseButton: Sendable {
-    case left, middle, right
+/// How a browser's pixels reach the screen.
+public enum CefRendering: Sendable, Equatable {
+    /// Chromium draws into its own native view inside yours. Input, IME and
+    /// accessibility are handled by Chromium. Native views cannot be layered
+    /// over the page.
+    case windowed
+    /// Chromium renders offscreen into a shared `IOSurface` that CefSwift
+    /// composites in a layer — a true subview that native UI can overlap.
+    /// Requires ``CefConfiguration/windowlessRenderingEnabled``.
+    case offscreen(frameRate: Int = 60)
 
-    var cefValue: cef_mouse_button_type_t {
-        switch self {
-        case .left: return MBT_LEFT
-        case .middle: return MBT_MIDDLE
-        case .right: return MBT_RIGHT
-        }
+    public static var offscreen: CefRendering { .offscreen() }
+}
+
+/// Creation-time settings for a ``CefBrowser``.
+@MainActor
+public struct CefBrowserOptions {
+    /// How the browser renders when hosted in a `CefWebView`.
+    public var rendering: CefRendering = .windowed
+    /// Runtime style. Browsers embedded in a view always use Alloy; only
+    /// ``CefBrowserWindow`` hosts Chrome style.
+    public var runtimeStyle: CefRuntimeStyle = .default
+    /// Background shown before the page paints.
+    public var backgroundColor: NSColor?
+    /// The profile (cookies, storage, cache, preferences) to browse with.
+    /// `nil` uses ``CefProfile/default``.
+    public var profile: CefProfile?
+    /// JavaScript bridges exposed to pages in this browser.
+    public var bridges: [CefBridge] = []
+    /// Scripts injected into every document before its own scripts run.
+    public var userScripts: [CefUserScript] = []
+    /// Shapes the context menu: hide built-in entries, add your own.
+    public var contextMenu = CefContextMenuConfiguration()
+    /// Inspects — and may block, redirect or amend — every network request.
+    public var requestFilter: CefRequestFilter?
+    /// Whether horizontal swipes navigate back and forward (offscreen
+    /// rendering; Chrome-style windows follow the system setting).
+    public var allowsBackForwardNavigationGestures = false
+    /// (Offscreen only) Forward raw trackpad touches to Chromium instead of
+    /// translating gestures natively.
+    public var forwardsRawTouchEvents = false
+
+    public init() {}
+}
+
+/// A script injected into every document a browser loads, before the page's
+/// own scripts run.
+public struct CefUserScript: Sendable, Equatable {
+    public var source: String
+    /// Run in an isolated world with this name instead of the page's own
+    /// JavaScript context (the page cannot see or tamper with it).
+    public var isolatedWorldName: String?
+
+    public init(source: String, isolatedWorldName: String? = nil) {
+        self.source = source
+        self.isolatedWorldName = isolatedWorldName
     }
+}
+
+/// Progress of a find-in-page session.
+public struct CefFindResult: Sendable, Equatable {
+    public var matchCount: Int
+    /// 1-based index of the highlighted match; 0 when there is none.
+    public var activeMatchIndex: Int
+    /// Whether the search has finished counting.
+    public var isFinal: Bool
 }
 
 // MARK: - CefBrowser
 
-/// A live CEF browser embedded in an NSView hierarchy. Create instances via
-/// ``CefBrowser/createBrowser(parentView:bounds:url:options:delegate:)``.
+/// One Chromium browser: a page, its navigation state, and every command you
+/// can send it.
 ///
-/// All members are main-actor isolated; CEF's UI thread is the main thread
-/// when using the external message pump.
+/// A `CefBrowser` is an observable model object. Create it up front, bind UI
+/// to its state, and hand it to a `CefWebView` or ``CefBrowserWindow`` — the
+/// underlying Chromium browser is created when it is first shown.
+///
+/// ```swift
+/// @State private var browser = CefBrowser(url: URL(string: "https://example.com")!)
+///
+/// var body: some View {
+///     VStack {
+///         Text(browser.title)
+///         CefWebView(browser)
+///     }
+/// }
+/// ```
 @MainActor
+@Observable
 public final class CefBrowser: Identifiable {
-    /// CEF's browser identifier (unique per process; `-1` if creation failed
-    /// or, for views-hosted browsers, until creation completes).
-    ///
-    /// `nonisolated(unsafe)` keeps the `Identifiable` conformance nonisolated
-    /// (as it was when this was a `let`): written only on the main actor (at
-    /// init and in `adoptRaw`), so cross-actor reads are benign.
-    nonisolated(unsafe) public private(set) var id: Int32
 
-    /// Event observer. Held weakly.
-    public weak var delegate: CefBrowserDelegate?
+    /// Where the browser is in its lifetime.
+    public enum State: Sendable, Equatable {
+        /// Not yet created in Chromium. Navigation is remembered and applied
+        /// at creation.
+        case pending
+        /// Created and usable.
+        case live
+        /// Closed. Create a new `CefBrowser` to browse again.
+        case closed
+    }
 
-    /// Current main-frame URL.
+    // MARK: Observable state
+
+    public private(set) var state: State = .pending
+    /// The main frame's URL.
     public private(set) var url: URL?
-    /// Current page title.
-    public private(set) var title: String = ""
-    /// Whether the browser is currently loading.
-    public private(set) var isLoading: Bool = false
-    /// Whether back navigation is possible.
-    public private(set) var canGoBack: Bool = false
-    /// Whether forward navigation is possible.
-    public private(set) var canGoForward: Bool = false
+    public private(set) var title = ""
+    public private(set) var isLoading = false
+    public private(set) var canGoBack = false
+    public private(set) var canGoForward = false
+    /// Load progress of the current navigation, 0…1.
+    public private(set) var estimatedProgress = 0.0
+    public private(set) var faviconURL: URL?
+    /// Whether the page is in HTML fullscreen.
+    public private(set) var isFullscreen = false
+    /// Status text, such as the URL of the link under the pointer.
+    public private(set) var statusText = ""
+    /// Downloads started by this browser, oldest first.
+    public private(set) var downloads: [CefDownload] = []
+    /// The latest result of ``find(_:forward:matchCase:)``.
+    public private(set) var findResult: CefFindResult?
 
-    /// Owned +1 reference to the underlying cef_browser_t; nil after close.
-    private var raw: UnsafeMutablePointer<cef_browser_t>?
-    let client: BrowserClient?
+    // MARK: Configuration
 
-    init(raw: UnsafeMutablePointer<cef_browser_t>?, client: BrowserClient?, delegate: CefBrowserDelegate?) {
-        self.raw = raw
-        self.client = client
+    @ObservationIgnored public weak var delegate: CefBrowserDelegate?
+    @ObservationIgnored public let options: CefBrowserOptions
+    /// Chromium's identifier for this browser; `-1` until created.
+    @ObservationIgnored public private(set) var identifier: Int32 = -1
+    /// The browser that opened this one, for popups.
+    @ObservationIgnored public private(set) weak var opener: CefBrowser?
+
+    /// Chrome DevTools Protocol access to this browser.
+    @ObservationIgnored public private(set) lazy var devTools = CefDevTools(browser: self)
+
+    public nonisolated var id: ObjectIdentifier { ObjectIdentifier(self) }
+
+    // MARK: Internals
+
+    @ObservationIgnored private(set) var raw: CefRef<cef_browser_t>?
+    @ObservationIgnored private(set) var client: BrowserClient?
+    @ObservationIgnored private var initialURL: URL?
+    @ObservationIgnored private(set) var isBootstrapping = false
+    @ObservationIgnored private var readyWaiters: [CheckedContinuation<Void, Error>] = []
+    @ObservationIgnored private var downloadControls: [UInt32: CefRef<cef_download_item_callback_t>] = [:]
+    @ObservationIgnored private(set) var isChromeStyle = false
+    @ObservationIgnored private var isEmbeddedView = false
+    /// The view hosting this browser, set by the host view.
+    @ObservationIgnored public weak var hostView: NSView?
+
+    /// Creates a browser model. Nothing is created in Chromium until the
+    /// browser is hosted.
+    public init(url: URL? = nil, options: CefBrowserOptions = .init(), delegate: CefBrowserDelegate? = nil) {
+        self.url = url
+        self.initialURL = url
+        self.options = options
         self.delegate = delegate
-        self.id = raw.map { $0.pointee.get_identifier?($0) ?? -1 } ?? -1
+    }
+
+    /// Wraps a browser Chromium created on its own (popup, Chrome UI tab).
+    init(adopting raw: CefRef<cef_browser_t>, client: BrowserClient, opener: CefBrowser?) {
+        self.options = opener?.options ?? CefBrowserOptions()
+        self.client = client
+        self.opener = opener
+        self.isChromeStyle = opener?.isChromeStyle ?? true
+        adopt(raw)
     }
 
     // MARK: Navigation
 
-    /// Navigates the main frame to `url`.
+    /// Navigates the main frame. Before creation, sets the page the browser
+    /// opens with.
     public func load(_ url: URL) {
+        guard state != .closed else { return }
+        guard raw != nil, !isBootstrapping else {
+            initialURL = url
+            self.url = url
+            return
+        }
         withMainFrame { frame in
-            CefStringUtil.withCefString(url.absoluteString) { cefURL in
-                frame.pointee.load_url?(frame, cefURL)
-            }
+            CefStringUtil.withCefString(url.absoluteString) { frame.pointee.load_url(frame, $0) }
         }
     }
 
-    /// Navigates back in session history.
-    public func goBack() {
-        guard let raw else { return }
-        raw.pointee.go_back?(raw)
-    }
+    public func goBack() { raw.map { $0.pointer.pointee.go_back($0.pointer) } }
+    public func goForward() { raw.map { $0.pointer.pointee.go_forward($0.pointer) } }
+    public func stopLoading() { raw.map { $0.pointer.pointee.stop_load($0.pointer) } }
 
-    /// Navigates forward in session history.
-    public func goForward() {
-        guard let raw else { return }
-        raw.pointee.go_forward?(raw)
-    }
-
-    /// Reloads the current page.
-    public func reload(ignoreCache: Bool = false) {
-        guard let raw else { return }
-        if ignoreCache {
-            raw.pointee.reload_ignore_cache?(raw)
+    public func reload(ignoringCache: Bool = false) {
+        guard let raw = raw?.pointer else { return }
+        if ignoringCache {
+            raw.pointee.reload_ignore_cache(raw)
         } else {
-            raw.pointee.reload?(raw)
+            raw.pointee.reload(raw)
         }
     }
 
-    /// Cancels the current load.
-    public func stopLoading() {
-        guard let raw else { return }
-        raw.pointee.stop_load?(raw)
-    }
+    // MARK: JavaScript
 
-    /// Executes JavaScript in the main frame.
+    /// Runs JavaScript in the main frame without waiting for a result.
     public func executeJavaScript(_ script: String) {
         withMainFrame { frame in
             CefStringUtil.withCefString(script) { code in
-                CefStringUtil.withCefString(url?.absoluteString ?? "about:blank") { scriptURL in
-                    frame.pointee.execute_java_script?(frame, code, scriptURL, 0)
-                }
+                frame.pointee.execute_java_script(frame, code, nil, 0)
             }
         }
     }
 
-    // MARK: Host controls
+    /// Evaluates JavaScript in the main frame and returns its value.
+    ///
+    /// Promises are awaited. A thrown JavaScript exception surfaces as
+    /// ``CefJavaScriptError``.
+    ///
+    /// ```swift
+    /// let title = try await browser.evaluateJavaScript("document.title").stringValue
+    /// ```
+    @discardableResult
+    public func evaluateJavaScript(_ script: String) async throws -> CefJSON {
+        let reply = try await devTools.send(
+            "Runtime.evaluate",
+            ["expression": .string(script), "returnByValue": true, "awaitPromise": true, "userGesture": true])
+        if let exception = reply["exceptionDetails"].objectValue {
+            throw CefJavaScriptError(exceptionDetails: .object(exception))
+        }
+        return reply["result"]["value"]
+    }
 
-    /// Page zoom level (0 = default; each unit is a ~20% zoom step).
+    /// Evaluates JavaScript and decodes its value as `T`.
+    public func evaluateJavaScript<T: Decodable>(_ script: String, as type: T.Type = T.self) async throws -> T {
+        try await evaluateJavaScript(script).decode(T.self)
+    }
+
+    /// Injects `script` into every document loaded from now on, before the
+    /// page's own scripts. For scripts known up front prefer
+    /// ``CefBrowserOptions/userScripts``, which also cover the first page.
+    public func addUserScript(_ script: CefUserScript) async throws {
+        var params: [String: CefJSON] = ["source": .string(script.source)]
+        if let world = script.isolatedWorldName {
+            params["worldName"] = .string(world)
+        }
+        try await devTools.send("Page.addScriptToEvaluateOnNewDocument", .object(params))
+    }
+
+    // MARK: Page controls
+
+    /// Zoom level: 0 is 100%, each step is roughly 20%.
     public var zoomLevel: Double {
-        get { withHost { $0.pointee.get_zoom_level?($0) ?? 0 } ?? 0 }
-        set { withHost { $0.pointee.set_zoom_level?($0, newValue) } }
+        get { withHost { $0.pointee.get_zoom_level($0) } ?? 0 }
+        set { withHost { $0.pointee.set_zoom_level($0, newValue) } }
     }
 
-    /// Mutes or unmutes page audio.
     public var isAudioMuted: Bool {
-        get { withHost { ($0.pointee.is_audio_muted?($0) ?? 0) != 0 } ?? false }
-        set { withHost { $0.pointee.set_audio_muted?($0, newValue ? 1 : 0) } }
+        get { withHost { $0.pointee.is_audio_muted($0) != 0 } ?? false }
+        set { withHost { $0.pointee.set_audio_muted($0, newValue ? 1 : 0) } }
     }
 
-    /// Opens Chrome DevTools for this browser in its own window. No-op if a
-    /// DevTools window is already open (CEF brings it to front).
-    public func showDevTools() {
+    /// Searches the page, or advances to the next match when `text` repeats
+    /// the previous search. Results arrive in ``findResult``.
+    public func find(_ text: String, forward: Bool = true, matchCase: Bool = false) {
+        let isRepeat = text == lastFindText
+        lastFindText = text
+        withHost { host in
+            CefStringUtil.withCefString(text) {
+                host.pointee.find(host, $0, forward ? 1 : 0, matchCase ? 1 : 0, isRepeat ? 1 : 0)
+            }
+        }
+    }
+
+    /// Ends the find session.
+    public func stopFinding(clearSelection: Bool = true) {
+        lastFindText = nil
+        findResult = nil
+        withHost { $0.pointee.stop_finding($0, clearSelection ? 1 : 0) }
+    }
+
+    @ObservationIgnored private var lastFindText: String?
+
+    /// Opens the system print dialog for the page.
+    public func print() {
+        withHost { $0.pointee.print($0) }
+    }
+
+    /// Renders the page to a PDF file.
+    public func printToPDF(at destination: URL) async throws {
+        try await ready()
+        let succeeded: Bool = await withCheckedContinuation { continuation in
+            let callback = PDFPrintCallback(continuation: continuation).makeCallback()
+            var settings = cef_pdf_print_settings_t()
+            settings.size = MemoryLayout<cef_pdf_print_settings_t>.stride
+            settings.print_background = 1
+            let started: Void? = withHost { host in
+                CefStringUtil.withCefString(destination.path) {
+                    host.pointee.print_to_pdf(host, $0, &settings, callback)
+                }
+            }
+            if started == nil {
+                cefRelease(callback)
+            }
+        }
+        guard succeeded else { throw CefError.operationFailed("print_to_pdf did not produce \(destination.path)") }
+    }
+
+    /// Captures the visible page as PNG data.
+    public func snapshot() async throws -> Data {
+        let reply = try await devTools.send("Page.captureScreenshot", ["format": "png"])
+        guard let base64 = reply["data"].stringValue, let data = Data(base64Encoded: base64) else {
+            throw CefError.operationFailed("Page.captureScreenshot returned no image data")
+        }
+        return data
+    }
+
+    // MARK: DevTools
+
+    /// Opens Chrome DevTools for this browser in its own window, optionally
+    /// inspecting the element at `point` (view coordinates).
+    public func showDevTools(inspecting point: CGPoint? = nil) {
         withHost { host in
             var windowInfo = cef_window_info_t()
             windowInfo.size = MemoryLayout<cef_window_info_t>.stride
-            // Give DevTools a real top-level window rather than a zero-rect:
-            // parent_view stays nil so CEF creates its own NSWindow.
             windowInfo.bounds = cef_rect_t(x: 0, y: 0, width: 900, height: 700)
-            windowInfo.runtime_style = CEF_RUNTIME_STYLE_DEFAULT
             var settings = cef_browser_settings_t()
             settings.size = MemoryLayout<cef_browser_settings_t>.stride
-            host.pointee.show_dev_tools?(host, &windowInfo, nil, &settings, nil)
-        }
-    }
-
-    /// Closes the DevTools window, if open.
-    public func closeDevTools() {
-        withHost { $0.pointee.close_dev_tools?($0) }
-    }
-
-    /// Whether a DevTools window is currently open for this browser.
-    public var hasDevTools: Bool {
-        withHost { ($0.pointee.has_dev_tools?($0) ?? 0) != 0 } ?? false
-    }
-
-    /// Opens DevTools if closed, closes it if open.
-    public func toggleDevTools() {
-        if hasDevTools {
-            closeDevTools()
-        } else {
-            showDevTools()
-        }
-    }
-
-    /// Searches the page for `text`.
-    public func find(_ text: String, forward: Bool, matchCase: Bool) {
-        withHost { host in
-            CefStringUtil.withCefString(text) { cefText in
-                host.pointee.find?(host, cefText, forward ? 1 : 0, matchCase ? 1 : 0, 0)
+            if let point {
+                var target = cef_point_t(x: Int32(point.x.rounded()), y: Int32(point.y.rounded()))
+                host.pointee.show_dev_tools(host, &windowInfo, nil, &settings, &target)
+            } else {
+                host.pointee.show_dev_tools(host, &windowInfo, nil, &settings, nil)
             }
         }
     }
 
-    /// Requests that the browser close. With `force: false` JavaScript
-    /// `onbeforeunload` handlers may cancel the close; ``CefBrowserDelegate/browserDidClose(_:)``
-    /// fires when the close completes.
-    public func close(force: Bool = false) {
-        withHost { $0.pointee.close_browser?($0, force ? 1 : 0) }
+    public func closeDevTools() {
+        withHost { $0.pointee.close_dev_tools($0) }
     }
 
-    /// The NSView CEF created for this browser, once available. Add it to
-    /// your view hierarchy is not required (CEF parents it automatically);
-    /// use it for sizing/focus.
+    public var hasDevTools: Bool {
+        withHost { $0.pointee.has_dev_tools($0) != 0 } ?? false
+    }
+
+    // MARK: Chrome commands
+
+    /// Whether Chrome can currently run `command` for this browser.
+    /// Chrome-style browsers only.
+    public func canExecute(_ command: CefChromeCommand) -> Bool {
+        withHost { $0.pointee.can_execute_chrome_command($0, Int32(command.rawValue)) != 0 } ?? false
+    }
+
+    /// Runs one of Chrome's own commands — open history, zoom, find, print,
+    /// bookmark, and so on. Chrome-style browsers only.
+    public func execute(_ command: CefChromeCommand, disposition: CefWindowOpenDisposition = .currentTab) {
+        withHost { $0.pointee.execute_chrome_command($0, Int32(command.rawValue), disposition.cefValue) }
+    }
+
+    // MARK: Downloads
+
+    public func cancelDownload(_ id: CefDownload.ID) {
+        downloadControls[id].map { $0.pointer.pointee.cancel($0.pointer) }
+    }
+
+    public func pauseDownload(_ id: CefDownload.ID) {
+        downloadControls[id].map { $0.pointer.pointee.pause($0.pointer) }
+    }
+
+    public func resumeDownload(_ id: CefDownload.ID) {
+        downloadControls[id].map { $0.pointer.pointee.resume($0.pointer) }
+    }
+
+    /// Downloads `url` as if the user had clicked a download link.
+    public func startDownload(_ url: URL) {
+        withHost { host in
+            CefStringUtil.withCefString(url.absoluteString) { host.pointee.start_download(host, $0) }
+        }
+    }
+
+    // MARK: Lifetime
+
+    /// Closes the browser. Unless `force` is set, a page's `beforeunload`
+    /// handler may ask the user to stay.
+    public func close(force: Bool = false) {
+        guard raw != nil else {
+            if state == .pending { state = .closed }
+            return
+        }
+        withHost { $0.pointee.close_browser($0, force ? 1 : 0) }
+    }
+
+    /// Suspends until the browser exists in Chromium. Throws if it closes
+    /// first.
+    public func ready() async throws {
+        switch state {
+        case .live: return
+        case .closed: throw CefError.browserClosed
+        case .pending:
+            try await withCheckedThrowingContinuation { readyWaiters.append($0) }
+        }
+    }
+
+    /// The NSView Chromium created for a windowed browser.
     public var nativeView: NSView? {
         withHost { host -> NSView? in
-            guard let handle = host.pointee.get_window_handle?(host) else { return nil }
+            guard let handle = host.pointee.get_window_handle(host) else { return nil }
             return Unmanaged<NSView>.fromOpaque(handle).takeUnretainedValue()
         } ?? nil
     }
 
-    // MARK: Internal plumbing
-
-    /// Adopts a raw browser after the fact (views-hosted browsers are created
-    /// asynchronously by CEF; ``CefChromeBrowser`` calls this from
-    /// `on_browser_created`). Takes ownership of the caller's +1 reference.
-    /// If a raw browser is already owned the extra reference is released —
-    /// this guards against popup browsers reusing the same client.
-    func adoptRaw(_ newRaw: UnsafeMutablePointer<cef_browser_t>) {
-        guard raw == nil else {
-            cefRelease(UnsafeMutableRawPointer(newRaw))
-            return
-        }
-        raw = newRaw
-        id = newRaw.pointee.get_identifier?(newRaw) ?? -1
-        CefRuntime.shared.registerBrowser(self)
+    /// The window currently showing this browser, if any.
+    public var hostWindow: NSWindow? {
+        hostView?.window ?? nativeView?.window
     }
 
-    /// Whether a live raw cef_browser_t is attached.
-    var hasRawBrowser: Bool { raw != nil }
-
-    /// Module-internal raw `cef_browser_t` accessor for the editing extension
-    /// (used to resolve the focused/main frame for clipboard commands).
-    var rawBrowserPointer: UnsafeMutablePointer<cef_browser_t>? { raw }
-
-    /// Calls `try_close_browser` on the host: gives JavaScript
-    /// `onbeforeunload` handlers their say, then proceeds with the close.
-    /// Used by the views window delegate's `can_close`.
-    func tryCloseFromWindow() -> Bool {
-        withHost { ($0.pointee.try_close_browser?($0) ?? 1) != 0 } ?? true
-    }
-
-    /// Runs `body` with a +1 host reference, releasing it afterwards.
-    private func withHost<R>(_ body: (UnsafeMutablePointer<cef_browser_host_t>) -> R) -> R? {
-        guard let raw, let host = raw.pointee.get_host?(raw) else { return nil }
-        defer { cefRelease(UnsafeMutableRawPointer(host)) }
-        return body(host)
-    }
-
-    /// Module-internal host accessor for the OSR input extension.
-    func withHostInternal(_ body: (UnsafeMutablePointer<cef_browser_host_t>) -> Void) {
-        withHost(body)
-    }
-
-    /// Runs `body` with a +1 main-frame reference, releasing it afterwards.
-    private func withMainFrame(_ body: (UnsafeMutablePointer<cef_frame_t>) -> Void) {
-        guard let raw, let frame = raw.pointee.get_main_frame?(raw) else { return }
-        defer { cefRelease(UnsafeMutableRawPointer(frame)) }
-        body(frame)
-    }
-
-    // State updates from BrowserClient (CEF UI thread == main thread).
-
-    func applyTitle(_ title: String) {
-        self.title = title
-        delegate?.browser(self, didChangeTitle: title)
-    }
-
-    func applyURL(_ urlString: String) {
-        let url = URL(string: urlString)
-        self.url = url
-        delegate?.browser(self, didChangeURL: url)
-    }
-
-    func applyLoadingState(isLoading: Bool, canGoBack: Bool, canGoForward: Bool) {
-        self.isLoading = isLoading
-        self.canGoBack = canGoBack
-        self.canGoForward = canGoForward
-        delegate?.browser(self, didChangeLoading: isLoading, canGoBack: canGoBack, canGoForward: canGoForward)
-    }
-
-    func handleBeforeClose() {
-        delegate?.browserDidClose(self)
-        if let raw {
-            cefRelease(UnsafeMutableRawPointer(raw))
-        }
-        raw = nil
-        CefRuntime.shared.unregisterBrowser(id: id)
-    }
+    /// Whether this browser renders offscreen.
+    public var isOffscreen: Bool { client?.osrHost != nil }
 }
 
-// MARK: - Factory
+// MARK: - Creation
 
 extension CefBrowser {
-    /// Creates a windowed browser as a child of `parentView` filling
-    /// `bounds` (parent-view coordinates).
-    ///
-    /// Requires an initialized runtime (``CefRuntime/initialize(configuration:)``)
-    /// and a `parentView` that is part of a window. Creation is synchronous;
-    /// the returned browser is live (its ``CefBrowser/nativeView`` exists)
-    /// unless creation failed, in which case `id == -1`.
-    ///
-    /// - Note: CEF always uses Alloy runtime style for browsers embedded via
-    ///   a parent view, regardless of ``CefBrowserOptions/runtimeStyle``.
-    public static func createBrowser(
-        parentView: NSView,
-        bounds: CGRect,
-        url: URL,
-        options: CefBrowserOptions = .init(),
-        delegate: CefBrowserDelegate?
-    ) -> CefBrowser {
-        precondition(
-            CefRuntime.shared.isInitialized,
-            "CefBrowser.createBrowser requires CefRuntime.shared.initialize() to have succeeded first."
-        )
+    private struct Blueprint {
+        var client: UnsafeMutablePointer<cef_client_t>
+        var settings: cef_browser_settings_t
+        var url: String
+        var requestContext: UnsafeMutablePointer<cef_request_context_t>?
+    }
 
-        let client = BrowserClient()
-        let clientPointer = client.makeClient()
+    /// Builds everything browser creation needs. Each returned reference is
+    /// consumed by the CEF creation call it is passed to.
+    private func makeBlueprint(osrHost: CefOSRHost? = nil, frameRate: Int = 0) -> Blueprint {
+        precondition(CefRuntime.shared.isInitialized, "Create browsers after CefRuntime.shared.initialize().")
+        precondition(state == .pending && client == nil, "This CefBrowser has already been created.")
 
+        let client = BrowserClient(
+            browser: self,
+            requestFilter: options.requestFilter,
+            chromeUI: CefRuntime.shared.configuration?.chromeUI ?? .init())
+        client.osrHost = osrHost
+        self.client = client
+
+        var settings = cef_browser_settings_t()
+        settings.size = MemoryLayout<cef_browser_settings_t>.stride
+        settings.windowless_frame_rate = Int32(frameRate)
+        if let color = options.backgroundColor {
+            settings.background_color = cefColor(color.cgColor)
+        }
+
+        // Bridges and user scripts must be installed before the first real
+        // document, so such browsers start blank and navigate once set up.
+        isBootstrapping = !options.bridges.isEmpty || !options.userScripts.isEmpty
+        let url = isBootstrapping ? "about:blank" : (initialURL?.absoluteString ?? "about:blank")
+
+        return Blueprint(
+            client: client.makeClient(),
+            settings: settings,
+            url: url,
+            requestContext: (options.profile ?? .default).makeRequestContext())
+    }
+
+    /// Shows the browser as a native child view of `parentView`: creates it
+    /// on first use, and afterwards moves its view there. `CefWebView` calls
+    /// this; call it yourself to host a browser in AppKit.
+    public func host(windowedIn parentView: NSView) {
+        guard state != .closed else { return }
+        if client == nil {
+            createWindowed(in: parentView)
+        }
+        guard let native = nativeView else { return }
+        if native.superview !== parentView {
+            native.removeFromSuperview()
+            parentView.addSubview(native)
+        }
+        native.frame = parentView.bounds
+        native.autoresizingMask = [.width, .height]
+        hostView = parentView
+    }
+
+    /// Shows the browser through an offscreen host: creates it on first
+    /// use, and afterwards redirects its frames and input to `host`.
+    public func host(offscreenIn host: CefOSRHost, size: CGSize) {
+        guard state != .closed else { return }
+        guard let client else {
+            createOffscreen(host: host, size: size)
+            return
+        }
+        guard client.osrHost !== host else { return }
+        client.osrHost = host
+        hostView = host as? NSView
+        wasResized()
+        invalidate()
+    }
+
+    private func createWindowed(in parentView: NSView) {
+        var blueprint = makeBlueprint()
         var windowInfo = cef_window_info_t()
         windowInfo.size = MemoryLayout<cef_window_info_t>.stride
-        windowInfo.bounds = cef_rect_t(
-            x: Int32(bounds.origin.x.rounded()),
-            y: Int32(bounds.origin.y.rounded()),
-            width: Int32(bounds.size.width.rounded()),
-            height: Int32(bounds.size.height.rounded())
-        )
+        windowInfo.bounds = cef_rect_t(parentView.bounds)
         windowInfo.parent_view = Unmanaged.passUnretained(parentView).toOpaque()
-        // Fall back to the runtime-wide default style when the per-browser
-        // option is .default.
         var style = options.runtimeStyle
-        if case .default = style,
-            let configured = CefRuntime.shared.configuration?.defaultRuntimeStyle
-        {
+        if style == .default, let configured = CefRuntime.shared.configuration?.defaultRuntimeStyle {
             style = configured
         }
         windowInfo.runtime_style = style.cefValue
+        hostView = parentView
+        isEmbeddedView = true
 
-        var browserSettings = cef_browser_settings_t()
-        browserSettings.size = MemoryLayout<cef_browser_settings_t>.stride
-        if let color = options.backgroundColor?.usingColorSpace(.sRGB) {
-            browserSettings.background_color = cefColorFromNSColor(color)
+        // on_after_created adopts the browser before this returns.
+        let created = CefStringUtil.withCefString(blueprint.url) {
+            cef_browser_host_create_browser_sync(
+                &windowInfo, blueprint.client, $0, &blueprint.settings, nil, blueprint.requestContext)
         }
-
-        let requestContext = options.profile?.makeRequestContext()
-
-        let rawBrowser = CefStringUtil.withCefString(url.absoluteString) { cefURL in
-            cef_browser_host_create_browser_sync(&windowInfo, clientPointer, cefURL, &browserSettings, nil, requestContext)
-        }
-
-        let browser = CefBrowser(raw: rawBrowser, client: client, delegate: delegate)
-        client.attach(browser)
-        CefRuntime.shared.registerBrowser(browser)
-        return browser
+        cefRelease(created)
+        if created == nil { creationFailed() }
     }
 
-    /// Creates an **offscreen-rendered** (OSR) browser with no CEF-owned
-    /// window: Chromium paints into a shared `IOSurface` delivered to `host`
-    /// via the render handler, so the host can composite the pixels into a
-    /// genuine in-tree `CALayer`/`CAMetalLayer`. This is the "indistinguishable
-    /// embedded web view" mode.
-    ///
-    /// Requires ``CefConfiguration/windowlessRenderingEnabled`` to have been
-    /// `true` when the runtime was initialized — otherwise this traps with an
-    /// actionable message.
-    ///
-    /// Creation is asynchronous (CEF calls back into `on_after_created`); the
-    /// returned ``CefBrowser`` has `id == -1` until then but is safe to retain
-    /// and to forward input to once frames begin arriving.
-    ///
-    /// - Parameters:
-    ///   - initialSize: Logical (DIP) size of the view.
-    ///   - scale: Backing scale factor (e.g. 2.0 on retina).
-    ///   - url: Initial URL.
-    ///   - options: Background color etc. (runtime style is forced to Alloy).
-    ///   - host: The view that supplies geometry and receives frames.
-    ///   - delegate: Navigation/state observer (typically the same model).
-    public static func createOSRBrowser(
-        initialSize: CGSize,
-        scale: CGFloat,
-        url: URL,
-        options: CefBrowserOptions = .init(),
-        host: CefOSRHost,
-        delegate: CefBrowserDelegate?
-    ) -> CefBrowser {
-        precondition(
-            CefRuntime.shared.isInitialized,
-            "CefBrowser.createOSRBrowser requires CefRuntime.shared.initialize() to have succeeded first."
-        )
+    private func createOffscreen(host: CefOSRHost, size: CGSize) {
         precondition(
             CefRuntime.shared.configuration?.windowlessRenderingEnabled == true,
-            """
-            CefBrowser.createOSRBrowser requires windowless rendering. Set \
-            `configuration.windowlessRenderingEnabled = true` before \
-            CefRuntime.shared.initialize(configuration:).
-            """
-        )
-
-        let client = BrowserClient()
-        client.osrHost = host
-        let clientPointer = client.makeClient()
+            "Offscreen browsers need CefConfiguration.windowlessRenderingEnabled = true at initialize().")
+        var frameRate = 60
+        if case .offscreen(let requested) = options.rendering { frameRate = requested }
+        var blueprint = makeBlueprint(osrHost: host, frameRate: frameRate)
 
         var windowInfo = cef_window_info_t()
         windowInfo.size = MemoryLayout<cef_window_info_t>.stride
         windowInfo.windowless_rendering_enabled = 1
         windowInfo.shared_texture_enabled = 1
-        // Display-synced painting: the host drives begin-frames from a
-        // CADisplayLink so scrolling/animation pace to the real refresh rate.
+        // The host drives frames from a display link, so painting follows
+        // the real refresh rate.
         windowInfo.external_begin_frame_enabled = 1
-        windowInfo.bounds = cef_rect_t(
-            x: 0, y: 0,
-            width: Int32(max(1, initialSize.width.rounded())),
-            height: Int32(max(1, initialSize.height.rounded()))
-        )
-        // Windowless rendering forces Alloy style on macOS regardless of the
-        // requested option.
+        windowInfo.bounds = cef_rect_t(CGRect(origin: .zero, size: size))
         windowInfo.runtime_style = CEF_RUNTIME_STYLE_ALLOY
+        hostView = host as? NSView
 
-        var browserSettings = cef_browser_settings_t()
-        browserSettings.size = MemoryLayout<cef_browser_settings_t>.stride
-        browserSettings.windowless_frame_rate = 60
-        if let color = options.backgroundColor?.usingColorSpace(.sRGB) {
-            browserSettings.background_color = cefColorFromNSColor(color)
+        let started = CefStringUtil.withCefString(blueprint.url) {
+            cef_browser_host_create_browser(
+                &windowInfo, blueprint.client, $0, &blueprint.settings, nil, blueprint.requestContext)
         }
-
-        let requestContext = options.profile?.makeRequestContext()
-
-        let browser = CefBrowser(raw: nil, client: client, delegate: delegate)
-        client.attach(browser)
-        client.pendingOSRBrowser = browser
-
-        _ = CefStringUtil.withCefString(url.absoluteString) { cefURL in
-            cef_browser_host_create_browser(&windowInfo, clientPointer, cefURL, &browserSettings, nil, requestContext)
-        }
-        return browser
+        if started == 0 { creationFailed() }
     }
 
-    /// Converts an sRGB NSColor to CEF's ARGB `cef_color_t`.
-    private static func cefColorFromNSColor(_ color: NSColor) -> cef_color_t {
-        let a = UInt32((color.alphaComponent * 255).rounded()) & 0xFF
-        let r = UInt32((color.redComponent * 255).rounded()) & 0xFF
-        let g = UInt32((color.greenComponent * 255).rounded()) & 0xFF
-        let b = UInt32((color.blueComponent * 255).rounded()) & 0xFF
-        return (a << 24) | (r << 16) | (g << 8) | b
+    /// Creates a Chrome-style browser view for a ``CefBrowserWindow``.
+    /// Returns a +1 `cef_browser_view_t`.
+    func createBrowserView(
+        delegate: UnsafeMutablePointer<cef_browser_view_delegate_t>
+    ) -> UnsafeMutablePointer<cef_browser_view_t>? {
+        var blueprint = makeBlueprint()
+        isChromeStyle = true
+        return CefStringUtil.withCefString(blueprint.url) {
+            cef_browser_view_create(blueprint.client, $0, &blueprint.settings, nil, blueprint.requestContext, delegate)
+        }
+    }
+
+    /// Creates the browser in a window owned and drawn entirely by Chrome:
+    /// tab strip, omnibox, menus, extensions toolbar.
+    func createInChromeUIWindow(frame: CGRect?) {
+        var blueprint = makeBlueprint()
+        isChromeStyle = true
+        var windowInfo = cef_window_info_t()
+        windowInfo.size = MemoryLayout<cef_window_info_t>.stride
+        windowInfo.runtime_style = CEF_RUNTIME_STYLE_CHROME
+        if let frame {
+            windowInfo.bounds = cef_rect_t(screenRect: frame)
+        }
+        let started = CefStringUtil.withCefString(blueprint.url) {
+            cef_browser_host_create_browser(
+                &windowInfo, blueprint.client, $0, &blueprint.settings, nil, blueprint.requestContext)
+        }
+        if started == 0 { creationFailed() }
+    }
+
+    private func creationFailed() {
+        client = nil
+        handleClosed()
+    }
+
+    /// Takes over the live `cef_browser_t` once Chromium has created it.
+    func adopt(_ raw: CefRef<cef_browser_t>) {
+        self.raw = raw
+        identifier = raw.pointer.pointee.get_identifier(raw.pointer)
+        state = .live
+        CefRuntime.shared.register(self)
+        readyWaiters.forEach { $0.resume() }
+        readyWaiters = []
+        delegate?.browserDidCreate(self)
+        if isBootstrapping {
+            Task { await bootstrap() }
+        }
+    }
+
+    /// Installs bridges and user scripts, then performs the real first load.
+    private func bootstrap() async {
+        do {
+            for script in options.userScripts {
+                try await addUserScript(script)
+            }
+            for bridge in options.bridges {
+                try await bridge.install(in: self)
+            }
+        } catch {
+            CefLog.error("page bootstrap failed for browser \(identifier): \(error)")
+        }
+        isBootstrapping = false
+        if let initialURL, state == .live {
+            load(initialURL)
+        }
     }
 }
 
-// MARK: - OSR Input
+// MARK: - Callbacks from the client
 
 extension CefBrowser {
-
-    /// Whether this browser was created in offscreen-rendering mode.
-    public var isOffscreen: Bool { client?.osrHost != nil }
-
-    // MARK: Mouse
-
-    private func mouseEvent(at point: CGPoint, modifiers: UInt32) -> cef_mouse_event_t {
-        cef_mouse_event_t(x: Int32(point.x.rounded()), y: Int32(point.y.rounded()), modifiers: modifiers)
+    func applyTitle(_ title: String) {
+        guard !isBootstrapping else { return }
+        self.title = title
     }
 
-    /// Forwards a mouse-move (or mouse-leave when `leaving` is true).
-    public func sendMouseMove(to point: CGPoint, modifiers: UInt32, leaving: Bool = false) {
-        withHostInternal { host in
-            var event = mouseEvent(at: point, modifiers: modifiers)
-            host.pointee.send_mouse_move_event?(host, &event, leaving ? 1 : 0)
+    func applyURL(_ urlString: String) {
+        guard !isBootstrapping else { return }
+        url = URL(string: urlString)
+    }
+
+    func applyLoadingState(isLoading: Bool, canGoBack: Bool, canGoForward: Bool) {
+        guard !isBootstrapping else { return }
+        self.isLoading = isLoading
+        self.canGoBack = canGoBack
+        self.canGoForward = canGoForward
+        if !isLoading { estimatedProgress = 1 }
+    }
+
+    func applyProgress(_ progress: Double) {
+        guard !isBootstrapping else { return }
+        estimatedProgress = progress
+    }
+
+    func applyFavicon(_ url: URL?) { faviconURL = url }
+    func applyFullscreen(_ isFullscreen: Bool) { self.isFullscreen = isFullscreen }
+    func applyStatusText(_ text: String) { statusText = text }
+    func applyFindResult(_ result: CefFindResult) { findResult = result }
+
+    func applyDownload(_ download: CefDownload, control: CefRef<cef_download_item_callback_t>?) {
+        if let index = downloads.firstIndex(where: { $0.id == download.id }) {
+            downloads[index] = download
+        } else {
+            downloads.append(download)
+        }
+        downloadControls[download.id] = (download.isComplete || download.isCanceled) ? nil : control
+        delegate?.browser(self, downloadDidUpdate: download)
+    }
+
+    /// Routes a window-open request. Returns `true` when CEF must not create
+    /// its own popup.
+    func route(_ request: CefWindowOpenRequest) -> Bool {
+        let decided = (delegate ?? CefDefaultBrowserDelegate.shared).browser(self, decideWindowOpenFor: request)
+        switch CefWindowOpenPolicy.resolve(decided, for: request) {
+        case .allowNativePopup:
+            return false
+        case .openInCurrentBrowser:
+            if let url = request.targetURL { load(url) }
+            return true
+        case .deny, .handled:
+            return true
         }
     }
 
-    /// Forwards a mouse button press.
-    public func sendMouseDown(at point: CGPoint, button: CefMouseButton, clickCount: Int, modifiers: UInt32) {
-        withHostInternal { host in
-            var event = mouseEvent(at: point, modifiers: modifiers)
-            host.pointee.send_mouse_click_event?(host, &event, button.cefValue, 0, Int32(clickCount))
-        }
+    /// For a browser embedded as a child view: removes Chromium's view from
+    /// the app's hierarchy, which is what lets Chromium finish closing it.
+    /// Returns `false` for browsers that own their window or have no view.
+    func detachEmbeddedView() -> Bool {
+        guard isEmbeddedView, let native = nativeView else { return false }
+        DispatchQueue.main.async { native.removeFromSuperview() }
+        return true
     }
 
-    /// Forwards a mouse button release.
-    public func sendMouseUp(at point: CGPoint, button: CefMouseButton, clickCount: Int, modifiers: UInt32) {
-        withHostInternal { host in
-            var event = mouseEvent(at: point, modifiers: modifiers)
-            host.pointee.send_mouse_click_event?(host, &event, button.cefValue, 1, Int32(clickCount))
-        }
+    /// Asks the delegate an asynchronous question and applies the answer.
+    func decide<Decision: Sendable>(
+        _ ask: @escaping @MainActor (CefBrowserDelegate) async -> Decision,
+        then apply: @escaping @MainActor (Decision) -> Void
+    ) {
+        let delegate = delegate ?? CefDefaultBrowserDelegate.shared
+        Task { apply(await ask(delegate)) }
     }
 
-    /// Forwards a scroll-wheel event. Deltas are in device-independent units.
-    public func sendMouseWheel(at point: CGPoint, deltaX: CGFloat, deltaY: CGFloat, modifiers: UInt32) {
-        withHostInternal { host in
-            var event = mouseEvent(at: point, modifiers: modifiers)
-            host.pointee.send_mouse_wheel_event?(host, &event, Int32(deltaX.rounded()), Int32(deltaY.rounded()))
-        }
-    }
-
-    // MARK: Keyboard
-
-    /// Forwards a raw CEF key event (built by the host view from `NSEvent`).
-    public func sendKeyEvent(_ event: cef_key_event_t) {
-        withHostInternal { host in
-            var e = event
-            host.pointee.send_key_event?(host, &e)
-        }
-    }
-
-    // MARK: Focus
-
-    /// Sets the browser's logical focus (call from `becomeFirstResponder` /
-    /// `resignFirstResponder`).
-    public func setFocus(_ focused: Bool) {
-        withHostInternal { $0.pointee.set_focus?($0, focused ? 1 : 0) }
-    }
-
-    // MARK: Geometry
-
-    /// Notifies CEF that the view size changed; CEF re-queries `get_view_rect`
-    /// and repaints at the new size.
-    public func wasResized() {
-        withHostInternal { $0.pointee.was_resized?($0) }
-    }
-
-    /// Notifies CEF that the screen scale/geometry changed; CEF re-queries
-    /// `get_screen_info` (drives retina correctness).
-    public func notifyScreenInfoChanged() {
-        withHostInternal { $0.pointee.notify_screen_info_changed?($0) }
-    }
-
-    /// Notifies CEF the view's visibility changed (pause painting when hidden).
-    public func wasHidden(_ hidden: Bool) {
-        withHostInternal { $0.pointee.was_hidden?($0, hidden ? 1 : 0) }
-    }
-
-    /// Forces a full repaint of the view.
-    public func invalidate() {
-        withHostInternal { $0.pointee.invalidate?($0, PET_VIEW) }
-    }
-
-    /// Requests one frame from CEF. Used when the browser is created with
-    /// `external_begin_frame_enabled`: the host drives this each display tick
-    /// (via `CADisplayLink`) so painting is paced to the real display refresh,
-    /// giving vsync-smooth scrolling/animation instead of CEF's free-running
-    /// internal timer.
-    public func sendExternalBeginFrame() {
-        withHostInternal { $0.pointee.send_external_begin_frame?($0) }
-    }
-
-    // MARK: IME
-
-    /// Begins/updates an IME composition (bridged from `NSTextInputClient.setMarkedText`).
-    public func imeSetComposition(text: String, selectionRange: NSRange, replacementRange: NSRange?) {
-        withHostInternal { host in
-            CefStringUtil.withCefString(text) { cefText in
-                var sel = cef_range_t(from: UInt32(max(0, selectionRange.location)),
-                                      to: UInt32(max(0, selectionRange.location + selectionRange.length)))
-                var underline = cef_composition_underline_t(
-                    size: MemoryLayout<cef_composition_underline_t>.stride,
-                    range: cef_range_t(from: 0, to: UInt32(text.utf16.count)),
-                    color: 0xFF000000, background_color: 0, thick: 0, style: CEF_CUS_SOLID)
-                if let replacementRange {
-                    var rep = cef_range_t(from: UInt32(max(0, replacementRange.location)),
-                                          to: UInt32(max(0, replacementRange.location + replacementRange.length)))
-                    host.pointee.ime_set_composition?(host, cefText, 1, &underline, &rep, &sel)
-                } else {
-                    host.pointee.ime_set_composition?(host, cefText, 1, &underline, nil, &sel)
-                }
-            }
-        }
-    }
-
-    /// Commits IME text (bridged from `NSTextInputClient.insertText`).
-    public func imeCommitText(_ text: String, replacementRange: NSRange?) {
-        withHostInternal { host in
-            CefStringUtil.withCefString(text) { cefText in
-                if let replacementRange {
-                    var rep = cef_range_t(from: UInt32(max(0, replacementRange.location)),
-                                          to: UInt32(max(0, replacementRange.location + replacementRange.length)))
-                    host.pointee.ime_commit_text?(host, cefText, &rep, 0)
-                } else {
-                    host.pointee.ime_commit_text?(host, cefText, nil, 0)
-                }
-            }
-        }
-    }
-
-    /// Completes the current composition (keeping the selection).
-    public func imeFinishComposing(keepSelection: Bool = true) {
-        withHostInternal { $0.pointee.ime_finish_composing_text?($0, keepSelection ? 1 : 0) }
-    }
-
-    /// Cancels the current composition.
-    public func imeCancelComposition() {
-        withHostInternal { $0.pointee.ime_cancel_composition?($0) }
-    }
-
-    // MARK: Accessibility
-
-    /// Enables or disables accessibility for this browser. When enabled, CEF
-    /// builds the AX tree and delivers it via the accessibility handler.
-    public func setAccessibilityEnabled(_ enabled: Bool) {
-        withHostInternal { $0.pointee.set_accessibility_state?($0, enabled ? STATE_ENABLED : STATE_DISABLED) }
+    func handleClosed() {
+        guard state != .closed else { return }
+        state = .closed
+        isLoading = false
+        canGoBack = false
+        canGoForward = false
+        downloadControls = [:]
+        devTools.invalidate()
+        readyWaiters.forEach { $0.resume(throwing: CefError.browserClosed) }
+        readyWaiters = []
+        delegate?.browserDidClose(self)
+        raw = nil
+        client = nil
+        CefRuntime.shared.unregister(self)
     }
 }
 
-// MARK: - Editing
+// MARK: - Host / frame access
 
 extension CefBrowser {
+    /// Runs `body` with the browser host, or returns nil when not live.
+    @discardableResult
+    func withHost<R>(_ body: (UnsafeMutablePointer<cef_browser_host_t>) -> R) -> R? {
+        guard let raw = raw?.pointer, let host = raw.pointee.get_host(raw) else { return nil }
+        defer { cefRelease(host) }
+        return body(host)
+    }
 
-    /// Runs `body` with the focused frame if one exists, otherwise the main
-    /// frame. The frame is a +1 reference released after `body` returns.
-    private func withEditingFrame(_ body: (UnsafeMutablePointer<cef_frame_t>) -> Void) {
-        guard let frame = focusedOrMainFrame() else { return }
-        defer { cefRelease(UnsafeMutableRawPointer(frame)) }
+    func withMainFrame(_ body: (UnsafeMutablePointer<cef_frame_t>) -> Void) {
+        guard let raw = raw?.pointer, let frame = raw.pointee.get_main_frame(raw) else { return }
+        defer { cefRelease(frame) }
         body(frame)
     }
 
-    /// Resolves the focused frame, falling back to the main frame. Caller owns
-    /// the returned +1 reference.
-    private func focusedOrMainFrame() -> UnsafeMutablePointer<cef_frame_t>? {
-        guard let raw = rawBrowserPointer else { return nil }
-        if let focused = raw.pointee.get_focused_frame?(raw) {
-            return focused
-        }
-        return raw.pointee.get_main_frame?(raw)
+    /// `try_close_browser`: lets `beforeunload` run, then reports whether the
+    /// hosting window may close now.
+    func tryClose() -> Bool {
+        withHost { $0.pointee.try_close_browser($0) != 0 } ?? true
+    }
+}
+
+// MARK: - Supporting types
+
+/// A JavaScript exception thrown by code passed to
+/// ``CefBrowser/evaluateJavaScript(_:)``.
+public struct CefJavaScriptError: Error, Sendable, CustomStringConvertible {
+    public var message: String
+    public var line: Int
+    public var column: Int
+
+    init(exceptionDetails details: CefJSON) {
+        message = details["exception"]["description"].stringValue
+            ?? details["text"].stringValue ?? "JavaScript exception"
+        line = details["lineNumber"].intValue ?? 0
+        column = details["columnNumber"].intValue ?? 0
     }
 
-    /// Copies the current selection to the clipboard.
-    public func copySelection() { withEditingFrame { $0.pointee.copy?($0) } }
+    public var description: String { message }
+}
 
-    /// Cuts the current selection to the clipboard.
-    public func cutSelection() { withEditingFrame { $0.pointee.cut?($0) } }
+/// Bridges `cef_pdf_print_callback_t` to a continuation, which resumes with
+/// `false` if CEF drops the callback without calling it.
+private final class PDFPrintCallback: @unchecked Sendable {
+    private var continuation: CheckedContinuation<Bool, Never>?
 
-    /// Pastes the clipboard contents at the caret, preserving source styling.
-    public func paste() { withEditingFrame { $0.pointee.paste?($0) } }
+    init(continuation: CheckedContinuation<Bool, Never>) {
+        self.continuation = continuation
+    }
 
-    /// Pastes the clipboard contents as plain text (matching the destination
-    /// style).
-    public func pasteAndMatchStyle() { withEditingFrame { $0.pointee.paste_and_match_style?($0) } }
+    deinit {
+        continuation?.resume(returning: false)
+    }
 
-    /// Deletes the current selection (forward delete).
-    public func deleteSelection() { withEditingFrame { $0.pointee.del?($0) } }
+    func makeCallback() -> UnsafeMutablePointer<cef_pdf_print_callback_t> {
+        let callback = cefAllocate(cef_pdf_print_callback_t.self, owner: self)
+        callback.pointee.on_pdf_print_finished = { s, _, ok in
+            guard let owner = cefOwner(PDFPrintCallback.self, s) else { return }
+            owner.continuation?.resume(returning: ok != 0)
+            owner.continuation = nil
+        }
+        return callback
+    }
+}
 
-    /// Selects all content in the focused frame.
-    public func selectAll() { withEditingFrame { $0.pointee.select_all?($0) } }
+extension cef_rect_t {
+    /// A view-local rectangle, rounded to whole DIPs and at least 1×1.
+    init(_ rect: CGRect) {
+        self.init(
+            x: Int32(rect.origin.x.rounded()), y: Int32(rect.origin.y.rounded()),
+            width: Int32(max(1, rect.width.rounded())), height: Int32(max(1, rect.height.rounded())))
+    }
 
-    /// Undoes the last edit in the focused frame.
-    public func undo() { withEditingFrame { $0.pointee.undo?($0) } }
-
-    /// Redoes the last undone edit in the focused frame.
-    public func redo() { withEditingFrame { $0.pointee.redo?($0) } }
+    /// An AppKit screen rectangle (bottom-left origin) in CEF's screen
+    /// coordinates (top-left origin of the primary display).
+    @MainActor
+    init(screenRect: CGRect) {
+        let primaryHeight = NSScreen.screens.first?.frame.height ?? screenRect.maxY
+        self.init(
+            x: Int32(screenRect.origin.x.rounded()), y: Int32((primaryHeight - screenRect.maxY).rounded()),
+            width: Int32(screenRect.width.rounded()), height: Int32(screenRect.height.rounded()))
+    }
 }

@@ -4,37 +4,26 @@ import PackageDescription
 let package = Package(
     name: "CefSwiftExamples",
     platforms: [.macOS(.v14)],
-    products: [
-        .executable(name: "Browser", targets: ["Browser"]),
-        .executable(name: "Gallery", targets: ["Gallery"]),
-        .executable(name: "Launcher", targets: ["Launcher"]),
-    ],
     dependencies: [
         .package(path: ".."),
     ],
     targets: [
-        // Arc-class mini browser — the flagship example.
+        // A complete tabbed browser: Chrome-style windows, SwiftUI toolbar.
         .executableTarget(
             name: "Browser",
-            dependencies: [
-                .product(name: "CefSwiftUI", package: "CefSwift"),
-            ],
+            dependencies: [.product(name: "CefSwiftUI", package: "CefSwift")],
             exclude: ["cefapp.json"]
         ),
-        // Embedding showcase — native SwiftUI dashboard mixing web cards and controls.
+        // Embedding web content in a SwiftUI app.
         .executableTarget(
-            name: "Gallery",
-            dependencies: [
-                .product(name: "CefSwiftUI", package: "CefSwift"),
-            ],
+            name: "Showcase",
+            dependencies: [.product(name: "CefSwiftUI", package: "CefSwift")],
             exclude: ["cefapp.json"]
         ),
-        // Launcher — opens each hosting mode / config demo one at a time.
+        // End-to-end checks against the real Chromium runtime; CI runs it.
         .executableTarget(
-            name: "Launcher",
-            dependencies: [
-                .product(name: "CefSwiftUI", package: "CefSwift"),
-            ],
+            name: "SelfTest",
+            dependencies: [.product(name: "CefSwiftUI", package: "CefSwift")],
             exclude: ["cefapp.json"]
         ),
     ]
