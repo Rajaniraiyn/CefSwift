@@ -13,7 +13,7 @@ public enum CefRendering: Sendable, Equatable {
     case windowed
     /// Chromium renders offscreen into a shared `IOSurface` that CefSwift
     /// composites in a layer — a true subview that native UI can overlap.
-    /// Requires ``CefConfiguration/windowlessRenderingEnabled``.
+    /// Requires ``CefConfiguration/isOffscreenRenderingEnabled``.
     case offscreen(frameRate: Int = 60)
 
     public static var offscreen: CefRendering { .offscreen() }
@@ -194,8 +194,9 @@ public final class CefBrowser: Identifiable {
     public private(set) var downloads: [CefDownload] = []
     /// Progress of an in-flight swipe-to-navigate gesture: 0 at rest, toward
     /// -1 while swiping back, toward 1 while swiping forward. Draw your own
-    /// indicator from it. Host views update it; offscreen rendering only.
-    public var navigationGestureProgress = 0.0
+    /// indicator from it. CefSwiftUI's offscreen view updates it; offscreen
+    /// rendering only.
+    public package(set) var navigationGestureProgress = 0.0
     /// The latest result of ``find(_:forward:matchCase:)``.
     public private(set) var findResult: CefFindResult?
 
@@ -223,8 +224,9 @@ public final class CefBrowser: Identifiable {
     @ObservationIgnored private var downloadControls: [UInt32: CefRef<cef_download_item_callback_t>] = [:]
     @ObservationIgnored private(set) var isChromeStyle = false
     @ObservationIgnored private var isEmbeddedView = false
-    /// The view hosting this browser, set by the host view.
-    @ObservationIgnored public weak var hostView: NSView?
+    /// The view hosting this browser: the parent of a windowed browser's
+    /// native view, or the offscreen host.
+    @ObservationIgnored public internal(set) weak var hostView: NSView?
 
     /// Creates a browser model. Nothing is created in Chromium until the
     /// browser is hosted.
@@ -590,8 +592,8 @@ extension CefBrowser {
 
     private func createOffscreen(host: CefOffscreenHost, size: CGSize) {
         precondition(
-            CefRuntime.shared.configuration?.windowlessRenderingEnabled == true,
-            "Offscreen browsers need CefConfiguration.windowlessRenderingEnabled = true at initialize().")
+            CefRuntime.shared.configuration?.isOffscreenRenderingEnabled == true,
+            "Offscreen browsers need CefConfiguration.isOffscreenRenderingEnabled = true at initialize().")
         var frameRate = 60
         if case .offscreen(let requested) = options.rendering { frameRate = requested }
         var blueprint = makeBlueprint(offscreenHost: host, frameRate: frameRate)
@@ -731,7 +733,7 @@ extension CefBrowser {
         } else {
             downloads.append(download)
         }
-        downloadControls[download.id] = (download.isComplete || download.isCanceled) ? nil : control
+        downloadControls[download.id] = (download.isComplete || download.isCancelled) ? nil : control
         delegate?.browser(self, downloadDidUpdate: download)
     }
 
@@ -853,7 +855,7 @@ private final class PDFPrintCallback: @unchecked Sendable {
 }
 
 extension cef_rect_t {
-    /// A view-local rectangle, rounded to whole DIPs and at least 1×1.
+    /// A view-local rectangle, rounded to whole points and at least 1×1.
     init(_ rect: CGRect) {
         self.init(
             x: Int32(rect.origin.x.rounded()), y: Int32(rect.origin.y.rounded()),

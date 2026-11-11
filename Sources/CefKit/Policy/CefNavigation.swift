@@ -40,7 +40,7 @@ public enum CefTerminationReason: Sendable, Equatable {
 
 /// An HTTP authentication challenge delivered to
 /// ``CefBrowserDelegate/browser(_:credentialFor:)``.
-public struct CefAuthChallenge: Sendable, Equatable {
+public struct CefAuthenticationChallenge: Sendable, Equatable {
     /// The origin of the request.
     public var origin: String
     /// Whether the challenge comes from a proxy rather than the server.

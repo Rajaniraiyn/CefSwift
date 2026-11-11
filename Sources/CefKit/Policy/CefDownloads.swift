@@ -15,7 +15,7 @@ public struct CefDownload: Sendable, Equatable, Identifiable {
     /// Whether the download finished successfully.
     public var isComplete: Bool
     /// Whether the download was cancelled or interrupted.
-    public var isCanceled: Bool
+    public var isCancelled: Bool
     /// Where the file is being written, once a destination is known.
     public var fullPath: URL?
 
@@ -25,7 +25,7 @@ public struct CefDownload: Sendable, Equatable, Identifiable {
         receivedBytes: Int64,
         totalBytes: Int64,
         isComplete: Bool,
-        isCanceled: Bool,
+        isCancelled: Bool,
         fullPath: URL?
     ) {
         self.id = id
@@ -33,7 +33,7 @@ public struct CefDownload: Sendable, Equatable, Identifiable {
         self.receivedBytes = receivedBytes
         self.totalBytes = totalBytes
         self.isComplete = isComplete
-        self.isCanceled = isCanceled
+        self.isCancelled = isCancelled
         self.fullPath = fullPath
     }
 }
@@ -75,7 +75,7 @@ extension CefDownload {
             receivedBytes: item.pointee.get_received_bytes(item),
             totalBytes: item.pointee.get_total_bytes(item),
             isComplete: item.pointee.is_complete(item) != 0,
-            isCanceled: item.pointee.is_canceled(item) != 0 || item.pointee.is_interrupted(item) != 0,
+            isCancelled: item.pointee.is_canceled(item) != 0 || item.pointee.is_interrupted(item) != 0,
             fullPath: path.isEmpty ? nil : URL(fileURLWithPath: path)
         )
     }

@@ -16,7 +16,8 @@ public struct CefPermissionKind: OptionSet, Sendable, Hashable {
     public static let storageAccess = CefPermissionKind(rawValue: 1 << 7)
     public static let sensors = CefPermissionKind(rawValue: 1 << 8)
     public static let windowManagement = CefPermissionKind(rawValue: 1 << 9)
-    public static let downloads = CefPermissionKind(rawValue: 1 << 10)
+    /// Downloading several files at once.
+    public static let multipleDownloads = CefPermissionKind(rawValue: 1 << 10)
     /// A permission with no more specific kind.
     public static let other = CefPermissionKind(rawValue: 1 << 31)
 
@@ -33,7 +34,7 @@ public struct CefPermissionKind: OptionSet, Sendable, Hashable {
         (CEF_PERMISSION_TYPE_TOP_LEVEL_STORAGE_ACCESS, .storageAccess),
         (CEF_PERMISSION_TYPE_SENSORS, .sensors),
         (CEF_PERMISSION_TYPE_WINDOW_MANAGEMENT, .windowManagement),
-        (CEF_PERMISSION_TYPE_MULTIPLE_DOWNLOADS, .downloads),
+        (CEF_PERMISSION_TYPE_MULTIPLE_DOWNLOADS, .multipleDownloads),
     ]
 
     /// Maps the `cef_permission_request_types_t` mask passed to
@@ -87,7 +88,7 @@ public enum CefPermissionDecision: Sendable, Equatable {
 }
 
 /// A permission request delivered to
-/// ``CefBrowserDelegate/browser(_:decidePermission:)``.
+/// ``CefBrowserDelegate/browser(_:decidePermissionFor:)``.
 public struct CefPermissionRequest: Sendable, Equatable {
     /// The permissions requested; a request can combine several.
     public var kinds: CefPermissionKind

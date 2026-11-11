@@ -151,7 +151,7 @@ final class BrowserController: CefBrowserDelegate {
         }
     }
 
-    func browser(_ browser: CefBrowser, decidePermission request: CefPermissionRequest) async -> CefPermissionDecision {
+    func browser(_ browser: CefBrowser, decidePermissionFor request: CefPermissionRequest) async -> CefPermissionDecision {
         let alert = NSAlert()
         alert.messageText = "Allow \(request.origin) to use \(request.kinds.summary)?"
         alert.addButton(withTitle: "Allow")

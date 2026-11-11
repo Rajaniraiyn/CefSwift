@@ -18,13 +18,15 @@ final class MappedCefSettings {
     ///     `framework_dir_path`), or nil to let CEF use defaults.
     init(configuration: CefConfiguration, frameworkDirectory: URL?) {
         raw.size = MemoryLayout<cef_settings_t>.stride
-        raw.no_sandbox = configuration.noSandbox ? 1 : 0
-        raw.external_message_pump = configuration.externalMessagePump ? 1 : 0
+        raw.no_sandbox = configuration.isSandboxEnabled ? 0 : 1
+        // Chromium's message loop is driven from the app's run loop
+        // (CefMessagePump), the only mode macOS apps support.
+        raw.external_message_pump = 1
         raw.multi_threaded_message_loop = 0  // unsupported on macOS
         raw.log_severity = configuration.logSeverity.cefValue
-        raw.persist_session_cookies = configuration.persistSessionCookies ? 1 : 0
+        raw.persist_session_cookies = configuration.persistsSessionCookies ? 1 : 0
         raw.remote_debugging_port = Int32(configuration.remoteDebuggingPort ?? 0)
-        raw.windowless_rendering_enabled = configuration.windowlessRenderingEnabled ? 1 : 0
+        raw.windowless_rendering_enabled = configuration.isOffscreenRenderingEnabled ? 1 : 0
 
         // CEF requires cache_path to equal or live under root_cache_path. When only
         // cachePath is given, derive the root from it so the pair is always valid.

@@ -1,6 +1,5 @@
 import AppKit
 import CefKit
-import CCef
 import Foundation
 
 // Forwards AppKit mouse, scroll and keyboard events to the browser, in view
@@ -9,49 +8,40 @@ extension CefOffscreenBrowserView {
 
     // MARK: Modifiers
 
-    /// CEF's `cef_event_flags_t` for modifier flags and a
+    /// The modifiers for AppKit modifier flags and a
     /// `NSEvent.pressedMouseButtons` mask.
-    static func cefModifiers(_ flags: NSEvent.ModifierFlags, pressedButtons: Int = 0) -> UInt32 {
-        var m: UInt32 = 0
-        if flags.contains(.shift) { m |= UInt32(EVENTFLAG_SHIFT_DOWN.rawValue) }
-        if flags.contains(.control) { m |= UInt32(EVENTFLAG_CONTROL_DOWN.rawValue) }
-        if flags.contains(.option) { m |= UInt32(EVENTFLAG_ALT_DOWN.rawValue) }
-        if flags.contains(.command) { m |= UInt32(EVENTFLAG_COMMAND_DOWN.rawValue) }
-        if flags.contains(.capsLock) { m |= UInt32(EVENTFLAG_CAPS_LOCK_ON.rawValue) }
-        if pressedButtons & (1 << 0) != 0 { m |= UInt32(EVENTFLAG_LEFT_MOUSE_BUTTON.rawValue) }
-        if pressedButtons & (1 << 1) != 0 { m |= UInt32(EVENTFLAG_RIGHT_MOUSE_BUTTON.rawValue) }
-        if pressedButtons & (1 << 2) != 0 { m |= UInt32(EVENTFLAG_MIDDLE_MOUSE_BUTTON.rawValue) }
-        return m
+    static func eventModifiers(_ flags: NSEvent.ModifierFlags, pressedButtons: Int = 0) -> CefEventModifiers {
+        CefEventModifiers(flags).union(CefEventModifiers(pressedMouseButtons: pressedButtons))
     }
 
-    private var modifiers: UInt32 {
-        Self.cefModifiers(NSEvent.modifierFlags, pressedButtons: NSEvent.pressedMouseButtons)
+    private var modifiers: CefEventModifiers {
+        Self.eventModifiers(NSEvent.modifierFlags, pressedButtons: NSEvent.pressedMouseButtons)
     }
 
     // MARK: Mouse
 
     public override func mouseMoved(with event: NSEvent) {
-        browser?.sendMouseMove(to: dipPoint(for: event), modifiers: modifiers)
+        browser?.sendMouseMove(to: viewPoint(for: event), modifiers: modifiers)
     }
 
     public override func mouseDragged(with event: NSEvent) {
-        browser?.sendMouseMove(to: dipPoint(for: event), modifiers: modifiers)
+        browser?.sendMouseMove(to: viewPoint(for: event), modifiers: modifiers)
     }
 
     public override func rightMouseDragged(with event: NSEvent) {
-        browser?.sendMouseMove(to: dipPoint(for: event), modifiers: modifiers)
+        browser?.sendMouseMove(to: viewPoint(for: event), modifiers: modifiers)
     }
 
     public override func otherMouseDragged(with event: NSEvent) {
-        browser?.sendMouseMove(to: dipPoint(for: event), modifiers: modifiers)
+        browser?.sendMouseMove(to: viewPoint(for: event), modifiers: modifiers)
     }
 
     public override func mouseEntered(with event: NSEvent) {
-        browser?.sendMouseMove(to: dipPoint(for: event), modifiers: modifiers)
+        browser?.sendMouseMove(to: viewPoint(for: event), modifiers: modifiers)
     }
 
     public override func mouseExited(with event: NSEvent) {
-        browser?.sendMouseMove(to: dipPoint(for: event), modifiers: modifiers, leaving: true)
+        browser?.sendMouseMove(to: viewPoint(for: event), modifiers: modifiers, leaving: true)
     }
 
     public override func mouseDown(with event: NSEvent) {
@@ -59,19 +49,19 @@ extension CefOffscreenBrowserView {
         // responder, so the browser is focused explicitly as well.
         window?.makeFirstResponder(self)
         browser?.setFocus(true)
-        browser?.sendMouseDown(at: dipPoint(for: event), button: .left, clickCount: event.clickCount, modifiers: modifiers)
+        browser?.sendMouseDown(at: viewPoint(for: event), button: .left, clickCount: event.clickCount, modifiers: modifiers)
     }
 
     public override func mouseUp(with event: NSEvent) {
-        browser?.sendMouseUp(at: dipPoint(for: event), button: .left, clickCount: event.clickCount, modifiers: modifiers)
+        browser?.sendMouseUp(at: viewPoint(for: event), button: .left, clickCount: event.clickCount, modifiers: modifiers)
     }
 
     public override func rightMouseDown(with event: NSEvent) {
-        browser?.sendMouseDown(at: dipPoint(for: event), button: .right, clickCount: event.clickCount, modifiers: modifiers)
+        browser?.sendMouseDown(at: viewPoint(for: event), button: .right, clickCount: event.clickCount, modifiers: modifiers)
     }
 
     public override func rightMouseUp(with event: NSEvent) {
-        browser?.sendMouseUp(at: dipPoint(for: event), button: .right, clickCount: event.clickCount, modifiers: modifiers)
+        browser?.sendMouseUp(at: viewPoint(for: event), button: .right, clickCount: event.clickCount, modifiers: modifiers)
     }
 
     /// What an `otherMouse` button does. Buttons 3 and 4 are the back and
@@ -94,13 +84,13 @@ extension CefOffscreenBrowserView {
         case .forward:
             browser?.goForward()
         case .middle:
-            browser?.sendMouseDown(at: dipPoint(for: event), button: .middle, clickCount: event.clickCount, modifiers: modifiers)
+            browser?.sendMouseDown(at: viewPoint(for: event), button: .middle, clickCount: event.clickCount, modifiers: modifiers)
         }
     }
 
     public override func otherMouseUp(with event: NSEvent) {
         guard Self.otherMouseAction(forButtonNumber: event.buttonNumber) == .middle else { return }
-        browser?.sendMouseUp(at: dipPoint(for: event), button: .middle, clickCount: event.clickCount, modifiers: modifiers)
+        browser?.sendMouseUp(at: viewPoint(for: event), button: .middle, clickCount: event.clickCount, modifiers: modifiers)
     }
 
     public override func scrollWheel(with event: NSEvent) {
@@ -124,7 +114,7 @@ extension CefOffscreenBrowserView {
         let sendY = totalY.rounded(.towardZero)
         scrollResidual = CGPoint(x: totalX - sendX, y: totalY - sendY)
         if sendX == 0 && sendY == 0 { return }
-        browser?.sendMouseWheel(at: dipPoint(for: event), deltaX: sendX, deltaY: sendY, modifiers: modifiers)
+        browser?.sendMouseWheel(at: viewPoint(for: event), deltaX: sendX, deltaY: sendY, modifiers: modifiers)
     }
 
     // MARK: Keyboard
@@ -136,41 +126,31 @@ extension CefOffscreenBrowserView {
         // key event, so the page sees `keydown` and `keypress`, or as IME text.
         handleKeyEventBeforeTextInputClient()
         interpretKeyEvents([event])
-        handleKeyEventAfterTextInputClient(makeKeyEvent(event))
+        handleKeyEventAfterTextInputClient(makeKeyEvent(event, phase: .keyDown))
     }
 
     public override func keyUp(with event: NSEvent) {
-        var e = makeKeyEvent(event)
-        e.type = KEYEVENT_KEYUP
-        browser?.sendKeyEvent(e)
+        browser?.sendKeyEvent(makeKeyEvent(event, phase: .keyUp))
     }
 
     public override func flagsChanged(with event: NSEvent) {
-        var e = makeKeyEvent(event)
-        e.type = isModifierPressed(event) ? KEYEVENT_KEYDOWN : KEYEVENT_KEYUP
-        browser?.sendKeyEvent(e)
+        browser?.sendKeyEvent(makeKeyEvent(event, phase: isModifierPressed(event) ? .keyDown : .keyUp))
     }
 
-    /// A `cef_key_event_t` for a `keyDown`, `keyUp` or `flagsChanged` event,
-    /// without its `type`.
-    func makeKeyEvent(_ event: NSEvent) -> cef_key_event_t {
-        var e = cef_key_event_t()
-        e.size = MemoryLayout<cef_key_event_t>.stride
-        e.modifiers = Self.cefModifiers(event.modifierFlags)
+    /// The key event for a `keyDown`, `keyUp` or `flagsChanged` event.
+    func makeKeyEvent(_ event: NSEvent, phase: CefKeyEvent.Phase) -> CefKeyEvent {
+        var e = CefKeyEvent(phase: phase, modifiers: Self.eventModifiers(event.modifierFlags))
         if Self.isKeyPadEvent(event) {
-            e.modifiers |= UInt32(EVENTFLAG_IS_KEY_PAD.rawValue)
+            e.modifiers.insert(.numericPad)
         }
-        e.native_key_code = Int32(event.keyCode)
+        e.nativeKeyCode = Int(event.keyCode)
         // `flagsChanged` events have no characters.
         if event.type == .keyDown || event.type == .keyUp {
-            e.windows_key_code = Int32(CefKeyCodes.windowsKeyCode(
-                forMacKeyCode: event.keyCode, characters: event.charactersIgnoringModifiers))
-            if let first = event.charactersIgnoringModifiers?.utf16.first {
-                e.unmodified_character = first
-            }
-            if let first = event.characters?.utf16.first {
-                e.character = first
-            }
+            e.windowsKeyCode = CefKeyCodes.windowsKeyCode(
+                forMacKeyCode: event.keyCode, characters: event.charactersIgnoringModifiers)
+            // Chromium takes the first UTF-16 code unit of each.
+            e.unmodifiedCharacter = event.charactersIgnoringModifiers?.first
+            e.character = event.characters?.first
         }
         return e
     }
@@ -211,7 +191,7 @@ extension CefOffscreenBrowserView {
         keyInput.unmarkTextCalled = false
     }
 
-    private func handleKeyEventAfterTextInputClient(_ base: cef_key_event_t) {
+    private func handleKeyEventAfterTextInputClient(_ base: CefKeyEvent) {
         keyInput.handlingKeyDown = false
         guard let browser else { return }
 
@@ -219,33 +199,33 @@ extension CefOffscreenBrowserView {
         // character is sent as a key event.
         if !keyInput.hasMarkedTextFlag, !keyInput.oldHasMarkedText, keyInput.textToBeInserted.utf16.count <= 1 {
             var e = base
-            e.type = KEYEVENT_KEYDOWN
+            e.phase = .keyDown
             browser.sendKeyEvent(e)
-            if let first = keyInput.textToBeInserted.utf16.first {
+            if let first = keyInput.textToBeInserted.first {
                 e.character = first
             }
-            e.type = KEYEVENT_CHAR
+            e.phase = .character
             browser.sendKeyEvent(e)
         }
 
         // Other text, such as the result of a composition, is committed.
         let commitThreshold = (keyInput.hasMarkedTextFlag || keyInput.oldHasMarkedText) ? 0 : 1
         if keyInput.textToBeInserted.utf16.count > commitThreshold {
-            browser.imeCommitText(keyInput.textToBeInserted, replacementRange: nil)
+            browser.insertText(keyInput.textToBeInserted)
             keyInput.textToBeInserted = ""
         }
 
         // Update, finish or cancel the composition.
         if keyInput.hasMarkedTextFlag, !keyInput.markedTextValue.isEmpty {
-            browser.imeSetComposition(
-                text: keyInput.markedTextValue,
-                selectionRange: keyInput.markedSelectionRange,
+            browser.setMarkedText(
+                keyInput.markedTextValue,
+                selectedRange: keyInput.markedSelectionRange,
                 replacementRange: keyInput.setMarkedReplacement)
         } else if keyInput.oldHasMarkedText, !keyInput.hasMarkedTextFlag {
             if keyInput.unmarkTextCalled {
-                browser.imeFinishComposing(keepSelection: false)
+                browser.unmarkText(keepingSelection: false)
             } else {
-                browser.imeCancelComposition()
+                browser.cancelComposition()
             }
         }
         keyInput.setMarkedReplacement = nil
@@ -267,7 +247,7 @@ extension CefOffscreenBrowserView {
 // MARK: - Key codes
 
 /// Maps macOS virtual key codes (`NSEvent.keyCode`) to the Windows virtual
-/// key codes Chromium expects in `cef_key_event_t.windows_key_code`.
+/// key codes Chromium expects in ``CefKeyEvent/windowsKeyCode``.
 enum CefKeyCodes {
 
     /// The Windows virtual key code for a key. Keys not in the table use

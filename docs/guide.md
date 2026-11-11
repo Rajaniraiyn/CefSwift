@@ -24,6 +24,21 @@ struct MyApp: CefSwiftApp {
 AppKit apps call `try CefRuntime.shared.initialize(configuration:)` first
 thing in `main`, before anything touches `NSApp`.
 
+### Preferences
+
+`preferences` sets Chromium preferences — the settings behind
+`chrome://settings` — by dotted name, for every profile when it is first
+used:
+
+```swift
+configuration.preferences["browser.confirm_to_quit"] = false      // no "Hold ⌘Q to Quit"
+configuration.preferences["credentials_enable_service"] = false   // no password manager
+configuration.preferences["webkit.webprefs.default_font_size"] = 18
+```
+
+Change them later, per profile, with `CefProfile.setPreference(_:to:)`
+([Profiles](#profiles)).
+
 ## Browsers and views
 
 `CefBrowser` is the model; views show it.
@@ -53,13 +68,54 @@ Options are set at creation:
 var options = CefBrowserOptions()
 options.rendering = .offscreen                       // composited layer; native UI can overlap
 options.profile = .persistent(name: "Work")
-options.allowsBackForwardNavigationGestures = true   // swipe to navigate (offscreen)
 options.userScripts = [CefUserScript(source: "window.appVersion = '1.2'")]
 options.requestFilter = { $0.url?.host() == "ads.example" ? .block : .allow }
 let browser = CefBrowser(url: url, options: options)
 ```
 
-Offscreen rendering needs `configuration.windowlessRenderingEnabled = true`.
+In AppKit, assign the browser to a `CefWindowedBrowserView` or
+`CefOffscreenBrowserView`.
+
+### Offscreen rendering
+
+Offscreen browsers draw into a layer, so SwiftUI can clip, animate and
+overlap them. They need the runtime switch:
+
+```swift
+configuration.isOffscreenRenderingEnabled = true
+```
+
+```swift
+var options = CefBrowserOptions()
+options.rendering = .offscreen(frameRate: 120)
+options.allowsBackForwardNavigationGestures = true   // two-finger swipe goes back and forward
+let browser = CefBrowser(url: url, options: options)
+```
+
+Pinch and smart magnify change `browser.zoomLevel`. While a swipe is in
+flight, `browser.navigationGestureProgress` runs from 0 toward -1 (back) or
+1 (forward); there is no built-in indicator, so draw your own:
+
+```swift
+CefWebView(browser)
+    .overlay(alignment: browser.navigationGestureProgress < 0 ? .leading : .trailing) {
+        let progress = abs(browser.navigationGestureProgress)
+        Image(systemName: browser.navigationGestureProgress < 0 ? "chevron.left" : "chevron.right")
+            .padding(12)
+            .background(.regularMaterial, in: .circle)
+            .opacity(progress)
+    }
+```
+
+`options.forwardsRawTouchEvents = true` sends trackpad touches to the page
+instead of interpreting gestures.
+
+To host offscreen frames in a view of your own, implement
+`CefOffscreenHost` and call `browser.host(offscreenIn:size:)`; input goes in
+through `sendMouseDown(at:button:clickCount:modifiers:)`,
+`sendKeyEvent(_:)`, `sendTouchEvent(_:)`,
+`setMarkedText(_:selectedRange:replacementRange:)`,
+`insertText(_:replacementRange:)` and the `dragTarget…` methods.
 
 ## JavaScript
 
@@ -101,16 +157,19 @@ permissions, `~/Downloads` for downloads.
 
 ```swift
 final class Policy: CefBrowserDelegate {
-    func browser(_ browser: CefBrowser, decidePermission request: CefPermissionRequest) async -> CefPermissionDecision {
+    func browser(_ browser: CefBrowser, decidePermissionFor request: CefPermissionRequest) async -> CefPermissionDecision {
         await askUser(request) ? .allow : .deny
     }
 
     func browser(_ browser: CefBrowser, decideWindowOpenFor request: CefWindowOpenRequest) -> CefWindowOpenAction {
-        openTab(request.targetURL)
+        guard request.disposition == .newBackgroundTab, let url = request.targetURL else {
+            return .default(for: request)
+        }
+        openTab(url)
         return .handled
     }
 
-    func browser(_ browser: CefBrowser, runJavaScriptDialog dialog: CefJSDialog) async -> CefJSDialogResponse {
+    func browser(_ browser: CefBrowser, runJavaScriptDialog dialog: CefJavaScriptDialog) async -> CefJavaScriptDialogResponse {
         dialog.kind == .alert ? .accept() : await CefDialogPresenter.present(dialog, in: browser.hostWindow)
     }
 }
@@ -136,8 +195,37 @@ depend on app state, implement `browser(_:configureContextMenu:params:)`.
 ```swift
 let browser = CefBrowser(url: home, delegate: policy)
 let window = CefBrowserWindow(browser: browser)
-window.setToolbar { AddressBar(browser: browser) }   // SwiftUI, in the title bar
+window.setToolbar {
+    NavigationButtons(browser: browser)    // beside the window buttons
+} principal: {
+    AddressBar(browser: browser)           // centered
+} trailing: {
+    Button("New Tab", systemImage: "plus", action: openTab)
+}
+window.setTabAccessory { TabIcon(browser: browser) }   // favicon or spinner in the native tab
 window.show()
+```
+
+The toolbar is a unified `NSToolbar` of SwiftUI views bound to the browser
+as usual; `setToolbar(principal:)` sets only the centered view.
+
+Around the page:
+
+```swift
+window.topAccessory = statusBanner                         // an NSView between title bar and page
+window.contentInsets = NSEdgeInsets(top: 0, left: 6, bottom: 6, right: 6)
+window.contentCornerRadius = 10                            // page as an inset, rounded card
+```
+
+Popups a page opens (`window.open` with features, sign-in flows) arrive
+through `onPopup` as hidden windows of their own, still connected to their
+opener. Without `onPopup`, Chromium shows them in a window of its design.
+
+```swift
+window.onPopup = { popup in
+    popup.nsWindow?.tabbingMode = .disallowed
+    popup.show()
+}
 ```
 
 - Give windows the same `configuration.tabbingIdentifier` and macOS groups
@@ -148,8 +236,87 @@ window.show()
 - `CefConfiguration.chromeUI` hides Chrome app-menu entries, toolbar buttons
   and page-action icons.
 - `CefRuntime.shared.openChromeWindow(url:)` opens a window drawn entirely by
-  Chrome, tab strip included. Browsers Chromium creates by itself (tabs,
-  popups) are reported through `CefRuntime.shared.onBrowserCreated`.
+  Chrome, tab strip included.
+
+### Windows Chromium opens itself
+
+Chromium sometimes creates a browser on its own: a tab or window opened from
+Chrome's UI, or a link from `chrome://settings` to the password manager.
+Each is reported to `CefRuntime.shared.onBrowserCreated` and listed in
+`CefRuntime.shared.browsers`. Popups and DevTools have an `opener`; the rest
+arrive in a window with Chrome's own tab strip, which a browser with its own
+toolbar can close and reopen as one of its tabs:
+
+```swift
+CefRuntime.shared.onBrowserCreated = { browser in
+    guard browser.opener == nil else { return }   // popups and DevTools keep their windows
+    Task {
+        while browser.url == nil { try? await Task.sleep(for: .milliseconds(25)) }
+        let url = browser.url
+        browser.close(force: true)
+        openTab(url)
+    }
+}
+```
+
+The Browser example does this in `adoptWindowsOpenedByChromium()`.
+
+## Customizing Chromium's own pages
+
+Chrome-style browsers show Chromium's internal pages — `chrome://settings`,
+`chrome://history`, `chrome://downloads`. You can rename, restyle and
+replace them.
+
+**Names.** `productName` replaces "Chromium" throughout; `stringOverrides`
+replaces any other built-in string by its `IDS_*` identifier
+(`CefStringID`):
+
+```swift
+configuration.productName = "Orbit"
+configuration.stringOverrides[.companyName] = "Orbit Software"
+```
+
+**Scripts and styles.** User scripts run on internal pages too. Scope them
+with a URL pattern, where `*` stands for any run of characters and the
+pattern must match the whole URL:
+
+```swift
+options.userScripts = [
+    CefUserScript(source: "document.title = 'Orbit Settings'", matching: "chrome://settings/*"),
+    .styleSheet("#about-menu { display: none !important }", matching: "chrome://settings/*"),
+]
+```
+
+Internal pages are built from web components whose markup sits in shadow
+roots; `styleSheet(_:matching:includingShadowRoots:)` applies its rules
+inside every shadow root as well (the default), so selectors for a
+component's internals match. On `chrome://` pages scripts run as the page
+starts loading rather than before its own scripts, and scripts with an
+`isolatedWorldName` do not run there. A scoped script runs inside a
+function, so its top-level declarations are not global.
+
+**Replacing a page.** Cancel the navigation and load your own page, served
+from a custom scheme:
+
+```swift
+// configuration.customSchemes = [CefCustomScheme(name: "orbit")]
+// CefRuntime.shared.registerSchemeHandler(scheme: "orbit", handler: OrbitPages())
+
+func browser(_ browser: CefBrowser, decidePolicyFor navigation: CefNavigationAction) -> CefNavigationDecision {
+    guard navigation.url?.absoluteString.hasPrefix("chrome://settings/help") == true else { return .allow }
+    browser.load(URL(string: "orbit://about/")!)
+    return .cancel
+}
+
+struct OrbitPages: CefSchemeHandler {
+    func response(for request: CefSchemeRequest) async -> CefSchemeResponse {
+        CefSchemeResponse(mimeType: "text/html", body: Data(aboutPage.utf8))
+    }
+}
+```
+
+The Browser example replaces Chromium's About page this way
+(`BrowserPages.swift`).
 
 ## Profiles
 

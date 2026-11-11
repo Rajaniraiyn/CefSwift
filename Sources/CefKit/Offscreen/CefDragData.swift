@@ -54,7 +54,7 @@ public struct CefDragData: Sendable, Equatable {
     /// Whether the drag is a text or HTML fragment.
     public var isFragment: Bool
     /// The link URL, when ``isLink`` is `true`.
-    public var linkURL: String
+    public var linkURL: URL?
     /// The link title, when ``isLink`` is `true`.
     public var linkTitle: String
     /// The plain-text fragment being dragged.
@@ -64,7 +64,7 @@ public struct CefDragData: Sendable, Equatable {
 
     public init(
         isLink: Bool = false, isFragment: Bool = false,
-        linkURL: String = "", linkTitle: String = "",
+        linkURL: URL? = nil, linkTitle: String = "",
         fragmentText: String = "", fragmentHTML: String = ""
     ) {
         self.isLink = isLink
@@ -80,7 +80,9 @@ public struct CefDragData: Sendable, Equatable {
         self.init(
             isLink: data.pointee.is_link(data) != 0,
             isFragment: data.pointee.is_fragment(data) != 0,
-            linkURL: CefStringUtil.takingUserFree(data.pointee.get_link_url(data)) ?? "",
+            linkURL: CefStringUtil.takingUserFree(data.pointee.get_link_url(data)).flatMap {
+                $0.isEmpty ? nil : URL(string: $0)
+            },
             linkTitle: CefStringUtil.takingUserFree(data.pointee.get_link_title(data)) ?? "",
             fragmentText: CefStringUtil.takingUserFree(data.pointee.get_fragment_text(data)) ?? "",
             fragmentHTML: CefStringUtil.takingUserFree(data.pointee.get_fragment_html(data)) ?? ""
@@ -88,7 +90,7 @@ public struct CefDragData: Sendable, Equatable {
     }
 }
 
-// MARK: - Drag and touch input
+// MARK: - Drag input
 
 extension CefBrowser {
 
@@ -96,7 +98,7 @@ extension CefBrowser {
 
     /// Tells the page a drag entered the view, carrying the given content.
     public func dragTargetEnter(
-        at point: CGPoint, modifiers: UInt32, allowedOps: CefDragOperation,
+        at point: CGPoint, modifiers: CefEventModifiers = [], allowedOperations: CefDragOperation,
         text: String? = nil, html: String? = nil, urls: [URL] = [], files: [String] = []
     ) {
         guard let data = cef_drag_data_create() else { return }
@@ -121,16 +123,16 @@ extension CefBrowser {
         // returned; release it only if it was never handed over.
         let delivered: Void? = withHost { host in
             var event = cef_mouse_event_t(point, modifiers: modifiers)
-            host.pointee.drag_target_drag_enter(host, data, &event, allowedOps.cefValue)
+            host.pointee.drag_target_drag_enter(host, data, &event, allowedOperations.cefValue)
         }
         if delivered == nil { cefRelease(data) }
     }
 
     /// Tells the page the drag moved.
-    public func dragTargetOver(at point: CGPoint, modifiers: UInt32, allowedOps: CefDragOperation) {
+    public func dragTargetOver(at point: CGPoint, modifiers: CefEventModifiers = [], allowedOperations: CefDragOperation) {
         withHost { host in
             var event = cef_mouse_event_t(point, modifiers: modifiers)
-            host.pointee.drag_target_drag_over(host, &event, allowedOps.cefValue)
+            host.pointee.drag_target_drag_over(host, &event, allowedOperations.cefValue)
         }
     }
 
@@ -140,7 +142,7 @@ extension CefBrowser {
     }
 
     /// Tells the page the drag was dropped.
-    public func dragTargetDrop(at point: CGPoint, modifiers: UInt32) {
+    public func dragTargetDrop(at point: CGPoint, modifiers: CefEventModifiers = []) {
         withHost { host in
             var event = cef_mouse_event_t(point, modifiers: modifiers)
             host.pointee.drag_target_drop(host, &event)
@@ -149,37 +151,17 @@ extension CefBrowser {
 
     // MARK: Dragging out of the page
 
-    /// Tells the page a drag it started ended at `viewPoint` with `operation`.
-    public func dragSourceEndedAt(viewPoint: CGPoint, operation: CefDragOperation) {
+    /// Tells the page a drag it started ended at `point`, in view points,
+    /// with `operation`.
+    public func dragSourceEnded(at point: CGPoint, operation: CefDragOperation) {
         withHost {
             $0.pointee.drag_source_ended_at(
-                $0, Int32(viewPoint.x.rounded()), Int32(viewPoint.y.rounded()), operation.cefValue)
+                $0, Int32(point.x.rounded()), Int32(point.y.rounded()), operation.cefValue)
         }
     }
 
     /// Tells the page the system drag session it started has finished.
     public func dragSourceSystemDragEnded() {
         withHost { $0.pointee.drag_source_system_drag_ended($0) }
-    }
-
-    // MARK: Touch
-
-    /// Forwards a touch event. `point` is in view points.
-    public func sendTouchEvent(
-        id: Int32, point: CGPoint, type: cef_touch_event_type_t,
-        modifiers: UInt32 = 0, pressure: Float = 0,
-        pointerType: cef_pointer_type_t = CEF_POINTER_TYPE_TOUCH
-    ) {
-        withHost { host in
-            var event = cef_touch_event_t()
-            event.id = id
-            event.x = Float(point.x)
-            event.y = Float(point.y)
-            event.pressure = pressure
-            event.type = type
-            event.modifiers = modifiers
-            event.pointer_type = pointerType
-            host.pointee.send_touch_event(host, &event)
-        }
     }
 }

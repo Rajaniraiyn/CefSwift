@@ -1,6 +1,5 @@
 import AppKit
 import CefKit
-import CCef
 import Foundation
 
 /// An `NSView` showing an offscreen-rendered browser.
@@ -88,7 +87,7 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
     var pendingContextMenuCallback: CefRunContextMenuCallback?
 
     /// The operations allowed for the page-initiated drag in progress.
-    var currentDragAllowedOps: CefDragOperation = .none
+    var currentDragAllowedOperations: CefDragOperation = .none
 
     // MARK: Initialization
 
@@ -283,10 +282,10 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
             screenRect = CGRect(origin: .zero, size: screenFrame.size)
         }
         return CefOffscreenViewInfo(
-            sizeDIP: bounds.size == .zero ? CGSize(width: 1, height: 1) : bounds.size,
+            size: bounds.size == .zero ? CGSize(width: 1, height: 1) : bounds.size,
             deviceScaleFactor: window?.backingScaleFactor ?? 2,
-            screenOriginDIP: origin,
-            screenRectDIP: screenRect
+            screenOrigin: origin,
+            screenFrame: screenRect
         )
     }
 
@@ -343,19 +342,19 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
         CATransaction.commit()
     }
 
-    public func offscreenImeCompositionRangeChanged(selectedRange: NSRange, characterBounds: [CGRect]) {
+    public func offscreenDidChangeCompositionRange(_ range: NSRange, characterBounds: [CGRect]) {
         if let first = characterBounds.first {
             lastKnownCaretRect = first
         }
     }
 
-    public func offscreenTextSelectionChanged(selectedText: String, selectedRange: NSRange) {
+    public func offscreenDidChangeSelection(_ selectedText: String, selectedRange: NSRange) {
         currentSelectedTextRange = selectedRange
     }
 
     /// An event's location in view coordinates, which are Chromium's: the
     /// view is flipped, so the origin is at the top left.
-    func dipPoint(for event: NSEvent) -> CGPoint {
+    func viewPoint(for event: NSEvent) -> CGPoint {
         convert(event.locationInWindow, from: nil)
     }
 }
@@ -420,31 +419,30 @@ extension CefOffscreenBrowserView {
     }
 
     public override func touchesBegan(with event: NSEvent) {
-        forwardTouches(in: event, phase: .began, as: CEF_TET_PRESSED)
+        forwardTouches(in: event, phase: .began, as: .began)
     }
 
     public override func touchesMoved(with event: NSEvent) {
-        forwardTouches(in: event, phase: .moved, as: CEF_TET_MOVED)
+        forwardTouches(in: event, phase: .moved, as: .moved)
     }
 
     public override func touchesEnded(with event: NSEvent) {
-        forwardTouches(in: event, phase: .ended, as: CEF_TET_RELEASED)
+        forwardTouches(in: event, phase: .ended, as: .ended)
     }
 
     public override func touchesCancelled(with event: NSEvent) {
-        forwardTouches(in: event, phase: .cancelled, as: CEF_TET_CANCELLED)
+        forwardTouches(in: event, phase: .cancelled, as: .cancelled)
     }
 
-    private func forwardTouches(in event: NSEvent, phase: NSTouch.Phase, as type: cef_touch_event_type_t) {
+    private func forwardTouches(in event: NSEvent, phase: NSTouch.Phase, as touchPhase: CefTouchEvent.Phase) {
         guard let browser, browser.options.forwardsRawTouchEvents else { return }
         let size = bounds.size
         for touch in event.touches(matching: phase, in: self) {
             // Trackpad touches have normalized, bottom-left positions.
             let position = touch.normalizedPosition
             let point = CGPoint(x: position.x * size.width, y: (1 - position.y) * size.height)
-            browser.sendTouchEvent(
-                id: Int32(truncatingIfNeeded: touch.identity.hash), point: point, type: type,
-                pressure: 1, pointerType: CEF_POINTER_TYPE_TOUCH)
+            browser.sendTouchEvent(CefTouchEvent(
+                id: touch.identity.hash, location: point, phase: touchPhase, pressure: 1))
         }
     }
 }
@@ -470,7 +468,7 @@ extension CefOffscreenBrowserView: @preconcurrency NSTextInputClient {
         if keyInput.handlingKeyDown {
             keyInput.textToBeInserted += text
         } else {
-            browser?.imeCommitText(text, replacementRange: Self.optionalRange(replacementRange))
+            browser?.insertText(text, replacementRange: Self.optionalRange(replacementRange))
         }
         keyInput.hasMarkedTextFlag = false
         currentMarkedRange = NSRange(location: NSNotFound, length: 0)
@@ -488,9 +486,9 @@ extension CefOffscreenBrowserView: @preconcurrency NSTextInputClient {
         if keyInput.handlingKeyDown {
             keyInput.setMarkedReplacement = replacement
         } else if text.isEmpty {
-            browser?.imeCancelComposition()
+            browser?.cancelComposition()
         } else {
-            browser?.imeSetComposition(text: text, selectionRange: selectedRange, replacementRange: replacement)
+            browser?.setMarkedText(text, selectedRange: selectedRange, replacementRange: replacement)
         }
     }
 
@@ -500,7 +498,7 @@ extension CefOffscreenBrowserView: @preconcurrency NSTextInputClient {
         if keyInput.handlingKeyDown {
             keyInput.unmarkTextCalled = true
         } else {
-            browser?.imeFinishComposing(keepSelection: true)
+            browser?.unmarkText(keepingSelection: true)
         }
     }
 
@@ -546,12 +544,12 @@ extension CefOffscreenBrowserView: @preconcurrency NSTextInputClient {
 
 extension CefOffscreenBrowserView {
 
-    public func offscreenRunContextMenu(_ menu: CefMenuModel, at viewPoint: CGPoint, callback: CefRunContextMenuCallback) {
+    public func offscreenRunContextMenu(_ menu: CefMenuModel, at point: CGPoint, callback: CefRunContextMenuCallback) {
         // Chromium does not allow a nested run loop inside this callback, so
         // the menu is read now and shown on the next turn of the run loop.
         let menuItems: [NSMenuItem] = (0..<menu.count).compactMap { index in
             if menu.isSeparator(at: index) { return .separator() }
-            let title = Self.menuTitle(fromCefLabel: menu.label(at: index))
+            let title = Self.menuTitle(fromCefTitle: menu.title(at: index))
             guard !title.isEmpty else { return nil }
             let item = NSMenuItem(title: title, action: #selector(contextMenuItemSelected(_:)), keyEquivalent: "")
             item.target = self
@@ -569,7 +567,7 @@ extension CefOffscreenBrowserView {
             let nsMenu = NSMenu()
             nsMenu.autoenablesItems = false
             nsMenu.items = menuItems
-            nsMenu.popUp(positioning: nil, at: viewPoint, in: self)
+            nsMenu.popUp(positioning: nil, at: point, in: self)
             // `popUp` returns once the menu closes; an unanswered callback
             // means nothing was chosen.
             self.pendingContextMenuCallback?.cancel()
@@ -578,8 +576,8 @@ extension CefOffscreenBrowserView {
     }
 
     /// Chromium marks mnemonics with `&` and writes a literal ampersand as `&&`.
-    static func menuTitle(fromCefLabel label: String) -> String {
-        label.components(separatedBy: "&&")
+    static func menuTitle(fromCefTitle title: String) -> String {
+        title.components(separatedBy: "&&")
             .map { $0.replacingOccurrences(of: "&", with: "") }
             .joined(separator: "&")
     }

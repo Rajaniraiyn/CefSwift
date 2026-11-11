@@ -39,7 +39,8 @@ public protocol CefBrowserDelegate: AnyObject {
 
     /// Allow or cancel a main-frame navigation.
     func browser(_ browser: CefBrowser, decidePolicyFor navigation: CefNavigationAction) -> CefNavigationDecision
-    /// Route a `target=_blank` / `window.open` / ⌘-click request.
+    /// Route a `target=_blank` / `window.open` / ⌘-click request. The default
+    /// is ``CefWindowOpenAction/default(for:)``.
     func browser(_ browser: CefBrowser, decideWindowOpenFor request: CefWindowOpenRequest) -> CefWindowOpenAction
     /// A key event, before (`isBeforePage`) or after the page saw it. Return
     /// `true` to consume it.
@@ -47,7 +48,7 @@ public protocol CefBrowserDelegate: AnyObject {
     /// Customize the context menu before it is shown.
     func browser(_ browser: CefBrowser, configureContextMenu menu: CefMenuModel, params: CefContextMenuParams)
     /// A context-menu command was chosen. Return `true` if you handled it.
-    func browser(_ browser: CefBrowser, contextMenuCommand commandID: Int, params: CefContextMenuParams) -> Bool
+    func browser(_ browser: CefBrowser, handleContextMenuCommand commandID: Int, params: CefContextMenuParams) -> Bool
     /// Chrome is about to run one of its commands (see ``CefChromeCommand``)
     /// — new tab, find, print, zoom, … Return `true` to handle it yourself.
     /// Chrome-style browsers only.
@@ -56,15 +57,15 @@ public protocol CefBrowserDelegate: AnyObject {
     // MARK: Asynchronous policy
 
     /// Present `alert` / `confirm` / `prompt`. The default shows a native sheet.
-    func browser(_ browser: CefBrowser, runJavaScriptDialog dialog: CefJSDialog) async -> CefJSDialogResponse
+    func browser(_ browser: CefBrowser, runJavaScriptDialog dialog: CefJavaScriptDialog) async -> CefJavaScriptDialogResponse
     /// Confirm leaving a page with a `beforeunload` handler. Return `true` to
     /// leave. The default shows a native sheet.
     func browser(_ browser: CefBrowser, confirmLeavingPage isReload: Bool) async -> Bool
     /// Resolve a permission request. The default denies.
-    func browser(_ browser: CefBrowser, decidePermission request: CefPermissionRequest) async -> CefPermissionDecision
+    func browser(_ browser: CefBrowser, decidePermissionFor request: CefPermissionRequest) async -> CefPermissionDecision
     /// Supply credentials for HTTP/proxy authentication, or `nil` to cancel.
     /// The default shows a native sign-in sheet.
-    func browser(_ browser: CefBrowser, credentialFor challenge: CefAuthChallenge) async -> CefCredential?
+    func browser(_ browser: CefBrowser, credentialFor challenge: CefAuthenticationChallenge) async -> CefCredential?
     /// Return `true` to proceed despite a certificate error. The default
     /// cancels the load.
     func browser(_ browser: CefBrowser, shouldProceedDespite error: CefCertificateError) async -> Bool
@@ -92,27 +93,27 @@ extension CefBrowserDelegate {
         .allow
     }
     public func browser(_ browser: CefBrowser, decideWindowOpenFor request: CefWindowOpenRequest) -> CefWindowOpenAction {
-        CefWindowOpenPolicy.defaultAction(for: request)
+        .default(for: request)
     }
     public func browser(_ browser: CefBrowser, handleKeyEvent event: CefKeyEvent, isBeforePage: Bool) -> Bool { false }
     public func browser(_ browser: CefBrowser, configureContextMenu menu: CefMenuModel, params: CefContextMenuParams) {}
-    public func browser(_ browser: CefBrowser, contextMenuCommand commandID: Int, params: CefContextMenuParams) -> Bool {
+    public func browser(_ browser: CefBrowser, handleContextMenuCommand commandID: Int, params: CefContextMenuParams) -> Bool {
         false
     }
     public func browser(_ browser: CefBrowser, handleChromeCommand command: CefChromeCommand, disposition: CefWindowOpenDisposition) -> Bool {
         false
     }
 
-    public func browser(_ browser: CefBrowser, runJavaScriptDialog dialog: CefJSDialog) async -> CefJSDialogResponse {
+    public func browser(_ browser: CefBrowser, runJavaScriptDialog dialog: CefJavaScriptDialog) async -> CefJavaScriptDialogResponse {
         await CefDialogPresenter.present(dialog, in: browser.hostWindow)
     }
     public func browser(_ browser: CefBrowser, confirmLeavingPage isReload: Bool) async -> Bool {
         await CefDialogPresenter.confirmLeaving(isReload: isReload, in: browser.hostWindow)
     }
-    public func browser(_ browser: CefBrowser, decidePermission request: CefPermissionRequest) async -> CefPermissionDecision {
+    public func browser(_ browser: CefBrowser, decidePermissionFor request: CefPermissionRequest) async -> CefPermissionDecision {
         .deny
     }
-    public func browser(_ browser: CefBrowser, credentialFor challenge: CefAuthChallenge) async -> CefCredential? {
+    public func browser(_ browser: CefBrowser, credentialFor challenge: CefAuthenticationChallenge) async -> CefCredential? {
         await CefDialogPresenter.requestCredential(for: challenge, in: browser.hostWindow)
     }
     public func browser(_ browser: CefBrowser, shouldProceedDespite error: CefCertificateError) async -> Bool { false }
@@ -171,7 +172,7 @@ public struct CefCertificateError: Sendable, Equatable {
     public var url: URL?
 }
 
-/// Credentials answering a ``CefAuthChallenge``.
+/// Credentials answering a ``CefAuthenticationChallenge``.
 public struct CefCredential: Sendable, Equatable {
     public var username: String
     public var password: String
@@ -183,7 +184,7 @@ public struct CefCredential: Sendable, Equatable {
 }
 
 /// The user's answer to a JavaScript dialog.
-public enum CefJSDialogResponse: Sendable, Equatable {
+public enum CefJavaScriptDialogResponse: Sendable, Equatable {
     /// OK was chosen; `text` is the prompt field's contents.
     case accept(text: String = "")
     /// Cancel was chosen (or the dialog was dismissed).

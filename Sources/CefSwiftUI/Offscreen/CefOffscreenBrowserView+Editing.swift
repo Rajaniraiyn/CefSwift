@@ -1,6 +1,5 @@
 import AppKit
 import CefKit
-import CCef
 import Foundation
 
 // Keyboard shortcuts and the Edit menu.
@@ -21,12 +20,11 @@ extension CefOffscreenBrowserView: NSMenuItemValidation, NSUserInterfaceValidati
         else {
             return super.performKeyEquivalent(with: event)
         }
-        var e = makeKeyEvent(event)
-        e.type = KEYEVENT_KEYDOWN
+        var e = makeKeyEvent(event, phase: .keyDown)
         browser.sendKeyEvent(e)
         // Chromium runs editing commands from the key-down; the char event
         // makes the page's `keypress` handlers fire too.
-        e.type = KEYEVENT_CHAR
+        e.phase = .character
         browser.sendKeyEvent(e)
         return true
     }
@@ -63,14 +61,16 @@ extension CefOffscreenBrowserView: NSMenuItemValidation, NSUserInterfaceValidati
 
     // MARK: Edit menu
 
-    @objc public func copy(_ sender: Any?) { browser?.copySelection() }
-    @objc public func cut(_ sender: Any?) { browser?.cutSelection() }
-    @objc public func paste(_ sender: Any?) { browser?.paste() }
-    @objc public func pasteAsPlainText(_ sender: Any?) { browser?.pasteAndMatchStyle() }
-    @objc public func delete(_ sender: Any?) { browser?.deleteSelection() }
+    // Responder-chain actions: only the Objective-C runtime needs to see
+    // them. `selectAll(_:)` overrides NSResponder's, so it stays public.
+    @objc func copy(_ sender: Any?) { browser?.copySelection() }
+    @objc func cut(_ sender: Any?) { browser?.cutSelection() }
+    @objc func paste(_ sender: Any?) { browser?.paste() }
+    @objc func pasteAsPlainText(_ sender: Any?) { browser?.pasteAndMatchStyle() }
+    @objc func delete(_ sender: Any?) { browser?.deleteSelection() }
     @objc public override func selectAll(_ sender: Any?) { browser?.selectAll() }
-    @objc public func undo(_ sender: Any?) { browser?.undo() }
-    @objc public func redo(_ sender: Any?) { browser?.redo() }
+    @objc func undo(_ sender: Any?) { browser?.undo() }
+    @objc func redo(_ sender: Any?) { browser?.redo() }
 
     // Whether the page has a selection or undo history is not known
     // synchronously, so editing items are enabled whenever the page has

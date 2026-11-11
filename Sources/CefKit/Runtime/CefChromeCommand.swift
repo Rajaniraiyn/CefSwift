@@ -52,15 +52,15 @@ public struct CefChromeCommand: RawRepresentable, Hashable, Sendable {
 
     public static let zoomIn = Self(rawValue: Int(IDC_ZOOM_PLUS))
     public static let zoomOut = Self(rawValue: Int(IDC_ZOOM_MINUS))
-    public static let zoomReset = Self(rawValue: Int(IDC_ZOOM_NORMAL))
+    public static let resetZoom = Self(rawValue: Int(IDC_ZOOM_NORMAL))
 
     public static let showHistory = Self(rawValue: Int(IDC_SHOW_HISTORY))
     public static let showDownloads = Self(rawValue: Int(IDC_SHOW_DOWNLOADS))
     public static let showSettings = Self(rawValue: Int(IDC_OPTIONS))
     public static let manageExtensions = Self(rawValue: Int(IDC_MANAGE_EXTENSIONS))
     public static let clearBrowsingData = Self(rawValue: Int(IDC_CLEAR_BROWSING_DATA))
-    public static let taskManager = Self(rawValue: Int(IDC_TASK_MANAGER))
-    public static let devTools = Self(rawValue: Int(IDC_DEV_TOOLS))
+    public static let showTaskManager = Self(rawValue: Int(IDC_TASK_MANAGER))
+    public static let showDevTools = Self(rawValue: Int(IDC_DEV_TOOLS))
 }
 
 /// Trims Chrome's own UI in Chrome-style windows. Set on

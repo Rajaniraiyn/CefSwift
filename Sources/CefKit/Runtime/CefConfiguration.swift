@@ -63,12 +63,11 @@ public enum CefLogSeverity: Sendable, Equatable {
 /// `cef_settings_t`; every knob has a sensible default so `.default` works
 /// out of the box for a bundled app.
 public struct CefConfiguration: Sendable {
-    /// Disable the Chromium sandbox (the default). Setting `false` enables
-    /// the macOS sandbox end-to-end: helper processes load
-    /// `libcef_sandbox.dylib` and seal themselves before any Chromium code
-    /// runs. Sandboxed operation requires a properly signed bundle — see
-    /// `docs/sandbox.md` before flipping this.
-    public var noSandbox: Bool = true
+    /// Whether Chromium's macOS sandbox is enabled. Off by default. When on,
+    /// helper processes load `libcef_sandbox.dylib` and seal themselves
+    /// before any Chromium code runs. Sandboxed operation requires a
+    /// properly signed bundle — see `docs/sandbox.md` before turning it on.
+    public var isSandboxEnabled: Bool = false
 
     /// Root directory for all CEF profile data. Defaults to
     /// `~/Library/Application Support/<bundle id>/CefSwift`.
@@ -93,19 +92,16 @@ public struct CefConfiguration: Sendable {
     /// Enables remote DevTools debugging on the given localhost port.
     public var remoteDebuggingPort: Int?
 
-    /// Persist session cookies across runs.
-    public var persistSessionCookies: Bool = false
+    /// Whether session cookies persist across runs.
+    public var persistsSessionCookies: Bool = false
 
     /// Default runtime style for browsers created without an explicit style.
     public var defaultRuntimeStyle: CefRuntimeStyle = .default
 
-    /// Drive CEF's message loop from the host run loop (required on macOS
-    /// when SwiftUI/AppKit owns the run loop). Leave `true`.
-    public var externalMessagePump: Bool = true
-
-    /// Allows offscreen rendering, which ``CefRendering/offscreen(frameRate:)``
-    /// browsers require. Offscreen browsers always use Alloy style.
-    public var windowlessRenderingEnabled: Bool = false
+    /// Whether offscreen rendering is available, which
+    /// ``CefRendering/offscreen(frameRate:)`` browsers require. Offscreen
+    /// browsers always use Alloy style.
+    public var isOffscreenRenderingEnabled: Bool = false
 
     /// Explicit path to `Chromium Embedded Framework.framework`. When `nil`
     /// the framework is resolved from the app bundle's Frameworks directory,
@@ -217,7 +213,7 @@ public struct CefConfiguration: Sendable {
     /// stays on.
     public static var browser: CefConfiguration {
         var configuration = CefConfiguration()
-        configuration.persistSessionCookies = true
+        configuration.persistsSessionCookies = true
         configuration.extraCommandLineSwitches["no-first-run"] = .some(nil)
         configuration.extraCommandLineSwitches["no-default-browser-check"] = .some(nil)
         return configuration

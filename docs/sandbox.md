@@ -1,26 +1,26 @@
 # Sandbox
 
-CefSwift fully wires the Chromium macOS sandbox; flipping it on is one knob:
+CefSwift fully wires the Chromium macOS sandbox; turning it on is one knob:
 
 ```swift
 static var cefConfiguration: CefConfiguration {
     var config = CefConfiguration()
-    config.noSandbox = false   // enable the Chromium sandbox
+    config.isSandboxEnabled = true
     return config
 }
 ```
 
 It defaults to **off** because sandboxed operation is only supportable on
-properly signed bundles (see caveats). Flip it for distribution builds once
-your signing pipeline is in place.
+properly signed bundles (see caveats). Turn it on for distribution builds
+once your signing pipeline is in place.
 
 ## How it works
 
 Since CEF M138 the macOS sandbox ships as a dylib inside the framework:
 `Chromium Embedded Framework.framework/Libraries/libcef_sandbox.dylib`.
 
-1. **Browser process** — `cef_settings_t.no_sandbox = 0` (mapped from
-   `CefConfiguration.noSandbox`). With the sandbox on, CEF stops appending
+1. **Browser process** — `cef_settings_t.no_sandbox = 0` (the inverse of
+   `CefConfiguration.isSandboxEnabled`). With the sandbox on, CEF stops appending
    `--no-sandbox` to helper command lines.
 2. **Helper processes** — `CefRuntime.helperMain()` inspects argv: when
    `--no-sandbox` is absent it calls `ccef_sandbox_initialize(argc, argv)`
@@ -33,7 +33,7 @@ Since CEF M138 the macOS sandbox ships as a dylib inside the framework:
 3. The sandbox loader is intentionally separate from the main `ccef_loader`
    symbol table, mirroring CEF's `cef_scoped_sandbox_context_mac.mm`.
 
-No app-code changes beyond the configuration flip; the bundle layout that
+No app-code changes beyond the configuration switch; the bundle layout that
 `cef bundle` produces already ships the dylib inside the framework's
 `Libraries/` directory.
 
@@ -62,4 +62,4 @@ No app-code changes beyond the configuration flip; the bundle layout that
   `extraCommandLineSwitches`; don't enable `remoteDebuggingPort` in
   production (unauthenticated localhost control channel).
 - **Treat bridges as attack surface.** `CefBridge` handlers run with app
-  privileges — validate inputs ([configuration.md](configuration.md#js--swift-bridge)).
+  privileges — validate inputs ([guide](guide.md#bridge)).

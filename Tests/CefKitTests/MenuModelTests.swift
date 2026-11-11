@@ -54,7 +54,7 @@ struct MenuModelTests {
             #expect(MenuModelProbe.lastInsertIndex == 2)
             #expect(MenuModelProbe.lastInsertCommandID == 26510)
 
-            #expect(menu.remove(commandID: 26510) == true)
+            #expect(menu.removeItem(commandID: 26510) == true)
             #expect(MenuModelProbe.lastRemovedCommandID == 26510)
 
             #expect(menu.removeItem(at: 3) == false)  // get returns 0

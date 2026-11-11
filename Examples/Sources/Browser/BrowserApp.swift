@@ -76,7 +76,7 @@ struct BrowserCommands: Commands {
             Button("Zoom Out") { controller.current?.zoomLevel -= 0.5 }.keyboardShortcut("-")
             Button("Actual Size") { controller.current?.zoomLevel = 0 }.keyboardShortcut("0")
             Divider()
-            Button("Developer Tools") { controller.current?.execute(.devTools) }
+            Button("Developer Tools") { controller.current?.execute(.showDevTools) }
                 .keyboardShortcut("i", modifiers: [.command, .option])
         }
         CommandMenu("History") {

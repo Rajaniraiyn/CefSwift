@@ -121,7 +121,7 @@ public struct CefWindowOpenRequest: Sendable, Equatable {
     /// Where Chromium intends the content to open.
     public var disposition: CefWindowOpenDisposition
     /// Whether a user gesture, rather than script alone, caused the request.
-    public var userGesture: Bool
+    public var hasUserGesture: Bool
     /// The window features the page requested.
     public var features: CefPopupFeatures
     /// Whether the requesting browser renders offscreen. Offscreen browsers
@@ -136,7 +136,7 @@ public struct CefWindowOpenRequest: Sendable, Equatable {
         targetURL: URL?,
         frameName: String = "",
         disposition: CefWindowOpenDisposition = .unknown,
-        userGesture: Bool = false,
+        hasUserGesture: Bool = false,
         features: CefPopupFeatures = .init(),
         isSourceOffscreen: Bool = false,
         isSourceChromeStyle: Bool = false
@@ -144,7 +144,7 @@ public struct CefWindowOpenRequest: Sendable, Equatable {
         self.targetURL = targetURL
         self.frameName = frameName
         self.disposition = disposition
-        self.userGesture = userGesture
+        self.hasUserGesture = hasUserGesture
         self.features = features
         self.isSourceOffscreen = isSourceOffscreen
         self.isSourceChromeStyle = isSourceChromeStyle
@@ -166,15 +166,13 @@ public enum CefWindowOpenAction: Sendable, Equatable {
     /// You opened the content yourself, for example in a new
     /// ``CefBrowserWindow``; Chromium does nothing more.
     case handled
-}
 
-/// The window-open behavior CefSwift applies.
-public enum CefWindowOpenPolicy {
-    /// The action used when the delegate does not implement
+    /// The action taken when the delegate does not implement
     /// ``CefBrowserDelegate/browser(_:decideWindowOpenFor:)``: Chrome-style
     /// browsers open tabs and windows natively; other browsers load the URL
-    /// in place, and allow a blank popup only when not offscreen.
-    public static func defaultAction(for request: CefWindowOpenRequest) -> CefWindowOpenAction {
+    /// in place, and allow a blank popup only when not offscreen. Return it
+    /// from your own implementation for requests you don't handle.
+    public static func `default`(for request: CefWindowOpenRequest) -> CefWindowOpenAction {
         if request.isSourceChromeStyle {
             return .allowNativePopup
         }
@@ -183,12 +181,15 @@ public enum CefWindowOpenPolicy {
         }
         return request.isSourceOffscreen ? .deny : .allowNativePopup
     }
+}
 
+/// The window-open behavior CefSwift applies.
+enum CefWindowOpenPolicy {
     /// The action actually taken for `action`: for offscreen browsers,
     /// ``CefWindowOpenAction/allowNativePopup`` becomes
     /// ``CefWindowOpenAction/openInCurrentBrowser``, or
     /// ``CefWindowOpenAction/deny`` when there is no URL.
-    public static func resolve(_ action: CefWindowOpenAction, for request: CefWindowOpenRequest) -> CefWindowOpenAction {
+    static func resolve(_ action: CefWindowOpenAction, for request: CefWindowOpenRequest) -> CefWindowOpenAction {
         guard action == .allowNativePopup, request.isSourceOffscreen else { return action }
         return request.targetURL != nil ? .openInCurrentBrowser : .deny
     }

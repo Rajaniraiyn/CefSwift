@@ -86,7 +86,7 @@ extension CefContextMenuParams {
 ///
 /// Give your own items command IDs from ``userCommandIDFirst`` through
 /// ``userCommandIDLast``. Choosing one calls
-/// ``CefBrowserDelegate/browser(_:contextMenuCommand:params:)``.
+/// ``CefBrowserDelegate/browser(_:handleContextMenuCommand:params:)``.
 @MainActor
 public final class CefMenuModel {
     /// The first command ID available to your items (`MENU_ID_USER_FIRST`).
@@ -136,7 +136,7 @@ public final class CefMenuModel {
 
     /// Removes the item with `commandID`. Returns whether it was found.
     @discardableResult
-    public func remove(commandID: Int) -> Bool {
+    public func removeItem(commandID: Int) -> Bool {
         raw.pointee.remove(raw, Int32(commandID)) != 0
     }
 
@@ -146,8 +146,9 @@ public final class CefMenuModel {
         raw.pointee.remove_at(raw, index) != 0
     }
 
-    /// The title of the item at `index`.
-    public func label(at index: Int) -> String {
+    /// The title of the item at `index`. Chromium marks mnemonics with `&`
+    /// and writes a literal ampersand as `&&`.
+    public func title(at index: Int) -> String {
         CefStringUtil.takingUserFree(raw.pointee.get_label_at(raw, index)) ?? ""
     }
 
@@ -178,12 +179,22 @@ public final class CefMenuModel {
 /// Reports the outcome of a context menu an offscreen host presented.
 ///
 /// Call ``select(commandID:)`` or ``cancel()`` once; later calls do nothing.
+/// A callback released without either cancels the menu.
 @MainActor
 public final class CefRunContextMenuCallback {
-    private var raw: UnsafeMutablePointer<cef_run_context_menu_callback_t>?
+    /// The reference CEF passed to `run_context_menu`, released exactly once:
+    /// by ``select(commandID:)``, ``cancel()`` or `deinit`, whichever runs
+    /// first.
+    private nonisolated(unsafe) var raw: UnsafeMutablePointer<cef_run_context_menu_callback_t>?
 
     init(raw: UnsafeMutablePointer<cef_run_context_menu_callback_t>) {
         self.raw = raw
+    }
+
+    deinit {
+        guard let raw else { return }
+        raw.pointee.cancel(raw)
+        cefRelease(raw)
     }
 
     /// Reports that the user chose the item with `commandID`.
@@ -265,7 +276,7 @@ public struct CefContextMenuConfiguration {
             return
         }
         for command in hiddenCommands {
-            menu.remove(commandID: command.rawValue)
+            menu.removeItem(commandID: command.rawValue)
         }
         let visible = items.enumerated().filter { $0.element.isVisible?(params) ?? true }
         if !visible.isEmpty || showsInspectElement {

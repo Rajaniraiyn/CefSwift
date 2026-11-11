@@ -76,6 +76,6 @@ import Testing
     }
 
     @Test func browserPresetKeepsSessions() {
-        #expect(CefConfiguration.browser.persistSessionCookies)
+        #expect(CefConfiguration.browser.persistsSessionCookies)
     }
 }
