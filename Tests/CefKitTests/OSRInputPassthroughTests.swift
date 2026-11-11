@@ -6,13 +6,12 @@ import Testing
 @testable import CefKit
 @testable import CefSwiftUI
 
-/// Pure-logic tests for the OSR native-input passthrough additions: drag mask
-/// mapping, touch-type/pointer mapping, paint-element routing, and the AX-tree
-/// value decoder. None require `cef_initialize`.
+/// Drag operations, drag data, paint elements and cursors for offscreen
+/// browsers.
 @MainActor
 struct OSRInputPassthroughTests {
 
-    // MARK: Drag operation mask mapping (CefDragOperation <-> NSDragOperation)
+    // MARK: Drag operations
 
     @Test func dragOperationToNS() {
         #expect(CefDragOperation.copy.nsOperation == .copy)
@@ -35,7 +34,7 @@ struct OSRInputPassthroughTests {
         #expect(!both.contains(.move))
     }
 
-    // MARK: Drag data snapshot defaults
+    // MARK: Drag data
 
     @Test func dragDataDefaults() {
         let d = CefDragData(isLink: true, linkURL: "https://example.com", linkTitle: "Ex")
@@ -46,4 +45,18 @@ struct OSRInputPassthroughTests {
         #expect(item.string(forType: .URL) == "https://example.com")
     }
 
+    // MARK: Paint elements and cursors
+
+    @Test func paintElementMapping() {
+        #expect(CefOffscreenPaintElement(cefValue: PET_VIEW) == .view)
+        #expect(CefOffscreenPaintElement(cefValue: PET_POPUP) == .popup)
+    }
+
+    @Test func cursorMapping() {
+        #expect(CefCursorType(cefValue: CT_HAND) == .hand)
+        #expect(CefCursorType(cefValue: CT_HAND).nsCursor == .pointingHand)
+        #expect(CefCursorType(cefValue: CT_IBEAM).nsCursor == .iBeam)
+        #expect(CefCursorType(cefValue: CT_NONE).nsCursor == nil)
+        #expect(CefCursorType(cefValue: CT_DND_NONE) == .other)
+    }
 }

@@ -2,10 +2,9 @@ import AppKit
 import CCef
 import Foundation
 
-/// The mouse cursor a page wants displayed, delivered to
-/// ``CefBrowserDelegate/browser(_:didChangeCursor:)``. For windowed browsers
-/// CEF already applies the cursor; this is informational (and lets OSR hosts
-/// drive `NSCursor` themselves). Use ``nsCursor`` for a ready-made AppKit cursor.
+/// The cursor a page asks for, delivered to offscreen hosts through
+/// ``CefOffscreenHost/offscreenDidChangeCursor(_:)``. Windowed browsers set
+/// the cursor themselves.
 public enum CefCursorType: Sendable, Equatable {
     case pointer
     case hand
@@ -50,13 +49,14 @@ public enum CefCursorType: Sendable, Equatable {
         }
     }
 
-    /// The closest standard `NSCursor`, or `nil` when AppKit has no analogue
-    /// (caller should fall back to the arrow cursor or hide it).
+    /// The closest standard `NSCursor`, or `nil` when the page hides the
+    /// cursor.
     @MainActor
     public var nsCursor: NSCursor? {
         switch self {
         case .pointer, .other: return .arrow
-        case .hand, .grab: return .openHand
+        case .hand: return .pointingHand
+        case .grab: return .openHand
         case .grabbing: return .closedHand
         case .iBeam: return .iBeam
         case .crosshair: return .crosshair

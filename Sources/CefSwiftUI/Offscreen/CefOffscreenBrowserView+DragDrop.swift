@@ -2,89 +2,83 @@ import AppKit
 import CefKit
 import CCef
 import Foundation
-import UniformTypeIdentifiers
 
-/// Bidirectional drag and drop for the OSR web view.
-///
-/// - **In (system → page):** the host view is an `NSDraggingDestination`
-///   (`registerForDraggedTypes`); drag enter/over/exit/drop build a CEF drag
-///   data from the pasteboard and call the host `drag_target_*` methods.
-/// - **Out (page → system):** the render handler's `start_dragging` routes to
-///   ``offscreenStartDragging(_:allowedOps:at:)``, which begins an `NSDraggingSession`
-///   from the view; session end reports back via `drag_source_ended_at` +
-///   `drag_source_system_drag_ended`.
+// Drag and drop in both directions: drags from other apps are passed to the
+// page as drag-target events, and drags the page starts become AppKit
+// dragging sessions whose outcome is reported back to it.
 extension CefOffscreenBrowserView: NSDraggingSource {
-
-    // MARK: Registration
 
     func registerDragTypes() {
         registerForDraggedTypes([.string, .html, .fileURL, .URL])
     }
 
-    private func cefMods(_ info: NSDraggingInfo) -> UInt32 {
-        CefOffscreenBrowserView.cefModifiers(NSEvent.modifierFlags, pressedButtons: 1 << 0)
+    /// Modifiers for drag events, which always have the left button down.
+    private var dragModifiers: UInt32 {
+        Self.cefModifiers(NSEvent.modifierFlags, pressedButtons: 1 << 0)
     }
 
-    private func dipPoint(_ info: NSDraggingInfo) -> CGPoint {
+    private func dipPoint(for info: NSDraggingInfo) -> CGPoint {
         convert(info.draggingLocation, from: nil)
     }
 
-    // MARK: NSDraggingDestination (system → page)
+    // MARK: Drags into the page
 
     public override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        guard let browser = offscreenBrowser else { return [] }
-        let pb = sender.draggingPasteboard
-        let text = pb.string(forType: .string)
-        let html = pb.string(forType: .html)
+        guard let browser else { return [] }
+        let pasteboard = sender.draggingPasteboard
         var urls: [URL] = []
         var files: [String] = []
-        if let items = pb.readObjects(forClasses: [NSURL.self], options: nil) as? [URL] {
-            for u in items {
-                if u.isFileURL { files.append(u.path) } else { urls.append(u) }
-            }
+        for url in pasteboard.readObjects(forClasses: [NSURL.self]) as? [URL] ?? [] {
+            if url.isFileURL { files.append(url.path) } else { urls.append(url) }
         }
         let allowed = CefDragOperation(sender.draggingSourceOperationMask)
-        browser.dragTargetEnter(at: dipPoint(sender), modifiers: cefMods(sender),
-                                allowedOps: allowed, text: text, html: html,
-                                urls: urls, files: files)
-        browser.dragTargetOver(at: dipPoint(sender), modifiers: cefMods(sender), allowedOps: allowed)
+        browser.dragTargetEnter(
+            at: dipPoint(for: sender), modifiers: dragModifiers, allowedOps: allowed,
+            text: pasteboard.string(forType: .string), html: pasteboard.string(forType: .html),
+            urls: urls, files: files)
+        browser.dragTargetOver(at: dipPoint(for: sender), modifiers: dragModifiers, allowedOps: allowed)
         return sender.draggingSourceOperationMask
     }
 
     public override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
-        guard let browser = offscreenBrowser else { return [] }
-        let allowed = CefDragOperation(sender.draggingSourceOperationMask)
-        browser.dragTargetOver(at: dipPoint(sender), modifiers: cefMods(sender), allowedOps: allowed)
+        guard let browser else { return [] }
+        browser.dragTargetOver(
+            at: dipPoint(for: sender), modifiers: dragModifiers,
+            allowedOps: CefDragOperation(sender.draggingSourceOperationMask))
         return sender.draggingSourceOperationMask
     }
 
     public override func draggingExited(_ sender: NSDraggingInfo?) {
-        offscreenBrowser?.dragTargetLeave()
+        browser?.dragTargetLeave()
     }
 
     public override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        guard let browser = offscreenBrowser else { return false }
-        let allowed = CefDragOperation(sender.draggingSourceOperationMask)
-        browser.dragTargetOver(at: dipPoint(sender), modifiers: cefMods(sender), allowedOps: allowed)
-        browser.dragTargetDrop(at: dipPoint(sender), modifiers: cefMods(sender))
+        guard let browser else { return false }
+        browser.dragTargetOver(
+            at: dipPoint(for: sender), modifiers: dragModifiers,
+            allowedOps: CefDragOperation(sender.draggingSourceOperationMask))
+        browser.dragTargetDrop(at: dipPoint(for: sender), modifiers: dragModifiers)
         return true
     }
 
-    // MARK: CefOffscreenHost drag callbacks
+    // MARK: Drags out of the page
 
     public func offscreenStartDragging(_ data: CefDragData, allowedOps: CefDragOperation, at viewPoint: CGPoint) -> Bool {
-        beginPageDrag(data, allowedOps: allowedOps, at: viewPoint)
+        guard let event = NSApp.currentEvent ?? syntheticDragEvent(at: viewPoint) else { return false }
+        let item = NSDraggingItem(pasteboardWriter: data.pasteboardItem)
+        item.setDraggingFrame(NSRect(x: viewPoint.x - 16, y: viewPoint.y - 16, width: 32, height: 32), contents: nil)
+        currentDragAllowedOps = allowedOps
+        beginDraggingSession(with: [item], event: event, source: self)
+        return true
     }
 
     public func offscreenUpdateDragCursor(_ operation: CefDragOperation) {
-        // The drag cursor during a page-initiated session is managed by AppKit's
-        // dragging session; we keep the page-requested operation for the source
-        // mask callback. (Hook left intentionally light — AppKit drives the
-        // visible cursor.)
-        currentDragAllowedOps = operation == .none ? currentDragAllowedOps : operation
+        // AppKit draws the drag cursor; keep the page's operation for the
+        // session's operation mask.
+        if operation != .none {
+            currentDragAllowedOps = operation
+        }
     }
-
-    // MARK: NSDraggingSource (page → system)
 
     public func draggingSession(
         _ session: NSDraggingSession,
@@ -96,38 +90,23 @@ extension CefOffscreenBrowserView: NSDraggingSource {
     public func draggingSession(
         _ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation
     ) {
-        guard let browser = offscreenBrowser else { return }
-        // Convert the screen end-point back into view DIP (top-left origin).
-        let inWindow = window?.convertPoint(fromScreen: screenPoint) ?? screenPoint
-        let viewPoint = convert(inWindow, from: nil)
-        browser.dragSourceEndedAt(viewPoint: viewPoint, operation: CefDragOperation(operation))
-        browser.dragSourceSystemDragEnded()
         currentDragAllowedOps = .none
-    }
-
-    /// Begins a system drag for a page-initiated drag (`start_dragging`).
-    func beginPageDrag(_ data: CefDragData, allowedOps: CefDragOperation, at viewPoint: CGPoint) -> Bool {
-        let item = NSDraggingItem(pasteboardWriter: data.pasteboardItem)
-        // Give the drag a small placeholder image at the start point.
-        let frame = NSRect(x: viewPoint.x - 16, y: viewPoint.y - 16, width: 32, height: 32)
-        item.setDraggingFrame(frame, contents: nil)
-        currentDragAllowedOps = allowedOps
-        guard let event = NSApp.currentEvent ?? syntheticDragEvent(at: viewPoint) else { return false }
-        beginDraggingSession(with: [item], event: event, source: self)
-        return true
+        guard let browser else { return }
+        let inWindow = window?.convertPoint(fromScreen: screenPoint) ?? screenPoint
+        browser.dragSourceEndedAt(viewPoint: convert(inWindow, from: nil), operation: CefDragOperation(operation))
+        browser.dragSourceSystemDragEnded()
     }
 
     private func syntheticDragEvent(at viewPoint: CGPoint) -> NSEvent? {
-        let inWindow = convert(viewPoint, to: nil)
-        return NSEvent.mouseEvent(
-            with: .leftMouseDragged, location: inWindow, modifierFlags: [],
+        NSEvent.mouseEvent(
+            with: .leftMouseDragged, location: convert(viewPoint, to: nil), modifierFlags: [],
             timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window?.windowNumber ?? 0,
-            context: nil, eventNumber: 0, clickCount: 1, pressure: 1.0)
+            context: nil, eventNumber: 0, clickCount: 1, pressure: 1)
     }
 }
 
 extension CefDragData {
-    /// Builds an `NSPasteboardItem` carrying this drag's text/html/url.
+    /// A pasteboard item carrying the dragged link, text and HTML.
     var pasteboardItem: NSPasteboardItem {
         let item = NSPasteboardItem()
         if isLink, !linkURL.isEmpty {

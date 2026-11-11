@@ -4,11 +4,9 @@ import Testing
 
 @testable import CefKit
 
-/// Exercises ``CefMenuModel`` against a hand-built `cef_menu_model_t` whose
-/// callbacks record into process-global counters. No CEF framework needed —
-/// the struct is a plain C struct of function pointers we populate ourselves.
-/// (C function pointers can't capture, hence the globals; the test is
-/// serialized to keep them deterministic.)
+/// Exercises ``CefMenuModel`` against a hand-built `cef_menu_model_t`. C
+/// function pointers cannot capture, so its callbacks record into globals;
+/// only this test uses them.
 @MainActor
 struct MenuModelTests {
     @Test func mutationsForwardToTheNativeModel() {
@@ -65,7 +63,7 @@ struct MenuModelTests {
     }
 }
 
-/// Process-global recorder for the non-capturing C callbacks above.
+/// Records calls made by the callbacks above.
 enum MenuModelProbe {
     nonisolated(unsafe) static var clearCount = 0
     nonisolated(unsafe) static var separatorCount = 0

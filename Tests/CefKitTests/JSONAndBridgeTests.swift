@@ -79,23 +79,3 @@ import Testing
         #expect(CefConfiguration.browser.persistSessionCookies)
     }
 }
-
-@Suite struct CefWindowOpenPolicyTests {
-    private let url = URL(string: "https://example.com")
-
-    @Test func chromeStyleKeepsNativeHandling() {
-        let request = CefWindowOpenRequest(targetURL: url, isSourceChromeStyle: true)
-        #expect(CefWindowOpenPolicy.defaultAction(for: request) == .allowNativePopup)
-    }
-
-    @Test func embeddedBrowsersLoadInPlace() {
-        #expect(CefWindowOpenPolicy.defaultAction(for: CefWindowOpenRequest(targetURL: url)) == .openInCurrentBrowser)
-    }
-
-    @Test func offscreenNeverGetsANativePopup() {
-        let request = CefWindowOpenRequest(targetURL: url, isSourceOffscreen: true)
-        #expect(CefWindowOpenPolicy.resolve(.allowNativePopup, for: request) == .openInCurrentBrowser)
-        let blank = CefWindowOpenRequest(targetURL: nil, isSourceOffscreen: true)
-        #expect(CefWindowOpenPolicy.resolve(.allowNativePopup, for: blank) == .deny)
-    }
-}

@@ -1,40 +1,37 @@
-import AppKit
 import CCef
 import Foundation
 
-/// How a link/popup the page wants to open should be routed — mirrors
-/// `cef_window_open_disposition_t` (Chromium's `WindowOpenDisposition`). The
-/// disposition encodes the user's intent as Chromium computed it from the
-/// click + modifier keys (e.g. ⌘-click → ``newBackgroundTab``).
+/// Where Chromium intends new content to open, derived from the click and
+/// its modifier keys (⌘-click gives ``newBackgroundTab``). Mirrors
+/// `cef_window_open_disposition_t`.
 public enum CefWindowOpenDisposition: Sendable, Equatable {
-    /// Unknown / unspecified.
+    /// No disposition was given.
     case unknown
-    /// Replace the current tab's contents (the default for most clicks).
+    /// Replace the current page; most clicks.
     case currentTab
-    /// Only one tab with the URL should exist in the same window.
+    /// Reuse a tab already showing the URL, or open one.
     case singletonTab
-    /// Open a new foreground tab (Shift+middle-click, or ⌘/Ctrl+Shift+click).
+    /// Open a tab in front (⇧⌘-click or Shift-middle-click).
     case newForegroundTab
-    /// Open a new background tab (middle-click, or ⌘/Ctrl+click).
+    /// Open a tab behind the current one (⌘-click or middle-click).
     case newBackgroundTab
-    /// Open a new popup window (`window.open` with features, JS popup).
+    /// Open a popup window, such as `window.open` with window features.
     case newPopup
-    /// Open a new top-level window (Shift+click).
+    /// Open a new window (Shift-click).
     case newWindow
-    /// Save the link target to disk (Alt+click).
+    /// Download the link target (Option-click).
     case saveToDisk
-    /// Open a new off-the-record (incognito) window.
+    /// Open an incognito window.
     case offTheRecord
-    /// Special error condition from the renderer.
+    /// Do nothing; the renderer reported an error.
     case ignoreAction
-    /// Activate an existing tab containing the URL.
+    /// Switch to a tab already showing the URL.
     case switchToTab
-    /// New document picture-in-picture window.
+    /// Open a document picture-in-picture window.
     case newPictureInPicture
-    /// Open in a split view alongside the current tab.
+    /// Open in a split view beside the current tab.
     case newSplitView
 
-    /// Maps a raw `cef_window_open_disposition_t` value.
     init(cefValue: cef_window_open_disposition_t) {
         switch cefValue {
         case CEF_WOD_CURRENT_TAB: self = .currentTab
@@ -71,8 +68,8 @@ public enum CefWindowOpenDisposition: Sendable, Equatable {
         }
     }
 
-    /// Whether this disposition expresses an intent to surface the new content
-    /// in the foreground (vs. opening it in the background).
+    /// Whether the new content should come to the front. Only
+    /// ``newBackgroundTab`` opens behind.
     public var prefersForeground: Bool {
         switch self {
         case .newBackgroundTab: return false
@@ -81,19 +78,18 @@ public enum CefWindowOpenDisposition: Sendable, Equatable {
     }
 }
 
-/// Optional window features the page requested for a popup (from
-/// `window.open(url, name, "width=…,height=…")`). Mirrors
-/// `cef_popup_features_t`.
+/// The window features a page requested for a popup, as in
+/// `window.open(url, name, "width=400,height=300")`.
 public struct CefPopupFeatures: Sendable, Equatable {
-    /// Requested origin X (screen coords), if specified.
+    /// The requested horizontal position on screen.
     public var x: Int?
-    /// Requested origin Y (screen coords), if specified.
+    /// The requested vertical position on screen.
     public var y: Int?
-    /// Requested content width, if specified.
+    /// The requested content width.
     public var width: Int?
-    /// Requested content height, if specified.
+    /// The requested content height.
     public var height: Int?
-    /// Whether the page asked for a chromeless popup (toolbar hidden).
+    /// Whether the page asked for a popup without browser controls.
     public var isPopup: Bool
 
     public init(x: Int? = nil, y: Int? = nil, width: Int? = nil, height: Int? = nil, isPopup: Bool = false) {
@@ -115,27 +111,25 @@ public struct CefPopupFeatures: Sendable, Equatable {
     }
 }
 
-/// Describes a page's request to open a link/popup/new window — the input to
-/// ``CefBrowserDelegate/browser(_:decideWindowOpenFor:)``, modeled on
-/// Electron's `setWindowOpenHandler` details.
+/// A page's request to open a link, popup or window, passed to
+/// ``CefBrowserDelegate/browser(_:decideWindowOpenFor:)``.
 public struct CefWindowOpenRequest: Sendable, Equatable {
-    /// The URL the page wants to open (may be `nil` for `about:blank` popups).
+    /// The URL to open; `nil` for a blank popup.
     public var targetURL: URL?
-    /// The target frame name (`window.open`'s second argument / `target=`).
+    /// The target name: `window.open`'s second argument or a link's `target`.
     public var frameName: String
-    /// How Chromium classified the open intent (from click + modifiers).
+    /// Where Chromium intends the content to open.
     public var disposition: CefWindowOpenDisposition
-    /// Whether the open was triggered by a genuine user gesture (vs. script).
+    /// Whether a user gesture, rather than script alone, caused the request.
     public var userGesture: Bool
-    /// Window features the page requested for a popup, if any.
+    /// The window features the page requested.
     public var features: CefPopupFeatures
-    /// Whether the source browser is offscreen-rendered (OSR). Native popups
-    /// are unsafe for OSR browsers, so the delegate should prefer
-    /// ``CefWindowOpenAction/openInCurrentBrowser`` or
-    /// ``CefWindowOpenAction/handled`` here.
+    /// Whether the requesting browser renders offscreen. Offscreen browsers
+    /// cannot host native popups; see
+    /// ``CefWindowOpenAction/allowNativePopup``.
     public var isSourceOffscreen: Bool
-    /// Whether the source browser runs Chrome style, where Chromium itself
-    /// knows how to open tabs and windows.
+    /// Whether the requesting browser uses Chrome style, where Chromium can
+    /// open tabs and windows itself.
     public var isSourceChromeStyle: Bool
 
     public init(
@@ -157,53 +151,43 @@ public struct CefWindowOpenRequest: Sendable, Equatable {
     }
 }
 
-/// What CefSwift should do with a ``CefWindowOpenRequest`` — the return of
-/// ``CefBrowserDelegate/browser(_:decideWindowOpenFor:)``, modeled on the
-/// allow/deny outcomes of Electron's `setWindowOpenHandler`.
+/// What to do with a ``CefWindowOpenRequest``, returned from
+/// ``CefBrowserDelegate/browser(_:decideWindowOpenFor:)``.
 public enum CefWindowOpenAction: Sendable, Equatable {
-    /// Suppress the open entirely (Electron `{ action: 'deny' }`).
+    /// Ignore the request.
     case deny
-    /// Load the target URL in the *same* browser (no new window/tab). The
-    /// safe default for OSR browsers. If the request has no URL, this is a
-    /// no-op (treated as ``deny``).
+    /// Load the URL in the requesting browser. Does nothing when the request
+    /// has no URL.
     case openInCurrentBrowser
-    /// Let CEF create a native popup browser/window (Electron
-    /// `{ action: 'allow' }`). **Only safe for windowed/chrome browsers** —
-    /// for OSR browsers a native popup would be created with no render handler.
-    /// CefSwift downgrades this to ``openInCurrentBrowser`` for OSR browsers.
+    /// Let Chromium open the popup, tab or window itself. For offscreen
+    /// browsers, which cannot host a native popup, this acts as
+    /// ``openInCurrentBrowser``, or ``deny`` when there is no URL.
     case allowNativePopup
-    /// The app will open its own tab/window for this URL (e.g. a new
-    /// `CefWebView`/`CefChromeWindow`). CEF's native popup is blocked.
+    /// You opened the content yourself, for example in a new
+    /// ``CefBrowserWindow``; Chromium does nothing more.
     case handled
 }
 
-/// The policy CefSwift applies when the delegate does not decide. Pure logic.
+/// The window-open behavior CefSwift applies.
 public enum CefWindowOpenPolicy {
-    /// The safe default action for a request when the delegate does not
-    /// override ``CefBrowserDelegate/browser(_:decideWindowOpenFor:)``.
-    ///
-    /// - OSR browsers: never a native popup. Route to the current browser so
-    ///   the target loads in-place (no orphaned, unhandled popup browser).
-    /// - Windowed/chrome browsers: also default to the current browser, which
-    ///   is safe everywhere; apps that want native popups or tabs opt in via
-    ///   the delegate.
+    /// The action used when the delegate does not implement
+    /// ``CefBrowserDelegate/browser(_:decideWindowOpenFor:)``: Chrome-style
+    /// browsers open tabs and windows natively; other browsers load the URL
+    /// in place, and allow a blank popup only when not offscreen.
     public static func defaultAction(for request: CefWindowOpenRequest) -> CefWindowOpenAction {
-        // Chrome style opens tabs and popup windows natively.
         if request.isSourceChromeStyle {
             return .allowNativePopup
         }
         if request.targetURL != nil {
             return .openInCurrentBrowser
         }
-        // No URL to load in place (about:blank popup). For windowed/chrome it's
-        // safe to let CEF make the popup; for OSR we must not.
         return request.isSourceOffscreen ? .deny : .allowNativePopup
     }
 
-    /// Resolves an action against the source browser's hosting mode, applying
-    /// the OSR safety downgrade: a native popup requested for an OSR browser
-    /// becomes ``CefWindowOpenAction/openInCurrentBrowser`` (or ``deny`` if
-    /// there is no URL).
+    /// The action actually taken for `action`: for offscreen browsers,
+    /// ``CefWindowOpenAction/allowNativePopup`` becomes
+    /// ``CefWindowOpenAction/openInCurrentBrowser``, or
+    /// ``CefWindowOpenAction/deny`` when there is no URL.
     public static func resolve(_ action: CefWindowOpenAction, for request: CefWindowOpenRequest) -> CefWindowOpenAction {
         guard action == .allowNativePopup, request.isSourceOffscreen else { return action }
         return request.targetURL != nil ? .openInCurrentBrowser : .deny

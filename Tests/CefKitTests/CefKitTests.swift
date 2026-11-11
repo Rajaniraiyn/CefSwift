@@ -64,7 +64,6 @@ import Testing
     }
 }
 
-
 @Suite struct SafeStoragePolicyTests {
     @Test func explicitPoliciesPassThrough() {
         #expect(CefSafeStoragePolicy.keychain.resolved() == .keychain)

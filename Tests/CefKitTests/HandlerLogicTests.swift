@@ -4,8 +4,7 @@ import Testing
 
 @testable import CefKit
 
-/// Pure-logic tests for the handler value-type mappings added for the
-/// Electron-class customization surface. None require `cef_initialize`.
+/// Mappings from CEF values to the types delegates receive.
 struct HandlerLogicTests {
 
     // MARK: JS dialog mapping
@@ -18,7 +17,7 @@ struct HandlerLogicTests {
         #expect(dialog.origin == "https://x")
     }
 
-    // MARK: Navigation decision mapping
+    // MARK: Termination reason mapping
 
     @Test func terminationReasonMapping() {
         #expect(CefTerminationReason(cefValue: TS_PROCESS_WAS_KILLED) == .killed)
@@ -61,10 +60,8 @@ struct HandlerLogicTests {
     }
 
     @Test func menuModelUserCommandRange() {
-        // Mirrors MENU_ID_USER_FIRST/LAST from cef_types.h.
         #expect(CefMenuModel.userCommandIDFirst == 26500)
         #expect(CefMenuModel.userCommandIDLast == 28500)
-        #expect(CefMenuModel.userCommandIDFirst < CefMenuModel.userCommandIDLast)
     }
 
     // MARK: Key event mapping

@@ -1,29 +1,29 @@
 import CCef
 import Foundation
 
-/// Verdict for a navigation that is about to start, returned from
+/// Whether a navigation may proceed, returned from
 /// ``CefBrowserDelegate/browser(_:decidePolicyFor:)``.
 public enum CefNavigationDecision: Sendable, Equatable {
     /// Let the navigation proceed.
     case allow
-    /// Block the navigation (e.g. to handle an external scheme yourself).
+    /// Stop the navigation, for example to handle the URL yourself.
     case cancel
 }
 
-/// Why the render process for a browser went away, delivered to
+/// Why a browser's render process ended, delivered to
 /// ``CefBrowserDelegate/browser(_:renderProcessDidTerminate:)``.
 public enum CefTerminationReason: Sendable, Equatable {
-    /// Non-zero exit status.
+    /// The process exited with a non-zero status.
     case abnormal
-    /// SIGKILL / task-manager kill.
+    /// The process was killed.
     case killed
-    /// Segmentation fault / crash.
+    /// The process crashed.
     case crashed
-    /// Out of memory.
+    /// The process ran out of memory.
     case outOfMemory
-    /// The child process never launched.
+    /// The process failed to launch.
     case launchFailed
-    /// Code-integrity failure (Windows; surfaced for completeness).
+    /// The process failed a code-integrity check. Windows only.
     case integrityFailure
 
     init(cefValue: cef_termination_status_t) {
@@ -41,17 +41,17 @@ public enum CefTerminationReason: Sendable, Equatable {
 /// An HTTP authentication challenge delivered to
 /// ``CefBrowserDelegate/browser(_:credentialFor:)``.
 public struct CefAuthChallenge: Sendable, Equatable {
-    /// Origin making the authentication request.
+    /// The origin of the request.
     public var origin: String
-    /// Whether the host is a proxy server (vs. the origin server).
+    /// Whether the challenge comes from a proxy rather than the server.
     public var isProxy: Bool
-    /// Server hostname.
+    /// The host name of the server or proxy.
     public var host: String
-    /// Server port.
+    /// The port of the server or proxy.
     public var port: Int
-    /// Authentication realm (may be empty).
+    /// The authentication realm, or an empty string.
     public var realm: String
-    /// Authentication scheme, e.g. `"basic"` or `"digest"` (may be empty).
+    /// The authentication scheme, such as `"basic"`, or an empty string.
     public var scheme: String
 
     public init(origin: String, isProxy: Bool, host: String, port: Int, realm: String, scheme: String) {

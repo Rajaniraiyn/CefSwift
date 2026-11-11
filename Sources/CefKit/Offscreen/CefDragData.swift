@@ -2,8 +2,7 @@ import AppKit
 import CCef
 import Foundation
 
-/// A drag operation bitmask, mirroring `cef_drag_operations_mask_t`. Maps to
-/// `NSDragOperation` for bridging native AppKit drag sessions.
+/// The operations a drag allows, mirroring `cef_drag_operations_mask_t`.
 public struct CefDragOperation: OptionSet, Sendable {
     public let rawValue: UInt32
     public init(rawValue: UInt32) { self.rawValue = rawValue }
@@ -17,12 +16,12 @@ public struct CefDragOperation: OptionSet, Sendable {
     public static let delete = CefDragOperation(rawValue: 32)
     public static let every = CefDragOperation(rawValue: UInt32.max)
 
-    /// The CEF enum value to hand back to host drag methods.
     var cefValue: cef_drag_operations_mask_t {
-        cef_drag_operations_mask_t(UInt32(truncatingIfNeeded: rawValue))
+        cef_drag_operations_mask_t(rawValue)
     }
 
-    /// Maps to `NSDragOperation`. `.every`/`.generic` widen to `.generic`.
+    /// The equivalent `NSDragOperation`. ``every`` maps to copy, link, move
+    /// and generic.
     public var nsOperation: NSDragOperation {
         if self == .every { return [.copy, .link, .move, .generic] }
         var op: NSDragOperation = []
@@ -35,7 +34,7 @@ public struct CefDragOperation: OptionSet, Sendable {
         return op
     }
 
-    /// Builds from an `NSDragOperation`.
+    /// Creates the mask equivalent to an `NSDragOperation`.
     public init(_ ns: NSDragOperation) {
         var raw: UInt32 = 0
         if ns.contains(.copy) { raw |= CefDragOperation.copy.rawValue }
@@ -48,21 +47,19 @@ public struct CefDragOperation: OptionSet, Sendable {
     }
 }
 
-/// A decoded snapshot of a page-initiated drag (page → system), captured in the
-/// render handler's `start_dragging`. The borrowed `cef_drag_data_t` is only
-/// valid during the callback, so all fields are eagerly read.
+/// What the page is dragging when it starts a drag from an offscreen browser.
 public struct CefDragData: Sendable, Equatable {
     /// Whether the drag is a hyperlink.
     public var isLink: Bool
-    /// Whether the drag is a text/html fragment.
+    /// Whether the drag is a text or HTML fragment.
     public var isFragment: Bool
-    /// The link URL (when `isLink`).
+    /// The link URL, when ``isLink`` is `true`.
     public var linkURL: String
-    /// The link title (when `isLink`).
+    /// The link title, when ``isLink`` is `true`.
     public var linkTitle: String
     /// The plain-text fragment being dragged.
     public var fragmentText: String
-    /// The text/html fragment being dragged.
+    /// The HTML fragment being dragged.
     public var fragmentHTML: String
 
     public init(
@@ -78,102 +75,96 @@ public struct CefDragData: Sendable, Equatable {
         self.fragmentHTML = fragmentHTML
     }
 
-    /// Reads a snapshot out of a borrowed `cef_drag_data_t`.
+    /// Reads a borrowed `cef_drag_data_t`.
     init(reading data: UnsafeMutablePointer<cef_drag_data_t>) {
         self.init(
-            isLink: (data.pointee.is_link?(data) ?? 0) != 0,
-            isFragment: (data.pointee.is_fragment?(data) ?? 0) != 0,
-            linkURL: CefStringUtil.takingUserFree(data.pointee.get_link_url?(data)) ?? "",
-            linkTitle: CefStringUtil.takingUserFree(data.pointee.get_link_title?(data)) ?? "",
-            fragmentText: CefStringUtil.takingUserFree(data.pointee.get_fragment_text?(data)) ?? "",
-            fragmentHTML: CefStringUtil.takingUserFree(data.pointee.get_fragment_html?(data)) ?? ""
+            isLink: data.pointee.is_link(data) != 0,
+            isFragment: data.pointee.is_fragment(data) != 0,
+            linkURL: CefStringUtil.takingUserFree(data.pointee.get_link_url(data)) ?? "",
+            linkTitle: CefStringUtil.takingUserFree(data.pointee.get_link_title(data)) ?? "",
+            fragmentText: CefStringUtil.takingUserFree(data.pointee.get_fragment_text(data)) ?? "",
+            fragmentHTML: CefStringUtil.takingUserFree(data.pointee.get_fragment_html(data)) ?? ""
         )
     }
 }
 
-// MARK: - Host-side drag/touch forwarding
+// MARK: - Drag and touch input
 
 extension CefBrowser {
 
-    // MARK: Drag target (system → page)
+    // MARK: Dragging into the page
 
-    /// Notifies the page a drag entered the view. Builds a `cef_drag_data_t`
-    /// from `text`/`html`/`urls`/`files` and forwards to the host.
+    /// Tells the page a drag entered the view, carrying the given content.
     public func dragTargetEnter(
         at point: CGPoint, modifiers: UInt32, allowedOps: CefDragOperation,
         text: String? = nil, html: String? = nil, urls: [URL] = [], files: [String] = []
     ) {
         guard let data = cef_drag_data_create() else { return }
-        // `cef_drag_data_create` returns a +1 ref; `drag_target_drag_enter`
-        // CONSUMES one ref (the C-API takes ownership of objects passed in), so
-        // we transfer our created ref into it and must NOT release again — doing
-        // so was a double-release / use-after-free (the drag-in crash). Only
-        // release ourselves if we never managed to hand it off.
-        var transferred = false
-        defer { if !transferred { cefRelease(UnsafeMutableRawPointer(data)) } }
-        // The web view rejects file contents on drag-in; reset to be safe.
-        data.pointee.reset_file_contents?(data)
+        data.pointee.reset_file_contents(data)
         if let text, !text.isEmpty {
-            CefStringUtil.withCefString(text) { data.pointee.set_fragment_text?(data, $0) }
+            CefStringUtil.withCefString(text) { data.pointee.set_fragment_text(data, $0) }
         }
         if let html, !html.isEmpty {
-            CefStringUtil.withCefString(html) { data.pointee.set_fragment_html?(data, $0) }
+            CefStringUtil.withCefString(html) { data.pointee.set_fragment_html(data, $0) }
         }
         if let first = urls.first {
-            CefStringUtil.withCefString(first.absoluteString) { data.pointee.set_link_url?(data, $0) }
+            CefStringUtil.withCefString(first.absoluteString) { data.pointee.set_link_url(data, $0) }
         }
         for file in files {
             CefStringUtil.withCefString(file) { path in
                 CefStringUtil.withCefString((file as NSString).lastPathComponent) { name in
-                    data.pointee.add_file?(data, path, name)
+                    data.pointee.add_file(data, path, name)
                 }
             }
         }
-        withHost { host in
-            guard let enter = host.pointee.drag_target_drag_enter else { return }
-            var event = cef_mouse_event_t(x: Int32(point.x.rounded()), y: Int32(point.y.rounded()), modifiers: modifiers)
-            enter(host, data, &event, allowedOps.cefValue)
-            transferred = true
+        // drag_target_drag_enter consumes the reference cef_drag_data_create
+        // returned; release it only if it was never handed over.
+        let delivered: Void? = withHost { host in
+            var event = cef_mouse_event_t(point, modifiers: modifiers)
+            host.pointee.drag_target_drag_enter(host, data, &event, allowedOps.cefValue)
         }
+        if delivered == nil { cefRelease(data) }
     }
 
-    /// Forwards a drag-over (call repeatedly as the mouse moves during a drag).
+    /// Tells the page the drag moved.
     public func dragTargetOver(at point: CGPoint, modifiers: UInt32, allowedOps: CefDragOperation) {
         withHost { host in
-            var event = cef_mouse_event_t(x: Int32(point.x.rounded()), y: Int32(point.y.rounded()), modifiers: modifiers)
-            host.pointee.drag_target_drag_over?(host, &event, allowedOps.cefValue)
+            var event = cef_mouse_event_t(point, modifiers: modifiers)
+            host.pointee.drag_target_drag_over(host, &event, allowedOps.cefValue)
         }
     }
 
-    /// Forwards a drag-leave.
+    /// Tells the page the drag left the view.
     public func dragTargetLeave() {
-        withHost { $0.pointee.drag_target_drag_leave?($0) }
+        withHost { $0.pointee.drag_target_drag_leave($0) }
     }
 
-    /// Forwards a drop.
+    /// Tells the page the drag was dropped.
     public func dragTargetDrop(at point: CGPoint, modifiers: UInt32) {
         withHost { host in
-            var event = cef_mouse_event_t(x: Int32(point.x.rounded()), y: Int32(point.y.rounded()), modifiers: modifiers)
-            host.pointee.drag_target_drop?(host, &event)
+            var event = cef_mouse_event_t(point, modifiers: modifiers)
+            host.pointee.drag_target_drop(host, &event)
         }
     }
 
-    // MARK: Drag source (page → system)
+    // MARK: Dragging out of the page
 
-    /// Tells the page a page-initiated system drag ended at `viewPoint`.
+    /// Tells the page a drag it started ended at `viewPoint` with `operation`.
     public func dragSourceEndedAt(viewPoint: CGPoint, operation: CefDragOperation) {
-        withHost { $0.pointee.drag_source_ended_at?($0, Int32(viewPoint.x.rounded()), Int32(viewPoint.y.rounded()), operation.cefValue) }
+        withHost {
+            $0.pointee.drag_source_ended_at(
+                $0, Int32(viewPoint.x.rounded()), Int32(viewPoint.y.rounded()), operation.cefValue)
+        }
     }
 
-    /// Tells the page the page-initiated system drag fully completed.
+    /// Tells the page the system drag session it started has finished.
     public func dragSourceSystemDragEnded() {
-        withHost { $0.pointee.drag_source_system_drag_ended?($0) }
+        withHost { $0.pointee.drag_source_system_drag_ended($0) }
     }
 
     // MARK: Touch
 
-    /// Forwards a raw touch event to Chromium's gesture/scroll recognizers
-    /// (windowless only). `point` is in view DIP (top-left origin).
+    /// Forwards a touch event. `point` is in view points.
     public func sendTouchEvent(
         id: Int32, point: CGPoint, type: cef_touch_event_type_t,
         modifiers: UInt32 = 0, pressure: Float = 0,
@@ -184,14 +175,11 @@ extension CefBrowser {
             event.id = id
             event.x = Float(point.x)
             event.y = Float(point.y)
-            event.radius_x = 0
-            event.radius_y = 0
-            event.rotation_angle = 0
             event.pressure = pressure
             event.type = type
             event.modifiers = modifiers
             event.pointer_type = pointerType
-            host.pointee.send_touch_event?(host, &event)
+            host.pointee.send_touch_event(host, &event)
         }
     }
 }

@@ -16,6 +16,7 @@ struct BrowserApp: CefSwiftApp {
         // Chrome's own UI is replaced by the SwiftUI toolbar; keep its
         // internal pages free of buttons that would open Chrome windows.
         configuration.chromeUI.hiddenAppMenuCommands = [.newWindow, .newIncognitoWindow]
+        configuration.customSchemes = [CefCustomScheme(name: BrowserPages.scheme)]
         return configuration
     }
 
@@ -33,6 +34,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let controller = BrowserController()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        CefRuntime.shared.registerSchemeHandler(scheme: BrowserPages.scheme, handler: BrowserPages())
         controller.adoptWindowsOpenedByChromium()
         controller.openTab()
     }
@@ -52,6 +54,9 @@ struct BrowserCommands: Commands {
     let controller: BrowserController
 
     var body: some Commands {
+        CommandGroup(replacing: .appInfo) {
+            Button("About CefSwift Browser") { controller.openTab(url: BrowserPages.about) }
+        }
         CommandGroup(replacing: .newItem) {
             Button("New Tab") { controller.openTab() }.keyboardShortcut("t")
             Button("New Private Tab") { controller.openTab(isPrivate: true) }.keyboardShortcut("n", modifiers: [.command, .shift])
@@ -84,7 +89,7 @@ struct BrowserCommands: Commands {
             Button("Passwords") { controller.openTab(url: URL(string: "chrome://password-manager")!) }
             Button("Chromium Settings") { controller.openTab(url: URL(string: "chrome://settings")!) }
             Button("Flags") { controller.openTab(url: URL(string: "chrome://flags")!) }
-            Button("About") { controller.openTab(url: URL(string: "chrome://version")!) }
+            Button("Version Details") { controller.openTab(url: URL(string: "chrome://version")!) }
         }
     }
 }

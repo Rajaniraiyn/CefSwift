@@ -4,36 +4,22 @@ import Testing
 @testable import CCef
 @testable import CefKit
 
-/// Loader tests that exercise the real CEF framework when present. They are
-/// skipped (via `.enabled(if:)`) when the framework is unavailable, e.g. on
-/// clean CI machines. They never call cef_initialize — that would take over
-/// the test process.
+/// Tests of the framework loader. Those that need the framework run only
+/// when `CEF_FRAMEWORK_PATH` points at it. None call `cef_initialize`, which
+/// would take over the test process.
 @Suite(.serialized)
 struct LoaderTests {
-    /// Resolves a usable framework binary from CEF_FRAMEWORK_PATH or the
-    /// local extracted distribution.
+    /// The framework binary named by `CEF_FRAMEWORK_PATH`, which may point at
+    /// the binary or at the `.framework` directory.
     static func frameworkBinaryPath() -> String? {
-        var candidates: [String] = []
-        if let env = ProcessInfo.processInfo.environment["CEF_FRAMEWORK_PATH"], !env.isEmpty {
-            candidates.append(env)
+        guard var path = ProcessInfo.processInfo.environment["CEF_FRAMEWORK_PATH"], !path.isEmpty else {
+            return nil
         }
-        candidates.append(
-            "/tmp/cefswift-ref/cef_binary_148.0.10+g7ee53f5+chromium-148.0.7778.218_macosarm64_minimal/"
-                + "Release/Chromium Embedded Framework.framework/Chromium Embedded Framework"
-        )
-        for candidate in candidates {
-            var resolved = candidate
-            var isDirectory: ObjCBool = false
-            if FileManager.default.fileExists(atPath: resolved, isDirectory: &isDirectory),
-                isDirectory.boolValue
-            {
-                resolved += "/Chromium Embedded Framework"
-            }
-            if FileManager.default.fileExists(atPath: resolved) {
-                return resolved
-            }
+        var isDirectory: ObjCBool = false
+        if FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory), isDirectory.boolValue {
+            path += "/Chromium Embedded Framework"
         }
-        return nil
+        return FileManager.default.fileExists(atPath: path) ? path : nil
     }
 
     static var frameworkAvailable: Bool { frameworkBinaryPath() != nil }
@@ -47,15 +33,15 @@ struct LoaderTests {
         #expect(ccef_has_symbol("cef_initialize") == 1)
         #expect(ccef_has_symbol("cef_no_such_function") == 0)
 
-        // First CEF call in the process must be cef_api_hash.
+        // cef_api_hash must be the first CEF call in the process.
         let hash = try #require(cef_api_hash(ccef_pinned_api_version(), 0))
         #expect(String(cString: hash) == String(cString: ccef_pinned_api_hash()))
         #expect(cef_api_version() == ccef_pinned_api_version())
 
-        // CefRuntime's own verification should agree.
+        // CefRuntime's own check agrees.
         try CefRuntime.verifyAPIHash()
 
-        // Framework-backed string conversion round-trip.
+        // A string conversion implemented by the framework.
         var utf16 = cef_string_t()
         #expect(cef_string_utf8_to_utf16("loader-test", 11, &utf16) == 1)
         #expect(CefStringUtil.string(from: utf16) == "loader-test")

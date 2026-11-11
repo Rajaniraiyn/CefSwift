@@ -1,8 +1,8 @@
 import Foundation
 
-/// Converts the flat "Chromium Embedded Framework.framework" that ships in CEF
-/// binary distributions into the versioned bundle layout required by newer
-/// Xcode releases (Xcode 26), exactly per the distro README.txt:
+/// Converts the flat `Chromium Embedded Framework.framework` in CEF binary
+/// distributions to the versioned bundle layout Xcode 26 and codesign
+/// require, as the distribution's README.txt describes:
 ///
 ///   Chromium Embedded Framework.framework
 ///   ├── Chromium Embedded Framework -> Versions/A/Chromium Embedded Framework
@@ -16,10 +16,10 @@ import Foundation
 ///      └── Current -> A
 enum FrameworkLayout {
     static let frameworkName = "Chromium Embedded Framework"
-    static let topLevelEntries = ["Chromium Embedded Framework", "Libraries", "Resources"]
+    static let topLevelEntries = [frameworkName, "Libraries", "Resources"]
 
-    /// Converts in place. Idempotent: a framework that already has `Versions/`
-    /// is left untouched.
+    /// Converts in place. A framework that already has `Versions/` is left
+    /// as it is.
     static func convertToVersionedBundle(framework: URL) throws {
         let fm = FileManager.default
         guard fm.fileExists(atPath: framework.path) else {
@@ -45,7 +45,6 @@ enum FrameworkLayout {
                     "The distribution may be corrupt — run 'swift package cef clean' and download again."
                 )
             }
-            // Move real contents into Versions/A, then leave a relative symlink behind.
             try fm.moveItem(at: source, to: versionA.appendingPathComponent(entry))
             try fm.createSymbolicLink(
                 atPath: source.path,
@@ -59,8 +58,7 @@ enum FrameworkLayout {
         )
     }
 
-    /// Sanity check used before bundling: the framework binary must resolve
-    /// through the symlink structure.
+    /// Checks that the framework binary resolves through the symlinks.
     static func validate(framework: URL) throws {
         let binary = framework.appendingPathComponent(frameworkName)
         guard FileManager.default.fileExists(atPath: binary.path) else {
