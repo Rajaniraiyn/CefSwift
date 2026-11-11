@@ -1,6 +1,6 @@
-# Tag-driven release. Push a `v*` tag and this drafts a GitHub Release with
-# auto-generated notes. SwiftPM consumers resolve via the tag (no asset upload
-# needed — GitHub attaches the source archive automatically).
+# Tag-driven release. Push a `v*` tag and this creates a GitHub Release with
+# generated notes. SwiftPM consumers resolve the tag itself, so there are no
+# assets to build or upload.
 #
 #   git tag v0.1.0 && git push origin v0.1.0
 #
@@ -11,21 +11,21 @@ on:
     tags:
       - 'v*'
 
-permissions:
-  contents: write
+permissions: {}
 
 jobs:
   release:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write   # create the release
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
+      # No checkout: gh works from the API, and --verify-tag fails if the tag
+      # is not on GitHub.
       - name: Create GitHub Release
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           gh release create "$GITHUB_REF_NAME" \
             --title "$GITHUB_REF_NAME" \

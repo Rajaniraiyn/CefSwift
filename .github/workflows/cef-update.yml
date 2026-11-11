@@ -1,11 +1,14 @@
-# Keeps the pinned CEF on the newest stable release.
+# Keeps the pinned CEF on the newest stable release (docs/automation.md).
 #
-# Twice a week this runs Scripts/update-cef.py. When CEF has moved, it opens
-# (or refreshes) a pull request that merges itself once CI is green.
+# Scheduled runs move CEF and open one `cef-update` pull request that merges
+# itself once CI is green. Running it by hand with `api_version` instead moves
+# the CEF_API_VERSION pin on a `cef-api-update` pull request that a person
+# merges, because that changes the C API the Swift code sees.
 #
 # Repository setup, once:
 #   - Settings → General → enable "Allow auto-merge".
-#   - Protect `main` with the `ci` job as a required status check.
+#   - Protect `main` with the `ci` job as a required status check (without
+#     it, auto-merge would merge before CI has run).
 #   - Settings → Actions → General → allow Actions to create pull requests.
 #   - Optional: variable CEF_UPDATE_COAUTHOR ("Name <email>") to change who
 #     is credited as co-author of the update commits.
@@ -15,54 +18,104 @@ on:
   schedule:
     - cron: '17 6 * * 1,4'   # Monday and Thursday, 06:17 UTC
   workflow_dispatch:
+    inputs:
+      api_version:
+        description: >-
+          Move CEF_API_VERSION instead of CEF: "latest" or a number such as
+          15700. Opens a pull request that does not merge itself. Leave empty
+          for a normal CEF update.
+        type: string
+        default: ''
 
-permissions:
-  actions: write
-  contents: write
-  pull-requests: write
+permissions: {}
 
+# One run at a time: two runs would race on the same branch and pull request.
 concurrency:
   group: cef-update
   cancel-in-progress: false
-
-env:
-  GH_TOKEN: ${{ github.token }}
-  COAUTHOR: ${{ vars.CEF_UPDATE_COAUTHOR || 'Rajaniraiyn <Rajaniraiyn@users.noreply.github.com>' }}
 
 jobs:
   update:
     runs-on: macos-15   # the C bridge is generated with Apple clang
     timeout-minutes: 30
+    permissions:
+      actions: write        # start CI for the update branch
+      contents: write       # push the update branch
+      pull-requests: write  # open, refresh or close the pull request; enable auto-merge
+    env:
+      GH_TOKEN: ${{ github.token }}
+      API_VERSION: ${{ inputs.api_version }}
+      BRANCH: ${{ inputs.api_version && 'cef-api-update' || 'cef-update' }}
+      BASE: ${{ github.event.repository.default_branch }}
+      COAUTHOR: ${{ vars.CEF_UPDATE_COAUTHOR || 'Rajaniraiyn <Rajaniraiyn@users.noreply.github.com>' }}
     steps:
+      # Always start from the default branch, even when dispatched from another.
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
 
-      - name: Update to the newest stable CEF
+      - name: Update the pin
         id: cef
-        run: Scripts/update-cef.py
+        run: Scripts/update-cef.py ${API_VERSION:+--api-version "$API_VERSION"}
 
-      - name: Commit and push
+      # Saved from the default branch, so CI on the update branch can restore
+      # it instead of downloading the same 135 MB again.
+      - name: Share the download with CI
+        if: steps.cef.outputs.updated == 'true' && steps.cef.outputs.cef_old != steps.cef.outputs.cef_new
+        uses: actions/cache/save@v4
+        with:
+          path: .cef/downloads
+          key: cef-${{ steps.cef.outputs.cef_new }}-macosarm64-minimal
+
+      - name: Commit and open or refresh the pull request
         if: steps.cef.outputs.updated == 'true'
+        env:
+          SUBJECT: ${{ steps.cef.outputs.subject }}
         run: |
+          set -euo pipefail
+          { cat .cef/update/commit-message.txt; printf '\nCo-authored-by: %s\n' "$COAUTHOR"; } > "$RUNNER_TEMP/message.txt"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git switch --force-create cef-update
+          git switch --force-create "$BRANCH"
           git add CEF_VERSION.json Sources/CCef
-          git commit \
-            --message "Update CEF to ${{ steps.cef.outputs.new }}" \
-            --message "From ${{ steps.cef.outputs.old }}." \
-            --message "Co-authored-by: ${COAUTHOR}"
-          git push --force origin cef-update
+          git commit --quiet --file "$RUNNER_TEMP/message.txt"
 
-      - name: Open or refresh the pull request
-        if: steps.cef.outputs.updated == 'true'
-        run: |
-          TITLE="Update CEF to ${{ steps.cef.outputs.new }}"
-          if gh pr view cef-update --json state --jq .state 2>/dev/null | grep -q OPEN; then
-            gh pr edit cef-update --title "$TITLE" --body-file .cef/update-summary.md
-          else
-            gh pr create --base main --head cef-update --title "$TITLE" --body-file .cef/update-summary.md
+          # An open pull request from an earlier run is refreshed in place;
+          # if it already holds exactly this tree, there is nothing to push.
+          state="$(gh pr view "$BRANCH" --json state --jq .state 2>/dev/null || true)"
+          if [ "$state" = OPEN ] && git fetch --quiet --depth=1 origin "$BRANCH" && git diff --quiet FETCH_HEAD HEAD; then
+            echo "The open pull request already has this change."
+            exit 0
           fi
-          # Pull requests opened with the workflow token do not trigger other
+          git push --force origin "$BRANCH"
+          if [ "$state" = OPEN ]; then
+            gh pr edit "$BRANCH" --title "$SUBJECT" --body-file .cef/update/pr-body.md
+          else
+            gh pr create --base "$BASE" --head "$BRANCH" --title "$SUBJECT" --body-file .cef/update/pr-body.md
+          fi
+
+          # Pushes made with the workflow token do not trigger other
           # workflows, so start CI for the branch explicitly.
-          gh workflow run ci.yml --ref cef-update
-          gh pr merge cef-update --auto --squash
+          gh workflow run ci.yml --ref "$BRANCH"
+
+          # Only CEF updates merge themselves. The squash commit's message is
+          # given explicitly so main gets exactly "Update CEF to …", the
+          # before line and the co-author trailer — not the PR description.
+          # Re-enabling after a refresh picks up the new subject and head.
+          if [ "$BRANCH" = cef-update ]; then
+            tail -n +3 "$RUNNER_TEMP/message.txt" > "$RUNNER_TEMP/squash-body.txt"
+            gh pr merge "$BRANCH" --disable-auto >/dev/null 2>&1 || true
+            gh pr merge "$BRANCH" --auto --squash --match-head-commit "$(git rev-parse HEAD)" \
+              --subject "$SUBJECT" --body-file "$RUNNER_TEMP/squash-body.txt"
+          fi
+
+      # The default branch already has the newest CEF (merged or updated by
+      # hand), so an update pull request still open is obsolete.
+      - name: Close an obsolete update pull request
+        if: steps.cef.outputs.updated == 'false' && env.BRANCH == 'cef-update'
+        env:
+          CURRENT: ${{ steps.cef.outputs.cef_new }}
+        run: |
+          if [ "$(gh pr view "$BRANCH" --json state --jq .state 2>/dev/null)" = OPEN ]; then
+            gh pr close "$BRANCH" --delete-branch --comment "$BASE already has CEF $CURRENT."
+          fi
