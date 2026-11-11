@@ -101,7 +101,7 @@ public enum CefPermissionDecision: Sendable, Equatable {
 }
 
 /// A permission request delivered to
-/// ``CefBrowserDelegate/browser(_:requestsPermission:)``.
+/// ``CefBrowserDelegate/browser(_:decidePermission:)``.
 public struct CefPermissionRequest: Sendable, Equatable {
     /// The permission classes requested (may combine several).
     public var kinds: CefPermissionKind

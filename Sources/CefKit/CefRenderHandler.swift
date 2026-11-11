@@ -109,7 +109,7 @@ extension BrowserClient {
     /// Only called for browsers created via the OSR factory path; windowed
     /// browsers never set `renderPointer`, so `get_render_handler` returns NULL
     /// and CEF uses its native compositor.
-    func makeRenderHandler() {
+    func makeRenderHandler() -> UnsafeMutablePointer<cef_render_handler_t> {
         let handler = cefAllocate(cef_render_handler_t.self, owner: self)
 
         handler.pointee.get_view_rect = { handlerSelf, browser, rect in
@@ -250,11 +250,7 @@ extension BrowserClient {
             }
         }
 
-        // on_cursor_change lives on the display handler (set up in makeClient);
-        // the existing handler already routes to the delegate, and the OSR host
-        // is also the delegate, so cursor changes arrive there.
-
-        renderPointer = handler
+        return handler
     }
 
     /// Reads the host's current geometry, or a 1x1 fallback if the host is gone

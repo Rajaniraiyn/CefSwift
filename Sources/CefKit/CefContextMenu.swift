@@ -89,11 +89,12 @@ extension CefContextMenuParams {
 /// User-defined command IDs must be between ``userCommandIDFirst`` and
 /// ``userCommandIDLast``; selecting one fires
 /// ``CefBrowserDelegate/browser(_:contextMenuCommand:params:)``.
+@MainActor
 public final class CefMenuModel {
     /// Lower bound for app-defined command IDs (`MENU_ID_USER_FIRST`).
-    public static let userCommandIDFirst = 26500
+    public nonisolated static let userCommandIDFirst = 26500
     /// Upper bound for app-defined command IDs (`MENU_ID_USER_LAST`).
-    public static let userCommandIDLast = 28500
+    public nonisolated static let userCommandIDLast = 28500
 
     private let raw: UnsafeMutablePointer<cef_menu_model_t>
 
@@ -190,5 +191,109 @@ public final class CefRunContextMenuCallback {
         raw.pointee.cancel?(raw)
         cefRelease(UnsafeMutableRawPointer(raw))
         self.raw = nil
+    }
+}
+
+// MARK: - Declarative configuration
+
+/// A custom entry in a browser's context menu.
+@MainActor
+public struct CefContextMenuItem {
+    public var title: String
+    /// Decides per click whether the item appears — for example only on
+    /// links, or only with a selection. `nil` always shows it.
+    public var isVisible: ((CefContextMenuParams) -> Bool)?
+    public var action: (CefBrowser, CefContextMenuParams) -> Void
+
+    public init(
+        _ title: String,
+        isVisible: ((CefContextMenuParams) -> Bool)? = nil,
+        action: @escaping (CefBrowser, CefContextMenuParams) -> Void
+    ) {
+        self.title = title
+        self.isVisible = isVisible
+        self.action = action
+    }
+}
+
+/// Shapes a browser's context menu without writing a delegate: drop
+/// Chromium's entries you don't want, add your own, opt into Inspect Element.
+///
+/// ```swift
+/// options.contextMenu.hiddenCommands = [.viewSource, .print]
+/// options.contextMenu.showsInspectElement = true
+/// options.contextMenu.items = [
+///     CefContextMenuItem("Copy Link as Markdown", isVisible: { $0.linkURL != nil }) { browser, target in
+///         copyMarkdownLink(target.linkURL!, title: browser.title)
+///     },
+/// ]
+/// ```
+///
+/// For menus that depend on more than the click target, implement
+/// ``CefBrowserDelegate/browser(_:configureContextMenu:params:)``, which
+/// runs after this configuration is applied.
+@MainActor
+public struct CefContextMenuConfiguration {
+    /// `false` suppresses the context menu entirely.
+    public var isEnabled = true
+    /// Built-in entries to remove.
+    public var hiddenCommands: Set<CefContextMenuCommand> = []
+    /// Adds "Inspect Element", opening DevTools on the clicked node.
+    public var showsInspectElement = false
+    /// Your entries, appended below Chromium's.
+    public var items: [CefContextMenuItem] = []
+
+    public init() {}
+
+    static let inspectCommandID = CefMenuModel.userCommandIDLast
+
+    /// Applies the configuration to a menu about to be shown.
+    func apply(to menu: CefMenuModel, params: CefContextMenuParams) {
+        guard isEnabled else {
+            menu.clear()
+            return
+        }
+        for command in hiddenCommands {
+            menu.remove(commandID: command.rawValue)
+        }
+        let visible = items.enumerated().filter { $0.element.isVisible?(params) ?? true }
+        if !visible.isEmpty || showsInspectElement {
+            menu.trimSeparators()
+            if menu.count > 0 { menu.addSeparator() }
+        }
+        for (index, item) in visible {
+            menu.addItem(commandID: CefMenuModel.userCommandIDFirst + index, title: item.title)
+        }
+        if showsInspectElement {
+            if !visible.isEmpty { menu.addSeparator() }
+            menu.addItem(commandID: Self.inspectCommandID, title: "Inspect Element")
+        }
+    }
+
+    /// Runs the custom command `commandID`. Returns whether it was one of ours.
+    func perform(commandID: Int, in browser: CefBrowser, params: CefContextMenuParams) -> Bool {
+        if showsInspectElement, commandID == Self.inspectCommandID {
+            browser.showDevTools(inspecting: CGPoint(x: params.x, y: params.y))
+            return true
+        }
+        let index = commandID - CefMenuModel.userCommandIDFirst
+        guard items.indices.contains(index) else { return false }
+        items[index].action(browser, params)
+        return true
+    }
+}
+
+extension CefMenuModel {
+    /// Removes leading, trailing and doubled separators left behind after
+    /// entries were removed.
+    public func trimSeparators() {
+        var index = count - 1
+        while index >= 0 {
+            let isEdge = index == 0 || index == count - 1
+            if isSeparator(at: index), isEdge || isSeparator(at: index - 1) {
+                removeItem(at: index)
+            }
+            index -= 1
+        }
     }
 }

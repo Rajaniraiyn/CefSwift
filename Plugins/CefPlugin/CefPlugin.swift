@@ -84,7 +84,7 @@ struct CefPlugin: CommandPlugin {
             // version has no sha1 to verify against, so be explicit about it.
             throw CefPluginError(
                 "--cef-version \(cefVersionOverride) does not match the pinned manifest version \(manifest.cef). " +
-                "Update CEF_VERSION.json (Scripts/cef-update.sh) instead of overriding ad hoc, " +
+                "Update CEF_VERSION.json (Scripts/update-cef.py) instead of overriding ad hoc, " +
                 "or pass --manifest pointing at a manifest pinned to that version."
             )
         }

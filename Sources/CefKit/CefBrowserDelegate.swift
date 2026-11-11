@@ -1,241 +1,191 @@
 import AppKit
 import Foundation
 
-/// What to do with a window/tab a page tries to open.
+/// Decisions and events for a ``CefBrowser``.
 ///
-/// - Note: Superseded by the richer
-///   ``CefBrowserDelegate/browser(_:decideWindowOpenFor:)`` / ``CefWindowOpenAction``
-///   API, which surfaces the disposition (foreground/background tab, popup,
-///   window), the user-gesture flag and popup features. ``CefPopupDecision`` is
-///   kept for source compatibility and bridged automatically.
-public enum CefPopupDecision: Sendable {
-    /// Let CEF open the popup in its own window.
-    case allow
-    /// Suppress the popup entirely.
-    case block
-    /// Suppress the popup and navigate the requesting browser to its URL.
-    case openInSameBrowser
-}
-
-/// All-optional, pluggable observer for ``CefBrowser`` events. Every method
-/// has a no-op default implementation — adopt only what you need.
+/// Browser *state* (URL, title, loading, progress, …) is observable directly
+/// on ``CefBrowser``; the delegate covers what observation cannot: policy
+/// decisions and one-shot events. Every method has a default, so adopt only
+/// what you need.
+///
+/// Decisions Chromium can wait for are `async` — present your own UI, await
+/// the user, and return. Decisions Chromium needs immediately (navigation,
+/// window opening, key handling) are synchronous.
 @MainActor
 public protocol CefBrowserDelegate: AnyObject {
-    /// The page title changed.
-    func browser(_ b: CefBrowser, didChangeTitle title: String)
-    /// The main-frame URL changed.
-    func browser(_ b: CefBrowser, didChangeURL url: URL?)
-    /// Loading started/stopped, or history availability changed.
-    func browser(_ b: CefBrowser, didChangeLoading isLoading: Bool, canGoBack: Bool, canGoForward: Bool)
-    /// Estimated load progress changed (0.0 ... 1.0).
-    func browser(_ b: CefBrowser, didChangeProgress progress: Double)
+
+    // MARK: Lifecycle
+
+    /// The underlying Chromium browser exists; commands now take effect.
+    func browserDidCreate(_ browser: CefBrowser)
+    /// The browser finished closing. Drop your references to it.
+    func browserDidClose(_ browser: CefBrowser)
+    /// A browser was created on this browser's behalf (a native popup, or
+    /// DevTools). It inherits this delegate; assign another to change that.
+    func browser(_ browser: CefBrowser, didOpen popup: CefBrowser)
+
+    // MARK: Loading
+
+    /// The main frame finished loading with the given HTTP status.
+    func browser(_ browser: CefBrowser, didFinishLoadWithStatus httpStatus: Int)
     /// The main frame failed to load.
-    func browser(_ b: CefBrowser, didFailLoad code: Int, errorText: String, failedURL: String)
-    /// The page's favicon URL(s) changed.
-    func browser(_ b: CefBrowser, didChangeFavicon urls: [URL])
-    /// The page entered or exited HTML fullscreen.
-    func browser(_ b: CefBrowser, didChangeFullscreen isFullscreen: Bool)
-    /// The page wants to open a popup window. Defaults to ``CefPopupDecision/allow``.
-    ///
-    /// - Note: Prefer ``browser(_:decideWindowOpenFor:)``, which carries the
-    ///   disposition, user-gesture flag and popup features. This method is
-    ///   bridged into the new API for source compatibility.
-    func browser(_ b: CefBrowser, requestsPopupFor url: URL?) -> CefPopupDecision
+    func browser(_ browser: CefBrowser, didFailLoad error: CefLoadError)
+    /// The page logged to the console.
+    func browser(_ browser: CefBrowser, didLog message: CefConsoleMessage)
+    /// The render process went away. Reloading recovers.
+    func browser(_ browser: CefBrowser, renderProcessDidTerminate reason: CefTerminationReason)
 
-    /// The page is trying to open a link/popup/new window (`target=_blank`,
-    /// `window.open`, ⌘/Ctrl-click, middle-click). Decide how CefSwift routes
-    /// it, Electron-`setWindowOpenHandler`-style.
-    ///
-    /// `request` carries the target URL, frame name, the disposition Chromium
-    /// computed (e.g. ``CefWindowOpenDisposition/newBackgroundTab`` for
-    /// ⌘-click), the user-gesture flag, popup features, and whether the source
-    /// browser is offscreen.
-    ///
-    /// Return one of:
-    /// - ``CefWindowOpenAction/deny`` — suppress it.
-    /// - ``CefWindowOpenAction/openInCurrentBrowser`` — load the URL in this
-    ///   browser (the safe choice for OSR).
-    /// - ``CefWindowOpenAction/allowNativePopup`` — let CEF create a native
-    ///   popup (windowed/chrome only; downgraded to `openInCurrentBrowser` for
-    ///   OSR browsers).
-    /// - ``CefWindowOpenAction/handled`` — you opened your own tab/window;
-    ///   CEF's popup is blocked.
-    ///
-    /// The default implementation bridges the legacy `requestsPopupFor` result
-    /// (so existing apps keep working), then applies the OSR safety downgrade.
-    func browser(_ b: CefBrowser, decideWindowOpenFor request: CefWindowOpenRequest) -> CefWindowOpenAction
-    /// The browser finished closing; release any references to it.
-    func browserDidClose(_ b: CefBrowser)
-    /// A console message was logged by the page.
-    func browser(_ b: CefBrowser, didReceiveConsoleMessage message: String, level: CefLogSeverity, source: String, line: Int)
-    /// A download is about to begin; decide what happens to it. The default
-    /// saves to `~/Downloads/<suggestedName>`.
-    func browser(_ b: CefBrowser, decidePolicyForDownload download: CefDownload, suggestedName: String) -> CefDownloadDecision
-    /// A download's progress/state changed (fires repeatedly, including the
-    /// final update where `isComplete` or `isCanceled` is set).
-    func browser(_ b: CefBrowser, downloadDidProgress download: CefDownload)
+    // MARK: Synchronous policy
 
-    // MARK: JavaScript dialogs
+    /// Allow or cancel a main-frame navigation.
+    func browser(_ browser: CefBrowser, decidePolicyFor navigation: CefNavigationAction) -> CefNavigationDecision
+    /// Route a `target=_blank` / `window.open` / ⌘-click request.
+    func browser(_ browser: CefBrowser, decideWindowOpenFor request: CefWindowOpenRequest) -> CefWindowOpenAction
+    /// A key event, before (`isBeforePage`) or after the page saw it. Return
+    /// `true` to consume it.
+    func browser(_ browser: CefBrowser, handleKeyEvent event: CefKeyEvent, isBeforePage: Bool) -> Bool
+    /// Customize the context menu before it is shown.
+    func browser(_ browser: CefBrowser, configureContextMenu menu: CefMenuModel, params: CefContextMenuParams)
+    /// A context-menu command was chosen. Return `true` if you handled it.
+    func browser(_ browser: CefBrowser, contextMenuCommand commandID: Int, params: CefContextMenuParams) -> Bool
+    /// Chrome is about to run one of its commands (see ``CefChromeCommand``)
+    /// — new tab, find, print, zoom, … Return `true` to handle it yourself.
+    /// Chrome-style browsers only.
+    func browser(_ browser: CefBrowser, handleChromeCommand command: CefChromeCommand, disposition: CefWindowOpenDisposition) -> Bool
 
-    /// The page wants to show a JavaScript dialog (`alert`/`confirm`/`prompt`).
-    /// Resolve it via `callback`. Return `true` if you will present it
-    /// yourself; return `false` to use CefSwift's native `NSAlert`.
-    func browser(_ b: CefBrowser, runJSDialog dialog: CefJSDialog, callback: CefJSDialogCallback) -> Bool
+    // MARK: Asynchronous policy
 
-    /// The page is navigating away and has a `beforeunload` handler. Resolve
-    /// `callback` (`success: true` = leave). Return `true` to present your own
-    /// dialog; `false` for the native one.
-    func browser(_ b: CefBrowser, runBeforeUnloadDialog message: String, isReload: Bool, callback: CefJSDialogCallback) -> Bool
+    /// Present `alert` / `confirm` / `prompt`. The default shows a native sheet.
+    func browser(_ browser: CefBrowser, runJavaScriptDialog dialog: CefJSDialog) async -> CefJSDialogResponse
+    /// Confirm leaving a page with a `beforeunload` handler. Return `true` to
+    /// leave. The default shows a native sheet.
+    func browser(_ browser: CefBrowser, confirmLeavingPage isReload: Bool) async -> Bool
+    /// Resolve a permission request. The default denies.
+    func browser(_ browser: CefBrowser, decidePermission request: CefPermissionRequest) async -> CefPermissionDecision
+    /// Supply credentials for HTTP/proxy authentication, or `nil` to cancel.
+    /// The default shows a native sign-in sheet.
+    func browser(_ browser: CefBrowser, credentialFor challenge: CefAuthChallenge) async -> CefCredential?
+    /// Return `true` to proceed despite a certificate error. The default
+    /// cancels the load.
+    func browser(_ browser: CefBrowser, shouldProceedDespite error: CefCertificateError) async -> Bool
+    /// Decide where a download goes. The default saves to `~/Downloads`.
+    func browser(_ browser: CefBrowser, decideDestinationFor download: CefDownload, suggestedName: String) async -> CefDownloadDecision
 
-    // MARK: Context menu
+    // MARK: Downloads
 
-    /// A context menu is about to appear. Mutate `menu` (clear, add custom
-    /// items with command IDs in
-    /// ``CefMenuModel/userCommandIDFirst``...``CefMenuModel/userCommandIDLast``,
-    /// remove items) before it is shown. `params` describes the click target.
-    func browser(_ b: CefBrowser, configureContextMenu menu: CefMenuModel, params: CefContextMenuParams)
-
-    /// A context-menu command was selected. Return `true` if you handled a
-    /// custom command, `false` to let CEF run its built-in command.
-    func browser(_ b: CefBrowser, contextMenuCommand commandID: Int, params: CefContextMenuParams) -> Bool
-
-    /// The context menu was dismissed (canceled or a command was chosen).
-    func browserContextMenuDidClose(_ b: CefBrowser)
-
-    // MARK: Permissions
-
-    /// The page requested one or more permissions. Return how to resolve it.
-    /// The default is ``CefPermissionDecision/deny`` (apps that want the
-    /// system prompt should override and return `.allow`).
-    func browser(_ b: CefBrowser, requestsPermission request: CefPermissionRequest) -> CefPermissionDecision
-
-    // MARK: Navigation / requests
-
-    /// Decide whether to allow a navigation. Return ``CefNavigationDecision/cancel``
-    /// to block it (e.g. to route external schemes yourself). Defaults to
-    /// ``CefNavigationDecision/allow``.
-    func browser(_ b: CefBrowser, decidePolicyForNavigation url: URL?, isRedirect: Bool, userGesture: Bool) -> CefNavigationDecision
-
-    /// The page tried to open `url` in a new tab/window (middle-click,
-    /// ctrl-click, etc.). Returns whether you handled it; returning `true`
-    /// cancels CEF's default new-window behavior.
-    func browser(_ b: CefBrowser, didRequestNewTab url: URL?) -> Bool
-
-    /// A certificate error occurred for `url`. Return `true` to override and
-    /// continue loading; `false` (default) to cancel.
-    func browser(_ b: CefBrowser, didEncounterCertificateError url: URL?, errorCode: Int) -> Bool
-
-    /// The render process for this browser terminated unexpectedly — a crash
-    /// recovery signal. Consider reloading.
-    func browser(_ b: CefBrowser, renderProcessDidTerminate reason: CefTerminationReason, errorCode: Int)
-
-    /// The server requested HTTP authentication. Resolve `callback` with
-    /// credentials or cancel it. Return `true` to handle it; `false` (default)
-    /// cancels the request immediately.
-    func browser(_ b: CefBrowser, didReceiveAuthChallenge challenge: CefAuthChallenge, callback: CefAuthCallback) -> Bool
-
-    // MARK: Keyboard / focus
-
-    /// A key event before it reaches the page — your chance to intercept
-    /// app-level shortcuts. Return `true` if you handled it (the page won't
-    /// see it). Defaults to `false`.
-    func browser(_ b: CefBrowser, handleKeyEvent event: CefKeyEvent, isBeforePage: Bool) -> Bool
-
-    /// The browser is about to lose focus to the next/previous component.
-    func browser(_ b: CefBrowser, willTakeFocusNext next: Bool)
-
-    /// The browser is requesting focus. Return `true` to cancel (deny) it;
-    /// `false` (default) to allow.
-    func browserShouldCancelSetFocus(_ b: CefBrowser) -> Bool
-
-    /// The browser received focus.
-    func browserDidGainFocus(_ b: CefBrowser)
-
-    // MARK: Display extras
-
-    /// The status text changed (e.g. the link under the cursor).
-    func browser(_ b: CefBrowser, didChangeStatusMessage message: String)
-
-    /// The browser wants to show a tooltip. Return `true` to suppress CEF's
-    /// own tooltip and present your own; `false` (default) for native behavior.
-    func browser(_ b: CefBrowser, showTooltip text: String) -> Bool
-
-    /// The mouse cursor changed. Informational for windowed browsers (CEF
-    /// applies it); OSR hosts can drive `NSCursor` from this.
-    func browser(_ b: CefBrowser, didChangeCursor cursor: CefCursorType)
+    /// A download's progress or state changed. ``CefBrowser/downloads``
+    /// carries the same information observably.
+    func browser(_ browser: CefBrowser, downloadDidUpdate download: CefDownload)
 }
 
-// Default no-op implementations.
 extension CefBrowserDelegate {
-    public func browser(_ b: CefBrowser, didChangeTitle title: String) {}
-    public func browser(_ b: CefBrowser, didChangeURL url: URL?) {}
-    public func browser(_ b: CefBrowser, didChangeLoading isLoading: Bool, canGoBack: Bool, canGoForward: Bool) {}
-    public func browser(_ b: CefBrowser, didChangeProgress progress: Double) {}
-    public func browser(_ b: CefBrowser, didFailLoad code: Int, errorText: String, failedURL: String) {}
-    public func browser(_ b: CefBrowser, didChangeFavicon urls: [URL]) {}
-    public func browser(_ b: CefBrowser, didChangeFullscreen isFullscreen: Bool) {}
-    public func browser(_ b: CefBrowser, requestsPopupFor url: URL?) -> CefPopupDecision { .allow }
-    public func browser(_ b: CefBrowser, decideWindowOpenFor request: CefWindowOpenRequest) -> CefWindowOpenAction {
-        // Bridge the legacy popup decision so apps that only adopted
-        // requestsPopupFor keep their behavior — then apply the OSR safety
-        // downgrade (a native popup for an OSR browser is unsafe).
-        let legacy = browser(b, requestsPopupFor: request.targetURL)
-        return CefWindowOpenPolicy.action(for: legacy, request: request)
+    public func browserDidCreate(_ browser: CefBrowser) {}
+    public func browserDidClose(_ browser: CefBrowser) {}
+    public func browser(_ browser: CefBrowser, didOpen popup: CefBrowser) {}
+
+    public func browser(_ browser: CefBrowser, didFinishLoadWithStatus httpStatus: Int) {}
+    public func browser(_ browser: CefBrowser, didFailLoad error: CefLoadError) {}
+    public func browser(_ browser: CefBrowser, didLog message: CefConsoleMessage) {}
+    public func browser(_ browser: CefBrowser, renderProcessDidTerminate reason: CefTerminationReason) {}
+
+    public func browser(_ browser: CefBrowser, decidePolicyFor navigation: CefNavigationAction) -> CefNavigationDecision {
+        .allow
     }
-    public func browserDidClose(_ b: CefBrowser) {}
-    public func browser(_ b: CefBrowser, didReceiveConsoleMessage message: String, level: CefLogSeverity, source: String, line: Int) {}
-    public func browser(_ b: CefBrowser, decidePolicyForDownload download: CefDownload, suggestedName: String) -> CefDownloadDecision {
+    public func browser(_ browser: CefBrowser, decideWindowOpenFor request: CefWindowOpenRequest) -> CefWindowOpenAction {
+        CefWindowOpenPolicy.defaultAction(for: request)
+    }
+    public func browser(_ browser: CefBrowser, handleKeyEvent event: CefKeyEvent, isBeforePage: Bool) -> Bool { false }
+    public func browser(_ browser: CefBrowser, configureContextMenu menu: CefMenuModel, params: CefContextMenuParams) {}
+    public func browser(_ browser: CefBrowser, contextMenuCommand commandID: Int, params: CefContextMenuParams) -> Bool {
+        false
+    }
+    public func browser(_ browser: CefBrowser, handleChromeCommand command: CefChromeCommand, disposition: CefWindowOpenDisposition) -> Bool {
+        false
+    }
+
+    public func browser(_ browser: CefBrowser, runJavaScriptDialog dialog: CefJSDialog) async -> CefJSDialogResponse {
+        await CefDialogPresenter.present(dialog, in: browser.hostWindow)
+    }
+    public func browser(_ browser: CefBrowser, confirmLeavingPage isReload: Bool) async -> Bool {
+        await CefDialogPresenter.confirmLeaving(isReload: isReload, in: browser.hostWindow)
+    }
+    public func browser(_ browser: CefBrowser, decidePermission request: CefPermissionRequest) async -> CefPermissionDecision {
+        .deny
+    }
+    public func browser(_ browser: CefBrowser, credentialFor challenge: CefAuthChallenge) async -> CefCredential? {
+        await CefDialogPresenter.requestCredential(for: challenge, in: browser.hostWindow)
+    }
+    public func browser(_ browser: CefBrowser, shouldProceedDespite error: CefCertificateError) async -> Bool { false }
+    public func browser(_ browser: CefBrowser, decideDestinationFor download: CefDownload, suggestedName: String) async -> CefDownloadDecision {
         .allow(destination: nil)
     }
-    public func browser(_ b: CefBrowser, downloadDidProgress download: CefDownload) {}
 
-    public func browser(_ b: CefBrowser, runJSDialog dialog: CefJSDialog, callback: CefJSDialogCallback) -> Bool { false }
-    public func browser(_ b: CefBrowser, runBeforeUnloadDialog message: String, isReload: Bool, callback: CefJSDialogCallback) -> Bool { false }
-
-    public func browser(_ b: CefBrowser, configureContextMenu menu: CefMenuModel, params: CefContextMenuParams) {}
-    public func browser(_ b: CefBrowser, contextMenuCommand commandID: Int, params: CefContextMenuParams) -> Bool { false }
-    public func browserContextMenuDidClose(_ b: CefBrowser) {}
-
-    public func browser(_ b: CefBrowser, requestsPermission request: CefPermissionRequest) -> CefPermissionDecision { .deny }
-
-    public func browser(_ b: CefBrowser, decidePolicyForNavigation url: URL?, isRedirect: Bool, userGesture: Bool) -> CefNavigationDecision { .allow }
-    public func browser(_ b: CefBrowser, didRequestNewTab url: URL?) -> Bool { false }
-    public func browser(_ b: CefBrowser, didEncounterCertificateError url: URL?, errorCode: Int) -> Bool { false }
-    public func browser(_ b: CefBrowser, renderProcessDidTerminate reason: CefTerminationReason, errorCode: Int) {}
-    public func browser(_ b: CefBrowser, didReceiveAuthChallenge challenge: CefAuthChallenge, callback: CefAuthCallback) -> Bool { false }
-
-    public func browser(_ b: CefBrowser, handleKeyEvent event: CefKeyEvent, isBeforePage: Bool) -> Bool { false }
-    public func browser(_ b: CefBrowser, willTakeFocusNext next: Bool) {}
-    public func browserShouldCancelSetFocus(_ b: CefBrowser) -> Bool { false }
-    public func browserDidGainFocus(_ b: CefBrowser) {}
-
-    public func browser(_ b: CefBrowser, didChangeStatusMessage message: String) {}
-    public func browser(_ b: CefBrowser, showTooltip text: String) -> Bool { false }
-    public func browser(_ b: CefBrowser, didChangeCursor cursor: CefCursorType) {}
+    public func browser(_ browser: CefBrowser, downloadDidUpdate download: CefDownload) {}
 }
 
-/// Per-browser creation options. Kept deliberately small in v1.
+/// Stands in when a browser has no delegate, so every decision still gets
+/// the protocol's default behavior.
 @MainActor
-public struct CefBrowserOptions {
-    /// Runtime style for this browser. Note: CEF forces Alloy style for
-    /// browsers embedded via a parent NSView.
-    public var runtimeStyle: CefRuntimeStyle = .default
-    /// Background color shown before the page paints. Defaults to CEF's
-    /// global default (opaque white).
-    public var backgroundColor: NSColor?
+final class CefDefaultBrowserDelegate: CefBrowserDelegate {
+    static let shared = CefDefaultBrowserDelegate()
+}
 
-    /// The browsing profile (request context) this browser belongs to. When
-    /// `nil` the global/default context is used. Use ``CefProfile/incognito()``
-    /// or ``CefProfile/persistent(name:)`` for isolated cookies/storage.
-    public var profile: CefProfile?
+// MARK: - Event payloads
 
-    /// (OSR only) Forward raw trackpad touches to Chromium's own gesture/scroll
-    /// recognizers via `send_touch_event`. Off by default: indirect-trackpad
-    /// touch forwarding is unreliable, and the gesture overrides (pinch-zoom,
-    /// swipe-nav, smart-magnify) plus pixel-precise wheel scrolling already
-    /// cover the common cases robustly. Enable to experiment with letting
-    /// Chromium drive gestures itself.
-    public var forwardsRawTouchEvents: Bool = false
+/// A failed main-frame load.
+public struct CefLoadError: Error, Sendable, Equatable {
+    /// Chromium's `net::Error` code (negative), e.g. `-105` for
+    /// `ERR_NAME_NOT_RESOLVED`.
+    public var code: Int
+    /// Chromium's description of the error.
+    public var message: String
+    /// The URL that failed.
+    public var url: URL?
 
-    public init() {}
+    /// Whether the load was aborted (`ERR_ABORTED`) — a navigation replaced
+    /// or cancelled it. Usually not worth showing to the user.
+    public var isCancellation: Bool { code == -3 }
+}
+
+/// One console message from a page.
+public struct CefConsoleMessage: Sendable, Equatable {
+    public var level: CefLogSeverity
+    public var text: String
+    public var source: String
+    public var line: Int
+}
+
+/// A main-frame navigation awaiting a policy decision.
+public struct CefNavigationAction: Sendable, Equatable {
+    public var url: URL?
+    public var isRedirect: Bool
+    /// Whether a user gesture (click, key) triggered the navigation.
+    public var hasUserGesture: Bool
+}
+
+/// A certificate error for a main-frame load.
+public struct CefCertificateError: Sendable, Equatable {
+    /// Chromium's `net::Error` code, e.g. `-202` for
+    /// `ERR_CERT_AUTHORITY_INVALID`.
+    public var code: Int
+    public var url: URL?
+}
+
+/// Credentials answering a ``CefAuthChallenge``.
+public struct CefCredential: Sendable, Equatable {
+    public var username: String
+    public var password: String
+
+    public init(username: String, password: String) {
+        self.username = username
+        self.password = password
+    }
+}
+
+/// The user's answer to a JavaScript dialog.
+public enum CefJSDialogResponse: Sendable, Equatable {
+    /// OK was chosen; `text` is the prompt field's contents.
+    case accept(text: String = "")
+    /// Cancel was chosen (or the dialog was dismissed).
+    case dismiss
 }

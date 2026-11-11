@@ -39,6 +39,15 @@ public struct CefCommandLine: @unchecked Sendable {
         }
     }
 
+    /// Adds `values` to a comma-separated list switch such as
+    /// `--enable-features`, keeping whatever is already there.
+    public func mergeList(_ name: String, adding values: Set<String>) {
+        guard !values.isEmpty else { return }
+        let existing = switchValue(name)?.split(separator: ",").map(String.init) ?? []
+        let merged = existing + values.subtracting(existing).sorted()
+        appendSwitch(name, value: merged.joined(separator: ","))
+    }
+
     /// Appends a positional argument.
     public func appendArgument(_ argument: String) {
         CefStringUtil.withCefString(argument) { cefArg in

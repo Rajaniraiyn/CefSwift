@@ -13,11 +13,19 @@ public enum CefError: Error {
     /// `cef_initialize` returned failure. The associated value is the result
     /// of `cef_get_exit_code()`.
     case initializationFailed(exitCode: Int32)
+    /// Another instance of the app already owns this profile directory.
+    /// Chromium has forwarded this launch to it; the right response is to
+    /// exit quietly.
+    case anotherInstanceRunning
     /// `CefRuntime.initialize` was called while already initialized.
     case alreadyInitialized
     /// An operation that requires an initialized runtime was attempted
     /// before `CefRuntime.initialize` succeeded.
     case notInitialized
+    /// The browser closed before the operation could complete.
+    case browserClosed
+    /// A Chromium operation reported failure. The associated value says which.
+    case operationFailed(String)
 }
 
 extension CefError: CustomStringConvertible {
@@ -47,10 +55,16 @@ extension CefError: CustomStringConvertible {
             from a bundle assembled by `swift package cef bundle`, or another \
             instance is using the same root_cache_path.
             """
+        case .anotherInstanceRunning:
+            return "Another instance of this app is already running with the same profile directory."
         case .alreadyInitialized:
             return "CefRuntime.initialize was called twice. Initialize CEF exactly once per process."
         case .notInitialized:
             return "CefRuntime has not been initialized. Call CefRuntime.shared.initialize() first."
+        case .browserClosed:
+            return "The browser closed before the operation completed."
+        case .operationFailed(let detail):
+            return detail
         }
     }
 }

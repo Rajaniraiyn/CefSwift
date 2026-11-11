@@ -5,7 +5,7 @@ import Foundation
 /// surface (tabs, chrome:// pages, extensions); Alloy style is the classic
 /// minimal embedded surface. Note that CEF always uses Alloy style for
 /// browsers embedded via a parent NSView.
-public enum CefRuntimeStyle: Sendable {
+public enum CefRuntimeStyle: Sendable, Equatable {
     /// Let CEF pick (currently equivalent to ``chrome``).
     case `default`
     /// Chrome runtime style.
@@ -133,22 +133,91 @@ public struct CefConfiguration: Sendable {
     /// Custom URL schemes registered in every CEF process (browser, renderer,
     /// GPU, …). Declare schemes here, then serve them with
     /// ``CefRuntime/registerSchemeHandler(scheme:domain:handler:)``.
-    /// CefSwift forwards the list to helper processes automatically via a
-    /// `--cefswift-schemes` command-line switch. The reserved `cefswift`
-    /// bridge scheme (see ``CefBridge``) is always appended.
     public var customSchemes: [CefCustomScheme] = []
 
-    /// Extra Chromium command-line switches applied to the browser process,
-    /// e.g. `["disable-gpu": nil, "proxy-server": "socks5://localhost:1080"]`.
+    /// The complete User-Agent string. `nil` keeps Chromium's, optionally
+    /// with ``userAgentProduct`` substituted.
+    public var userAgent: String?
+
+    /// Preferred languages for `Accept-Language`, most preferred first,
+    /// e.g. `["en-US", "en"]`. Empty uses the system's.
+    public var acceptLanguages: [String] = []
+
+    /// Unpacked extension directories (each containing a `manifest.json`)
+    /// to load at startup. Extensions run in Chrome-style browsers
+    /// (``CefBrowserWindow``); more can be installed at runtime from
+    /// `chrome://extensions` or the Chrome Web Store.
+    public var extensions: [URL] = []
+
+    /// Chromium features to switch on (`--enable-features`), by name.
+    public var enabledFeatures: Set<String> = []
+
+    /// Chromium features to switch off (`--disable-features`), by name.
+    public var disabledFeatures: Set<String> = []
+
+    /// Trims Chrome's own UI in Chrome-style windows.
+    public var chromeUI = CefChromeUIConfiguration()
+
+    /// Replacements for Chromium's built-in UI strings — the way to rebrand
+    /// settings, About, dialogs and internal pages. See ``productName`` for
+    /// the common case.
+    public var stringOverrides: [CefStringID: String] = [:]
+
+    /// Your product's name, shown wherever Chromium would say "Chromium"
+    /// (settings, `chrome://version`, dialogs, the About page).
+    public var productName: String? {
+        get { stringOverrides[.productName] }
+        set {
+            stringOverrides[.productName] = newValue
+            stringOverrides[.shortProductName] = newValue
+        }
+    }
+
+    /// Extra Chromium command-line switches for the browser process, e.g.
+    /// `["proxy-server": "socks5://localhost:1080", "disable-gpu": nil]`.
+    /// The escape hatch for anything Chromium supports that this type
+    /// doesn't model.
     public var extraCommandLineSwitches: [String: String?] = [:]
 
-    /// Last-chance hook to inspect/modify the command line of every CEF
-    /// process before it is processed. Called on the thread CEF invokes it
-    /// on (the main thread for the browser process).
+    /// Last-chance hook to edit the browser process command line. Called on
+    /// the main thread during initialization.
     public var onBeforeCommandLineProcessing: (@Sendable (CefCommandLine) -> Void)?
 
     public init() {}
 
     /// The default configuration.
     public static let `default` = CefConfiguration()
+
+    /// A lean configuration for showing your own web content — an editor, a
+    /// preview pane, an app UI. Turns off the parts of Chromium that only a
+    /// general-purpose browser needs: background networking, component
+    /// updates, sync, translation, default-browser checks and first-run UI.
+    /// Fewer background tasks, fewer network requests, lower idle cost.
+    public static var embedded: CefConfiguration {
+        var configuration = CefConfiguration()
+        for name in [
+            "disable-background-networking", "disable-component-update", "disable-sync",
+            "disable-default-apps", "disable-domain-reliability", "disable-client-side-phishing-detection",
+            "no-first-run", "no-default-browser-check", "no-pings", "disable-breakpad",
+        ] {
+            configuration.extraCommandLineSwitches[name] = .some(nil)
+        }
+        configuration.disabledFeatures = [
+            "Translate", "MediaRouter", "OptimizationHints", "AutofillServerCommunication",
+            "InterestFeedContentSuggestions", "CalculateNativeWinOcclusion",
+        ]
+        return configuration
+    }
+
+    /// A configuration for building a full web browser: persistent session
+    /// state, and none of Chromium's first-run or default-browser prompts.
+    /// Everything else — extensions, internal pages, sync-free profiles —
+    /// stays on.
+    public static var browser: CefConfiguration {
+        var configuration = CefConfiguration()
+        configuration.persistSessionCookies = true
+        configuration.extraCommandLineSwitches["no-first-run"] = .some(nil)
+        configuration.extraCommandLineSwitches["no-default-browser-check"] = .some(nil)
+        return configuration
+    }
 }

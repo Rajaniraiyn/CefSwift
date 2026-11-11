@@ -1,110 +1,106 @@
 import AppKit
-import CefKit
 import CefSwiftUI
 import SwiftUI
 
-/// Arc-class mini browser built on CefSwift's **full-browser hosting mode**
-/// (``CefChromeWindow`` — inverted ownership).
+/// A complete tabbed web browser in a few hundred lines.
 ///
-/// The real browser window is a CEF-owned Chrome-runtime window whose native
-/// SwiftUI chrome (tab strip + omnibox) is hosted as an overlay on top, with
-/// web content inset below. Because it's the full Chrome runtime, the WebUI
-/// pages that render blank in NSView-embedded (Alloy) views — `chrome://history`,
-/// `chrome://extensions`, `chrome://settings`, `chrome://downloads`,
-/// `chrome://flags` — all render here, opened as tabs from the Chrome menu.
-///
-/// App model: CEF owns the browser window, so it lives *outside* SwiftUI's
-/// `Scene` graph. A tiny hidden placeholder `WindowGroup` keeps the app alive
-/// and bootstraps the chrome window on launch via ``BrowserShell``.
+/// Every tab is a Chrome-style ``CefBrowserWindow`` — so `chrome://settings`,
+/// `chrome://extensions`, history, downloads, passwords and PDF viewing all
+/// work — with a SwiftUI toolbar on top. Windows share a tabbing identifier,
+/// so macOS presents them as native tabs.
 @main
 struct BrowserApp: CefSwiftApp {
-
     static var cefConfiguration: CefConfiguration {
-        var config = CefConfiguration()
-        config.cachePath = FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("dev.rajaniraiyn.cefswift.browser/BrowserCache", isDirectory: true)
-        config.persistSessionCookies = true
-        if ProcessInfo.processInfo.environment["CEFSWIFT_ENABLE_SANDBOX"] == "1" {
-            config.noSandbox = false
-        }
-        return config
+        var configuration = CefConfiguration.browser
+        configuration.productName = "CefSwift Browser"
+        // Chrome's own UI is replaced by the SwiftUI toolbar; keep its
+        // internal pages free of buttons that would open Chrome windows.
+        configuration.chromeUI.hiddenAppMenuCommands = [.newWindow, .newIncognitoWindow]
+        return configuration
     }
 
-    /// `--open-url <url>`: load this address in the first tab at launch.
-    private static var launchURL: URL? { argumentURL(after: "--open-url") }
-
-    private static func argumentURL(after flag: String) -> URL? {
-        let args = CommandLine.arguments
-        guard let i = args.firstIndex(of: flag), args.indices.contains(i + 1) else { return nil }
-        return URL(string: args[i + 1])
-    }
-
-    @State private var shell = BrowserShell()
+    @NSApplicationDelegateAdaptor private var appDelegate: AppDelegate
 
     var body: some Scene {
-        WindowGroup {
-            // The CEF-owned chrome window is the real browser UI; this scene is
-            // a near-invisible placeholder that owns the app lifecycle and
-            // bootstraps the window once the runtime is up.
-            PlaceholderScene(shell: shell)
-                .task {
-                    if SmokeTest.isRequested {
-                        SmokeTest.run(shell: shell)
-                        return
-                    }
-                    shell.openWindow(initialURL: Self.launchURL ?? BrowserShell.homeURL)
-                }
+        // Browser windows are created by BrowserController, not by a scene.
+        Settings { SettingsView() }
+            .commands { BrowserCommands(controller: appDelegate.controller) }
+    }
+}
+
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    let controller = BrowserController()
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        controller.adoptWindowsOpenedByChromium()
+        controller.openTab()
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
+        if !hasVisibleWindows { controller.openTab() }
+        return true
+    }
+}
+
+struct BrowserCommands: Commands {
+    let controller: BrowserController
+
+    var body: some Commands {
+        CommandGroup(replacing: .newItem) {
+            Button("New Tab") { controller.openTab() }.keyboardShortcut("t")
+            Button("New Private Tab") { controller.openTab(isPrivate: true) }.keyboardShortcut("n", modifiers: [.command, .shift])
+            Button("Open Location…") { controller.focusAddressBar() }.keyboardShortcut("l")
         }
-        .windowResizability(.contentSize)
-        .commands {
-            CommandGroup(after: .newItem) {
-                Button("New Tab") { shell.newTab() }
-                    .keyboardShortcut("t", modifiers: .command)
-                Button("Close Tab") { shell.closeSelectedTab() }
-                    .keyboardShortcut("w", modifiers: .command)
-                Divider()
-                Button("Open Location…") { shell.requestOmniboxFocus() }
-                    .keyboardShortcut("l", modifiers: .command)
-                Button("Reload Page") { shell.reload() }
-                    .keyboardShortcut("r", modifiers: .command)
-            }
-            // Chrome internals. Because the browser runs the full Chrome
-            // runtime (inverted-ownership window), *all* of these render here —
-            // including history/extensions/settings/downloads/flags, which are
-            // blank in NSView-embedded (Alloy) tabs. They open as tabs of the
-            // chrome window.
-            CommandMenu("Chrome") {
-                Button("History") { shell.openChromePage("chrome://history") }
-                Button("Extensions") { shell.openChromePage("chrome://extensions") }
-                Button("Settings") { shell.openChromePage("chrome://settings") }
-                Button("Downloads") { shell.openChromePage("chrome://downloads") }
-                Button("Flags") { shell.openChromePage("chrome://flags") }
-                Divider()
-                Button("Version") { shell.openChromePage("chrome://version") }
-                Button("GPU Internals") { shell.openChromePage("chrome://gpu") }
-                Button("All Chrome URLs") { shell.openChromePage("chrome://about") }
-                Divider()
-                Button("Toggle DevTools") { shell.showDevTools() }
-                    .keyboardShortcut("i", modifiers: [.command, .option])
-            }
+        CommandGroup(after: .textEditing) {
+            Button("Find…") { controller.current?.execute(.find) }.keyboardShortcut("f")
+        }
+        CommandMenu("View") {
+            Button("Reload") { controller.current?.reload() }.keyboardShortcut("r")
+            Button("Reload Ignoring Cache") { controller.current?.reload(ignoringCache: true) }
+                .keyboardShortcut("r", modifiers: [.command, .shift])
+            Divider()
+            Button("Zoom In") { controller.current?.zoomLevel += 0.5 }.keyboardShortcut("+")
+            Button("Zoom Out") { controller.current?.zoomLevel -= 0.5 }.keyboardShortcut("-")
+            Button("Actual Size") { controller.current?.zoomLevel = 0 }.keyboardShortcut("0")
+            Divider()
+            Button("Developer Tools") { controller.current?.execute(.devTools) }
+                .keyboardShortcut("i", modifiers: [.command, .option])
+        }
+        CommandMenu("History") {
+            Button("Back") { controller.current?.goBack() }.keyboardShortcut("[")
+            Button("Forward") { controller.current?.goForward() }.keyboardShortcut("]")
+            Divider()
+            Button("Show History") { controller.openTab(url: URL(string: "chrome://history")!) }.keyboardShortcut("y")
+            Button("Downloads") { controller.openTab(url: URL(string: "chrome://downloads")!) }
+        }
+        CommandMenu("Browser") {
+            Button("Extensions") { controller.openTab(url: URL(string: "chrome://extensions")!) }
+            Button("Passwords") { controller.openTab(url: URL(string: "chrome://password-manager")!) }
+            Button("Chromium Settings") { controller.openTab(url: URL(string: "chrome://settings")!) }
+            Button("Flags") { controller.openTab(url: URL(string: "chrome://flags")!) }
+            Button("About") { controller.openTab(url: URL(string: "chrome://version")!) }
         }
     }
 }
 
-/// Near-invisible SwiftUI scene. The actual browser is the CEF-owned chrome
-/// window opened by ``BrowserShell``; this just anchors the app lifecycle.
-private struct PlaceholderScene: View {
-    let shell: BrowserShell
+struct SettingsView: View {
+    @AppStorage("homePage") private var homePage = BrowserController.defaultHomePage
+    @AppStorage("appearance") private var appearance = "system"
 
     var body: some View {
-        Color.clear
-            .frame(width: 1, height: 1)
-            .onAppear {
-                // Hide the placeholder window chrome; the CEF window is the UI.
-                if let win = NSApp.windows.first(where: { $0.contentView != nil && $0.isVisible }) {
-                    win.orderOut(nil)
-                }
+        Form {
+            TextField("Home page", text: $homePage)
+            Picker("Appearance", selection: $appearance) {
+                Text("System").tag("system")
+                Text("Light").tag("light")
+                Text("Dark").tag("dark")
             }
+            .onChange(of: appearance) { _, value in
+                CefProfile.default.setColorScheme(value == "dark" ? .dark : value == "light" ? .light : .system)
+            }
+        }
+        .formStyle(.grouped)
+        .frame(width: 420)
     }
 }

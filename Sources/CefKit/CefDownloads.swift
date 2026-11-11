@@ -2,9 +2,9 @@ import CCef
 import Foundation
 
 /// A snapshot of one file download's state, delivered through
-/// ``CefBrowserDelegate/browser(_:decidePolicyForDownload:suggestedName:)``
-/// and ``CefBrowserDelegate/browser(_:downloadDidProgress:)``.
-public struct CefDownload: Sendable, Equatable {
+/// ``CefBrowserDelegate/browser(_:decideDestinationFor:suggestedName:)``
+/// and ``CefBrowser/downloads``.
+public struct CefDownload: Sendable, Equatable, Identifiable {
     /// CEF's identifier for this download (stable across updates).
     public var id: UInt32
     /// The download URL.

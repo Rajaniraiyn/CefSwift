@@ -59,46 +59,24 @@ jobs:
 
       # Audit the dlsym bridge: every symbol in Sources/CCef/.../ccef_symbols.h
       # must be an exported global of the just-downloaded framework binary.
-      - name: Check bridge symbols against CEF binary
-        run: Scripts/check-symbols.sh
+      - name: Generated C bridge is up to date
+        run: Scripts/generate-bindings.py --check
 
-      - name: Build Examples package
+      - name: Build examples
         run: swift build --package-path Examples
 
-      # Bundle the Browser example into a runnable .app.
-      # NOTE: the `cef` command plugin is declared in the ROOT package; the
-      # Examples package depends on it via `.package(path: "..")`, which makes
-      # the plugin verb available when running from Examples. If SwiftPM ever
-      # reports an ambiguous/unknown `cef` verb here, disambiguate with
-      # `--package cefswift` (the root package identity) after `swift package`.
-      # `--output dist` resolves relative to the Examples package directory.
-      - name: Bundle Browser example
+      - name: Bundle SelfTest
         run: |
           swift package --package-path Examples \
             --allow-writing-to-package-directory \
             --allow-network-connections all \
-            cef bundle --product Browser --configuration release --output dist
+            cef bundle --product SelfTest --configuration release --output dist
 
-      # The Browser example exits 0 after its first successful page load when
-      # launched with --cef-smoke-test. macOS runners lack GNU `timeout`, so
-      # use a portable shell watchdog: background the app + a killer, wait for
-      # the app, kill the killer if it returned first.
-      - name: Smoke test (launch CEF, load a page, exit)
-        run: |
-          set +e
-          ./Examples/dist/Browser.app/Contents/MacOS/Browser --cef-smoke-test &
-          APP=$!
-          ( sleep 60; kill -9 $APP 2>/dev/null ) &
-          KILLER=$!
-          wait $APP
-          STATUS=$?
-          kill $KILLER 2>/dev/null
-          echo "smoke test exit: $STATUS"
-          exit $STATUS
+      # Runs every end-to-end check against the real Chromium runtime; the
+      # app exits with the number of failed checks.
+      - name: SelfTest
+        run: ./Examples/dist/SelfTest.app/Contents/MacOS/SelfTest
 
-      # Catch generated files escaping .gitignore: after building, testing,
-      # downloading, and bundling, the working tree must still be clean —
-      # no modified tracked files and nothing untracked.
       - name: Working tree must stay clean
         run: |
           git diff --exit-code

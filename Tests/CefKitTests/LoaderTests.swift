@@ -42,18 +42,15 @@ struct LoaderTests {
     func loadVerifyAndUnloadRealFramework() throws {
         let path = try #require(Self.frameworkBinaryPath())
 
-        #expect(ccef_is_framework_loaded() == 0)
         #expect(ccef_load_framework(path) == 1, "\(String(cString: ccef_loader_error()))")
-        defer { ccef_unload_framework() }
         #expect(ccef_is_framework_loaded() == 1)
+        #expect(ccef_has_symbol("cef_initialize") == 1)
+        #expect(ccef_has_symbol("cef_no_such_function") == 0)
 
         // First CEF call in the process must be cef_api_hash.
-        let hash = try #require(cef_api_hash(CCEF_API_VERSION_VALUE, 0))
-        #expect(String(cString: hash) == CCEF_EXPECTED_API_HASH_PLATFORM)
-
-        // The configured API version must be the pinned one.
-        #expect(cef_api_version() == CCEF_API_VERSION_VALUE)
-        #expect(CCEF_API_VERSION_VALUE == 14800)
+        let hash = try #require(cef_api_hash(ccef_pinned_api_version(), 0))
+        #expect(String(cString: hash) == String(cString: ccef_pinned_api_hash()))
+        #expect(cef_api_version() == ccef_pinned_api_version())
 
         // CefRuntime's own verification should agree.
         try CefRuntime.verifyAPIHash()

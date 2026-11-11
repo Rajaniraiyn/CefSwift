@@ -1,0 +1,5 @@
+{
+  "bundleIdentifier": "dev.rajaniraiyn.cefswift.selftest",
+  "displayName": "CefSwift SelfTest",
+  "minimumSystemVersion": "14.0"
+}

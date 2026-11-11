@@ -2,33 +2,20 @@ import SwiftUI
 import CCefAppKit
 @_exported import CefKit
 
-/// The one-line bootstrap for a SwiftUI app embedding CEF.
+/// A SwiftUI `App` that embeds Chromium.
 ///
-/// Conform your `@main` type to ``CefSwiftApp`` instead of `SwiftUI.App` and CefSwift
-/// takes care of the entire CEF startup dance before SwiftUI launches:
-///
-/// 1. Installs `CEFApplication` (an `NSApplication` subclass conforming to CEF's
-///    `CrAppControlProtocol`) **before** anything touches `NSApp`.
-/// 2. Initializes the CEF runtime with ``cefConfiguration``
-///    (`CefRuntime.shared.initialize(configuration:)`).
-/// 3. Hands control to SwiftUI's regular `App.main()`.
+/// Conform your `@main` type to `CefSwiftApp` instead of `App`. Before
+/// SwiftUI starts, CefSwift installs the `NSApplication` subclass Chromium
+/// requires and initializes the runtime with ``cefConfiguration``.
 ///
 /// ```swift
 /// @main
 /// struct MyApp: CefSwiftApp {
+///     static var cefConfiguration: CefConfiguration { .embedded }
+///
 ///     var body: some Scene {
 ///         WindowGroup { CefWebView(url: URL(string: "https://example.com")!) }
 ///     }
-/// }
-/// ```
-///
-/// Customize startup by overriding ``cefConfiguration``:
-///
-/// ```swift
-/// static var cefConfiguration: CefConfiguration {
-///     var config = CefConfiguration.default
-///     config.remoteDebuggingPort = 9222
-///     return config
 /// }
 /// ```
 public protocol CefSwiftApp: SwiftUI.App {
@@ -44,46 +31,28 @@ extension CefSwiftApp {
 }
 
 extension SwiftUI.App {
-    /// Launches the standard SwiftUI app lifecycle.
-    ///
-    /// Dispatch subtlety (this is why this method exists): `static func main()` is *not* a
-    /// requirement of `SwiftUI.App` — it is provided in a protocol *extension*, so every call
-    /// to it is **statically** dispatched. Inside this `extension App`, the unqualified call
-    /// below therefore resolves to SwiftUI's own `App.main()` extension method — never to the
-    /// more-specific `CefSwiftApp.main()` shadow (which only wins overload resolution when the
-    /// call site's context is the concrete conforming type, e.g. the `@main` entry point).
-    /// This gives us a non-recursive path from `CefSwiftApp.main()` into SwiftUI's launcher.
+    /// Runs SwiftUI's own `App.main()`. Inside this extension the call binds
+    /// statically to SwiftUI's implementation rather than to
+    /// `CefSwiftApp.main()`, which is what lets the latter wrap it.
     @MainActor static func launchSwiftUIRuntime() {
         main()
     }
 }
 
 extension CefSwiftApp {
-    /// The `@main` entry point: bootstraps CEF, then runs the SwiftUI app.
-    ///
-    /// Because `Self` conforms to the refined ``CefSwiftApp`` protocol, the `@main` attribute's
-    /// statically-resolved call to `Self.main()` picks this overload in preference to
-    /// `SwiftUI.App`'s extension method. After CEF is up, SwiftUI's original `main()` is
-    /// reached via ``SwiftUI/App/launchSwiftUIRuntime()`` (see its doc comment for why that
-    /// does not recurse).
-    ///
-    /// On CEF initialization failure this prints actionable diagnostics to standard error and
-    /// terminates the process with exit code 1.
+    /// The `@main` entry point: initializes Chromium, then runs the SwiftUI
+    /// app. If Chromium cannot start, prints what went wrong and how to fix
+    /// it, and exits with status 1.
     @MainActor public static func main() {
-        // 1. NSApplication must be instantiated as CEFApplication before any NSApp touch
-        //    (CEF requires CrAppControlProtocol conformance on the application object).
-        //    CefRuntime.initialize also ensures this, but installing here guarantees ordering
-        //    even if SwiftUI internals touch NSApp earlier than expected. Idempotent.
+        // Must precede every other NSApp access, including SwiftUI's.
         CEFApplication.install()
-
-        // 2. Bring up the CEF runtime.
         do {
             try CefRuntime.shared.initialize(configuration: Self.cefConfiguration)
+        } catch .anotherInstanceRunning {
+            exit(0)  // the running instance has been told about this launch
         } catch {
             reportBootstrapFailure(error)
         }
-
-        // 3. Hand off to SwiftUI's default App.main() (statically dispatched — no recursion).
         launchSwiftUIRuntime()
     }
 
@@ -106,8 +75,8 @@ extension CefSwiftApp {
             lines.append("Check the CEF log (see CefConfiguration.logFile / logSeverity) for details.")
         case .alreadyInitialized:
             lines.append("CEF was already initialized. Initialize the runtime exactly once per process.")
-        case .notInitialized:
-            lines.append("CEF runtime was used before initialization.")
+        case .notInitialized, .browserClosed, .operationFailed, .anotherInstanceRunning:
+            lines.append(String(describing: error))
         }
 
         lines.append("")
@@ -120,8 +89,6 @@ extension CefSwiftApp {
 
         let message = lines.joined(separator: "\n") + "\n"
         FileHandle.standardError.write(Data(message.utf8))
-        // Print guidance to stderr and exit(1) — same user-visible effect as fatalError,
-        // but without a crash report burying the actionable message.
         exit(1)
     }
 }
