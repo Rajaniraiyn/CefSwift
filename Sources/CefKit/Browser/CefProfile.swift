@@ -47,6 +47,19 @@ public final class CefProfile {
 
     private static var persistentProfiles: [String: CefProfile] = [:]
 
+    // MARK: Bookmarks, history, autocomplete
+    // Built on Chromium's internal pages; see CefBookmarks.swift,
+    // CefHistory.swift and CefAutocomplete.swift.
+
+    /// The profile's bookmarks.
+    public private(set) lazy var bookmarks = CefBookmarks(profile: self)
+
+    /// The profile's browsing history and most-visited sites.
+    public private(set) lazy var history = CefHistory(profile: self)
+
+    /// Omnibox-ranked address-bar suggestions. Experimental.
+    public private(set) lazy var autocomplete = CefAutocomplete(profile: self)
+
     // MARK: Preferences
 
     /// Reads a Chromium preference — the settings behind `chrome://settings`

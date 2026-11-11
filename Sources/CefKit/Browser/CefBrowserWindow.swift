@@ -112,6 +112,15 @@ public final class CefBrowserWindow: Identifiable {
 
     @ObservationIgnored private var isPopup = false
 
+    /// A hidden window hosting an internal-page service browser
+    /// (``CefProfile/bookmarks`` and friends). Such windows are left out of
+    /// ``all``.
+    @ObservationIgnored var isService = false {
+        didSet {
+            if isService { Self.all.removeAll { $0 === self } }
+        }
+    }
+
     private func createWindow() {
         // Creation is synchronous: windowCreated(_:) has run by the time
         // this returns.
