@@ -361,13 +361,20 @@ public final class CefRuntime {
 
     func register(_ browser: CefBrowser) {
         browsersByIdentifier[browser.identifier] = browser
-        browsers.append(browser)
+        // Internal-page service browsers stay out of the public list.
+        if serviceBrowserIDs.contains(browser.id) {
+            serviceBrowsers.append(browser)
+        } else {
+            browsers.append(browser)
+        }
     }
 
     func unregister(_ browser: CefBrowser) {
         browsersByIdentifier[browser.identifier] = nil
         browsers.removeAll { $0 === browser }
-        if isTerminationRequested && browsers.isEmpty {
+        serviceBrowsers.removeAll { $0 === browser }
+        serviceBrowserIDs.remove(browser.id)
+        if isTerminationRequested && browsers.isEmpty && serviceBrowsers.isEmpty {
             // Re-enter terminate:; with no browsers left it now proceeds.
             NSApp.terminate(nil)
         }
@@ -382,7 +389,7 @@ public final class CefRuntime {
     /// then terminates once the last one is gone.
     func handleTerminationRequest() -> Bool {
         guard isInitialized else { return true }
-        if browsers.isEmpty {
+        if browsers.isEmpty && serviceBrowsers.isEmpty {
             shutdown()
             return true
         }
@@ -390,6 +397,24 @@ public final class CefRuntime {
         for browser in browsers {
             browser.close()
         }
+        for browser in serviceBrowsers {
+            browser.close(force: true)
+        }
         return false
     }
+
+    // MARK: Service browsers (internal-page data APIs)
+
+    /// Live service browsers: hidden, created by CefKit itself, and left out
+    /// of ``browsers``.
+    @ObservationIgnored private var serviceBrowsers: [CefBrowser] = []
+    @ObservationIgnored private var serviceBrowserIDs: Set<CefBrowser.ID> = []
+
+    /// Marks `browser` as a service browser. Call before it is created.
+    func registerServiceBrowser(_ browser: CefBrowser) {
+        serviceBrowserIDs.insert(browser.id)
+    }
+
+    /// Whether the app is quitting, so no new service browsers should start.
+    var isTerminating: Bool { isTerminationRequested }
 }
