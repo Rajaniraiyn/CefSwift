@@ -231,6 +231,11 @@ enum SelfTest {
             return text.contains("SelfTestBrowser")
         }
         check("browser window: chrome commands", browser.canExecute(.find))
+        await expect("browser window: ad-hoc signed builds use the mock keychain") {
+            // Local builds must never touch the login keychain (no password prompts).
+            let text = try await browser.evaluateJavaScript("document.body.innerText").stringValue ?? ""
+            return text.contains("--use-mock-keychain")
+        }
         await expect("internal page: scoped script runs, others don't") {
             _ = await waitUntilAsync(timeout: .seconds(3)) {
                 (try? await browser.evaluateJavaScript("window.__scoped === 1").boolValue) == true

@@ -22,16 +22,10 @@ let package = Package(
             publicHeadersPath: "include",
             cSettings: [.headerSearchPath("include")]
         ),
-        // NSApplication subclass conforming to CEF's CrAppControlProtocol.
-        .target(
-            name: "CCefAppKit",
-            publicHeadersPath: "include",
-            linkerSettings: [.linkedFramework("AppKit")]
-        ),
         // Core Swift wrapper over the CEF C API.
         .target(
             name: "CefKit",
-            dependencies: ["CCef", "CCefAppKit"],
+            dependencies: ["CCef"],
             linkerSettings: [.linkedFramework("AppKit")]
         ),
         // First-class SwiftUI integration.
