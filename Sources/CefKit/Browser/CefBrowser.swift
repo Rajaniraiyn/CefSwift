@@ -125,6 +125,10 @@ public final class CefBrowser: Identifiable {
     public private(set) var statusText = ""
     /// Downloads started by this browser, oldest first.
     public private(set) var downloads: [CefDownload] = []
+    /// Progress of an in-flight swipe-to-navigate gesture: 0 at rest, toward
+    /// -1 while swiping back, toward 1 while swiping forward. Draw your own
+    /// indicator from it. Host views update it; offscreen rendering only.
+    public var navigationGestureProgress = 0.0
     /// The latest result of ``find(_:forward:matchCase:)``.
     public private(set) var findResult: CefFindResult?
 
@@ -145,7 +149,7 @@ public final class CefBrowser: Identifiable {
     // MARK: Internals
 
     @ObservationIgnored private(set) var raw: CefRef<cef_browser_t>?
-    @ObservationIgnored private(set) var client: BrowserClient?
+    @ObservationIgnored private(set) var client: CefBrowserClient?
     @ObservationIgnored private var initialURL: URL?
     @ObservationIgnored private(set) var isBootstrapping = false
     @ObservationIgnored private var readyWaiters: [CheckedContinuation<Void, Error>] = []
@@ -165,7 +169,7 @@ public final class CefBrowser: Identifiable {
     }
 
     /// Wraps a browser Chromium created on its own (popup, Chrome UI tab).
-    init(adopting raw: CefRef<cef_browser_t>, client: BrowserClient, opener: CefBrowser?) {
+    init(adopting raw: CefRef<cef_browser_t>, client: CefBrowserClient, opener: CefBrowser?) {
         self.options = opener?.options ?? CefBrowserOptions()
         self.client = client
         self.opener = opener
@@ -416,7 +420,7 @@ public final class CefBrowser: Identifiable {
     }
 
     /// Whether this browser renders offscreen.
-    public var isOffscreen: Bool { client?.osrHost != nil }
+    public var isOffscreen: Bool { client?.offscreenHost != nil }
 }
 
 // MARK: - Creation
@@ -431,15 +435,15 @@ extension CefBrowser {
 
     /// Builds everything browser creation needs. Each returned reference is
     /// consumed by the CEF creation call it is passed to.
-    private func makeBlueprint(osrHost: CefOSRHost? = nil, frameRate: Int = 0) -> Blueprint {
+    private func makeBlueprint(offscreenHost: CefOffscreenHost? = nil, frameRate: Int = 0) -> Blueprint {
         precondition(CefRuntime.shared.isInitialized, "Create browsers after CefRuntime.shared.initialize().")
         precondition(state == .pending && client == nil, "This CefBrowser has already been created.")
 
-        let client = BrowserClient(
+        let client = CefBrowserClient(
             browser: self,
             requestFilter: options.requestFilter,
             chromeUI: CefRuntime.shared.configuration?.chromeUI ?? .init())
-        client.osrHost = osrHost
+        client.offscreenHost = offscreenHost
         self.client = client
 
         var settings = cef_browser_settings_t()
@@ -481,14 +485,14 @@ extension CefBrowser {
 
     /// Shows the browser through an offscreen host: creates it on first
     /// use, and afterwards redirects its frames and input to `host`.
-    public func host(offscreenIn host: CefOSRHost, size: CGSize) {
+    public func host(offscreenIn host: CefOffscreenHost, size: CGSize) {
         guard state != .closed else { return }
         guard let client else {
             createOffscreen(host: host, size: size)
             return
         }
-        guard client.osrHost !== host else { return }
-        client.osrHost = host
+        guard client.offscreenHost !== host else { return }
+        client.offscreenHost = host
         hostView = host as? NSView
         wasResized()
         invalidate()
@@ -517,13 +521,13 @@ extension CefBrowser {
         if created == nil { creationFailed() }
     }
 
-    private func createOffscreen(host: CefOSRHost, size: CGSize) {
+    private func createOffscreen(host: CefOffscreenHost, size: CGSize) {
         precondition(
             CefRuntime.shared.configuration?.windowlessRenderingEnabled == true,
             "Offscreen browsers need CefConfiguration.windowlessRenderingEnabled = true at initialize().")
         var frameRate = 60
         if case .offscreen(let requested) = options.rendering { frameRate = requested }
-        var blueprint = makeBlueprint(osrHost: host, frameRate: frameRate)
+        var blueprint = makeBlueprint(offscreenHost: host, frameRate: frameRate)
 
         var windowInfo = cef_window_info_t()
         windowInfo.size = MemoryLayout<cef_window_info_t>.stride

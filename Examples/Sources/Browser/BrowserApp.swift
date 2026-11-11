@@ -37,6 +37,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller.openTab()
     }
 
+    /// Lets the native tab bar show its "+" button.
+    @objc func newWindowForTab(_ sender: Any?) {
+        controller.openTab()
+    }
+
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
         if !hasVisibleWindows { controller.openTab() }
         return true

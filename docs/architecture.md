@@ -58,7 +58,7 @@ its IO thread — request filtering, authentication, scheme handlers — are
 ## Browsers and clients
 
 `CefBrowser` is created as a model first and bound to a Chromium browser when
-it is hosted. Each gets a `BrowserClient` owning its handler structs.
+it is hosted. Each gets a `CefBrowserClient` owning its handler structs.
 Browsers that Chromium creates on its own (popups, DevTools, tabs opened in
 Chrome's UI) reuse their opener's client or the runtime's default client, so
 every callback resolves its `CefBrowser` by Chromium's browser identifier

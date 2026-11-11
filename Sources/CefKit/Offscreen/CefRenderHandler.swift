@@ -12,7 +12,7 @@ import IOSurface
 /// BGRA byte buffer (upper-left origin) only used when shared textures are
 /// unavailable.
 @MainActor
-public enum CefOSRFrame {
+public enum CefOffscreenFrame {
     /// A GPU frame: a shared `IOSurface` Chromium rendered into. `size` is in
     /// device pixels. Set it as `CALayer.contents` inside the sink.
     case accelerated(surface: IOSurfaceRef, size: CGSize)
@@ -23,7 +23,7 @@ public enum CefOSRFrame {
 /// Which compositing surface an OSR frame targets. Alloy OSR renders form
 /// widgets (the `<select>` dropdown, autofill) as a *separate* paint element
 /// (``popup``) so the host can composite it above the page content.
-public enum CefOSRPaintElement: Sendable {
+public enum CefOffscreenPaintElement: Sendable {
     /// The main page content (`PET_VIEW`).
     case view
     /// The popup widget such as a `<select>` dropdown (`PET_POPUP`).
@@ -34,7 +34,7 @@ public enum CefOSRPaintElement: Sendable {
 /// the backing scale factor for retina. The host updates this on layout/scale
 /// changes and calls ``CefBrowser/wasResized()`` /
 /// ``CefBrowser/notifyScreenInfoChanged()``.
-public struct CefOSRViewInfo: Sendable {
+public struct CefOffscreenViewInfo: Sendable {
     /// Logical view size in DIP (points).
     public var sizeDIP: CGSize
     /// Device scale factor (e.g. 2.0 on retina).
@@ -64,47 +64,47 @@ public struct CefOSRViewInfo: Sendable {
 /// Implemented by ``CefMetalHostView`` in CefSwiftUI; CEF invokes the
 /// callbacks on the UI thread (== main thread under the external pump).
 @MainActor
-public protocol CefOSRHost: AnyObject {
+public protocol CefOffscreenHost: AnyObject {
     /// Current view geometry CEF should render at.
-    var osrViewInfo: CefOSRViewInfo { get }
+    var offscreenViewInfo: CefOffscreenViewInfo { get }
     /// A new frame is ready for `element`. The frame is only valid for the
     /// duration of this call (accelerated path returns the surface to CEF's
     /// pool afterwards). `.view` frames go to the content layer; `.popup`
     /// frames go to the popup overlay layer.
-    func osrDidPaint(_ frame: CefOSRFrame, element: CefOSRPaintElement)
+    func offscreenDidPaint(_ frame: CefOffscreenFrame, element: CefOffscreenPaintElement)
     /// The page requested a cursor change.
-    func osrDidChangeCursor(_ cursor: CefCursorType)
+    func offscreenDidChangeCursor(_ cursor: CefCursorType)
     /// The popup widget (e.g. `<select>` dropdown) should show/hide.
-    func osrPopupDidChangeVisibility(_ visible: Bool)
+    func offscreenPopupDidChangeVisibility(_ visible: Bool)
     /// The popup widget moved/resized to `rect` (view DIP coordinates).
-    func osrPopupDidResize(_ rect: CGRect)
+    func offscreenPopupDidResize(_ rect: CGRect)
     /// The IME composition range changed; `bounds` are character rects in view
     /// DIP coordinates (used to position the candidate window).
-    func osrImeCompositionRangeChanged(selectedRange: NSRange, characterBounds: [CGRect])
+    func offscreenImeCompositionRangeChanged(selectedRange: NSRange, characterBounds: [CGRect])
     /// Text selection changed (used by NSTextInputClient for `selectedRange`).
-    func osrTextSelectionChanged(selectedText: String, selectedRange: NSRange)
+    func offscreenTextSelectionChanged(selectedText: String, selectedRange: NSRange)
     /// The page requested a context menu. The host should present a native
     /// `NSMenu` built from `menu` at `viewPoint` (view DIP) and report the
     /// chosen command (or cancellation) through `callback`.
-    func osrRunContextMenu(_ menu: CefMenuModel, at viewPoint: CGPoint, callback: CefRunContextMenuCallback)
+    func offscreenRunContextMenu(_ menu: CefMenuModel, at viewPoint: CGPoint, callback: CefRunContextMenuCallback)
 
     /// The page started a drag (page → system). The host should begin an
     /// `NSDraggingSession` carrying `data`, and on completion call back through
     /// ``CefBrowser/dragSourceEndedAt(viewPoint:operation:)`` +
     /// ``CefBrowser/dragSourceSystemDragEnded()``. Return `false` to abort.
-    func osrStartDragging(_ data: CefDragData, allowedOps: CefDragOperation, at viewPoint: CGPoint) -> Bool
+    func offscreenStartDragging(_ data: CefDragData, allowedOps: CefDragOperation, at viewPoint: CGPoint) -> Bool
 
     /// The drag cursor should reflect `operation` during an in-progress drag.
-    func osrUpdateDragCursor(_ operation: CefDragOperation)
+    func offscreenUpdateDragCursor(_ operation: CefDragOperation)
 }
 
 // Default no-ops so existing hosts (and tests) need not implement every method.
-extension CefOSRHost {
-    public func osrStartDragging(_ data: CefDragData, allowedOps: CefDragOperation, at viewPoint: CGPoint) -> Bool { false }
-    public func osrUpdateDragCursor(_ operation: CefDragOperation) {}
+extension CefOffscreenHost {
+    public func offscreenStartDragging(_ data: CefDragData, allowedOps: CefDragOperation, at viewPoint: CGPoint) -> Bool { false }
+    public func offscreenUpdateDragCursor(_ operation: CefDragOperation) {}
 }
 
-extension BrowserClient {
+extension CefBrowserClient {
     /// Allocates and wires the `cef_render_handler_t` used by OSR browsers.
     /// Only called for browsers created via the OSR factory path; windowed
     /// browsers never set `renderPointer`, so `get_render_handler` returns NULL
@@ -115,7 +115,7 @@ extension BrowserClient {
         handler.pointee.get_view_rect = { handlerSelf, browser, rect in
             cefRelease(browser.map(UnsafeMutableRawPointer.init))
             guard let rect else { return }
-            let info = BrowserClient.osrHostInfo(handlerSelf)
+            let info = CefBrowserClient.offscreenViewInfo(handlerSelf)
             // CEF requires a non-empty rect; clamp to >= 1.
             rect.pointee = cef_rect_t(
                 x: 0, y: 0,
@@ -127,7 +127,7 @@ extension BrowserClient {
         handler.pointee.get_screen_info = { handlerSelf, browser, screenInfo in
             cefRelease(browser.map(UnsafeMutableRawPointer.init))
             guard let screenInfo else { return 0 }
-            let info = BrowserClient.osrHostInfo(handlerSelf)
+            let info = CefBrowserClient.offscreenViewInfo(handlerSelf)
             screenInfo.pointee.device_scale_factor = Float(info.deviceScaleFactor)
             screenInfo.pointee.depth = 24
             screenInfo.pointee.depth_per_component = 8
@@ -146,7 +146,7 @@ extension BrowserClient {
         handler.pointee.get_screen_point = { handlerSelf, browser, viewX, viewY, screenX, screenY in
             cefRelease(browser.map(UnsafeMutableRawPointer.init))
             guard let screenX, let screenY else { return 0 }
-            let info = BrowserClient.osrHostInfo(handlerSelf)
+            let info = CefBrowserClient.offscreenViewInfo(handlerSelf)
             // macOS expects screen DIP coordinates.
             screenX.pointee = Int32((info.screenOriginDIP.x + CGFloat(viewX)).rounded())
             screenY.pointee = Int32((info.screenOriginDIP.y + CGFloat(viewY)).rounded())
@@ -158,7 +158,7 @@ extension BrowserClient {
             // Both PET_VIEW (page) and PET_POPUP (e.g. <select> dropdown) frames
             // are forwarded; the host routes each to the right CALayer.
             guard let buffer else { return }
-            let element: CefOSRPaintElement = (type == PET_POPUP) ? .popup : .view
+            let element: CefOffscreenPaintElement = (type == PET_POPUP) ? .popup : .view
             var rects: [CGRect] = []
             if let dirtyRects, dirtyCount > 0 {
                 for i in 0..<Int(dirtyCount) {
@@ -167,21 +167,21 @@ extension BrowserClient {
                 }
             }
             let w = Int(width), h = Int(height)
-            BrowserClient.withOSRHost(handlerSelf) { host in
-                host.osrDidPaint(.cpu(buffer: buffer, width: w, height: h, dirtyRects: rects), element: element)
+            CefBrowserClient.withOffscreenHost(handlerSelf) { host in
+                host.offscreenDidPaint(.cpu(buffer: buffer, width: w, height: h, dirtyRects: rects), element: element)
             }
         }
 
         handler.pointee.on_accelerated_paint = { handlerSelf, browser, type, _, _, info in
             cefRelease(browser.map(UnsafeMutableRawPointer.init))
             guard let info else { return }
-            let element: CefOSRPaintElement = (type == PET_POPUP) ? .popup : .view
+            let element: CefOffscreenPaintElement = (type == PET_POPUP) ? .popup : .view
             let ioSurfacePtr = info.pointee.shared_texture_io_surface
             guard let ioSurfacePtr else { return }
             let surface = Unmanaged<IOSurfaceRef>.fromOpaque(ioSurfacePtr).takeUnretainedValue()
             let size = CGSize(width: IOSurfaceGetWidth(surface), height: IOSurfaceGetHeight(surface))
-            BrowserClient.withOSRHost(handlerSelf) { host in
-                host.osrDidPaint(.accelerated(surface: surface, size: size), element: element)
+            CefBrowserClient.withOffscreenHost(handlerSelf) { host in
+                host.offscreenDidPaint(.accelerated(surface: surface, size: size), element: element)
             }
         }
 
@@ -193,26 +193,26 @@ extension BrowserClient {
             cefRelease(UnsafeMutableRawPointer(dragData))
             let ops = CefDragOperation(rawValue: UInt32(allowedOps.rawValue))
             let point = CGPoint(x: CGFloat(x), y: CGFloat(y))
-            guard let client = cefOwner(BrowserClient.self, handlerSelf.map(UnsafeMutableRawPointer.init)) else { return 0 }
+            guard let client = cefOwner(CefBrowserClient.self, handlerSelf.map(UnsafeMutableRawPointer.init)) else { return 0 }
             return MainActor.assumeIsolated {
-                guard let host = client.osrHost else { return 0 }
-                return host.osrStartDragging(snapshot, allowedOps: ops, at: point) ? 1 : 0
+                guard let host = client.offscreenHost else { return 0 }
+                return host.offscreenStartDragging(snapshot, allowedOps: ops, at: point) ? 1 : 0
             }
         }
 
         handler.pointee.update_drag_cursor = { handlerSelf, browser, operation in
             cefRelease(browser.map(UnsafeMutableRawPointer.init))
             let op = CefDragOperation(rawValue: UInt32(operation.rawValue))
-            BrowserClient.withOSRHost(handlerSelf) { host in
-                host.osrUpdateDragCursor(op)
+            CefBrowserClient.withOffscreenHost(handlerSelf) { host in
+                host.offscreenUpdateDragCursor(op)
             }
         }
 
         handler.pointee.on_popup_show = { handlerSelf, browser, show in
             cefRelease(browser.map(UnsafeMutableRawPointer.init))
             let visible = show != 0
-            BrowserClient.withOSRHost(handlerSelf) { host in
-                host.osrPopupDidChangeVisibility(visible)
+            CefBrowserClient.withOffscreenHost(handlerSelf) { host in
+                host.offscreenPopupDidChangeVisibility(visible)
             }
         }
 
@@ -221,8 +221,8 @@ extension BrowserClient {
             guard let rect else { return }
             let cg = CGRect(x: CGFloat(rect.pointee.x), y: CGFloat(rect.pointee.y),
                             width: CGFloat(rect.pointee.width), height: CGFloat(rect.pointee.height))
-            BrowserClient.withOSRHost(handlerSelf) { host in
-                host.osrPopupDidResize(cg)
+            CefBrowserClient.withOffscreenHost(handlerSelf) { host in
+                host.offscreenPopupDidResize(cg)
             }
         }
 
@@ -236,8 +236,8 @@ extension BrowserClient {
                     rects.append(CGRect(x: CGFloat(r.x), y: CGFloat(r.y), width: CGFloat(r.width), height: CGFloat(r.height)))
                 }
             }
-            BrowserClient.withOSRHost(handlerSelf) { host in
-                host.osrImeCompositionRangeChanged(selectedRange: range, characterBounds: rects)
+            CefBrowserClient.withOffscreenHost(handlerSelf) { host in
+                host.offscreenImeCompositionRangeChanged(selectedRange: range, characterBounds: rects)
             }
         }
 
@@ -245,8 +245,8 @@ extension BrowserClient {
             cefRelease(browser.map(UnsafeMutableRawPointer.init))
             let text = CefStringUtil.string(from: selectedText)
             let range = selectedRange.map { NSRange(location: Int($0.pointee.from), length: Int($0.pointee.to) - Int($0.pointee.from)) } ?? NSRange(location: 0, length: 0)
-            BrowserClient.withOSRHost(handlerSelf) { host in
-                host.osrTextSelectionChanged(selectedText: text, selectedRange: range)
+            CefBrowserClient.withOffscreenHost(handlerSelf) { host in
+                host.offscreenTextSelectionChanged(selectedText: text, selectedRange: range)
             }
         }
 
@@ -255,17 +255,17 @@ extension BrowserClient {
 
     /// Reads the host's current geometry, or a 1x1 fallback if the host is gone
     /// (CEF may call get_view_rect from non-main contexts during teardown).
-    nonisolated static func osrHostInfo(_ handlerSelf: UnsafeMutableRawPointer?) -> CefOSRViewInfo {
-        guard let client = cefOwner(BrowserClient.self, handlerSelf) else { return CefOSRViewInfo() }
-        return MainActor.assumeIsolated { client.osrHost?.osrViewInfo ?? CefOSRViewInfo() }
+    nonisolated static func offscreenViewInfo(_ handlerSelf: UnsafeMutableRawPointer?) -> CefOffscreenViewInfo {
+        guard let client = cefOwner(CefBrowserClient.self, handlerSelf) else { return CefOffscreenViewInfo() }
+        return MainActor.assumeIsolated { client.offscreenHost?.offscreenViewInfo ?? CefOffscreenViewInfo() }
     }
 
     /// Runs `body` with the OSR host on the main actor when both client and
     /// host are alive.
-    nonisolated static func withOSRHost(_ handlerSelf: UnsafeMutableRawPointer?, _ body: @MainActor (CefOSRHost) -> Void) {
-        guard let client = cefOwner(BrowserClient.self, handlerSelf) else { return }
+    nonisolated static func withOffscreenHost(_ handlerSelf: UnsafeMutableRawPointer?, _ body: @MainActor (CefOffscreenHost) -> Void) {
+        guard let client = cefOwner(CefBrowserClient.self, handlerSelf) else { return }
         MainActor.assumeIsolated {
-            guard let host = client.osrHost else { return }
+            guard let host = client.offscreenHost else { return }
             body(host)
         }
     }

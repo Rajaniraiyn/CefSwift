@@ -28,27 +28,27 @@ extension CefOffscreenBrowserView {
         CefOffscreenBrowserView.cefModifiers(NSEvent.modifierFlags, pressedButtons: NSEvent.pressedMouseButtons)
     }
 
-    var osrBrowser: CefBrowser? { browser }
+    var offscreenBrowser: CefBrowser? { browser }
 
     // MARK: Mouse
 
     public override func mouseMoved(with event: NSEvent) {
-        osrBrowser?.sendMouseMove(to: dipPoint(for: event), modifiers: modifiers)
+        offscreenBrowser?.sendMouseMove(to: dipPoint(for: event), modifiers: modifiers)
     }
     public override func mouseDragged(with event: NSEvent) {
-        osrBrowser?.sendMouseMove(to: dipPoint(for: event), modifiers: modifiers)
+        offscreenBrowser?.sendMouseMove(to: dipPoint(for: event), modifiers: modifiers)
     }
     public override func rightMouseDragged(with event: NSEvent) {
-        osrBrowser?.sendMouseMove(to: dipPoint(for: event), modifiers: modifiers)
+        offscreenBrowser?.sendMouseMove(to: dipPoint(for: event), modifiers: modifiers)
     }
     public override func otherMouseDragged(with event: NSEvent) {
-        osrBrowser?.sendMouseMove(to: dipPoint(for: event), modifiers: modifiers)
+        offscreenBrowser?.sendMouseMove(to: dipPoint(for: event), modifiers: modifiers)
     }
     public override func mouseExited(with event: NSEvent) {
-        osrBrowser?.sendMouseMove(to: dipPoint(for: event), modifiers: modifiers, leaving: true)
+        offscreenBrowser?.sendMouseMove(to: dipPoint(for: event), modifiers: modifiers, leaving: true)
     }
     public override func mouseEntered(with event: NSEvent) {
-        osrBrowser?.sendMouseMove(to: dipPoint(for: event), modifiers: modifiers)
+        offscreenBrowser?.sendMouseMove(to: dipPoint(for: event), modifiers: modifiers)
     }
 
     public override func mouseDown(with event: NSEvent) {
@@ -56,17 +56,17 @@ extension CefOffscreenBrowserView {
         // becomeFirstResponder alone proved flaky when several browsers share
         // a window (you'd have to click another view first).
         window?.makeFirstResponder(self)
-        osrBrowser?.setFocus(true)
-        osrBrowser?.sendMouseDown(at: dipPoint(for: event), button: .left, clickCount: event.clickCount, modifiers: modifiers)
+        offscreenBrowser?.setFocus(true)
+        offscreenBrowser?.sendMouseDown(at: dipPoint(for: event), button: .left, clickCount: event.clickCount, modifiers: modifiers)
     }
     public override func mouseUp(with event: NSEvent) {
-        osrBrowser?.sendMouseUp(at: dipPoint(for: event), button: .left, clickCount: event.clickCount, modifiers: modifiers)
+        offscreenBrowser?.sendMouseUp(at: dipPoint(for: event), button: .left, clickCount: event.clickCount, modifiers: modifiers)
     }
     public override func rightMouseDown(with event: NSEvent) {
-        osrBrowser?.sendMouseDown(at: dipPoint(for: event), button: .right, clickCount: event.clickCount, modifiers: modifiers)
+        offscreenBrowser?.sendMouseDown(at: dipPoint(for: event), button: .right, clickCount: event.clickCount, modifiers: modifiers)
     }
     public override func rightMouseUp(with event: NSEvent) {
-        osrBrowser?.sendMouseUp(at: dipPoint(for: event), button: .right, clickCount: event.clickCount, modifiers: modifiers)
+        offscreenBrowser?.sendMouseUp(at: dipPoint(for: event), button: .right, clickCount: event.clickCount, modifiers: modifiers)
     }
     /// What an `otherMouse*` button maps to. Buttons 3/4 are the standard
     /// "back"/"forward" thumb buttons; anything else is treated as a middle
@@ -83,17 +83,17 @@ extension CefOffscreenBrowserView {
     public override func otherMouseDown(with event: NSEvent) {
         // The press is the meaningful edge for nav — fire on down, swallow up.
         switch CefOffscreenBrowserView.otherMouseAction(forButtonNumber: event.buttonNumber) {
-        case .back: osrBrowser?.goBack(); return
-        case .forward: osrBrowser?.goForward(); return
+        case .back: offscreenBrowser?.goBack(); return
+        case .forward: offscreenBrowser?.goForward(); return
         case .middle:
-            osrBrowser?.sendMouseDown(at: dipPoint(for: event), button: .middle, clickCount: event.clickCount, modifiers: modifiers)
+            offscreenBrowser?.sendMouseDown(at: dipPoint(for: event), button: .middle, clickCount: event.clickCount, modifiers: modifiers)
         }
     }
     public override func otherMouseUp(with event: NSEvent) {
         // Swallow the release of the back/forward thumb buttons so they don't
         // also reach the page as a middle click.
         guard CefOffscreenBrowserView.otherMouseAction(forButtonNumber: event.buttonNumber) == .middle else { return }
-        osrBrowser?.sendMouseUp(at: dipPoint(for: event), button: .middle, clickCount: event.clickCount, modifiers: modifiers)
+        offscreenBrowser?.sendMouseUp(at: dipPoint(for: event), button: .middle, clickCount: event.clickCount, modifiers: modifiers)
     }
 
     public override func scrollWheel(with event: NSEvent) {
@@ -122,13 +122,13 @@ extension CefOffscreenBrowserView {
         let sendY = totalY.rounded(.towardZero)
         scrollResidual = CGPoint(x: totalX - sendX, y: totalY - sendY)
         if sendX == 0 && sendY == 0 { return }
-        osrBrowser?.sendMouseWheel(at: dipPoint(for: event), deltaX: sendX, deltaY: sendY, modifiers: modifiers)
+        offscreenBrowser?.sendMouseWheel(at: dipPoint(for: event), deltaX: sendX, deltaY: sendY, modifiers: modifiers)
     }
 
     // MARK: Keyboard
 
     public override func keyDown(with event: NSEvent) {
-        guard osrBrowser != nil else { return }
+        guard offscreenBrowser != nil else { return }
         // Deferred model (mirrors cefclient): interpretKeyEvents only feeds the
         // NSTextInputClient methods, which *accumulate* state; we then decide
         // whether this was a plain keypress (→ KEYDOWN+CHAR, so JS key events
@@ -142,14 +142,14 @@ extension CefOffscreenBrowserView {
     public override func keyUp(with event: NSEvent) {
         var e = makeKeyEvent(event)
         e.type = KEYEVENT_KEYUP
-        osrBrowser?.sendKeyEvent(e)
+        offscreenBrowser?.sendKeyEvent(e)
     }
 
     public override func flagsChanged(with event: NSEvent) {
         // Modifier-only change: down when the modifier is now pressed, else up.
         var e = makeKeyEvent(event)
         e.type = isModifierPressed(event) ? KEYEVENT_KEYDOWN : KEYEVENT_KEYUP
-        osrBrowser?.sendKeyEvent(e)
+        offscreenBrowser?.sendKeyEvent(e)
     }
 
     /// Builds a `cef_key_event_t` (without a `type`) from an `NSEvent`.
@@ -218,7 +218,7 @@ extension CefOffscreenBrowserView {
 
     private func handleKeyEventAfterTextInputClient(_ base: cef_key_event_t) {
         keyInput.handlingKeyDown = false
-        guard let browser = osrBrowser else { return }
+        guard let browser = offscreenBrowser else { return }
 
         // Plain keypress (no composition, at most one character produced):
         // send KEYDOWN then CHAR so the renderer sees a real key event.
@@ -259,12 +259,12 @@ extension CefOffscreenBrowserView {
     // MARK: Focus
 
     public override func becomeFirstResponder() -> Bool {
-        osrBrowser?.setFocus(true)
+        offscreenBrowser?.setFocus(true)
         return super.becomeFirstResponder()
     }
 
     public override func resignFirstResponder() -> Bool {
-        osrBrowser?.setFocus(false)
+        offscreenBrowser?.setFocus(false)
         return super.resignFirstResponder()
     }
 }

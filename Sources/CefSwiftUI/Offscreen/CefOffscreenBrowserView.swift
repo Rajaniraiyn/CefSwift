@@ -15,7 +15,7 @@ import Foundation
 /// `CefWebView` uses this for browsers whose ``CefBrowserOptions/rendering``
 /// is `.offscreen`; use it directly in AppKit by assigning ``browser``.
 @MainActor
-public final class CefOffscreenBrowserView: NSView, CefOSRHost {
+public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
 
     // MARK: Stored state
 
@@ -44,7 +44,7 @@ public final class CefOffscreenBrowserView: NSView, CefOSRHost {
 
     /// Cursor the page last requested. Re-applied from `cursorUpdate(with:)`
     /// because AppKit resets the cursor on every mouse-move; a one-shot
-    /// `NSCursor.set()` from `osrDidChangeCursor` alone would not stick.
+    /// `NSCursor.set()` from `offscreenDidChangeCursor` alone would not stick.
     private var currentCursor: NSCursor = .arrow
 
     /// Drives `sendExternalBeginFrame()` once per display refresh so painting is
@@ -262,9 +262,9 @@ public final class CefOffscreenBrowserView: NSView, CefOSRHost {
         browser = nil
     }
 
-    // MARK: CefOSRHost
+    // MARK: CefOffscreenHost
 
-    public var osrViewInfo: CefOSRViewInfo {
+    public var offscreenViewInfo: CefOffscreenViewInfo {
         let scale = window?.backingScaleFactor ?? 2.0
         var origin = CGPoint.zero
         var screenRect = CGRect(x: 0, y: 0, width: 1, height: 1)
@@ -279,7 +279,7 @@ public final class CefOffscreenBrowserView: NSView, CefOSRHost {
                 screenRect = CGRect(x: 0, y: 0, width: sf.width, height: sf.height)
             }
         }
-        return CefOSRViewInfo(
+        return CefOffscreenViewInfo(
             sizeDIP: bounds.size == .zero ? CGSize(width: 1, height: 1) : bounds.size,
             deviceScaleFactor: scale,
             screenOriginDIP: origin,
@@ -287,7 +287,7 @@ public final class CefOffscreenBrowserView: NSView, CefOSRHost {
         )
     }
 
-    public func osrDidPaint(_ frame: CefOSRFrame, element: CefOSRPaintElement) {
+    public func offscreenDidPaint(_ frame: CefOffscreenFrame, element: CefOffscreenPaintElement) {
         // PET_VIEW frames go to the content layer; PET_POPUP frames (the
         // `<select>` dropdown / autofill widget) go to the popup overlay layer
         // sized by on_popup_size and shown/hidden by on_popup_show.
@@ -318,7 +318,7 @@ public final class CefOffscreenBrowserView: NSView, CefOSRHost {
         }
     }
 
-    public func osrDidChangeCursor(_ cursor: CefCursorType) {
+    public func offscreenDidChangeCursor(_ cursor: CefCursorType) {
         currentCursor = cursor.nsCursor ?? .arrow
         // Apply immediately, and make AppKit re-apply it via cursorUpdate(_:)
         // on subsequent mouse-moves (otherwise it reverts to the arrow).
@@ -334,12 +334,12 @@ public final class CefOffscreenBrowserView: NSView, CefOSRHost {
         addCursorRect(bounds, cursor: currentCursor)
     }
 
-    public func osrPopupDidChangeVisibility(_ visible: Bool) {
+    public func offscreenPopupDidChangeVisibility(_ visible: Bool) {
         popupLayer.isHidden = !visible
         if !visible { popupRectDIP = .zero }
     }
 
-    public func osrPopupDidResize(_ rect: CGRect) {
+    public func offscreenPopupDidResize(_ rect: CGRect) {
         popupRectDIP = rect
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -347,7 +347,7 @@ public final class CefOffscreenBrowserView: NSView, CefOSRHost {
         CATransaction.commit()
     }
 
-    public func osrImeCompositionRangeChanged(selectedRange: NSRange, characterBounds: [CGRect]) {
+    public func offscreenImeCompositionRangeChanged(selectedRange: NSRange, characterBounds: [CGRect]) {
         currentImeSelectedRange = selectedRange
         currentImeCharacterBounds = characterBounds
         if let first = characterBounds.first {
@@ -355,7 +355,7 @@ public final class CefOffscreenBrowserView: NSView, CefOSRHost {
         }
     }
 
-    public func osrTextSelectionChanged(selectedText: String, selectedRange: NSRange) {
+    public func offscreenTextSelectionChanged(selectedText: String, selectedRange: NSRange) {
         currentSelectedText = selectedText
         currentSelectedTextRange = selectedRange
     }
@@ -410,7 +410,7 @@ extension CefOffscreenBrowserView {
     // MARK: Pinch zoom
 
     public override func magnify(with event: NSEvent) {
-        guard let browser = osrBrowser else { return }
+        guard let browser = offscreenBrowser else { return }
         // event.magnification is an incremental scale delta (-1...1-ish per
         // event). Translate into a zoom-level delta; ~4 units of magnification
         // ≈ one Chromium zoom step, matching trackpad feel.
@@ -419,7 +419,7 @@ extension CefOffscreenBrowserView {
     }
 
     public override func smartMagnify(with event: NSEvent) {
-        guard let browser = osrBrowser else { return }
+        guard let browser = offscreenBrowser else { return }
         // Two-finger double-tap: toggle between default and a zoomed-in step.
         if abs(browser.zoomLevel) < 0.01 {
             browser.zoomLevel = CefOffscreenBrowserView.smartMagnifyStep
@@ -460,9 +460,11 @@ extension CefOffscreenBrowserView {
         else { return false }
         let goesBack = event.scrollingDeltaX > 0
         guard goesBack ? browser.canGoBack : browser.canGoForward else { return false }
-        event.trackSwipeEvent(options: .lockDirection, dampenAmountThresholdMin: -1, max: 1) { amount, phase, _, _ in
-            guard phase == .ended, abs(amount) >= 1 else { return }
+        event.trackSwipeEvent(options: .lockDirection, dampenAmountThresholdMin: -1, max: 1) { amount, phase, isComplete, _ in
             MainActor.assumeIsolated {
+                // AppKit reports positive amounts for "back".
+                browser.navigationGestureProgress = isComplete ? 0 : -Double(amount)
+                guard phase == .ended, abs(amount) >= 1 else { return }
                 if goesBack { browser.goBack() } else { browser.goForward() }
             }
         }
@@ -490,7 +492,7 @@ extension CefOffscreenBrowserView {
     }
 
     private func forwardTouches(_ event: NSEvent, type: cef_touch_event_type_t) {
-        guard forwardsRawTouches, let browser = osrBrowser else { return }
+        guard forwardsRawTouches, let browser = offscreenBrowser else { return }
         let phase: NSTouch.Phase
         switch type {
         case CEF_TET_PRESSED: phase = .began
@@ -528,7 +530,7 @@ extension CefOffscreenBrowserView: @preconcurrency NSTextInputClient {
         } else {
             // Direct insert (e.g. IME candidate pick outside a keystroke).
             let range = replacementRange.location == NSNotFound ? nil : replacementRange
-            osrBrowser?.imeCommitText(text, replacementRange: range)
+            offscreenBrowser?.imeCommitText(text, replacementRange: range)
         }
         // Inserting text always clears any marked composition.
         keyInput.hasMarkedTextFlag = false
@@ -549,9 +551,9 @@ extension CefOffscreenBrowserView: @preconcurrency NSTextInputClient {
             keyInput.setMarkedReplacement = rep
         } else {
             if text.isEmpty {
-                osrBrowser?.imeCancelComposition()
+                offscreenBrowser?.imeCancelComposition()
             } else {
-                osrBrowser?.imeSetComposition(text: text, selectionRange: selectedRange, replacementRange: rep)
+                offscreenBrowser?.imeSetComposition(text: text, selectionRange: selectedRange, replacementRange: rep)
             }
         }
     }
@@ -562,7 +564,7 @@ extension CefOffscreenBrowserView: @preconcurrency NSTextInputClient {
         if keyInput.handlingKeyDown {
             keyInput.unmarkTextCalled = true
         } else {
-            osrBrowser?.imeFinishComposing(keepSelection: true)
+            offscreenBrowser?.imeFinishComposing(keepSelection: true)
         }
     }
 
@@ -628,7 +630,7 @@ extension CefOffscreenBrowserView: @preconcurrency NSTextInputClient {
 /// so right-click feels identical to a native control.
 extension CefOffscreenBrowserView {
 
-    public func osrRunContextMenu(_ menu: CefMenuModel, at viewPoint: CGPoint, callback: CefRunContextMenuCallback) {
+    public func offscreenRunContextMenu(_ menu: CefMenuModel, at viewPoint: CGPoint, callback: CefRunContextMenuCallback) {
         // IMPORTANT: CEF forbids running an OS modal message loop *inside* this
         // callback (only start_dragging may). So we snapshot the menu items
         // synchronously, then present the NSMenu on the next runloop tick and
