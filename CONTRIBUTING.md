@@ -7,6 +7,16 @@ swift build
 swift test
 ```
 
+CI also runs the unit tests under the sanitizers:
+
+```sh
+swift test --sanitize=thread
+swift test --sanitize=address --build-system native
+```
+
+The default build system links the helper-startup library without the
+Address Sanitizer runtime, so that one uses the native build system.
+
 The Command Line Tools are enough; Xcode is not required. `CefKitTests`
 covers CefKit, `CefSwiftUITests` the views, and `CefPluginTests` the
 plugin's signing, distribution and bundle-assembly logic; none of them
@@ -101,9 +111,21 @@ through a scheme handler: load time, main-thread busy time, peak memory),
 `lifecycle` (CPU time of an animated page in each host while visible,
 covered, minimized and with the app hidden), `frames` (offscreen frame
 rate, pacing, mouse-to-paint latency and CPU, with Chromium's timer and a
-display link; `-frameTiming <label prefix>` runs one) and `probes`
-(freezing and App Nap). Run them with nothing else on screen; note the
-power source and Low Power Mode, which change the numbers.
+display link; `-frameTiming <label prefix>` runs one), `probes`
+(freezing and App Nap), `compositor` (what the offscreen view presents;
+`-compositorPage damage` for a page that changes one block per frame,
+`-compositorCopy whole` to copy whole frames), `bridge`, `evaluate` and
+`codec` (round trips and allocations of bridge calls and evaluations, and
+the codecs alone), `axingest` (taking a large accessibility tree from
+CEF) and `devtools` (DevTools events nobody listens to). Allocations are
+the app's main thread's, counted through `malloc_logger`. Run them with
+nothing else on screen; note the power source and Low Power Mode, which
+change the numbers.
+
+SelfTest removes its own cache directories in `$TMPDIR` when it exits, and
+those of earlier runs whose process is gone. With the live-object census
+on, it prints a `CENSUS` line after each group and checks before quitting
+that nothing but process-lifetime objects is alive.
 
 ## Measure web compatibility
 

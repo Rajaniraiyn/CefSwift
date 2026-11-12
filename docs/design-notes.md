@@ -176,3 +176,33 @@ tree is ready at about the same time either way, the slower background
 read making up for the shorter main-thread step. CefKit copies. Reading
 the original tree value by value on the main thread, without a copy, took
 452 ms there for a 15 000-node page in an earlier measurement.
+
+## Strings, scheme bodies and DevTools events
+
+Measured the same way, 2026-11-13, before and after builds back to back
+(`-benchmark requests`, `devtools`; nine and two runs):
+
+- A string going into CEF was copied into an `Array` of UTF-16 units and
+  then into a heap buffer; it is transcoded once into a stack buffer.
+  The request filter's own work around the filter (three strings out,
+  two URLs parsed, headers in) took 3.1–4.9 µs a request before and
+  2.9–3.4 µs after: parsing the URL dominates; the referrer is
+  parsed only when a filter reads it.
+- A 200 MB `.file` body was read in 256 KB `Data` chunks on
+  `CefFileActor` and copied from them into Chromium's buffer; it is read
+  with `pread(2)` straight into Chromium's buffer. Total time (242–339 ms
+  before, 280–284 ms after), peak footprint (+13–15 MB, +12–15 MB) and
+  app CPU (220–328 ms, 222–234 ms) did not change measurably: Chromium's
+  own work on the body sets them. What changed is one copy and one
+  allocation per 256 KB fewer, and no actor hop per chunk.
+- 20 000 DevTools events nobody listens to: CefKit copied each event's
+  parameters before looking for a listener; it looks first. 8.0–8.2
+  allocations an event on the main thread before, 6.0–6.3 after; CefKit's
+  own time stayed at 0.9–1.0 µs an event.
+
+The Minimal example's footprint (`measure-footprint.py`, median of five
+relaunches) is 88.5 MiB after these changes, as before (88 MiB). The
+web-compatibility probe (`compat-matrix.py probe`, rows `nothing`,
+`bridge` and `evaluateJavaScript` in the windowed, offscreen and window
+hosts) reads the same with the wire transport as without a feature,
+except for the bridge's own global.
