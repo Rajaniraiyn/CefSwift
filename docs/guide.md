@@ -15,6 +15,8 @@ are `@MainActor`.
   - [Swipe navigation](#swipe-navigation)
   - [Offscreen accessibility](#offscreen-accessibility)
 - [Discarding browsers](#discarding-browsers)
+- [Processes](#processes)
+  - [Unresponsive pages](#unresponsive-pages)
 - [JavaScript](#javascript)
   - [User scripts and style sheets](#user-scripts-and-style-sheets)
   - [Bridge](#bridge)
@@ -623,6 +625,71 @@ CefRuntime.shared.energySaver = CefEnergySaver(reducedOffscreenFrameRate: 45)
 Windowed and Chrome-style browsers draw at the display's rate in any
 case.
 
+## Processes
+
+`CefRuntime.shared.tasks` is Chromium's task manager: an `@Observable`
+list of the app's processes and what runs in them, with CPU and memory,
+as Chrome's Task Manager shows them.
+
+```swift
+struct TaskList: View {
+    private let manager = CefRuntime.shared.tasks
+
+    var body: some View {
+        Table(manager.tasks) {
+            TableColumn("Task", value: \.title)
+            TableColumn("Memory") { task in
+                Text(task.memory.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .memory) } ?? "–")
+            }
+        }
+    }
+}
+```
+
+Each `CefTaskManager.Task` has a `kind` (`.browser`, `.gpu`, `.renderer`,
+`.utility`, `.serviceWorker`, …), Chromium's `title`, `cpuUsage` in percent
+of one core (up to `processorCount` × 100), `memory` and `gpuMemory` in
+bytes (`nil` until Chromium has measured them), and `canTerminate`.
+`terminate(_:)` ends a task's process, as End Process does; the pages it
+showed report `browser(_:renderProcessDidTerminate:)`. Chromium does not
+end the app's own process.
+
+`tasks` refreshes every `refreshInterval` (one second) while something
+reads it: a view showing it, or code that reads it again within two
+intervals. When nothing does, it stops, and Chromium stops measuring.
+`refresh()` takes one snapshot at once.
+
+The figures belong to processes, and several tasks can share one: tabs of
+one site in one renderer, a page and its workers. Tasks of one process
+report the same figures and the same `process`; `processes` groups them,
+and `CefTaskManager.Process.totalMemory(of:)` counts each process once.
+Chromium's API names no process, so CefSwift groups the consecutive
+renderer tasks with identical figures, which is what the tasks of one
+process have.
+
+`browser.process` is the task of the renderer showing a browser's page,
+and `tasks.browsers(in:)` lists every browser a process serves, so a
+browser's memory is that process's memory shared with those browsers.
+
+### Unresponsive pages
+
+A page whose renderer has not handled input for 15 seconds, such as one
+stuck in a loop, is unresponsive: `browser.isResponsive` turns `false`
+until it responds again or its process ends. Chrome-style browsers show
+Chromium's “Page Unresponsive” dialog. Other browsers ask the delegate,
+whose default is a native sheet offering Wait and Force Reload:
+
+```swift
+func browserPageIsUnresponsive(_ browser: CefBrowser) async -> CefUnresponsivePageDecision {
+    .reload   // .wait asks again later if the page still does not respond; .terminate ends it
+}
+```
+
+Set `CefBrowserOptions.unresponsivePages` to `.delegate` to have
+Chrome-style browsers ask the delegate too, instead of showing Chromium's
+dialog. A page that responds again before you answer withdraws the
+question: the task is cancelled and the default sheet dismisses itself.
+
 ## JavaScript
 
 ```swift
@@ -758,6 +825,7 @@ final class Policy: CefBrowserDelegate {
 | `browser(_:decidePermissionFor:) async` | `.deny`. Asked only when the site settings leave the request to the user; see [Site settings](#site-settings) |
 | `browser(_:credentialFor:) async` (HTTP authentication) | Native sign-in sheet. CEF 156 does not call it; see [Known limits](#known-limits) |
 | `browser(_:shouldProceedDespite:) async` (certificate errors) | `false`: the load is cancelled |
+| `browserPageIsUnresponsive(_:) async` | Native sheet; Chrome-style browsers show Chromium's dialog instead. See [Unresponsive pages](#unresponsive-pages) |
 | `browser(_:decideDestinationFor:suggestedName:) async` | `.allow(destination: nil)`: `~/Downloads` |
 | `browser(_:decidePasskeyRequest:) async` | Native passkey sheet; see [Passkeys](#passkeys) |
 | `browser(_:decidePolicyFor:)` | `.allow` |

@@ -683,8 +683,10 @@ final class CefBrowserClient {
             CefBrowserClient.run(s, browser, default: ()) { _, b in
                 b.pageScripting.failPendingEvaluations()
                 b.delegate?.browser(b, renderProcessDidTerminate: reason)
+                b.renderProcessEnded()
             }
         }
+        Self.installResponsivenessCallbacks(on: h)
         // IO thread.
         h.pointee.get_resource_request_handler = { s, browser, frame, request, _, _, _, _ in
             cefRelease(browser)

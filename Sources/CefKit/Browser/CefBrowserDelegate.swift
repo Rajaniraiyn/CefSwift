@@ -46,6 +46,13 @@ public protocol CefBrowserDelegate: AnyObject {
     func browser(_ browser: CefBrowser, didLog message: CefConsoleMessage)
     /// The render process went away. Reloading recovers.
     func browser(_ browser: CefBrowser, renderProcessDidTerminate reason: CefTerminationReason)
+    /// The page has not responded to input for 15 seconds: wait for it, or
+    /// end its renderer. Not asked for Chrome-style browsers, which show
+    /// Chromium's dialog, unless ``CefBrowserOptions/unresponsivePages`` is
+    /// ``CefUnresponsivePagePolicy/delegate``. The question is withdrawn,
+    /// and the task cancelled, when the page responds again. The default
+    /// asks with ``CefUnresponsivePagePresenter``.
+    func browserPageIsUnresponsive(_ browser: CefBrowser) async -> CefUnresponsivePageDecision
 
     // MARK: Synchronous policy
 
@@ -120,6 +127,9 @@ extension CefBrowserDelegate {
     public func browser(_ browser: CefBrowser, didFailLoad error: CefLoadError) {}
     public func browser(_ browser: CefBrowser, didLog message: CefConsoleMessage) {}
     public func browser(_ browser: CefBrowser, renderProcessDidTerminate reason: CefTerminationReason) {}
+    public func browserPageIsUnresponsive(_ browser: CefBrowser) async -> CefUnresponsivePageDecision {
+        await CefUnresponsivePagePresenter.present(for: browser, in: browser.hostWindow)
+    }
 
     public func browser(_ browser: CefBrowser, decidePolicyFor navigation: CefNavigationAction) -> CefNavigationDecision {
         .allow

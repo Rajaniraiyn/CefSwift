@@ -167,6 +167,7 @@ enum SelfTest {
         ("chromeWindow", chromeWindowChecks),
         ("operations", operationChecks),
         ("siteSettings", siteSettingsChecks),
+        ("processes", processChecks),
         // Last: it leaves discarded browsers open for the quit.
         ("discard", discardChecks),
     ]

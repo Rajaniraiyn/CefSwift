@@ -62,6 +62,10 @@ public struct CefBrowserOptions {
     /// which VoiceOver and other assistive apps read. Building it costs
     /// time and memory, so by default it starts on first demand.
     public var offscreenAccessibility: CefOffscreenAccessibility = .automatic
+    /// Who answers when the page stops responding: Chromium's dialog for
+    /// Chrome-style browsers and the delegate for others, or the delegate
+    /// for every browser.
+    public var unresponsivePages: CefUnresponsivePagePolicy = .automatic
 
     public init() {}
 }
@@ -256,6 +260,10 @@ public final class CefBrowser: Identifiable {
     public package(set) var navigationGestureProgress = 0.0
     /// The latest result of ``find(_:backwards:caseSensitive:)``.
     public internal(set) var findResult: CefFindResult?
+    /// Whether the page responds to input. Chromium reports a page whose
+    /// renderer has not handled input for 15 seconds as unresponsive; see
+    /// ``CefBrowserDelegate/browserPageIsUnresponsive(_:)``.
+    public internal(set) var isResponsive = true
 
     /// Whether the page has been unloaded to free its memory, by
     /// ``discard()`` or ``CefRuntime/memorySaver``.
@@ -1227,6 +1235,8 @@ extension CefBrowser {
         case dialog
         /// A permission prompt: ends when Chromium dismisses the prompt.
         case permissionPrompt(UInt64)
+        /// An unresponsive page: ends when the page responds again.
+        case unresponsive
         /// The browser: ends when it closes.
         case browser
     }
