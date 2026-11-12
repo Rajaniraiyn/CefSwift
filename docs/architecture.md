@@ -160,15 +160,23 @@ its DevTools connection, before the browser loads its first page:
   virtual authenticator environment. Chromium's dialog and its real
   authenticators (security keys, iCloud Keychain, phones) are not used
   there, and a call waits for an authenticator until its timeout.
-- As each document's main-world execution context appears, a
-  function-call breakpoint (`Debugger.setBreakpointOnFunctionCall`) is
-  set on that context's `CredentialsContainer.prototype.create` and
-  `.get`. A call stops the page before the call runs, in the caller's
-  frame; the frame's script gives the execution context, which gives the
-  origin and frame. `navigator.userActivation.isActive` is read in that
-  frame with `throwOnSideEffect`, so the read cannot change the page.
-  Nothing is added to the page. Any other pause, such as a `debugger`
-  statement, is resumed at once.
+- Each document's main-world context gets a function-call breakpoint
+  (`Debugger.setBreakpointOnFunctionCall`) on its
+  `CredentialsContainer.prototype.create` and `.get` before any of its
+  scripts runs. `Page.addScriptToEvaluateOnNewDocument` runs a script of
+  one statement, `debugger`, at the start of every document in an
+  isolated world named `cefswift-passkeys`, which the page cannot see or
+  reach. The renderer stops there. The document's main-world context has
+  been reported by then, and `Runtime.evaluate` in that context works
+  while the renderer is stopped, so the breakpoints are set before the
+  page's first script. (Setting them when `Runtime.executionContextCreated`
+  arrives, without the stop, loses to a script that calls at once.)
+- A call stops the page before the call runs, in the caller's frame; the
+  frame's script gives the execution context, which gives the origin and
+  frame. `navigator.userActivation.isActive` is read in that frame with
+  `throwOnSideEffect`, so the read cannot change the page. Nothing in the
+  page is changed. Any other pause, such as a `debugger` statement in the
+  page, is resumed at once.
 - While the page is stopped, the delegate decides, and CefKit adds a
   virtual authenticator (CTAP 2.1, internal transport, resident keys,
   user verification) for that one call: empty for a registration, holding

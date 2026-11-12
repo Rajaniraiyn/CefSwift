@@ -10,8 +10,13 @@ import Foundation
 /// - A function-call breakpoint on each document's
 ///   `CredentialsContainer.prototype.create` and `.get` stops the page at
 ///   every call, before the call runs, in the calling document's execution
-///   context (and so with its origin). Nothing is added to or changed in
-///   the page. The breakpoints are set as each document's context appears.
+///   context (and so with its origin). Nothing in the page is changed.
+/// - The breakpoints are in place before a document's first script runs:
+///   a one-statement script, `debugger`, runs at the start of every
+///   document in an isolated world of its own, which the page cannot see
+///   or reach. It stops the renderer there; the new document's main-world
+///   context exists by then, and its breakpoints are set before the page
+///   goes on.
 /// - While the page is stopped, the delegate decides, and an authenticator
 ///   made for that one call is put in place: an empty one for a
 ///   registration, one holding only the chosen passkey for an assertion,
@@ -44,6 +49,13 @@ final class CefPasskeyAuthenticator {
     private var authenticatorID: String?
     /// Credentials Chromium reported, by the authenticator that reported them.
     private var reported: [String: CefJSON] = [:]
+    /// The document-start scripts' IDs.
+    private var holdScripts: Set<String> = []
+    /// Setting each context's breakpoints, running or done.
+    private var arming: [Int: Task<Void, Never>] = [:]
+
+    /// The address the document-start script reports its pause under.
+    nonisolated static let holdScriptURL = "cefswift://passkeys/document-start.js"
 
     init(browser: CefBrowser, mode: CefPasskeyMode) {
         self.browser = browser
@@ -54,14 +66,15 @@ final class CefPasskeyAuthenticator {
     /// browser loads its first page.
     func start() async throws {
         guard let browser else { throw CefError.browserClosed }
+        passkeyTrace("start \(ObjectIdentifier(self)) browser \(browser.identifier)")
         let devTools = browser.devTools
         listen(devTools, "Runtime.executionContextCreated") { $0.contextCreated($1["context"]) }
         listen(devTools, "Runtime.executionContextDestroyed") { $0.contextDestroyed($1["executionContextId"].intValue) }
         listen(devTools, "Runtime.executionContextsCleared") { owner, _ in owner.contextsCleared() }
         listen(devTools, "Debugger.scriptParsed") { owner, event in
-            if let script = event["scriptId"].stringValue, let context = event["executionContextId"].intValue {
-                owner.scriptContexts[script] = context
-            }
+            guard let script = event["scriptId"].stringValue else { return }
+            if let context = event["executionContextId"].intValue { owner.scriptContexts[script] = context }
+            if event["url"].stringValue == Self.holdScriptURL { owner.holdScripts.insert(script) }
         }
         listen(devTools, "Debugger.paused") { owner, event in Task { await owner.paused(event) } }
         listen(devTools, "WebAuthn.credentialAdded") { $0.credentialReported($1) }
@@ -70,6 +83,13 @@ final class CefPasskeyAuthenticator {
         try await devTools.send("WebAuthn.enable", ["enableUI": false])
         mainFrameID = try await devTools.send("Page.getFrameTree")["frameTree"]["frame"]["id"].stringValue
         try await devTools.send("Debugger.enable")
+        try await devTools.send("Page.enable")
+        try await devTools.send("Page.addScriptToEvaluateOnNewDocument", [
+            "source": .string("debugger\n//# sourceURL=\(Self.holdScriptURL)"),
+            "worldName": "cefswift-passkeys",
+        ])
+        // Reports the contexts already there, which are armed as they are
+        // reported; documents from now on are armed at their start.
         try await devTools.send("Runtime.enable")
     }
 
@@ -96,14 +116,17 @@ final class CefPasskeyAuthenticator {
 
     private func contextCreated(_ context: CefJSON) {
         guard let id = context["id"].intValue, context["auxData"]["isDefault"].boolValue == true else { return }
+        passkeyTrace("context \(id) \(context["origin"].stringValue ?? "") frame \(context["auxData"]["frameId"].stringValue ?? "")")
         contexts[id] = Context(
             origin: context["origin"].stringValue ?? "",
             frameID: context["auxData"]["frameId"].stringValue ?? "")
-        Task { await arm(id) }
+        armIfNeeded(id)
     }
 
     private func contextDestroyed(_ id: Int?) {
-        guard let id, let context = contexts.removeValue(forKey: id) else { return }
+        guard let id else { return }
+        arming[id] = nil
+        guard let context = contexts.removeValue(forKey: id) else { return }
         for breakpoint in context.breakpoints {
             breakpointKinds[breakpoint] = nil
             let devTools = browser?.devTools
@@ -112,14 +135,27 @@ final class CefPasskeyAuthenticator {
     }
 
     private func contextsCleared() {
+        passkeyTrace("contexts cleared")
         contexts = [:]
         scriptContexts = [:]
+        holdScripts = []
         breakpointKinds = [:]
+        arming = [:]
+    }
+
+    /// Starts setting a context's breakpoints unless that has started, and
+    /// returns the work, to wait for.
+    @discardableResult
+    private func armIfNeeded(_ context: Int) -> Task<Void, Never> {
+        if let task = arming[context] { return task }
+        let task = Task { await arm(context) }
+        arming[context] = task
+        return task
     }
 
     /// Sets the breakpoints on one context's `create` and `get`.
     private func arm(_ context: Int) async {
-        guard let devTools = browser?.devTools else { return }
+        guard let devTools = browser?.devTools, contexts[context] != nil else { return }
         for (name, kind) in [("create", CefPasskeyRequest.Kind.registration), ("get", .assertion)] {
             do {
                 let function = try await devTools.send("Runtime.evaluate", [
@@ -135,7 +171,9 @@ final class CefPasskeyAuthenticator {
                 }
                 breakpointKinds[id] = kind
                 contexts[context]?.breakpoints.append(id)
+                passkeyTrace("armed \(context) \(name) \(id)")
             } catch {
+                passkeyTrace("arm \(context) failed \(error)")
                 // The context went away first, as a document that navigates
                 // on at once does.
                 return
@@ -150,7 +188,15 @@ final class CefPasskeyAuthenticator {
         let frame = event["callFrames"][0]
         let kind = (event["hitBreakpoints"].arrayValue ?? []).compactMap { $0.stringValue.flatMap { breakpointKinds[$0] } }.first
         let contextID = scriptContexts[frame["location"]["scriptId"].stringValue ?? ""]
-        if let kind, let contextID, let context = contexts[contextID] {
+        passkeyTrace("paused \(event["reason"].stringValue ?? "") url=\(frame["url"].stringValue ?? "") hit=\(event["hitBreakpoints"].text) kind=\(String(describing: kind)) ctx=\(String(describing: contextID)) known=\(contextID.map { contexts[$0] != nil } ?? false) contexts=\(contexts.keys.sorted())")
+        if kind == nil, holdScripts.contains(frame["location"]["scriptId"].stringValue ?? "") {
+            // A document is starting. Its main-world context was reported
+            // before this pause; arm it, and any other not armed yet, while
+            // nothing in the page has run.
+            for task in contexts.keys.map(armIfNeeded) {
+                await task.value
+            }
+        } else if let kind, let contextID, let context = contexts[contextID] {
             let gesture = try? await devTools.send("Debugger.evaluateOnCallFrame", [
                 "callFrameId": frame["callFrameId"], "expression": "navigator.userActivation.isActive",
                 "silent": true, "throwOnSideEffect": true, "returnByValue": true,
@@ -247,15 +293,18 @@ final class CefPasskeyAuthenticator {
         }
         if let credential = reported.removeValue(forKey: id) {
             await body(credential)
-            // Leave the authenticator a moment to hand its response over.
-            try? await Task.sleep(for: .milliseconds(200))
         }
         if authenticatorID == id { await removeAuthenticator() }
     }
 
+    /// Records the credential and takes the authenticator away at once:
+    /// it has answered its one call, and must not answer another.
     private func credentialReported(_ event: CefJSON) {
         guard let id = event["authenticatorId"].stringValue, id == authenticatorID else { return }
         reported[id] = event["credential"]
+        authenticatorID = nil
+        let devTools = browser?.devTools
+        Task { _ = try? await devTools?.send("WebAuthn.removeVirtualAuthenticator", ["authenticatorId": .string(id)]) }
     }
 
     private func removeAuthenticator() async {
@@ -299,3 +348,9 @@ extension CefPasskey {
         ]
     }
 }
+
+// TRACE-BEGIN
+@MainActor func passkeyTrace(_ message: @autoclosure () -> String) {
+    if ProcessInfo.processInfo.environment["CEFSWIFT_PASSKEY_TRACE"] != nil { print("TRACE \(Date().timeIntervalSince1970) \(message())") }
+}
+// TRACE-END
