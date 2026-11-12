@@ -30,8 +30,12 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
             }
             hostBrowserIfPossible()
             updateVisibility(notifyingBrowser: true)
+            accessibilityBridge.browserDidChange()
         }
     }
+
+    /// The page's accessibility elements.
+    lazy var accessibilityBridge = CefOffscreenAccessibilityBridge(view: self)
 
     /// Whether dismantling the view closes its browser. `CefWebView(url:)`
     /// sets this for the browser it owns.
