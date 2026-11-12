@@ -16,6 +16,10 @@ taken from outside the app.
     Scripts/compat-matrix.py sites --out /tmp/compat          # public pages, a few cells
     Scripts/compat-matrix.py table --out /tmp/compat          # Markdown table of the probe results
 
+Reading the public pages: the Turnstile demo uses Cloudflare's always-pass
+test key, so it shows only that the widget runs. Compare each cell with the
+Chrome column rather than with the page's own verdict alone.
+
 COMPAT_APP=<path to Compat.app> measures another bundle, such as one built
 from an earlier commit. COMPAT_LOCK=<file> serializes every app run with lockf(1), for machines where
 other Chromium apps run at the same time. Public pages are loaded once per
