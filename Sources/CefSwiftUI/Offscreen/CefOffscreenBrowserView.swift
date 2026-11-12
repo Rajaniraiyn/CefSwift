@@ -4,8 +4,9 @@ import Foundation
 
 /// An `NSView` showing an offscreen-rendered browser.
 ///
-/// Chromium paints into a shared `IOSurface` that this view sets as the
-/// contents of a layer, so the page is an ordinary layer-backed subview:
+/// Chromium paints into a shared `IOSurface`, which this view copies on the
+/// GPU into a surface of its own and sets as the contents of a layer, so
+/// the page is an ordinary layer-backed subview:
 /// native views can sit over it, and it clips, animates and composites like
 /// any other. In exchange the view does what a Chromium window would do —
 /// forwarding mouse, keyboard, scroll, IME and drag input, applying cursors,
@@ -58,6 +59,9 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
     private let contentLayer = CALayer()
     /// Displays popup widgets such as an open `<select>`, above the page.
     private let popupLayer = CALayer()
+    /// The surfaces each layer shows Chromium's frames in.
+    private let contentCompositor = CefOffscreenCompositor()
+    private let popupCompositor = CefOffscreenCompositor()
 
     /// The cursor the page last requested. AppKit resets the cursor as the
     /// mouse moves, so it is re-applied from `cursorUpdate(with:)`.
@@ -123,6 +127,9 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
             owner: self, userInfo: nil))
         allowedTouchTypes = [.indirect]
         registerDragTypes()
+        for compositor in [contentCompositor, popupCompositor] {
+            compositor.requestFrame = { [weak self] in self?.browser?.setNeedsDisplay() }
+        }
     }
 
     @available(*, unavailable)
@@ -228,6 +235,12 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
         let visible = canBeSeen
         guard visible != isDisplaying || notifyingBrowser else { return }
         isDisplaying = visible
+        if !visible {
+            // The last frame stays up; the spare copies are not needed
+            // until Chromium paints again.
+            contentCompositor.trim()
+            popupCompositor.trim()
+        }
         // A browser that has moved to another view is that view's to manage.
         if let browser, browser.hostView === self {
             if visible { browser.hostViewDidUnhide() } else { browser.hostViewDidHide() }
@@ -306,9 +319,10 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
         let contents: Any
         switch frame {
         case let .accelerated(surface, _):
-            // The layer keeps its own reference to the surface's pixels, so
-            // Chromium may reuse the surface once this returns.
-            contents = surface
+            // Chromium paints the next frames into the same few surfaces,
+            // so the layer shows a copy the view owns.
+            guard let copy = (element == .popup ? popupCompositor : contentCompositor).copy(surface) else { return }
+            contents = copy
         case let .cpu(buffer, width, height, _):
             // The buffer is only valid during this call; the image copies it.
             let bytesPerRow = width * 4
@@ -345,6 +359,10 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
 
     public func offscreenPopupDidChangeVisibility(_ visible: Bool) {
         popupLayer.isHidden = !visible
+        if !visible {
+            popupLayer.contents = nil
+            popupCompositor.reset()
+        }
     }
 
     public func offscreenPopupDidResize(_ rect: CGRect) {

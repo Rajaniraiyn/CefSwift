@@ -10,6 +10,7 @@ import Darwin
 ///   scheme handler, with a request filter on every request.
 /// - `lifecycle`: CPU use of an animated page in each host and state.
 /// - `frames`: offscreen animation frames, pacing, input latency and CPU.
+/// - `compositor`: what `CefOffscreenBrowserView` presents, at three sizes.
 @MainActor
 enum Benchmarks {
     static var requested: String? { UserDefaults.standard.string(forKey: "benchmark") }
@@ -29,6 +30,7 @@ enum Benchmarks {
         case "frames":
             CefRuntime.shared.registerSchemeHandler(scheme: "selftest", domain: "bench", handler: BenchmarkPages())
             await frames()
+        case "compositor": await compositor()
         default: print("bench error: unknown benchmark \(name)")
         }
     }
@@ -108,6 +110,8 @@ struct BenchmarkPages: CefSchemeHandler {
             return CefSchemeResponse(mimeType: "text/html", body: Data(Self.timersPage.utf8))
         case "/frames.html":
             return CefSchemeResponse(mimeType: "text/html", body: Data(Self.framesPage.utf8))
+        case "/compositor.html":
+            return CefSchemeResponse(mimeType: "text/html", body: Data(CompositorStage.page.utf8))
         case "/big-data":
             return CefSchemeResponse(mimeType: "application/octet-stream", body: Data(count: Self.bigSize))
         case "/big-stream":

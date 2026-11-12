@@ -144,6 +144,7 @@ enum SelfTest {
         ("threads", threadChecks),
         ("lifecycle", lifecycleChecks),
         ("frames", frameChecks),
+        ("compositor", compositorChecks),
         ("accessibility", offscreenAccessibilityChecks),
         ("profile", profileChecks),
         ("browserWindow", browserWindowChecks),
