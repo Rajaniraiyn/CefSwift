@@ -309,8 +309,6 @@ public final class CefBrowser: Identifiable {
     /// Whether the DevTools `Accessibility` domain, which accessibility
     /// actions use to find a node's DOM node, is enabled.
     @ObservationIgnored var isDevToolsAccessibilityEnabled = false
-    /// Whether a read of the document's scroll position is scheduled.
-    @ObservationIgnored var isAccessibilityScrollRefreshPending = false
 
     /// Creates a browser model. Nothing is created in Chromium until the
     /// browser is hosted.

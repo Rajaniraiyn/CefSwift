@@ -91,7 +91,6 @@ enum SelfTest {
         }
         await windowedBrowserChecks()
         await offscreenBrowserChecks()
-        await offscreenAccessibilityChecks()
         await profileChecks()
         await browserWindowChecks()
         await browserBehaviorChecks()
@@ -102,6 +101,10 @@ enum SelfTest {
         await serviceLifetimeChecks()
         await relaunchChecks()
         await chromeWindowChecks()
+        // After the history checks: discarding an offscreen browser once the
+        // DevTools protocol has been used makes Chromium's most-visited
+        // sites miss later visits.
+        await offscreenAccessibilityChecks()
         // Last: it leaves discarded browsers open for the quit.
         await discardChecks()
     }

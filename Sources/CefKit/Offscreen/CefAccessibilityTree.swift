@@ -353,20 +353,16 @@ public final class CefAccessibilityTree {
         return changes
     }
 
-    /// Applies the main document's scroll position, in CSS pixels, given the
-    /// layout viewport's width in CSS pixels. Chromium's scroll updates do
-    /// not reach CEF's accessibility handler, so the browser reads the
-    /// position itself.
+    /// Applies the main document's scroll position, in Chromium's pixels.
+    /// Chromium's scroll updates do not reach CEF's accessibility handler,
+    /// so the browser passes on what the render handler reports.
     @discardableResult
-    func applyDocumentScroll(_ offset: CGPoint, viewportWidth: CGFloat) -> CefAccessibilityChanges {
+    func applyDocumentScroll(_ offset: CGPoint) -> CefAccessibilityChanges {
         var changes = CefAccessibilityChanges()
-        guard let mainTreeID, var tree = trees[mainTreeID], let rootID = tree.rootID, var root = tree.nodes[rootID],
-              viewportWidth > 0, root.relativeBounds.width > 0
+        guard let mainTreeID, var tree = trees[mainTreeID], let rootID = tree.rootID, var root = tree.nodes[rootID]
         else { return changes }
-        // The root spans the viewport, so its width gives pixels per CSS pixel.
-        let ratio = root.relativeBounds.width / viewportWidth
-        let x = (offset.x * ratio).rounded()
-        let y = (offset.y * ratio).rounded()
+        let x = offset.x.rounded()
+        let y = offset.y.rounded()
         guard root.attributes["scrollX"]?.doubleValue != x || root.attributes["scrollY"]?.doubleValue != y else { return changes }
         root.attributes["scrollX"] = .number(x)
         root.attributes["scrollY"] = .number(y)

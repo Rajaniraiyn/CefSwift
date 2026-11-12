@@ -300,12 +300,10 @@ struct AccessibilityTreeTests {
     @Test func documentScrollReadBackMovesNodes() {
         let tree = CefAccessibilityTree()
         tree.applyTreeChange(Self.page())
-        // The root is 800 pixels wide for a 400-CSS-pixel viewport: 2 pixels
-        // per CSS pixel, so 25 CSS pixels of scroll are 50 pixels.
-        let changes = tree.applyDocumentScroll(CGPoint(x: 0, y: 25), viewportWidth: 400)
+        let changes = tree.applyDocumentScroll(CGPoint(x: 0, y: 50))
         #expect(changes.layoutDidChange)
         #expect(tree.frame(of: Self.id(4))?.minY == 50)
-        #expect(tree.applyDocumentScroll(CGPoint(x: 0, y: 25), viewportWidth: 400).isEmpty)
+        #expect(tree.applyDocumentScroll(CGPoint(x: 0, y: 50)).isEmpty)
     }
 
     // MARK: Recorded

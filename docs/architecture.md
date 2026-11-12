@@ -131,9 +131,9 @@ from `get_accessibility_handler`:
   then offset by the hosting `<iframe>`, and divided by the device scale
   factor, since Chromium reports physical pixels.
 - Chromium's scroll updates travel separately from location updates and
-  CEF does not forward them, so after the page repaints the browser reads
-  the document's scroll position with `Page.getLayoutMetrics`, at most
-  every 150 ms, and writes it into the root node.
+  CEF does not forward them, so the document's scroll position, which the
+  render handler's `on_scroll_offset_changed` reports, is written into the
+  root node.
 - `CefOffscreenBrowserView` keeps one `NSAccessibilityElement` per node.
   Elements hold only a node identifier and read the tree on every query;
   the role table follows Chromium's macOS mapping. Ignored nodes are
