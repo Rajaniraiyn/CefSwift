@@ -66,6 +66,9 @@ public struct CefBrowserOptions {
     /// Chrome-style browsers and the delegate for others, or the delegate
     /// for every browser.
     public var unresponsivePages: CefUnresponsivePagePolicy = .automatic
+    /// Who picks the certificate a site asks the user to identify with:
+    /// Chromium's picker, or the delegate.
+    public var clientCertificates: CefClientCertificatePolicy = .automatic
 
     public init() {}
 }
@@ -264,6 +267,9 @@ public final class CefBrowser: Identifiable {
     /// renderer has not handled input for 15 seconds as unresponsive; see
     /// ``CefBrowserDelegate/browserPageIsUnresponsive(_:)``.
     public internal(set) var isResponsive = true
+    /// How the page shown was loaded: TLS, its certificate, insecure
+    /// content. `nil` before the first page commits.
+    public internal(set) var connectionSecurity: CefConnectionSecurity?
 
     /// Whether the page has been unloaded to free its memory, by
     /// ``discard()`` or ``CefRuntime/memorySaver``.

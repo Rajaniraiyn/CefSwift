@@ -169,6 +169,7 @@ enum SelfTest {
         ("siteSettings", siteSettingsChecks),
         ("processes", processChecks),
         ("pdf", pdfChecks),
+        ("security", securityChecks),
         // Last: it leaves discarded browsers open for the quit.
         ("discard", discardChecks),
     ]

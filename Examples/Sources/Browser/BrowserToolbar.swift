@@ -141,7 +141,7 @@ struct AddressBar: View {
                     .padding(.vertical, 2)
                     .background(.tint.opacity(0.2), in: .capsule)
             }
-            if !isFocused, let security = SiteSecurity(url: browser.url) {
+            if !isFocused, let security = SiteSecurity(browser: browser) {
                 PageInfoButton(browser: browser, security: security)
             }
             ZStack {
@@ -331,13 +331,20 @@ private struct ViewAnchor: NSViewRepresentable {
 enum SiteSecurity {
     case secure, notSecure, app
 
-    init?(url: URL?) {
-        switch url?.scheme {
-        case "https": self = .secure
-        case "http": self = .notSecure
-        case _ where BrowserPages.isStartPage(url): return nil
-        case _ where BrowserPages.isInternal(url): self = .app
-        default: return nil
+    @MainActor init?(browser: CefBrowser) {
+        let url = browser.url
+        guard !BrowserPages.isStartPage(url) else { return nil }
+        switch browser.connectionSecurity?.level {
+        case .secure: self = .secure
+        case .partiallySecure, .notSecure: self = .notSecure
+        case .local: if BrowserPages.isInternal(url) { self = .app } else { return nil }
+        case nil:
+            switch url?.scheme {
+            case "https": self = .secure
+            case "http": self = .notSecure
+            case _ where BrowserPages.isInternal(url): self = .app
+            default: return nil
+            }
         }
     }
 

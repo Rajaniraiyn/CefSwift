@@ -27,6 +27,8 @@ are `@MainActor`.
   - [Passkeys](#passkeys)
 - [Context menu](#context-menu)
 - [Building a browser](#building-a-browser)
+  - [Connection security](#connection-security)
+  - [Client certificates](#client-certificates)
   - [Toolbar and window](#toolbar-and-window)
   - [Tabs](#tabs)
   - [Popups](#popups)
@@ -35,6 +37,7 @@ are `@MainActor`.
   - [Tabs Chromium opens itself](#tabs-chromium-opens-itself)
 - [Customizing Chromium's own pages](#customizing-chromiums-own-pages)
 - [Profiles](#profiles)
+  - [Network maintenance](#network-maintenance)
   - [Site settings](#site-settings)
   - [Bookmarks, history and suggestions](#bookmarks-history-and-suggestions)
 - [DevTools](#devtools)
@@ -856,6 +859,7 @@ final class Policy: CefBrowserDelegate {
 | `browser(_:decidePermissionFor:) async` | `.deny`. Asked only when the site settings leave the request to the user; see [Site settings](#site-settings) |
 | `browser(_:credentialFor:) async` (HTTP authentication) | Native sign-in sheet. CEF 156 does not call it; see [Known limits](#known-limits) |
 | `browser(_:shouldProceedDespite:) async` (certificate errors) | `false`: the load is cancelled |
+| `browser(_:selectClientCertificateFor:) async` | Native sheet; asked only with `options.clientCertificates = .delegate`, otherwise Chromium's picker. See [Client certificates](#client-certificates) |
 | `browserPageIsUnresponsive(_:) async` | Native sheet; Chrome-style browsers show Chromium's dialog instead. See [Unresponsive pages](#unresponsive-pages) |
 | `browser(_:decideDestinationFor:suggestedName:) async` | `.allow(destination: nil)`: `~/Downloads` |
 | `browser(_:decidePasskeyRequest:) async` | Native passkey sheet; see [Passkeys](#passkeys) |
@@ -1138,6 +1142,60 @@ and its frame, title, ordering and tabbing are yours.
 `CefRuntime.shared.openChromeWindow(url:frame:options:delegate:)` opens a
 window drawn entirely by Chrome instead, with its tab strip, omnibox and
 menus.
+
+### Connection security
+
+`browser.connectionSecurity` describes how the page shown was loaded, and
+changes as the browser navigates:
+
+```swift
+if let security = browser.connectionSecurity {
+    switch security.level {
+    case .secure: showLock()
+    case .partiallySecure, .notSecure: showWarning()
+    case .local: break                      // the app's scheme, a file, a Chromium page
+    }
+    print(security.protocolVersion as Any, security.certificate?.subject.displayName ?? "")
+}
+```
+
+`level` sums up `isSecureConnection`, the `certificateStatus` Chromium
+found (`.dateInvalid`, `.authorityInvalid`, `.nameMismatch`,
+`.extendedValidation`, …) and whether the page `displayedInsecureContent`
+or `ranInsecureContent` loaded over HTTP. `protocolVersion` is the TLS
+version, `.tls1_2`, `.tls1_3` or `.quic`; Chromium's API gives no cipher
+suite. An HTTPS page your own scheme handler serves has no TLS, so it is
+`.notSecure`.
+
+A `CefCertificate` has its `subject` and `issuer` (common name,
+organizations, country, …), `serialNumber`, `validFrom` and `validUntil`,
+the `issuerChain` the server sent, the `sha256Fingerprint`, and the
+`subjectAlternativeNames` it covers. `derRepresentation` and
+`secCertificate` bridge it to the Security framework, for example to show
+the system's certificate sheet:
+
+```swift
+import SecurityInterface
+
+if let chain = browser.connectionSecurity?.certificate?.secCertificateChain, let window = browser.hostWindow {
+    SFCertificatePanel.shared().beginSheet(for: window, modalDelegate: nil, didEnd: nil,
+                                           contextInfo: nil, certificates: chain, showGroup: true)
+}
+```
+
+The `CefCertificateError` that `browser(_:shouldProceedDespite:)` receives
+carries the same `certificate` and its `status`.
+
+### Client certificates
+
+A site can ask for a certificate to identify the user. Chromium lists the
+user's identities in the keychain whose issuers the server accepts, and by
+default shows its own picker. With `options.clientCertificates =
+.delegate`, `browser(_:selectClientCertificateFor:)` decides instead: the
+`CefClientCertificateRequest` has the `host`, `port` and the offered
+`certificates`; return one of them, or `nil` to continue without. The
+default implementation asks with `CefClientCertificatePresenter`, a native
+sheet. Private keys stay in the keychain; Chromium signs with them itself.
 
 ### Toolbar and window
 
@@ -1447,6 +1505,24 @@ alive forever.
 `allPreferences(includingDefaults:)` returns every preference as one JSON
 object. `setColorScheme(_:accentColor:)` themes Chrome-style UI and sets the
 `prefers-color-scheme` pages see.
+
+### Network maintenance
+
+A profile clears what Chromium keeps for its connections, each `async`
+and done when it returns:
+
+```swift
+await profile.clearHTTPCache()                       // cookies and site data stay
+await profile.clearCertificateExceptions()           // certificate errors the user accepted
+await profile.clearHTTPAuthenticationCredentials()
+await profile.closeAllConnections()
+let addresses = try await profile.resolveHost("example.com")   // ["93.184.215.14", …]
+```
+
+Clearing certificate exceptions does not close a connection that uses
+one; close all connections too, or the browser keeps going without
+asking. `resolveHost(_:)` uses the profile's DNS settings, Secure DNS
+included, and throws when the name does not resolve.
 
 ### Site settings
 

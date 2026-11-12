@@ -1,4 +1,5 @@
 import CefSwiftUI
+import SecurityInterface
 import SwiftUI
 
 /// The lock at the start of the address field; clicking it shows the
@@ -120,18 +121,52 @@ struct PageInfoView: View {
     }
 }
 
-/// One line on how the page is connected.
+/// How the page is connected, and its certificate.
 struct ConnectionSummary: View {
     let browser: CefBrowser
 
     var body: some View {
-        switch SiteSecurity(url: browser.url) {
-        case .secure:
-            Label("Connection is secure", systemImage: "lock.fill").foregroundStyle(.secondary)
-        case .notSecure:
-            Label("Connection is not secure", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-        case .app, nil:
-            Label("Page of this app", systemImage: "gearshape.fill").foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 4) {
+            switch browser.connectionSecurity?.level {
+            case .secure:
+                Label("Connection is secure", systemImage: "lock.fill").foregroundStyle(.secondary)
+            case .partiallySecure:
+                Label("Connection is not fully secure", systemImage: "lock.trianglebadge.exclamationmark.fill")
+                    .foregroundStyle(.orange)
+            case .notSecure:
+                Label("Connection is not secure", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+            case .local, nil:
+                Label("Page of this app", systemImage: "gearshape.fill").foregroundStyle(.secondary)
+            }
+            if let security = browser.connectionSecurity, let certificate = security.certificate {
+                Text(Self.details(of: security, certificate))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button("Show Certificate") { Self.show(certificate, from: browser) }
+                    .buttonStyle(.link)
+                    .font(.caption)
+            }
         }
+    }
+
+    private static func details(of security: CefConnectionSecurity, _ certificate: CefCertificate) -> String {
+        let version: String =
+            switch security.protocolVersion {
+            case .tls1_3: "TLS 1.3"
+            case .tls1_2: "TLS 1.2"
+            case .quic: "QUIC"
+            case .tls1_0, .tls1_1, .other: "an old TLS version"
+            case nil: "TLS"
+            }
+        let expiry = certificate.validUntil.formatted(date: .abbreviated, time: .omitted)
+        return "\(version) · issued by \(certificate.issuer.displayName) · valid until \(expiry)"
+    }
+
+    /// The system's certificate sheet, with the chain the site sent.
+    private static func show(_ certificate: CefCertificate, from browser: CefBrowser) {
+        guard let window = browser.hostWindow else { return }
+        SFCertificatePanel.shared().beginSheet(
+            for: window, modalDelegate: nil, didEnd: nil, contextInfo: nil,
+            certificates: certificate.secCertificateChain, showGroup: true)
     }
 }

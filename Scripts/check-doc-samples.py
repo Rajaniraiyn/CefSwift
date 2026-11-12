@@ -85,6 +85,8 @@ struct MediaLibrary: Sendable { func file(for url: URL?) -> URL? { nil } }
 @MainActor func askUser(about kinds: CefPermissionKind, from origin: String?) async -> Bool { true }
 @MainActor func askUserRemembering(about kinds: CefPermissionKind, from origin: String?) async -> (Bool, Bool) { (true, false) }
 @MainActor func chooseFolder() async -> URL? { nil }
+@MainActor func showLock() {}
+@MainActor func showWarning() {}
 @MainActor func confirm(_ message: String) async -> Bool { true }
 @MainActor func choose(from passkeys: [CefPasskey]) async -> CefPasskey? { nil }
 

@@ -284,6 +284,7 @@ final class CefBrowserClient {
         h.pointee.on_loading_state_change = { s, browser, isLoading, canGoBack, canGoForward in
             CefBrowserClient.run(s, browser, default: ()) { _, b in
                 b.applyLoadingState(isLoading: isLoading != 0, canGoBack: canGoBack != 0, canGoForward: canGoForward != 0)
+                b.refreshConnectionSecurity()
             }
         }
         h.pointee.on_load_start = { s, browser, frame, _ in
@@ -331,7 +332,10 @@ final class CefBrowserClient {
             cefRelease(frame)
             let url = CefStringUtil.string(from: url)
             CefBrowserClient.run(s, browser, default: ()) { _, b in
-                if isMain { b.applyURL(url) }
+                if isMain {
+                    b.applyURL(url)
+                    b.refreshConnectionSecurity()
+                }
             }
         }
         h.pointee.on_favicon_urlchange = { s, browser, iconURLs in
@@ -627,9 +631,16 @@ final class CefBrowserClient {
             }
         }
         h.pointee.on_certificate_error = { s, browser, certError, requestURL, sslInfo, callback in
-            cefRelease(sslInfo)
-            let error = CefCertificateError(
+            var error = CefCertificateError(
                 code: Int(certError.rawValue), url: URL(string: CefStringUtil.string(from: requestURL)))
+            if let sslInfo {
+                error.status = CefCertificateStatus(rawValue: UInt32(sslInfo.pointee.get_cert_status(sslInfo).rawValue))
+                if let x509 = sslInfo.pointee.get_x509_certificate(sslInfo) {
+                    error.certificate = CefCertificate(borrowing: x509)
+                    cefRelease(x509)
+                }
+                cefRelease(sslInfo)
+            }
             guard let callback = CefRef(adopting: callback) else {
                 cefRelease(browser)
                 return 0
@@ -687,6 +698,7 @@ final class CefBrowserClient {
             }
         }
         Self.installResponsivenessCallbacks(on: h)
+        Self.installClientCertificateCallback(on: h)
         // IO thread.
         h.pointee.get_resource_request_handler = { s, browser, frame, request, _, _, _, _ in
             cefRelease(browser)

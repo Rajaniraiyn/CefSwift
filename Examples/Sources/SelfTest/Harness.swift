@@ -184,6 +184,7 @@ extension SelfTest {
         "systemEngine": .seconds(90),
         "discard": .seconds(90),
         "processes": .seconds(120),
+        "security": .seconds(120),
     ]
     static let defaultGroupDeadline: Duration = .seconds(60)
 
