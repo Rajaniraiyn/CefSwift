@@ -15,6 +15,9 @@ final class BrowserController: CefBrowserDelegate {
     /// The browser in the frontmost tab.
     var current: CefBrowser? { keyBrowser ?? windows.last?.browser }
 
+    /// Tabs Memory Saver has put to sleep.
+    var sleepingTabs: [CefBrowser] { windows.map(\.browser).filter(\.isDiscarded) }
+
     /// The browser whose window is key, tracked so that views and menus
     /// depending on the frontmost tab update when it changes.
     private var keyBrowser: CefBrowser?

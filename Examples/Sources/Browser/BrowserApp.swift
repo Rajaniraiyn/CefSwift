@@ -43,6 +43,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         CefRuntime.shared.registerSchemeHandler(scheme: BrowserPages.scheme, handler: BrowserPages())
         Appearance.current.apply()
+        MemorySaver.current.apply()
         controller.adoptTabsOpenedByChromium()
         // Launching the app again while it runs opens a tab, or the
         // addresses it was given (`Browser https://swift.org`).
@@ -171,6 +172,33 @@ enum Appearance: String, CaseIterable {
     }
 }
 
+/// The Memory Saver setting: when tabs in the background are put to sleep.
+enum MemorySaver: String, CaseIterable {
+    case off, underPressure, after15Minutes, after1Hour
+
+    static var current: MemorySaver {
+        MemorySaver(rawValue: UserDefaults.standard.string(forKey: "memorySaver") ?? "") ?? .after1Hour
+    }
+
+    var title: String {
+        switch self {
+        case .off: "Off"
+        case .underPressure: "When Memory Is Low"
+        case .after15Minutes: "After 15 Minutes in the Background"
+        case .after1Hour: "After an Hour in the Background"
+        }
+    }
+
+    @MainActor func apply() {
+        CefRuntime.shared.memorySaver = switch self {
+        case .off: .off
+        case .underPressure: .underMemoryPressure
+        case .after15Minutes: .after(.seconds(15 * 60))
+        case .after1Hour: .after(.seconds(60 * 60))
+        }
+    }
+}
+
 struct BrowserCommands: Commands {
     let controller: BrowserController
 
@@ -282,6 +310,7 @@ private struct BookmarkMenuItem: View {
 struct SettingsView: View {
     @AppStorage("newTabPage") private var newTabPage = BrowserController.defaultNewTabPage
     @AppStorage("appearance") private var appearance = Appearance.system.rawValue
+    @AppStorage("memorySaver") private var memorySaver = MemorySaver.current.rawValue
 
     var body: some View {
         Form {
@@ -292,6 +321,13 @@ struct SettingsView: View {
                 Text("Dark").tag(Appearance.dark.rawValue)
             }
             .onChange(of: appearance) { Appearance.current.apply() }
+            Picker(selection: $memorySaver) {
+                ForEach(MemorySaver.allCases, id: \.self) { Text($0.title).tag($0.rawValue) }
+            } label: {
+                Text("Put tabs to sleep")
+                Text("Sleeping tabs free their memory and reload when you return to them.")
+            }
+            .onChange(of: memorySaver) { MemorySaver.current.apply() }
         }
         .formStyle(.grouped)
         .frame(width: 420)

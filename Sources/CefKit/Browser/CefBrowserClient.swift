@@ -290,6 +290,9 @@ final class CefBrowserClient {
             CefBrowserClient.run(s, browser, default: ()) { _, b in b.delegate?.browser(b, didLog: entry) }
             return 0  // keep Chromium's own logging
         }
+        h.pointee.on_media_access_change = { s, browser, hasVideo, hasAudio in
+            CefBrowserClient.run(s, browser, default: ()) { _, b in b.isCapturingMedia = hasVideo != 0 || hasAudio != 0 }
+        }
         h.pointee.on_cursor_change = { s, browser, _, type, _ in
             let cursor = CefCursorType(cefValue: type)
             // Windowed browsers apply the cursor themselves; offscreen ones

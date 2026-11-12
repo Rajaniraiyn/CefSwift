@@ -12,6 +12,7 @@ are `@MainActor`.
 - [Browsers](#browsers)
 - [Showing a browser](#showing-a-browser)
   - [Offscreen rendering](#offscreen-rendering)
+- [Discarding browsers](#discarding-browsers)
 - [JavaScript](#javascript)
   - [User scripts and style sheets](#user-scripts-and-style-sheets)
   - [Bridge](#bridge)
@@ -201,6 +202,7 @@ when it is first shown.
 | JavaScript | `evaluateJavaScript(_:)`, `evaluateJavaScript(_:as:)`, `executeJavaScript(_:)`, `addUserScript(_:)` |
 | DevTools | `devTools`, `showDevTools(inspecting:)`, `closeDevTools()`, `isShowingDevTools` |
 | Lifetime | `ready()`, `close(force:)` |
+| Memory | `isDiscarded`, `discard()`, `restore()`, `discardBlockers()`, `allowsDiscarding`, `discardSnapshot` ([discarding](#discarding-browsers)) |
 | Relations | `delegate`, `options`, `opener`, `popupFeatures`, `hostWindow` |
 
 Options are fixed at creation:
@@ -340,6 +342,80 @@ AppKit drives a view:
   which mirror `NSDraggingDestination` and `NSDraggingSource`.
 
 `CefOffscreenBrowserView` is the reference implementation.
+
+## Discarding browsers
+
+A browser the user is not looking at can give back its page's memory
+while staying in your UI. Discarding ends the page's renderer process; the
+browser keeps its `url`, `title` and `favicon`, and loads the page again
+as soon as it is shown, navigated or used. `isDiscarded` is observable, so
+a tab can fade while it sleeps:
+
+```swift
+Image(nsImage: browser.favicon ?? fallbackIcon)
+    .opacity(browser.isDiscarded ? 0.4 : 1)
+```
+
+Discard one browser yourself, or let CefKit do it:
+
+```swift
+do {
+    try await tab.discard()
+} catch .blocked(let blockers) {
+    print("kept loaded:", blockers)          // [.visible], [.playingAudio], …
+}
+
+CefRuntime.shared.memorySaver = .after(.minutes(30))   // hidden 30 minutes, or memory is low
+CefRuntime.shared.memorySaver = .underMemoryPressure    // only when macOS runs low on memory
+```
+
+Only a browser that is off screen can be discarded: a window tab that is
+not selected, a hidden or minimized window, or a `CefWebView` that is
+hidden or out of a visible window. `discardBlockers()` lists what keeps a
+browser loaded, and `discard()` throws `CefDiscardError.blocked` with the
+same set:
+
+| Blocker | When |
+|---|---|
+| `.visible` | The browser is on screen. |
+| `.exempt` | `allowsDiscarding` is `false` (pinned tabs, say), or an extension protects the tab. |
+| `.notLoaded` | The browser is not open yet, is loading, or shows DevTools itself. |
+| `.playingAudio` | The page plays sound, or did in the last minute. |
+| `.capturingMedia` | The page uses the camera, microphone or screen capture, or is cast. |
+| `.formInteraction` | The user typed into the page. |
+| `.beforeUnloadHandler` | The page has a `beforeunload` handler. |
+| `.devToolsOpen` | The browser's DevTools window is open. |
+| `.downloading` | A download it started is in progress. |
+| `.pictureInPicture`, `.connectedToDevice` | Picture in picture; a Bluetooth or USB device. |
+
+In a `CefWebView`, audio and form input are read from the main frame's
+`<audio>`, `<video>`, `<input>` and `<textarea>` elements; Chrome-style
+browsers use Chromium's own signals, which cover every frame and Web Audio.
+
+`restore()` loads a discarded page at once, even while it is hidden. The
+delegate hears `browserWillDiscard(_:)`, while the page can still be read,
+then `browserDidDiscard(_:)`, and `browserDidRestore(_:)` when the page
+starts loading again. `discardSnapshot` is an image of the page taken
+just before it was discarded, for a tab preview or to show while it loads.
+
+What a discard keeps:
+
+| | `CefBrowserWindow`, Chrome UI windows | `CefWebView` |
+|---|---|---|
+| URL, title, favicon, zoom, profile, delegate | Kept | Kept |
+| Back/forward list | Kept | Starts again from the current page |
+| Scroll position | Restored | Lost |
+| Form input not yet submitted | Lost | Lost |
+| Bridges and user scripts | Work as before | Installed again |
+| `devTools` event streams | Keep delivering | Keep delivering; enabled domains are enabled again |
+| Other DevTools session state | Kept | Lost (overrides, scripts added through `devTools`) |
+| `identifier` | Kept | A new one |
+
+A Chrome-style browser is discarded by Chromium itself and comes back when
+its window is shown. A browser in a view is discarded by closing its
+Chromium browser and creating a new one in the same view; it stays in
+`CefRuntime.shared.browsers` meanwhile. Quitting with discarded browsers
+needs nothing special.
 
 ## JavaScript
 
@@ -1032,10 +1108,12 @@ driver crash cannot end the app.
   `ERR_INVALID_AUTH_CREDENTIALS`, reported to `browser(_:didFailLoad:)`, and
   Chromium shows its sign-in dialog in a window of its own; closing the
   browser leaves the page first, which dismisses that window.
-- Tab discarding (Memory Saver) is unavailable. Each browser is the active
-  tab of its own Chromium window, and once CefKit's DevTools connection is
-  in use (JavaScript evaluation, user scripts, bridges) it stays attached,
-  so Chromium never discards a browser. Close browsers you do not need.
+- Chromium's own Memory Saver never discards a CefKit browser, since each
+  is the active tab of its own Chromium window; use
+  `CefRuntime.shared.memorySaver` instead. A `CefWebView` browser loses its
+  back/forward list when discarded, and Chromium tells tabs apart only by
+  address and title, so of two hidden Chrome-style tabs showing the same
+  page, discarding one may briefly reload the other.
 - DevTools opens in a window of its own; there is no docked DevTools.
 - Offscreen pages appear to VoiceOver as a single element.
 - Offscreen browsers always use the Alloy style and cannot open native
