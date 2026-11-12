@@ -32,7 +32,7 @@
   // "signingIdentity": "Developer ID Application: Example Corp (A1B2C3D4E5)",
   // "provisioningProfile": "Browser_Developer_ID.provisionprofile",
   // "entitlements": "Browser-Distribution.entitlements",
-  // "notarization": { "keychainProfile": "notary", "format": "dmg" },
+  // "notarization": { "keychainProfile": "notary" },
   // Only when the certificate does not carry the team identifier:
   // "teamIdentifier": "A1B2C3D4E5",
 }

@@ -27,7 +27,8 @@ enum Notarizer {
             try Shell.runChecked(
                 "/usr/bin/hdiutil",
                 ["create", "-volname", name, "-srcfolder", app.path, "-ov", "-format", "UDZO", archive.path],
-                hint: "Could not create \(archive.path) with hdiutil.")
+                hint: "Could not create \(archive.path) with hdiutil. SwiftPM's plugin sandbox keeps hdiutil " +
+                    "from attaching disk images; run the command above in Terminal, or use --format zip.")
             if let identity, identity != "-" {
                 var arguments = ["--force", "--sign", identity, "--timestamp"]
                 if let keychain { arguments += ["--keychain", keychain] }

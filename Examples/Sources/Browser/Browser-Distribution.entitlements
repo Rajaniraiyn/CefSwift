@@ -20,6 +20,9 @@
 -->
 <plist version="1.0">
 <dict>
+	<!-- As in Browser.entitlements, which this file replaces. -->
+	<key>com.apple.security.personal-information.photos-library</key>
+	<true/>
 	<!-- Passkeys the browser keeps itself (CefKeychainPasskeyStore), shared
 	     with other apps of the team through this group. The store's default
 	     group, the application identifier, needs no entry here. -->
