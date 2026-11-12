@@ -42,6 +42,21 @@ struct BundleFacts: Sendable {
     /// `stapler validate`: nil when it could not run.
     var isStapled: Bool?
     var isQuarantined = false
+    var footprint: Footprint?
+
+    /// What the bundle's parts weigh, in logical bytes.
+    struct Footprint: Sendable {
+        var appBytes: Int64 = 0
+        var frameworkBinaryBytes: Int64 = 0
+        var frameworkResourcesBytes: Int64 = 0
+        /// Each locale pack with its gender variants.
+        var localePacks: [String: Int64] = [:]
+        /// SwiftShader's files; nil when they are left out.
+        var softwareGPUBytes: Int64?
+        var helperBytes: Int64 = 0
+        var appLocalizations: [String] = []
+        var developmentLanguage = "en"
+    }
 }
 
 struct DoctorReport: Encodable, Sendable {
@@ -448,6 +463,16 @@ enum Doctor {
                         "web browsers, in a provisioning profile, and an Apple team signature.",
                     fix: "request the entitlement from Apple, then add \"passkeys\" to capabilities and set provisioningProfile."))
 
+        let libraryNames = Set(facts.libraries.map(\.name))
+        features.append(libraryNames.contains("libcef_sandbox.dylib") && libraryNames.contains("libcefswift_helper_startup.dylib")
+            ? .init(status: .ok, title: "Chromium sandbox",
+                    detail: "the helpers can seal themselves (libcef_sandbox.dylib, libcefswift_helper_startup.dylib); " +
+                        "CefConfiguration.isSandboxEnabled decides at run time.")
+            : .init(status: .warning, title: "Chromium sandbox",
+                    detail: "the bundle lacks libcef_sandbox.dylib or libcefswift_helper_startup.dylib, so sandboxed " +
+                        "helpers cannot start.",
+                    fix: "bundle with cef bundle, or set CefConfiguration.isSandboxEnabled = false."))
+
         return DoctorReport(
             app: app.name, bundleIdentifier: bundleID,
             signature: app.kind.displayName + (runtime ? ", hardened runtime" : ""),
@@ -460,7 +485,48 @@ enum Doctor {
                 .init(name: "Provisioning profile", checks: profileChecks),
                 .init(name: "Distribution", checks: distribution),
                 .init(name: "Features", checks: features),
-            ])
+            ] + (facts.footprint.map { [.init(name: "Footprint", checks: footprintChecks($0))] } ?? []))
+    }
+
+    /// Sizes, and the locale packs against the app's localizations.
+    static func footprintChecks(_ footprint: BundleFacts.Footprint) -> [DoctorReport.Check] {
+        let mib = FrameworkTrim.formatted
+        var checks: [DoctorReport.Check] = [
+            .init(status: .info, title: "size", detail: "\(mib(footprint.appBytes)) (logical): framework binary " +
+                  "\(mib(footprint.frameworkBinaryBytes)), framework resources \(mib(footprint.frameworkResourcesBytes)), " +
+                  "helpers \(mib(footprint.helperBytes))."),
+        ]
+        let packs = Set(footprint.localePacks.keys)
+        let packBytes = footprint.localePacks.values.reduce(0, +)
+        let needed = ChromiumLocales.packsToKeep(
+            for: footprint.appLocalizations, developmentLanguage: footprint.developmentLanguage, packs: packs)
+        let mapping = (footprint.appLocalizations.isEmpty ? [footprint.developmentLanguage] : footprint.appLocalizations)
+            .map { "\($0) → \(ChromiumLocales.pack(for: $0, in: packs) ?? "none")" }
+        let extra = packs.subtracting(needed)
+        checks.append(.init(
+            status: .info, title: "locale packs",
+            detail: "\(packs.count) (\(mib(packBytes))): \(packs.sorted().joined(separator: ", ")). App localizations: " +
+                mapping.joined(separator: ", ") + ".",
+            fix: extra.isEmpty ? nil : "\(extra.count) packs serve no localization of the app; --localizations " +
+                "application leaves them out (\(mib(extra.reduce(0) { $0 + (footprint.localePacks[$1] ?? 0) })))."))
+        for localization in footprint.appLocalizations where ChromiumLocales.pack(for: localization, in: packs) == nil {
+            let fallback = ChromiumLocales.resolve([], developmentLanguage: footprint.developmentLanguage, packs: packs) ?? "en"
+            checks.append(.init(
+                status: .warning, title: "locale pack for \(localization)",
+                detail: "the bundle has no Chromium pack for \(localization); Chromium's interface shows " +
+                    "\(ChromiumLocales.chromiumLocale(forPack: fallback)) for it.",
+                fix: "add it to cefapp.json \"cef\": {\"localizations\"}, or bundle with --localizations all " +
+                    "(Chromium may have no pack for it at all)."))
+        }
+        checks.append(footprint.softwareGPUBytes.map {
+            .init(status: .info, title: "software GPU fallback",
+                  detail: "included (SwiftShader, \(mib($0))).",
+                  fix: "--software-gpu-fallback exclude leaves it out, and with it WebGL and GPU compositing " +
+                      "where the GPU is unavailable.")
+        } ?? .init(status: .info, title: "software GPU fallback",
+                   detail: "left out: where the GPU is unavailable or blocklisted, pages get no WebGL and " +
+                       "Chromium composites on the CPU."))
+        return checks
     }
 
     /// Parses `codesign -d --verbose=4` output (on stderr) into a part.

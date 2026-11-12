@@ -67,8 +67,15 @@ struct CefPlugin: CommandPlugin {
              [--capability <name>]... [--info-plist <file>]... [--entitlements <file>]
              [--provisioning-profile <file>] [--[no-]hardened-runtime] [--[no-]timestamp]
              [--package zip|dmg] [--notarize --keychain-profile <name>]
+             [--localizations application|all|<list>] [--software-gpu-fallback include|exclude]
           Build <Name>, compile the helper, then assemble and sign <Name>.app
           (framework + five helper apps + Info.plists + entitlements).
+          --localizations chooses Chromium's locale packs: those of the app's
+          localizations (CFBundleLocalizations), its development language and
+          English (application, the default), all of them, or those of a
+          list such as en,fr. --software-gpu-fallback exclude leaves out
+          SwiftShader (about 16 MiB). cefapp.json "cef": {"localizations",
+          "softwareGPUFallback"} sets defaults.
           Settings come from cefapp.json next to the target's sources (or
           --config); options override it. --sign '-' signs ad hoc; without it,
           the first "Apple Development", else "Developer ID Application"
@@ -146,6 +153,8 @@ struct CefPlugin: CommandPlugin {
         let infoPlistOptions = extractor.extractOption(named: "info-plist")
         let entitlementsOption = extractor.extractOption(named: "entitlements").last
         let profileOption = extractor.extractOption(named: "provisioning-profile").last
+        let localizationsOption = extractor.extractOption(named: "localizations").last
+        let softwareGPUOption = extractor.extractOption(named: "software-gpu-fallback").last
         let hardenedRuntime = try Self.toggle(&extractor, "hardened-runtime")
         let timestamp = try Self.toggle(&extractor, "timestamp")
         let packageFormat = extractor.extractOption(named: "package").last
@@ -223,6 +232,8 @@ struct CefPlugin: CommandPlugin {
                                      errors.joined(separator: "\n  "))
             }
         }
+        let trim = try (appConfig ?? CefAppConfig()).trimPolicy(
+            localizationsOption: localizationsOption, softwareGPUOption: softwareGPUOption)
         let notarization = try notarizationSettings(
             notarize: notarize, keychainProfile: keychainProfileOption, format: packageFormat,
             config: appConfig, identity: identity, plan: plan)
@@ -296,6 +307,7 @@ struct CefPlugin: CommandPlugin {
             outputDirectory: outputDirectory,
             identity: identity,
             plan: plan,
+            trim: trim,
             provisioningProfile: identity.kind.hasAppleTeam ? distribution.profileURL : nil,
             signingKeychain: keychain,
             workDirectory: workDirectory

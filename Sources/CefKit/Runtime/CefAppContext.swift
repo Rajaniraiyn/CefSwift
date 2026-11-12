@@ -110,10 +110,9 @@ final class CefAppContext: @unchecked Sendable {
         for (name, value) in configuration.extraCommandLineSwitches {
             commandLine.appendSwitch(name, value: value)
         }
-        // Chromium registers no components, Widevine included, while its
-        // component updater is off.
-        if !configuration.protectedMedia.usesComponentUpdater, !commandLine.hasSwitch("disable-component-update") {
-            commandLine.appendSwitch("disable-component-update")
+        // Component updates, hyperlink auditing, the sign-in prompt.
+        for name in configuration.policySwitches where !commandLine.hasSwitch(name) {
+            commandLine.appendSwitch(name)
         }
         if configuration.safeStorage.resolved() == .mockKeychain, !commandLine.hasSwitch("use-mock-keychain") {
             commandLine.appendSwitch("use-mock-keychain")
@@ -123,8 +122,6 @@ final class CefAppContext: @unchecked Sendable {
         if !configuration.extensions.isEmpty {
             commandLine.appendSwitch(
                 "load-extension", value: configuration.extensions.map(\.path).joined(separator: ","))
-            // Chromium is phasing out --load-extension behind this feature.
-            disabledFeatures.insert("DisableLoadExtensionCommandLineSwitch")
         }
         // Discarding a tab then keeps its WebContents, and so its CefBrowser
         // and back/forward list. Without it Chromium replaces the

@@ -71,6 +71,11 @@ extension SelfTest {
             _ = try await (search, visits, tiles, suggestions, icon)
             return true
         }
+        let hostBrowsers = CefRuntime.shared.openServiceBrowsers
+        check("service hosts: no host attaches a DevTools session",
+              !hostBrowsers.isEmpty && hostBrowsers.allSatisfy { !$0.devTools.isAttached && $0.devTools.sentMessageCount == 0 },
+              detail: hostBrowsers.map { "\($0.url?.absoluteString ?? "?"): attached \($0.devTools.isAttached), " +
+                  "\($0.devTools.sentMessageCount) sent" }.joined(separator: "; "))
         let running = profile.runningServiceHosts
         check("service hosts: one per WebUI host", running == ["bookmarks", "history", "most-visited", "omnibox"],
               detail: "\(running)")

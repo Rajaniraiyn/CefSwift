@@ -9,7 +9,7 @@ import SwiftUI
 ///
 /// - `-url <address>` shows that page instead of the built-in one.
 /// - `-cacheDirectory <path>` keeps Chromium's data there.
-/// - `-sandbox YES` runs the helper processes in Chromium's sandbox.
+/// - `-sandbox NO` runs the helper processes outside Chromium's sandbox.
 /// - `-memoryPolicy standard|reduced|minimal` overrides the preset's
 ///   ``CefMemoryPolicy``.
 /// - `-protectedMedia YES` lets Chromium fetch Widevine
@@ -24,7 +24,9 @@ struct MinimalApp: CefSwiftApp {
         if let path = UserDefaults.standard.string(forKey: "cacheDirectory") {
             configuration.rootCacheDirectory = URL(fileURLWithPath: path, isDirectory: true)
         }
-        configuration.isSandboxEnabled = UserDefaults.standard.bool(forKey: "sandbox")
+        if UserDefaults.standard.object(forKey: "sandbox") != nil {
+            configuration.isSandboxEnabled = UserDefaults.standard.bool(forKey: "sandbox")
+        }
         if UserDefaults.standard.bool(forKey: "protectedMedia") { configuration.protectedMedia = .automatic }
         switch UserDefaults.standard.string(forKey: "memoryPolicy") {
         case "standard": configuration.memoryPolicy = .standard

@@ -10,11 +10,12 @@ import Testing
 /// real bundle, but the settings mapping is where the toggle is easy to
 /// break.
 @Suite struct SandboxConfigTests {
-    @Test func defaultIsUnsandboxed() {
-        #expect(CefConfiguration().isSandboxEnabled == false)
-        #expect(CefConfiguration.default.isSandboxEnabled == false)
+    @Test func defaultIsSandboxed() {
+        for configuration in [CefConfiguration(), .default, .embedded, .browser] {
+            #expect(configuration.isSandboxEnabled)
+        }
         let mapped = MappedCefSettings(configuration: CefConfiguration(), frameworkDirectory: nil)
-        #expect(mapped.raw.no_sandbox == 1)
+        #expect(mapped.raw.no_sandbox == 0)
     }
 
     @Test func disabledSandboxSetsNoSandbox() {

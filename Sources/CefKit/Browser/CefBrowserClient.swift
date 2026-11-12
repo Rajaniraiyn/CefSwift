@@ -667,24 +667,30 @@ final class CefBrowserClient {
                 realm: CefStringUtil.string(from: realm),
                 scheme: CefStringUtil.string(from: scheme)
             )
-            let identifier = browser.map { $0.pointee.get_identifier($0) }
+            // No closures here: one written in this main-actor method is
+            // main-actor isolated, and traps on the IO thread.
+            let identifier: Int32? = if let browser { browser.pointee.get_identifier(browser) } else { nil }
             cefRelease(browser)
             let callback = CefRef(adopting: callback)
             guard let identifier, let callback else { return 0 }
+            // A decision of the page: it ends, and the default sheet
+            // dismisses itself, when the browser navigates or closes.
+            // Releasing the callback unanswered cancels the sign-in.
             Task { @MainActor in
                 guard let b = CefRuntime.shared.browser(withIdentifier: identifier) else {
                     callback.pointer.pointee.cancel(callback.pointer)
                     return
                 }
-                let delegate = b.delegate ?? CefDefaultBrowserDelegate.shared
-                if let credential = await delegate.browser(b, credentialFor: challenge) {
+                b.decide(.page) { await $0.browser(b, credentialFor: challenge) } then: { credential in
+                    guard let credential else {
+                        callback.pointer.pointee.cancel(callback.pointer)
+                        return
+                    }
                     CefStringUtil.withCefString(credential.username) { user in
                         CefStringUtil.withCefString(credential.password) { password in
                             callback.pointer.pointee.cont(callback.pointer, user, password)
                         }
                     }
-                } else {
-                    callback.pointer.pointee.cancel(callback.pointer)
                 }
             }
             return 1

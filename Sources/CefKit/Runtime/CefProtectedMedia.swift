@@ -17,13 +17,21 @@ import Foundation
 /// docs/guide.md#playing-streaming-services, and ``CefSystemBrowser`` for
 /// playing those services through the system's WebKit and FairPlay.
 public enum CefProtectedMedia: Sendable, Equatable {
-    /// No Widevine. Chromium's component updater stays off, so Chromium
-    /// neither downloads the CDM nor loads one already on disk.
+    /// CefSwift neither asks for nor installs the CDM, and
+    /// ``CefRuntime/installWidevine()`` returns
+    /// ``CefWidevineState/unavailable``.
+    ///
+    /// What reaches pages depends on
+    /// ``CefConfiguration/Services/componentUpdates``. Off, Chromium
+    /// registers no component: it neither downloads the CDM nor loads one
+    /// already on disk, and `com.widevine.alpha` is refused. On, Chromium
+    /// registers Widevine with its other components, and its updater
+    /// offers no way to leave one out: it downloads the CDM at its first
+    /// check, about a minute after start-up, and pages can then use it.
     case disabled
     /// Chromium's component updater runs, downloads Widevine from Google
-    /// when it is missing and keeps it current. It also keeps Chromium's
-    /// other components current (certificate revocation lists, safety
-    /// lists and the like).
+    /// when it is missing and keeps it current, whatever
+    /// ``CefConfiguration/Services/componentUpdates`` says.
     ///
     /// CefSwift asks for the CDM as soon as the app creates its first
     /// browser; ``CefRuntime/installWidevine()`` waits for it.
@@ -41,7 +49,6 @@ public enum CefProtectedMedia: Sendable, Equatable {
     /// Chromium's component ID for the Widevine CDM.
     static let widevineComponentID = "oimompecagnajdejgnnjijobebaeigek"
 
-    var usesComponentUpdater: Bool { self != .disabled }
 
     /// Copies a preinstalled CDM into `<rootCache>/WidevineCdm/<version>`,
     /// where Chromium's component installer looks for installed versions,
@@ -79,8 +86,9 @@ public enum CefProtectedMedia: Sendable, Equatable {
 /// Where the Widevine CDM stands in this process. See
 /// ``CefRuntime/widevine`` and ``CefRuntime/installWidevine()``.
 public enum CefWidevineState: Sendable, Equatable {
-    /// Widevine is turned off (``CefProtectedMedia/disabled``), or Chromium
-    /// is not initialized.
+    /// Chromium's component updater is off (see
+    /// ``CefConfiguration/Services/componentUpdates``), or Chromium is not
+    /// initialized.
     case unavailable
     /// Chromium has not fetched the CDM yet.
     case notInstalled
@@ -104,8 +112,7 @@ extension CefRuntime {
     /// Where the Widevine CDM stands now: a snapshot of Chromium's component
     /// updater.
     public var widevine: CefWidevineState {
-        guard isInitialized, configuration?.protectedMedia.usesComponentUpdater == true,
-              let updater = Self.componentUpdater
+        guard isInitialized, configuration?.runsComponentUpdater == true, let updater = Self.componentUpdater
         else { return .unavailable }
         let component = CefStringUtil.withCefString(CefProtectedMedia.widevineComponentID) {
             updater.pointer.pointee.get_component_by_id(updater.pointer, $0)
@@ -115,6 +122,25 @@ extension CefRuntime {
         let version = CefStringUtil.takingUserFree(component.pointer.pointee.get_version(component.pointer)) ?? ""
         let state = component.pointer.pointee.get_state(component.pointer)
         return Self.widevineState(state: state, version: version)
+    }
+
+    /// The components Chromium's updater has registered, as "name version
+    /// (state n)".
+    @_spi(Testing) public var registeredComponents: [String] {
+        guard isInitialized, let updater = Self.componentUpdater else { return [] }
+        var count = updater.pointer.pointee.get_component_count(updater.pointer)
+        guard count > 0 else { return [] }
+        let components = UnsafeMutablePointer<UnsafeMutablePointer<cef_component_t>?>.allocate(capacity: count)
+        defer { components.deallocate() }
+        components.initialize(repeating: nil, count: count)
+        updater.pointer.pointee.get_components(updater.pointer, &count, components)
+        return (0..<count).compactMap { index in
+            guard let component = components[index] else { return nil }
+            defer { cefRelease(component) }
+            let name = CefStringUtil.takingUserFree(component.pointee.get_name(component)) ?? ""
+            let version = CefStringUtil.takingUserFree(component.pointee.get_version(component)) ?? ""
+            return "\(name) \(version) (state \(component.pointee.get_state(component).rawValue))"
+        }
     }
 
     private static var componentUpdater: CefRef<cef_component_updater_t>? {
@@ -137,7 +163,8 @@ extension CefRuntime {
     /// Asks Chromium to fetch the Widevine CDM now and returns where it
     /// stands once Chromium has finished. Returns at once when the CDM is
     /// already installed (Chromium keeps it current on its own), and with
-    /// ``CefWidevineState/unavailable`` when Widevine is turned off.
+    /// ``CefWidevineState/unavailable`` when protected media is
+    /// ``CefProtectedMedia/disabled``.
     ///
     /// CefSwift already asks when the app creates its first browser; call
     /// this to wait for the CDM, or to try again after
@@ -147,8 +174,8 @@ extension CefRuntime {
     /// to ask again (usually a reload).
     @discardableResult
     public func installWidevine() async -> CefWidevineState {
-        guard isInitialized, configuration?.protectedMedia.usesComponentUpdater == true,
-              let updater = Self.componentUpdater
+        guard isInitialized, let configuration, configuration.protectedMedia != .disabled,
+              configuration.runsComponentUpdater, let updater = Self.componentUpdater
         else { return .unavailable }
         let current = widevine
         if current.isInstalled { return current }

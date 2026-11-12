@@ -628,15 +628,31 @@ public final class CefBrowser: Identifiable {
 
     /// Captures the visible page as PNG data.
     ///
-    /// CEF has no capture API for windowed browsers, so this uses the
-    /// DevTools protocol's `Page.captureScreenshot`, which attaches
-    /// ``devTools`` to the browser; no protocol domain is enabled.
+    /// An offscreen browser returns the frame its view shows, at the view's
+    /// pixel size, with an open popup widget (a `<select>` list, a date
+    /// picker) drawn where it is (``CefOffscreenHost/offscreenSnapshot()``);
+    /// nothing is asked of the page. A windowed browser, and an offscreen
+    /// one before its first frame, use the DevTools Protocol's
+    /// `Page.captureScreenshot`, since CEF has no capture API for windowed
+    /// browsers: it attaches ``devTools`` to the browser and enables no
+    /// domain. That image is the page alone, without popup widgets.
     public func snapshot() async throws -> Data {
+        if let image = client?.offscreenHost?.offscreenSnapshot() {
+            guard let data = Self.pngData(image) else { throw CefError.operationFailed("could not encode the frame as PNG") }
+            return data
+        }
         let reply = try await devTools.send("Page.captureScreenshot", ["format": "png"])
         guard let base64 = reply["data"].stringValue, let data = Data(base64Encoded: base64) else {
             throw CefError.operationFailed("Page.captureScreenshot returned no image data")
         }
         return data
+    }
+
+    static func pngData(_ image: CGImage) -> Data? {
+        let data = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(data, "public.png" as CFString, 1, nil) else { return nil }
+        CGImageDestinationAddImage(destination, image, nil)
+        return CGImageDestinationFinalize(destination) ? data as Data : nil
     }
 
     // MARK: DevTools
@@ -761,10 +777,10 @@ public final class CefBrowser: Identifiable {
             return
         }
         if let signInPromptURL, signInPromptURL == url {
-            // Chromium's sign-in window for an Alloy-style browser crashes
-            // the process when its browser closes under it. A navigation
-            // dismisses the window, so leave the page first and close once
-            // the window has gone.
+            // With `CefAuthenticationPrompt.chromium`, Chromium's sign-in
+            // window for an Alloy-style browser crashes the process when its
+            // browser closes under it. A navigation dismisses the window, so
+            // leave the page first and close once the window has gone.
             self.signInPromptURL = nil
             let browserWindows = Set(CefBrowserWindow.all.compactMap(\.window).map(ObjectIdentifier.init))
             let chromiumWindows = NSApp.windows.filter {
@@ -983,10 +999,12 @@ extension CefBrowser {
     /// Creates a Chrome-style browser view for a ``CefBrowserWindow``.
     /// Returns a +1 `cef_browser_view_t`.
     func createBrowserView(
-        delegate: UnsafeMutablePointer<cef_browser_view_delegate_t>
+        delegate: UnsafeMutablePointer<cef_browser_view_delegate_t>, showsStatusBubble: Bool, showsZoomBubble: Bool
     ) -> UnsafeMutablePointer<cef_browser_view_t>? {
         var blueprint = makeBlueprint()
         isChromeStyle = true
+        if !showsStatusBubble { blueprint.settings.chrome_status_bubble = STATE_DISABLED }
+        if !showsZoomBubble { blueprint.settings.chrome_zoom_bubble = STATE_DISABLED }
         return CefStringUtil.withCefString(blueprint.url) {
             cef_browser_view_create(blueprint.client, $0, &blueprint.settings, blueprint.extraInfo, blueprint.requestContext, delegate)
         }
@@ -1164,8 +1182,11 @@ extension CefBrowser {
     }
 
     func mainFrameDidFailLoad(_ error: CefLoadError) {
-        // ERR_INVALID_AUTH_CREDENTIALS: Chromium asks for credentials itself.
-        if error.code == -338, !isChromeStyle { signInPromptURL = error.url }
+        // ERR_INVALID_AUTH_CREDENTIALS: with `CefAuthenticationPrompt.chromium`,
+        // Chromium asks for credentials itself, in a window of its own.
+        if error.code == -338, !isChromeStyle, CefRuntime.shared.configuration?.authenticationPrompt == .chromium {
+            signInPromptURL = error.url
+        }
         delegate?.browser(self, didFailLoad: error)
     }
 

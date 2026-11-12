@@ -75,7 +75,7 @@ names at run time:
 | `cef_scheme_handler_factory_t.create` | IO | Creates the resource handler. |
 | `cef_resource_handler_t.get_response_headers`, `cancel` | IO | Read and change the handler's locked state. |
 | `cef_resource_handler_t.open`, `skip`, `read` | Chromium's thread pool (`ThreadPoolForegroundWorker`), in sequence | `open` starts the `CefSchemeHandler` in a task; `read` copies buffered bytes or waits for them. |
-| `cef_request_handler_t.get_auth_credentials` | IO | Hops to the main actor for the delegate; CEF 156 does not call it. |
+| `cef_request_handler_t.get_auth_credentials` | IO | Hops to the main actor for the delegate. CEF calls it only with `--disable-chrome-login-prompt` (`CefAuthenticationPrompt.delegate`, the default); without the switch Chromium shows its own dialog. |
 | `cef_cookie_visitor_t.visit`, `cef_download_handler_t` | UI | No hop needed. |
 | `cef_render_handler_t`, `cef_accessibility_handler_t`, everything else | UI | `MainActor.assumeIsolated`. |
 | `on_schedule_message_pump_work` | Any | Posts to the main queue. |
@@ -380,8 +380,10 @@ from `get_accessibility_handler`:
   notification; layout notifications are coalesced to one per 100 ms.
 
 CEF's C API has no way to perform accessibility actions, so actions go
-through input: clicks at the node's centre, arrow keys, and
-`Input.insertText`. Focus and scrolling use `DOM.focus` and
+through input: clicks at the node's centre, arrow keys, and text committed
+as an input method commits it (`ime_commit_text`, replacing the field's
+whole value), with `Input.insertText` only for a field that takes no
+input-method text. Focus and scrolling use `DOM.focus` and
 `DOM.scrollIntoViewIfNeeded`. Those need a DOM node, which the serialized
 tree does not carry; the DevTools `Accessibility` domain shares Chromium's
 node identifiers with it, so `Accessibility.getChildAXNodes` on the node's
@@ -464,11 +466,10 @@ protection"). These use it:
 |---|---|
 | `browser.devTools` | Whatever the app sends. |
 | `evaluateJavaScript(_:userGesture: true)` | `Runtime.evaluate` with `userGesture`, the only way to grant a user activation. |
-| `snapshot()` | `Page.captureScreenshot`. |
+| `snapshot()` | `Page.captureScreenshot`, for windowed browsers; an offscreen browser's snapshot is the frame its view shows. |
 | `CefPasskeyMode.app` and `.disabled` | `WebAuthn`, `Debugger`, `Page` and `Runtime` enabled for the browser's lifetime; see [Passkeys](#passkeys). |
 | `discard()` | `Runtime.evaluate` and `DOMDebugger.getEventListeners` on the page's window, to find a `beforeunload` listener, which JavaScript cannot list. |
-| Offscreen accessibility actions | `Accessibility.enable` for the length of one lookup, then `DOM.focus`, `DOM.scrollIntoViewIfNeeded`, `Input.insertText`. |
-| Internal-page services | Service hosts only, which show Chromium's own pages, never yours. |
+| Offscreen accessibility actions | `Accessibility.enable` for the length of one lookup, then `DOM.focus`, `DOM.scrollIntoViewIfNeeded`; `Input.insertText` only for a field that takes no input-method text. |
 
 A browser created again after a discard enables the domains its session
 had enabled before, before its page loads; a session that was never used
@@ -523,11 +524,13 @@ second.
 **Services as modules.** A `CefServiceModule` names the hosts that can
 serve it and a JavaScript `setup` that builds a service object once per
 document — a bound Mojo remote, or an extension API with listeners. A
-call evaluates a function against that object through the DevTools
-Protocol and returns its JSON result; a module that serves from several
-hosts (favicons) uses whichever of them runs. A module reports events
-through one DevTools binding per host, and subscribers hear them while the
-host runs. Adding a service is declaring a module and calling it.
+call evaluates a function against that object in the host's renderer, as
+`evaluateJavaScript` does, and returns its JSON result; a module that
+serves from several hosts (favicons) uses whichever of them runs. A module
+reports events through a `CefBridge` of the host's
+(`__cefswiftServiceEvents.event(…)`), and subscribers hear them while the
+host runs. Hosts attach no DevTools session. Adding a service is declaring
+a module and calling it.
 
 **Lifetime.** A host starts on the first call that needs it and closes 30
 seconds after its last one, when macOS reports memory pressure, when its

@@ -1,4 +1,5 @@
 import AppKit
+@_spi(Testing) import CefKit
 import CefSwiftUI
 
 /// Checks of the offscreen accessibility tree, read the way assistive apps
@@ -129,6 +130,7 @@ extension SelfTest {
             }
 
             recorder.posted.removeAll()
+            let fallbacks = CefAccessibilityTesting.setValueProtocolFallbacks
             field.setAccessibilityValue("Grace")
             await expect("accessibility: setting the value types into the field") {
                 let typed = await waitUntilAsync(timeout: .seconds(5)) {
@@ -140,6 +142,8 @@ extension SelfTest {
                 }
                 return typed && reflected
             }
+            check("accessibility: the value goes in as input-method text, not through the DevTools Protocol",
+                  CefAccessibilityTesting.setValueProtocolFallbacks == fallbacks)
         }
 
         if let button {

@@ -24,6 +24,8 @@
   "infoPlist": {
     "LSApplicationCategoryType": "public.app-category.productivity",
   },
+  // A browser's users pick Chromium's interface language: keep every pack.
+  "cef": { "localizations": "all" },
   // Unrestricted entitlements of the app, beyond those of the capabilities.
   "entitlements": "Browser.entitlements",
 
