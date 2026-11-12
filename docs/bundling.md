@@ -261,7 +261,7 @@ plugin passes `--timestamp=none`, so signing works offline.
 
 | Identity | Hardened runtime | Timestamp | `get-task-allow` |
 |---|---|---|---|
-| Ad hoc | Off | Off | No |
+| Ad hoc | Off (with `--hardened-runtime`, `disable-library-validation` is added) | Off | No |
 | Apple Development | On | Off | Added, so the app can be debugged |
 | Developer ID Application | On | On | Refused: notarization rejects it |
 
@@ -281,10 +281,17 @@ The built-in ones follow CEF's
 and Chromium's `chrome/app/helper-renderer-entitlements.plist` and
 `helper-gpu-entitlements.plist`: V8 and the GPU process's shader compilers
 generate code at run time, which the hardened runtime allows only with
-`allow-jit`. None of the parts needs
-`com.apple.security.cs.disable-library-validation`: the plugin signs every
-library a process loads, the startup library and CEF's own included, with
-the app's identity.
+`allow-jit`.
+
+Library validation, part of the hardened runtime, loads a library only when
+it carries the process's team identifier (or Apple's). With a team
+signature that holds for every library, since the plugin signs each one,
+the startup library and CEF's own included, with the app's identity; no part
+needs `com.apple.security.cs.disable-library-validation`. A signature without
+a team (ad hoc or self-signed) matches nothing, and the framework fails to
+load with "mapping process and mapped file (non-platform) have different
+Team IDs". With the hardened runtime on such a signature, the plugin adds
+`disable-library-validation` to the app and every helper and says so.
 
 Strings in entitlements files may use `$(TeamIdentifierPrefix)` and
 `$(AppIdentifierPrefix)` (`<team ID>.`), `$(TeamIdentifier)` and
@@ -470,7 +477,7 @@ line at start-up naming what the signature leaves out. See
 |---|---|---|
 | The app dies at launch with `SIGKILL (Code Signature Invalid)`; the log shows `taskgated-helper … Unsatisfied entitlements` or `AMFI` | A restricted entitlement no embedded profile authorizes, or a profile that does not match the bundle | `cef doctor`; embed a matching profile, or drop the entitlement. `cef bundle` refuses these combinations. |
 | `errSecMissingEntitlement` (-34018) from the keychain | The data protection keychain without `com.apple.application-identifier`, as in ad hoc builds | Sign with a team identity and a profile. |
-| A helper fails with `Library not loaded … code signature … not valid for use in process` | A library signed differently from the process (other team, or ad hoc under a team signature) | Bundle again; `cef doctor` names the library. |
+| `CefError.loadFailed` or a helper exit with `code signature … not valid for use in process: mapping process and mapped file (non-platform) have different Team IDs` | Library validation: a library signed by another team, ad hoc under a team signature, or any library under a team-less signature with the hardened runtime | Bundle again with `cef bundle`; `cef doctor` names the part. |
 | Renderers crash at start under the hardened runtime | The renderer helper lacks `allow-jit` | Keep the built-in helper entitlements; `cef doctor` flags it. |
 | "MyApp is damaged" or "cannot be opened" on another Mac | The download is quarantined and the app is not notarized | Notarize. For a test only: `xattr -dr com.apple.quarantine MyApp.app`. |
 | Notarization `Invalid` | Missing hardened runtime or timestamp, `get-task-allow`, or an unsigned nested binary | `cef notarize` prints the notary log; `cef doctor` names the part. |
