@@ -53,6 +53,11 @@ let package = Package(
             name: "CefKitTests",
             dependencies: ["CefKit"]
         ),
+        // Compiles the plugin's pure logic (Plugins/CefPlugin/Distribution,
+        // linked in as a directory symlink) so it can be unit-tested.
+        .testTarget(
+            name: "CefPluginTests"
+        ),
         .testTarget(
             name: "CefSwiftUITests",
             dependencies: ["CefSwiftUI"]

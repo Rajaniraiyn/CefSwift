@@ -81,6 +81,7 @@ enum SelfTest {
     /// `SELFTEST_ONLY=passkeys`; `accessibility-external` is a session for an
     /// outside accessibility client instead of checks.
     static let checkGroups: [(name: String, run: @MainActor () async -> Void)] = [
+        ("capabilities", { capabilityChecks() }),
         ("windowed", windowedBrowserChecks),
         ("offscreen", offscreenBrowserChecks),
         ("accessibility", offscreenAccessibilityChecks),
@@ -112,6 +113,19 @@ enum SelfTest {
         for group in checkGroups where only?.contains(group.name) ?? true {
             await group.run()
         }
+    }
+
+    /// What the bundle's signature allows, as CefKit reads it.
+    static func capabilityChecks() {
+        let capabilities = CefRuntime.shared.capabilities
+        let consistent = capabilities.signature.hasAppleTeam == (capabilities.teamIdentifier != nil)
+            && capabilities.passkeyAuthenticators.contains(.securityKey)
+            && (capabilities.teamIdentifier != nil
+                || capabilities.resolvedSafeStorage(.automatic) == .mockKeychain)
+        check("capabilities: signature (\(capabilities.signature.rawValue)" +
+              (capabilities.isHardenedRuntime ? ", hardened runtime" : "") + ") and passkey authenticators (" +
+              capabilities.passkeyAuthenticators.map(\.description).sorted().joined(separator: ", ") + ")",
+              consistent && capabilities.signature != .unsigned)
     }
 
     static func windowedBrowserChecks() async {

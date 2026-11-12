@@ -145,6 +145,37 @@ signed builds are asked again after each rebuild.
 | `.keychain` | Always use the keychain, as Chrome does. |
 | `.mockKeychain` | Use a fixed key and never touch the keychain (`--use-mock-keychain`). Nothing is protected at rest; use it for development, demos and tests. |
 
+`cef bundle` signs with your Apple Development or Developer ID identity
+when the keychain has one; [bundling](bundling.md#distribution) lists what
+each kind of signature allows.
+
+### Signing and capabilities
+
+`CefRuntime.shared.capabilities` (also `CefAppCapabilities.current`)
+describes what the running app's signature, entitlements and Info.plist let
+Chromium do, so the app can adapt its UI:
+
+```swift
+let capabilities = CefRuntime.shared.capabilities
+if !capabilities.passkeyAuthenticators.contains(.iCloudKeychain) {
+    // Offer the app's own passkeys (CefPasskeyMode.app) instead.
+}
+```
+
+| Property | Value |
+|---|---|
+| `signature` | `.unsigned`, `.adHoc`, `.development`, `.developerID`, `.appStore` or `.other` (a certificate without an Apple team). |
+| `teamIdentifier` | The team of an Apple certificate, else nil. |
+| `isHardenedRuntime`, `isAppSandboxed` | From the signature's flags and entitlements. |
+| `entitlements`, `keychainAccessGroups` | The entitlements the signature grants. |
+| `usageDescriptions` | The `NS…UsageDescription` keys in the Info.plist. |
+| `passkeyAuthenticators` | `.securityKey`, `.hybrid`, `.touchID`, `.iCloudKeychain`: what `.chromium` passkeys can offer. |
+| `resolvedSafeStorage(_:)` | The safe-storage policy Chromium gets for a configured one. |
+
+At start-up CefSwift logs one line (subsystem `CefSwift`) naming what the
+signature leaves out, such as "Chromium passkeys offer only security keys".
+`swift package cef doctor <App.app>` reports the same for a bundle on disk.
+
 ### Preferences
 
 `preferences` sets Chromium preferences, the settings behind
@@ -686,18 +717,22 @@ func browser(_ browser: CefBrowser, decideDestinationFor download: CefDownload, 
 | `.disabled` | Nobody: every call rejects with `NotAllowedError`. |
 
 With `.chromium`, what Chromium can offer depends on how the app is
-signed:
+signed and configured. The `passkeys` capability of `cef bundle` adds what
+it can ([bundling](bundling.md#features)):
 
 | Authenticator | Needs |
 |---|---|
-| USB security keys | Nothing. |
-| iCloud Keychain passkeys, through AuthenticationServices | The `com.apple.developer.web-browser.public-key-credential` entitlement, which Apple grants to web browsers, in a provisioning profile, and a Developer ID or Apple Development signature. |
-| Chromium's own profile passkeys (Touch ID) | A `keychain-access-groups` entitlement of `<team ID>.org.chromium.Chromium.webauthn`. |
-| A phone or tablet (QR code and Bluetooth) | `NSBluetoothAlwaysUsageDescription` in the app's `Info.plist`, and a launch from Finder or `open`, which makes the app responsible for its own Bluetooth access. |
+| USB and NFC security keys | Nothing. |
+| A phone or tablet (QR code and Bluetooth) | `NSBluetoothAlwaysUsageDescription` in the app's `Info.plist` and, under the hardened runtime, `com.apple.security.device.bluetooth`; and a launch from Finder or `open`, which makes the app responsible for its own Bluetooth access. |
+| iCloud Keychain passkeys, through AuthenticationServices | The `com.apple.developer.web-browser.public-key-credential` entitlement, which Apple grants to web browsers on request, in a provisioning profile, and an Apple Development or Developer ID signature. |
+| Chromium's own profile passkeys (Touch ID) | Not available: CEF 156 checks for a keychain access group without a team prefix, which no provisioning profile can authorize. |
 
-An ad hoc signed app gets only security keys. Chromium shows its dialog
-("Use your security key with example.com") as a window attached to a
-`CefBrowserWindow`, or as a free-standing window for a `CefWebView`.
+An ad hoc signed app gets security keys and, with the Bluetooth key,
+phones. `CefRuntime.shared.capabilities.passkeyAuthenticators` lists what
+the running app gets, and CefSwift logs a line at start-up when it is only
+part of the list. Chromium shows its dialog ("Use your security key with
+example.com") as a window attached to a `CefBrowserWindow`, or as a
+free-standing window for a `CefWebView`.
 
 With `.app(store)`, the delegate decides each call while the page waits at
 it:
@@ -748,7 +783,7 @@ try await store.remove(saved[0])
 | Store | Keeps passkeys |
 |---|---|
 | `CefInMemoryPasskeyStore` | In memory, until it is released. For tests and private browsing. |
-| `CefKeychainPasskeyStore(service:accessGroup:)` | In the data protection keychain, one item per passkey, available while the Mac is unlocked and never synced. Needs a team signature; an ad hoc signed app gets `errSecMissingEntitlement` (-34018) as `CefError.operationFailed`. It never shows a keychain password prompt. |
+| `CefKeychainPasskeyStore(service:accessGroup:)` | In the data protection keychain, one item per passkey, available while the Mac is unlocked and never synced. Needs a team signature with a provisioning profile, which gives the app the `com.apple.application-identifier` entitlement the data protection keychain checks; an ad hoc signed app gets `errSecMissingEntitlement` (-34018) as `CefError.operationFailed`. It never shows a keychain password prompt. |
 
 Adopt `CefPasskeyStore` (`passkeys()`, `save(_:)`, `remove(_:)`) to keep
 them elsewhere, such as in a password manager.
@@ -1392,3 +1427,10 @@ driver crash cannot end the app.
   DevTools target of their own, also wait until their timeout without
   reaching the delegate. The app's mode uses the browser's DevTools `Debugger` and
   `WebAuthn` domains; do not use those domains yourself in such a browser.
+- Chromium's profile passkey authenticator (Touch ID, `.chromium`) is not
+  available: CEF 156 compiles in Chromium's keychain access group,
+  `.org.chromium.Chromium.webauthn`, with an empty team identifier, and
+  macOS lets a signed app claim only groups its provisioning profile
+  authorizes, which start with the team identifier.
+- The App Sandbox is not supported, so CefSwift apps do not ship in the
+  Mac App Store ([bundling](bundling.md#app-sandbox)).
