@@ -202,14 +202,19 @@ extension SelfTest {
         }
         // Not awaited: the release's reply waits for the page, which stays
         // stopped before its call while the sheet is up.
-        Task {
-            for type in ["mousePressed", "mouseReleased"] {
-                _ = try? await sheetBrowser.devTools.send("Input.dispatchMouseEvent", [
-                    "type": .string(type), "x": 40, "y": 40, "button": "left", "clickCount": 1,
-                ])
+        // A click sent before the page takes input is lost, so it is sent
+        // again until the sheet shows.
+        var shown = false
+        for _ in 0 ..< 5 where !shown {
+            Task {
+                for type in ["mousePressed", "mouseReleased"] {
+                    _ = try? await sheetBrowser.devTools.send("Input.dispatchMouseEvent", [
+                        "type": .string(type), "x": 40, "y": 40, "button": "left", "clickCount": 1,
+                    ])
+                }
             }
+            shown = await waitUntil(timeout: .seconds(3)) { window.attachedSheet != nil }
         }
-        let shown = await waitUntil(timeout: .seconds(5)) { window.attachedSheet != nil }
         sheetBrowser.close(force: true)
         let gone = await waitUntil(timeout: .seconds(5)) {
             window.attachedSheet == nil && sheetBrowser.state == .closed && sheetBrowser.pendingDecisionCount == 0

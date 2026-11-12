@@ -106,8 +106,13 @@ extension SelfTest {
             return
         }
         let before = CefRuntime.shared.widevine
-        check("widevine: .automatic reports the CDM missing or arriving on a fresh profile",
-              before == .notInstalled || before == .installing, detail: "\(before)")
+        if case .failed = before {
+            // Offline, the component updater gives up at once.
+            skip("widevine: the CDM's first state", because: "the update check failed at once (offline?)", .environment)
+        } else {
+            check("widevine: .automatic reports the CDM missing or arriving on a fresh profile",
+                  before == .notInstalled || before == .installing, detail: "\(before)")
+        }
 
         let started = ContinuousClock.now
         var result: CefWidevineState?

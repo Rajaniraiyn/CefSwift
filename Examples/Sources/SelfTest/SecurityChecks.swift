@@ -35,7 +35,10 @@ extension SelfTest {
               handled?.isSecureConnection == false && handled?.certificate == nil && handled?.level == .notSecure,
               detail: "\(String(describing: handled))")
 
-        if await load(URL(string: "https://example.com/")!), browser.title.lowercased().contains("example") {
+        // An error page also finishes loading, so the public site's own
+        // title is what tells a working network from none.
+        let online = await load(URL(string: "https://example.com/")!) && browser.title.lowercased().contains("example")
+        if online {
             let security = browser.connectionSecurity
             let certificate = security?.certificate
             check("security: a public HTTPS site is secure over TLS 1.2 or later",
@@ -70,7 +73,7 @@ extension SelfTest {
             check("security: a site asking for a client certificate asks the delegate",
                   request.host == "client.badssl.com" && request.port == 443 && !request.isProxy,
                   detail: "\(request)")
-        } else if browser.title.isEmpty {
+        } else if !online || browser.title.isEmpty {
             skip("security: a client-certificate request", because: "client.badssl.com did not answer (offline?)", .environment)
         } else {
             check("security: a site asking for a client certificate asks the delegate", false, detail: browser.title)
