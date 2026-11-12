@@ -6,15 +6,22 @@ import CefSwiftUI
 ///
 /// Launch the bundled app; it runs every check, prints one line per result
 /// and exits with the number of failures (124 if the watchdog fires).
+/// Harness.swift describes deadlines, skip categories, `SELFTEST_STRICT`,
+/// `SELFTEST_ISOLATED` and `SELFTEST_JSON`.
 @main
 @MainActor
 enum SelfTest {
     static let bridge = CefBridge(name: "app")
     static var window: NSWindow!
     static var failures = 0
+    static let started = ContinuousClock.now
 
     static func main() {
         setvbuf(stdout, nil, _IONBF, 0)
+        _ = started
+        if isIsolatedParent {
+            exit(runIsolated())
+        }
         var configuration = CefConfiguration.embedded
         configuration.isOffscreenRenderingEnabled = true
         configuration.productName = "SelfTestBrowser"
@@ -35,6 +42,12 @@ enum SelfTest {
             configuration.rootCacheDirectory = URL(fileURLWithPath: widevineProbeDirectory)
             configuration.protectedMedia = .automatic
         }
+        // Those second instances report to this one, which counts their
+        // lines; they write no results file of their own.
+        if relaunchDirectory != nil || widevineProbeDirectory != nil {
+            unsetenv("SELFTEST_JSON")
+            unsetenv("SELFTEST_STRICT")
+        }
         sendJobBeforeStartUp()
         do {
             try CefRuntime.shared.initialize(configuration: configuration)
@@ -49,6 +62,11 @@ enum SelfTest {
             exit(1)
         }
         CefRuntime.shared.registerSchemeHandler(scheme: "selftest", handler: StaticPage())
+        installBridgeHandlers()
+        // Pages several groups load, so that each group also runs by itself.
+        CefRuntime.shared.registerSchemeHandler(scheme: "selftest", domain: "edge", handler: EdgePages())
+        CefRuntime.shared.registerSchemeHandler(scheme: "selftest", domain: "bench", handler: BenchmarkPages())
+        CefRuntime.shared.registerSchemeHandler(scheme: "selftest", domain: "ax", handler: AccessibilityPages())
 
         window = NSWindow(
             contentRect: NSRect(x: 80, y: 80, width: 900, height: 600),
@@ -59,8 +77,15 @@ enum SelfTest {
         window.makeKeyAndOrderFront(nil)
         NSApp.activate()
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + (ServiceBenchmark.isRequested || Benchmarks.requested != nil ? 900 : 360)) {
-            print("FAIL watchdog: checks did not finish in 360s")
+        // A last resort: each group has its own deadline.
+        let isBenchmark = ServiceBenchmark.isRequested || Benchmarks.requested != nil
+        let watchdog = isBenchmark ? 900 : 90 + selectedGroups.reduce(0) { $0 + Int(deadline(of: $1.name).components.seconds) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(watchdog)) {
+            MainActor.assumeIsolated {
+                check("watchdog: checks finish within \(watchdog) s", false,
+                      detail: "stuck in group \(SelfTestResults.shared.group)")
+                SelfTestReport.finish(failures: failures, isolated: false, started: started)
+            }
             exit(124)
         }
         Task {
@@ -79,10 +104,10 @@ enum SelfTest {
                 forName: NSApplication.willTerminateNotification, object: nil, queue: nil
             ) { _ in
                 MainActor.assumeIsolated {
+                    SelfTestResults.shared.group = "quit"
                     check("quit: Chromium shuts down cleanly", !CefRuntime.shared.isInitialized)
                     check("quit: a job sent to CefIOActor after shutdown runs", jobAfterShutdownRuns())
-                    print(failures == 0 ? "ALL CHECKS PASSED" : "\(failures) CHECK(S) FAILED")
-                    exit(Int32(failures))
+                    exit(Int32(min(SelfTestReport.finish(failures: failures, isolated: false, started: started), 123)))
                 }
             }
             if ProcessInfo.processInfo.environment["SELFTEST_QUIT"] == "logout" {
@@ -137,14 +162,13 @@ enum SelfTest {
     ]
 
     static func runChecks() async {
-        let only = ProcessInfo.processInfo.environment["SELFTEST_ONLY"]
-            .map { Set($0.split(separator: ",").map(String.init)) }
-        if only?.contains("accessibility-external") == true {
+        if ProcessInfo.processInfo.environment["SELFTEST_ONLY"]?.split(separator: ",")
+            .contains("accessibility-external") == true {
             await accessibilityExternalClientSession()
             return
         }
-        for group in checkGroups where only?.contains(group.name) ?? true {
-            await group.run()
+        for group in selectedGroups {
+            await run(group: group.name, group.run)
         }
     }
 
@@ -161,13 +185,18 @@ enum SelfTest {
               consistent && capabilities.signature != .unsigned)
     }
 
-    static func windowedBrowserChecks() async {
-        struct Person: Codable { var name: String }
+    struct Person: Codable { var name: String }
+
+    /// The `app` bridge's handlers, which the windowed and discard groups
+    /// call. Installed at start-up so that each group also runs by itself.
+    static func installBridgeHandlers() {
         bridge.handle("greet") { (person: Person, call: CefBridgeCall) in
             "Hello, \(person.name) from \(call.isMainFrame ? "main" : "sub")!"
         }
         bridge.handle("fail") { (_: CefJSON) -> String in throw CefError.operationFailed("nope") }
+    }
 
+    static func windowedBrowserChecks() async {
         var options = CefBrowserOptions()
         options.bridges = [bridge]
         options.userScripts = [CefUserScript(source: "window.__injected = 42;")]
@@ -248,7 +277,6 @@ enum SelfTest {
 
         browser.load(URL(string: "selftest://app/second.html")!)
         check("navigation: history", await waitUntil { browser.title == "second" && browser.canGoBack })
-        print("dbg", (try? await browser.evaluateJavaScript("[typeof app, typeof app.invoke, typeof app.greet, String(Object.getOwnPropertyNames(window).filter(k => k === 'app')), location.href]").text) ?? "error")
         await expect("bridge survives navigation") {
             try await browser.evaluateJavaScript("app.greet({name: 'Bob'})").stringValue == "Hello, Bob from main!"
         }
@@ -271,7 +299,7 @@ enum SelfTest {
         if window.occlusionState.contains(.visible) {
             check("offscreen: paints", await waitUntil { view.layer?.sublayers?.first?.contents != nil })
         } else {
-            print("SKIP offscreen: paints — the test window is not visible (screen locked or asleep?)")
+            skip("offscreen: paints", because: "the test window is not visible (screen locked or asleep?)", .environment)
         }
         await expect("offscreen: evaluateJavaScript") { try await browser.evaluateJavaScript("document.title").stringValue == "second" }
         browser.close(force: true)

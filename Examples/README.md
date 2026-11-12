@@ -108,7 +108,9 @@ without the tree. `SELFTEST_ONLY=accessibility-external` instead shows the
 accessibility test page without reading it, prints `READY <pid>`, and
 waits `SELFTEST_AX_HOLD` seconds (15 by default) for a separate process to
 read it through the `AXUIElement` API, which needs that process to have
-Accessibility permission.
+Accessibility permission. `SELFTEST_ISOLATED`, `SELFTEST_STRICT` and
+`SELFTEST_JSON` are described in
+[CONTRIBUTING](../CONTRIBUTING.md#verify-with-selftest).
 
 ## Launch arguments
 
