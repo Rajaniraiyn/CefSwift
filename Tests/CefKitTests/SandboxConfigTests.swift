@@ -6,9 +6,9 @@ import Testing
 
 /// Pure-logic tests for the macOS sandbox seam: defaults and the bit that
 /// crosses into `cef_settings_t.no_sandbox`, the inverse of
-/// `isSandboxEnabled`. We can't exercise the helper
-/// dlopen path in a unit test (it needs a real bundle layout), but the
-/// settings mapping is where the toggle is easy to break.
+/// `isSandboxEnabled`. The helper's side (Plugins/CefPlugin/Helper) needs a
+/// real bundle, but the settings mapping is where the toggle is easy to
+/// break.
 @Suite struct SandboxConfigTests {
     @Test func defaultIsUnsandboxed() {
         #expect(CefConfiguration().isSandboxEnabled == false)

@@ -265,61 +265,6 @@ public final class CefRuntime {
         isInitialized = false
     }
 
-    // MARK: Helper process
-
-    /// Entry point for helper executables (`cef-helper`'s main.swift calls
-    /// only this). Seals the macOS sandbox when requested (i.e. unless CEF
-    /// passed `--no-sandbox`), loads the framework from the helper-relative
-    /// bundle location (or `CEF_FRAMEWORK_PATH`), mirrors any custom scheme
-    /// registration forwarded on the command line, runs
-    /// `cef_execute_process`, and exits with its return code. Never returns.
-    public static func helperMain() -> Never {
-        let arguments = CommandLine.arguments
-
-        // Sandbox: when the browser process runs with no_sandbox=0, CEF stops
-        // passing --no-sandbox to subprocesses; each helper must then load
-        // libcef_sandbox.dylib and seal itself BEFORE the framework loads.
-        if !arguments.contains("--no-sandbox") {
-            guard ccef_sandbox_initialize(CommandLine.argc, CommandLine.unsafeArgv) != 0 else {
-                let message = String(cString: ccef_sandbox_error())
-                FileHandle.standardError.write(Data("cef-helper: sandbox initialization failed: \(message)\n".utf8))
-                exit(125)
-            }
-        }
-
-        let binary: URL
-        do {
-            binary = try resolveHelperFrameworkBinary()
-        } catch {
-            FileHandle.standardError.write(Data("cef-helper: \(error)\n".utf8))
-            exit(125)
-        }
-        guard ccef_load_framework(binary.path) != 0 else {
-            let message = String(cString: ccef_loader_error())
-            FileHandle.standardError.write(Data("cef-helper: \(message)\n".utf8))
-            exit(125)
-        }
-        do {
-            try verifyAPIHash()
-        } catch {
-            FileHandle.standardError.write(Data("cef-helper: \(error)\n".utf8))
-            exit(125)
-        }
-
-        // Custom schemes must be registered in every process: the browser
-        // forwarded its list via --cefswift-schemes (see CefAppContext).
-        let customSchemes = CefCustomScheme.parse(fromArguments: arguments)
-        var helperApp: UnsafeMutablePointer<cef_app_t>?
-        if !customSchemes.isEmpty {
-            // cef_execute_process consumes our +1 reference on the app.
-            helperApp = CefHelperAppContext(customSchemes: customSchemes).makeApp()
-        }
-
-        var mainArgs = cef_main_args_t(argc: CommandLine.argc, argv: CommandLine.unsafeArgv)
-        let code = cef_execute_process(&mainArgs, helperApp, nil)
-        exit(code)
-    }
-
     // MARK: Framework resolution
 
     nonisolated static let frameworkBinaryName = "Chromium Embedded Framework"
@@ -359,31 +304,6 @@ public final class CefRuntime {
         }
 
         throw CefError.frameworkNotFound("Searched: \(searched.joined(separator: "; ")).")
-    }
-
-    /// Helper-process resolution: CEF_FRAMEWORK_PATH override, then the
-    /// standard helper-relative location
-    /// `<exe>/../../../Chromium Embedded Framework.framework/...`
-    /// (helpers live in `Contents/Frameworks/` of the main app).
-    nonisolated static func resolveHelperFrameworkBinary() throws(CefError) -> URL {
-        if let env = ProcessInfo.processInfo.environment["CEF_FRAMEWORK_PATH"], !env.isEmpty {
-            let candidate = binaryURL(for: URL(fileURLWithPath: env))
-            if FileManager.default.fileExists(atPath: candidate.path) {
-                return candidate
-            }
-        }
-        let executable = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath()
-        let candidate = executable
-            .deletingLastPathComponent()  // MacOS/
-            .deletingLastPathComponent()  // Contents/
-            .deletingLastPathComponent()  // <Helper>.app/  -> Contents/Frameworks/
-            .deletingLastPathComponent()
-            .appendingPathComponent(frameworkBundleName)
-            .appendingPathComponent(frameworkBinaryName)
-        if FileManager.default.fileExists(atPath: candidate.path) {
-            return candidate
-        }
-        throw CefError.frameworkNotFound("Helper searched: \(candidate.path).")
     }
 
     /// Accepts either a `.framework` directory or a direct binary path.

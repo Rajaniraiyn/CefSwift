@@ -41,7 +41,7 @@ final class CefAppContext: @unchecked Sendable {
             guard let commandLine, let owner = cefOwner(CefAppContext.self, s), !owner.customSchemes.isEmpty
             else { return }
             // CEF does not tell subprocesses about app-registered schemes;
-            // pass them along so helperMain() registers the same list.
+            // pass them along so the helper registers the same list.
             CefCommandLine(raw: commandLine).appendSwitch(
                 CefCustomScheme.childProcessSwitchName,
                 value: CefCustomScheme.serialize(owner.customSchemes))
@@ -101,35 +101,16 @@ final class CefAppContext: @unchecked Sendable {
             commandLine.appendSwitch("use-mock-keychain")
         }
 
-        var disabledFeatures = configuration.disabledFeatures
+        var (enabledFeatures, disabledFeatures) = configuration.chromiumFeatures
         if !configuration.extensions.isEmpty {
             commandLine.appendSwitch(
                 "load-extension", value: configuration.extensions.map(\.path).joined(separator: ","))
             // Chromium is phasing out --load-extension behind this feature.
             disabledFeatures.insert("DisableLoadExtensionCommandLineSwitch")
         }
-        commandLine.appendValues(configuration.enabledFeatures, toListSwitch: "enable-features")
+        commandLine.appendValues(enabledFeatures, toListSwitch: "enable-features")
         commandLine.appendValues(disabledFeatures, toListSwitch: "disable-features")
 
         configuration.onBeforeCommandLineProcessing?(commandLine)
-    }
-}
-
-/// Owner of the `cef_app_t` passed to `cef_execute_process` in helper
-/// processes; mirrors the browser process's custom scheme registration.
-final class CefHelperAppContext: @unchecked Sendable {
-    let customSchemes: [CefCustomScheme]
-
-    init(customSchemes: [CefCustomScheme]) {
-        self.customSchemes = customSchemes
-    }
-
-    func makeApp() -> UnsafeMutablePointer<cef_app_t> {
-        let app = cefAllocate(cef_app_t.self, owner: self)
-        app.pointee.on_register_custom_schemes = { s, registrar in
-            guard let registrar, let owner = cefOwner(CefHelperAppContext.self, s) else { return }
-            CefCustomScheme.register(owner.customSchemes, with: registrar)
-        }
-        return app
     }
 }

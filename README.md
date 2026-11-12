@@ -167,11 +167,13 @@ covers identifiers, signing and the bundle layout.
 
 ## Examples
 
-[`Examples/`](Examples/README.md) is a separate package with three apps:
+[`Examples/`](Examples/README.md) is a separate package with four apps:
 
 - **Browser**: a tabbed browser with a SwiftUI toolbar, address-bar
   suggestions, bookmarks, history, private tabs, downloads and popups.
 - **Showcase**: three demos of embedding web content in SwiftUI.
+- **Minimal**: one `CefWebView` on the `.embedded` configuration, and the
+  lean case of the footprint benchmark.
 - **SelfTest**: end-to-end checks against the real Chromium runtime, run by CI.
 
 ## Requirements
