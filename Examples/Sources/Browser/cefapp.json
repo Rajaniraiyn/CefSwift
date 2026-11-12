@@ -1,5 +1,38 @@
+// Settings for `swift package cef bundle --product Browser`; see
+// docs/bundling.md. Comments and trailing commas are allowed.
 {
   "bundleIdentifier": "dev.rajaniraiyn.cefswift.browser",
   "displayName": "CefSwift Browser",
-  "minimumSystemVersion": "15.0"
+  "minimumSystemVersion": "15.0",
+
+  // Each capability adds the Info.plist keys and entitlements it needs.
+  // Restricted entitlements (iCloud Keychain passkeys) are added only when
+  // the bundle is signed with an Apple team identity and a provisioning
+  // profile that authorizes them; ad hoc builds leave them out and say so.
+  "capabilities": [
+    "camera", "microphone", "location", "passkeys", "usb", "localNetwork",
+    "defaultBrowser", "handoff",
+  ],
+  "usageDescriptions": {
+    "camera": "Websites you allow can use the camera, for example for video calls.",
+    "microphone": "Websites you allow can use the microphone, for example for video calls and voice input.",
+    "location": "Websites you allow can see your approximate location, for example to show nearby places.",
+    "bluetooth": "Websites you allow can connect to Bluetooth devices, and your phone can sign you in with a passkey.",
+    "passkeys": "Websites can sign you in with passkeys saved in iCloud Keychain.",
+    "localNetwork": "Websites you allow can find devices on your network, such as screens to cast to.",
+  },
+  "infoPlist": {
+    "LSApplicationCategoryType": "public.app-category.productivity",
+  },
+  // Unrestricted entitlements of the app, beyond those of the capabilities.
+  "entitlements": "Browser.entitlements",
+
+  // For a build others can run, sign with a team identity and embed a
+  // provisioning profile for this bundle identifier:
+  // "signingIdentity": "Developer ID Application: Example Corp (A1B2C3D4E5)",
+  // "provisioningProfile": "Browser_Developer_ID.provisionprofile",
+  // "entitlements": "Browser-Distribution.entitlements",
+  // "notarization": { "keychainProfile": "notary", "format": "dmg" },
+  // Only when the certificate does not carry the team identifier:
+  // "teamIdentifier": "A1B2C3D4E5",
 }

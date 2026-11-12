@@ -12,7 +12,7 @@ let package = Package(
         .executableTarget(
             name: "Browser",
             dependencies: [.product(name: "CefSwiftUI", package: "CefSwift")],
-            exclude: ["cefapp.json"]
+            exclude: ["cefapp.json", "Browser.entitlements", "Browser-Distribution.entitlements"]
         ),
         // Embedding web content in a SwiftUI app.
         .executableTarget(

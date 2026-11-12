@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  A template for a team-signed Browser. Use it from cefapp.json
+  ("entitlements": "Browser-Distribution.entitlements") together with
+  "signingIdentity" and "provisioningProfile".
+
+  cef bundle expands $(TeamIdentifierPrefix) / $(AppIdentifierPrefix) to
+  "<team ID>." and $(CFBundleIdentifier) to the bundle identifier, and adds
+  com.apple.application-identifier and com.apple.developer.team-identifier
+  from the provisioning profile, as Xcode does. Every restricted key here
+  (keychain-access-groups, com.apple.developer.*) must be authorized by that
+  profile: enable the capability for the App ID on the Apple Developer
+  website and download the profile again. Without the profile, macOS kills
+  the app at launch, so cef bundle refuses to sign it.
+
+  The "passkeys" capability already adds
+  com.apple.developer.web-browser.public-key-credential when the profile
+  allows it; Apple grants that entitlement to web browsers on request.
+-->
+<plist version="1.0">
+<dict>
+	<!-- Passkeys the browser keeps itself (CefKeychainPasskeyStore), shared
+	     with other apps of the team through this group. The store's default
+	     group, the application identifier, needs no entry here. -->
+	<key>keychain-access-groups</key>
+	<array>
+		<string>$(TeamIdentifierPrefix)$(CFBundleIdentifier).passkeys</string>
+	</array>
+</dict>
+</plist>
