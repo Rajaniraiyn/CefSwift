@@ -51,8 +51,9 @@ arguments.
 SelfTest checks CefSwift against the real Chromium runtime: windowed and
 offscreen browsers, the bridge, profiles and preferences, Chrome-style
 windows, popups, downloads, `beforeunload`, renderer crashes, tab
-discarding, bookmarks, history, autocomplete, passkeys and a clean quit. Bundle and
-run it before sending a change that touches anything CEF does:
+discarding, Chromium's own interface, swipe navigation, bookmarks, history,
+autocomplete, passkeys and a clean quit. Bundle and run it before sending a
+change that touches anything CEF does:
 
 ```sh
 swift package --package-path Examples \
@@ -66,6 +67,9 @@ number of failures, or 124 if it does not finish within 240 seconds. Keep the
 screen unlocked while it runs; the offscreen painting check is skipped when
 its window cannot be seen. CI runs it on every pull request. Add a check in
 `Examples/Sources/SelfTest` for new behavior that crosses into CEF.
+`SELFTEST_ONLY=passkeys,discard` runs only the named groups of checks
+(`SelfTest.checkGroups` lists them), which is quicker while you work on one
+area.
 
 ## Regenerate the C bridge
 
