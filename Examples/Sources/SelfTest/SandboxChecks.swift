@@ -34,7 +34,10 @@ extension SelfTest {
             check("sandbox: page loads", false, detail: browser.title)
             return
         }
-        let helpers = childProcesses()
+        // The Alerts helper posts system notifications for Chromium and, as
+        // in Chrome, is never sandboxed; it runs once anything has used
+        // notifications.
+        let helpers = childProcesses().filter { !$0.name.hasSuffix("(Alerts)") }
         let unexpected = helpers.filter { (sandbox_check($0.pid, nil, 0) == 1) != expected }
         check("sandbox: every helper process runs \(expected ? "sandboxed" : "unsandboxed")",
               !helpers.isEmpty && unexpected.isEmpty,
