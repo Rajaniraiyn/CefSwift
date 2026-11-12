@@ -234,6 +234,12 @@ public final class CefWindowedBrowserView: NSView {
         }
     }
 
+    /// A discarded browser comes back when its view is shown again.
+    public override func viewDidUnhide() {
+        super.viewDidUnhide()
+        hostBrowserIfPossible()
+    }
+
     /// Chromium can only create a windowed browser inside a window, so
     /// hosting waits until the view is in one.
     private func hostBrowserIfPossible() {

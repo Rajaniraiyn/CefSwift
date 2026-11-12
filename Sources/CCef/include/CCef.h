@@ -11,7 +11,6 @@
 
 #include "ccef_loader.h"
 #include "ccef_object.h"
-#include "ccef_sandbox.h"
 #include "ccef_string.h"
 
 #endif  // CCEF_H_

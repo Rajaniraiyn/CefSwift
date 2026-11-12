@@ -21,26 +21,16 @@ import Testing
         ]
         let serialized = CefCustomScheme.serialize(schemes)
         #expect(serialized == "myapp:89,assets:3,raw:0")
-        #expect(CefCustomScheme.parse(serialized) == schemes)
     }
 
-    @Test func parseFromHelperArguments() {
-        let arguments = [
-            "/path/to/Helper", "--type=renderer",
-            "--cefswift-schemes=myapp:89,cefswift:89", "--lang=en-US",
-        ]
-        let schemes = CefCustomScheme.parse(fromArguments: arguments)
-        #expect(schemes.map(\.name) == ["myapp", "cefswift"])
-        #expect(schemes.allSatisfy { $0.options == [.standard, .secure, .corsEnabled, .fetchEnabled] })
-    }
-
-    @Test func parseDropsMalformedEntries() {
-        #expect(CefCustomScheme.parse("ok:1,,bad,:5,alsobad:x,fine:0") == [
-            CefCustomScheme(name: "ok", options: CefCustomScheme.Options(rawValue: 1)),
-            CefCustomScheme(name: "fine", options: []),
-        ])
-        #expect(CefCustomScheme.parse("") == [])
-        #expect(CefCustomScheme.parse(fromArguments: ["--no-such-switch"]) == [])
+    /// The helper executable (C, compiled by the plugin) reads the same
+    /// switch.
+    @Test func helperReadsTheSchemeSwitch() throws {
+        let source = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Plugins/CefPlugin/Helper/helper_main.c")
+        let text = try String(contentsOf: source, encoding: .utf8)
+        #expect(text.contains("\"--\(CefCustomScheme.childProcessSwitchName)=\""))
     }
 }
 

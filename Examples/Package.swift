@@ -20,6 +20,13 @@ let package = Package(
             dependencies: [.product(name: "CefSwiftUI", package: "CefSwift")],
             exclude: ["cefapp.json"]
         ),
+        // One CefWebView on the `.embedded` configuration; the footprint
+        // benchmark's lean case (Scripts/measure-footprint.py).
+        .executableTarget(
+            name: "Minimal",
+            dependencies: [.product(name: "CefSwiftUI", package: "CefSwift")],
+            exclude: ["cefapp.json"]
+        ),
         // End-to-end checks against the real Chromium runtime; CI runs it.
         .executableTarget(
             name: "SelfTest",
