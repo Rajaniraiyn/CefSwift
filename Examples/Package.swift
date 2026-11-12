@@ -5,7 +5,7 @@ let package = Package(
     name: "CefSwiftExamples",
     platforms: [.macOS(.v15)],
     dependencies: [
-        .package(path: ".."),
+        .package(name: "CefSwift", path: ".."),
     ],
     targets: [
         // A complete tabbed browser: Chrome-style windows, SwiftUI toolbar.
