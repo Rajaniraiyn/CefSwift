@@ -57,6 +57,8 @@ final class BrowserController: CefBrowserDelegate {
         }
         options.userScripts = Self.internalPageStyles
         options.bridges = [library.startPageBridge]
+        // Two-finger swipes go back and forward, with CefSwift's indicator.
+        options.allowsBackForwardNavigationGestures = true
         options.contextMenu.showsInspectElement = true
         options.contextMenu.hiddenCommands = [.viewSource]
         options.contextMenu.items = [
@@ -83,6 +85,7 @@ final class BrowserController: CefBrowserDelegate {
             TrailingButtons(browser: browser, controller: self)
         }
         window.setTabAccessory { TabIcon(browser: browser) }
+        ChromiumPanels.configure(window)
         window.window?.contentMinSize = NSSize(width: 560, height: 320)
         // Frame the page as a rounded card inset from the window edges.
         window.contentInsets = NSEdgeInsets(top: 0, left: 6, bottom: 6, right: 6)

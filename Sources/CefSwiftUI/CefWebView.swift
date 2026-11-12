@@ -25,6 +25,9 @@ import SwiftUI
 /// with ``init(url:options:)`` closes its browser when it goes away.
 public struct CefWebView: View {
     private let source: Source
+    /// A swipe indicator of the app's own, set by
+    /// ``navigationGestureIndicator(_:)``.
+    var gestureIndicator: ((Double) -> AnyView)?
 
     private enum Source {
         case browser(CefBrowser)
@@ -44,26 +47,28 @@ public struct CefWebView: View {
     public var body: some View {
         switch source {
         case .browser(let browser):
-            Host(browser: browser, ownsBrowser: false)
+            Host(browser: browser, ownsBrowser: false, gestureIndicator: gestureIndicator)
         case .url(let url, let options):
-            OwnedHost(url: url, options: options)
+            OwnedHost(url: url, options: options, gestureIndicator: gestureIndicator)
         }
     }
 
     /// Keeps the view-owned browser alive across view updates.
     private struct OwnedHost: View {
         let url: URL
+        let gestureIndicator: ((Double) -> AnyView)?
         // SwiftUI keeps the first browser and discards the ones later
         // initializers make; a browser does nothing in Chromium until hosted.
         @State private var browser: CefBrowser
 
-        init(url: URL, options: CefBrowserOptions) {
+        init(url: URL, options: CefBrowserOptions, gestureIndicator: ((Double) -> AnyView)?) {
             self.url = url
+            self.gestureIndicator = gestureIndicator
             _browser = State(initialValue: CefBrowser(url: url, options: options))
         }
 
         var body: some View {
-            Host(browser: browser, ownsBrowser: true)
+            Host(browser: browser, ownsBrowser: true, gestureIndicator: gestureIndicator)
                 .onChange(of: url) { _, newURL in browser.load(newURL) }
         }
     }
@@ -71,13 +76,22 @@ public struct CefWebView: View {
     private struct Host: View {
         let browser: CefBrowser
         let ownsBrowser: Bool
+        let gestureIndicator: ((Double) -> AnyView)?
 
         var body: some View {
-            switch browser.options.rendering {
-            case .windowed:
-                WindowedRepresentable(browser: browser, ownsBrowser: ownsBrowser)
-            case .offscreen:
-                OffscreenRepresentable(browser: browser, ownsBrowser: ownsBrowser)
+            let showsBuiltIn = gestureIndicator == nil
+            Group {
+                switch browser.options.rendering {
+                case .windowed:
+                    WindowedRepresentable(browser: browser, ownsBrowser: ownsBrowser, showsBuiltInIndicator: showsBuiltIn)
+                case .offscreen:
+                    OffscreenRepresentable(browser: browser, ownsBrowser: ownsBrowser, showsBuiltInIndicator: showsBuiltIn)
+                }
+            }
+            .overlay {
+                if let gestureIndicator, browser.options.allowsBackForwardNavigationGestures {
+                    GestureProgressReader(browser: browser, content: gestureIndicator)
+                }
             }
         }
     }
@@ -86,15 +100,18 @@ public struct CefWebView: View {
 private struct WindowedRepresentable: NSViewRepresentable {
     let browser: CefBrowser
     let ownsBrowser: Bool
+    let showsBuiltInIndicator: Bool
 
     func makeNSView(context: Context) -> CefWindowedBrowserView {
         let view = CefWindowedBrowserView()
         view.closesBrowserOnTeardown = ownsBrowser
+        view.showsBuiltInGestureIndicator = showsBuiltInIndicator
         view.browser = browser
         return view
     }
 
     func updateNSView(_ view: CefWindowedBrowserView, context: Context) {
+        view.showsBuiltInGestureIndicator = showsBuiltInIndicator
         view.browser = browser
     }
 
@@ -106,15 +123,18 @@ private struct WindowedRepresentable: NSViewRepresentable {
 private struct OffscreenRepresentable: NSViewRepresentable {
     let browser: CefBrowser
     let ownsBrowser: Bool
+    let showsBuiltInIndicator: Bool
 
     func makeNSView(context: Context) -> CefOffscreenBrowserView {
         let view = CefOffscreenBrowserView()
         view.closesBrowserOnTeardown = ownsBrowser
+        view.showsBuiltInGestureIndicator = showsBuiltInIndicator
         view.browser = browser
         return view
     }
 
     func updateNSView(_ view: CefOffscreenBrowserView, context: Context) {
+        view.showsBuiltInGestureIndicator = showsBuiltInIndicator
         view.browser = browser
     }
 
@@ -143,8 +163,22 @@ public final class CefWindowedBrowserView: NSView {
                 previous.removeFromSuperview()
             }
             hostBrowserIfPossible()
+            gestureIndicator = updatedGestureIndicator(gestureIndicator, browser: browser, isAllowed: showsBuiltInGestureIndicator)
+            updateSwipeMonitor()
         }
     }
+
+    /// Whether the view draws the built-in swipe indicator that
+    /// ``CefBrowserOptions/navigationGestureIndicator`` chooses. `CefWebView`
+    /// turns it off for an indicator of the app's own.
+    public var showsBuiltInGestureIndicator = true {
+        didSet {
+            gestureIndicator = updatedGestureIndicator(gestureIndicator, browser: browser, isAllowed: showsBuiltInGestureIndicator)
+        }
+    }
+
+    private var gestureIndicator: CefNavigationGestureIndicatorView?
+    private var swipeMonitor: Any?
 
     /// Whether dismantling the view closes its browser. `CefWebView(url:)`
     /// sets this for the browser it owns.
@@ -161,6 +195,43 @@ public final class CefWindowedBrowserView: NSView {
     public override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         hostBrowserIfPossible()
+        updateSwipeMonitor()
+    }
+
+    /// Keeps the indicator above Chromium's view, which is added later.
+    public override func didAddSubview(_ subview: NSView) {
+        super.didAddSubview(subview)
+        if let gestureIndicator, subview !== gestureIndicator {
+            addSubview(gestureIndicator, positioned: .above, relativeTo: nil)
+        }
+    }
+
+    /// Chromium's view takes scroll events directly, so swipes are claimed
+    /// before it sees them, while the view is in a window and the browser
+    /// allows them.
+    private func updateSwipeMonitor() {
+        let wantsMonitor = !isTornDown && window != nil
+            && browser?.options.allowsBackForwardNavigationGestures == true
+        guard wantsMonitor != (swipeMonitor != nil) else { return }
+        if let swipeMonitor {
+            NSEvent.removeMonitor(swipeMonitor)
+            self.swipeMonitor = nil
+            return
+        }
+        swipeMonitor = NSEvent.addLocalMonitorForEvents(matching: [.scrollWheel, .swipe]) { [weak self] event in
+            nonisolated(unsafe) let event = event
+            let claimed = MainActor.assumeIsolated { () -> Bool in
+                guard let self, let browser = self.browser, let window = self.window, event.window === window,
+                      !self.isHiddenOrHasHiddenAncestor,
+                      self.bounds.contains(self.convert(event.locationInWindow, from: nil))
+                else { return false }
+                if event.type == .swipe {
+                    return browser.handleNavigationSwipe(event)
+                }
+                return browser.beginHistorySwipeIfNeeded(with: event)
+            }
+            return claimed ? nil : event
+        }
     }
 
     /// A discarded browser comes back when its view is shown again.
@@ -179,6 +250,7 @@ public final class CefWindowedBrowserView: NSView {
     func tearDown() {
         guard !isTornDown else { return }
         isTornDown = true
+        updateSwipeMonitor()
         if closesBrowserOnTeardown {
             browser?.close(force: true)
         }

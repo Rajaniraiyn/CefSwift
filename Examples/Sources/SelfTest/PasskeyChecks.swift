@@ -15,7 +15,9 @@ extension SelfTest {
         let url = URL(string: "http://localhost:\(server.port)/passkeys.html")!
         let watcher = ChromiumDialogWatcher()
         await passkeyRoundTrip(style: "Alloy", url: url, watcher: watcher)
+        _ = await waitUntil { CefRuntime.shared.browsers.isEmpty }
         await passkeyRoundTrip(style: "Chrome style", url: url, watcher: watcher)
+        _ = await waitUntil { CefRuntime.shared.browsers.isEmpty }
         await disabledPasskeyChecks(url: url)
         check("passkeys: Chromium's WebAuthn dialog never appears", !watcher.sawDialog, detail: watcher.titles.joined(separator: ", "))
         watcher.stop()
@@ -114,6 +116,18 @@ extension SelfTest {
             let afterRestore = await PasskeyCall.run(browser, "signIn()")
             check("\(name): the app still answers after a discard and restore",
                   discarded && afterRestore.ok, detail: "discarded: \(discarded), \(afterRestore)")
+
+            // A call from the first script of a new document is held for the
+            // delegate too.
+            policy.answer = { _ in .deny }
+            let asked = policy.requests.count
+            browser.load(url.appending(queryItems: [URLQueryItem(name: "early", value: "1")]))
+            let heard = await waitUntil(timeout: .seconds(10)) {
+                policy.requests.count > asked && policy.requests.last?.kind == .assertion
+            }
+            let early = (try? await browser.evaluateJavaScript("window.__early"))?.stringValue
+            check("\(name): a document's first script reaches the delegate",
+                  heard && early == "NotAllowedError", detail: "\(policy.requests.count - asked) asked, \(early ?? "nil")")
         } else {
             if let passkey = saved.first { try? await store.remove(passkey) }
             check("\(name): removing from the store", (try? await store.passkeys())?.isEmpty == true)
@@ -163,18 +177,23 @@ extension SelfTest {
                 })()
                 """).boolValue) == true
         }
-        let ours = Set(CefBrowserWindow.all.compactMap(\.window).map(ObjectIdentifier.init))
-        var sawWindow = false
+        // Windows already on screen, such as one still closing from an
+        // earlier check, are not Chromium's new one.
+        let present = Set(NSApp.windows.filter(\.isVisible).map(ObjectIdentifier.init))
+        var sawWindow: String?
         let arrived = await waitUntil {
-            sawWindow = sawWindow || NSApp.windows.contains {
+            let ours = Set(CefBrowserWindow.all.compactMap(\.window).map(ObjectIdentifier.init))
+            if sawWindow == nil, let shown = NSApp.windows.first(where: {
                 $0.isVisible && $0.alphaValue > 0.05 && $0.styleMask.contains(.titled) && $0.parent == nil
-                    && $0 !== SelfTest.window && !ours.contains(ObjectIdentifier($0))
+                    && $0 !== SelfTest.window && !ours.contains(ObjectIdentifier($0)) && !present.contains(ObjectIdentifier($0))
+            }) {
+                sawWindow = "\(type(of: shown)) “\(shown.title)”"
             }
             return !opened.isEmpty
         }
         check("passkeys: the settings Passkeys button hands its tab over",
-              clicked && arrived && opened.first?.host() == "password-manager" && !sawWindow,
-              detail: "\(opened)")
+              clicked && arrived && opened.first?.host() == "password-manager" && sawWindow == nil,
+              detail: "clicked: \(clicked), \(opened), window: \(sawWindow ?? "none")")
         window.close()
         _ = await waitUntil { window.isClosed }
     }
@@ -186,6 +205,13 @@ enum PasskeyChecks {
     /// The test page. Each call reports its outcome instead of throwing.
     static let page = """
         <!doctype html><title>passkeys</title>
+        <script>
+          // The document's first script: it calls before anything else runs.
+          if (location.search.includes('early')) {
+            window.__early = navigator.credentials.get({ publicKey: {
+              challenge: new Uint8Array(16), rpId: 'localhost', timeout: 3000 } }).then(() => 'ok', e => e.name);
+          }
+        </script>
         <button id=go style="position:fixed;left:0;top:0;width:300px;height:200px">Sign in</button>
         <script>
           const b64 = buffer => btoa(String.fromCharCode(...new Uint8Array(buffer)))

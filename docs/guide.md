@@ -12,6 +12,7 @@ are `@MainActor`.
 - [Browsers](#browsers)
 - [Showing a browser](#showing-a-browser)
   - [Offscreen rendering](#offscreen-rendering)
+  - [Swipe navigation](#swipe-navigation)
   - [Offscreen accessibility](#offscreen-accessibility)
 - [Discarding browsers](#discarding-browsers)
 - [JavaScript](#javascript)
@@ -27,6 +28,7 @@ are `@MainActor`.
   - [Tabs](#tabs)
   - [Popups](#popups)
   - [Chrome commands](#chrome-commands)
+  - [Chromium's own interface](#chromiums-own-interface)
   - [Tabs Chromium opens itself](#tabs-chromium-opens-itself)
 - [Customizing Chromium's own pages](#customizing-chromiums-own-pages)
 - [Profiles](#profiles)
@@ -200,7 +202,7 @@ when it is first shown.
 |---|---|
 | State | `url`, `title`, `isLoading`, `estimatedProgress`, `canGoBack`, `canGoForward`, `favicon`, `faviconURL`, `zoomLevel`, `isFullscreen`, `statusText`, `downloads`, `findResult`, `state` (`.pending`, `.live`, `.closed`) |
 | Navigation | `load(_:)`, `goBack()`, `goForward()`, `reload(ignoringCache:)`, `stopLoading()` |
-| Page | `isAudioMuted`, `find(_:backwards:caseSensitive:)`, `stopFinding(clearingSelection:)`, `print()`, `printToPDF(at:)`, `snapshot()` |
+| Page | `isAudioMuted`, `find(_:backwards:caseSensitive:)`, `stopFinding(clearingSelection:)`, `findSession` (an observable find-bar model), `print()`, `printToPDF(at:)`, `snapshot()` |
 | JavaScript | `evaluateJavaScript(_:)`, `evaluateJavaScript(_:as:)`, `executeJavaScript(_:)`, `addUserScript(_:)` |
 | DevTools | `devTools`, `showDevTools(inspecting:)`, `closeDevTools()`, `isShowingDevTools` |
 | Lifetime | `ready()`, `close(force:)` |
@@ -297,24 +299,8 @@ options.allowsBackForwardNavigationGestures = true
 let browser = CefBrowser(url: url, options: options)
 ```
 
-With `allowsBackForwardNavigationGestures`, a horizontal two-finger swipe
-(when the system's "Swipe between pages" setting allows it) or the
-navigation swipe goes back and forward. Pinch and smart magnify change
-`zoomLevel`. While a swipe is in progress, `navigationGestureProgress` moves
-from 0 toward -1 (back) or 1 (forward). There is no built-in indicator;
-draw your own:
-
-```swift
-CefWebView(browser)
-    .overlay(alignment: browser.navigationGestureProgress < 0 ? .leading : .trailing) {
-        Image(systemName: browser.navigationGestureProgress < 0 ? "chevron.left" : "chevron.right")
-            .padding(12)
-            .background(.regularMaterial, in: .circle)
-            .opacity(abs(browser.navigationGestureProgress))
-    }
-```
-
-Set `options.forwardsRawTouchEvents = true` to send trackpad touches to the
+Pinch and smart magnify change `zoomLevel`. Set
+`options.forwardsRawTouchEvents = true` to send trackpad touches to the
 page instead of interpreting them as gestures.
 
 Offscreen browsers cannot open native popup windows: a request that would
@@ -344,6 +330,47 @@ AppKit drives a view:
   which mirror `NSDraggingDestination` and `NSDraggingSource`.
 
 `CefOffscreenBrowserView` is the reference implementation.
+
+### Swipe navigation
+
+With `options.allowsBackForwardNavigationGestures`, a two-finger swipe that
+starts sideways (when the system's "Swipe between pages" setting allows it)
+and the dedicated navigation swipe go back and forward, in `CefWebView`,
+both renderings, and in `CefBrowserWindow`, where Chrome's own swipe
+handling does the work. It is off by default everywhere.
+
+While a swipe is in progress, `browser.navigationGestureProgress` moves from
+0 toward -1 (back) or 1 (forward); at ±1 and beyond, releasing navigates.
+`options.navigationGestureIndicator` chooses what is drawn over the page:
+
+| Indicator | Drawing |
+|---|---|
+| `.automatic` (default) | CefSwift's: a chevron in a circle that slides in from the edge, resists past the commit point, and fills with the accent color once releasing navigates. |
+| `.chromium` | Chrome's own arrow, in `CefBrowserWindow`; `.automatic` elsewhere. |
+| `.hidden` | Nothing; draw your own from `navigationGestureProgress`. |
+
+To replace the indicator with a SwiftUI view:
+
+```swift
+CefWebView(browser)
+    .navigationGestureIndicator { progress in
+        Image(systemName: progress < 0 ? "chevron.left" : "chevron.right")
+            .padding(12)
+            .background(.regularMaterial, in: .circle)
+            .frame(maxWidth: .infinity, alignment: progress < 0 ? .leading : .trailing)
+            .opacity(min(1, abs(progress)))
+    }
+
+window.setNavigationGestureIndicator { progress in MyIndicator(progress: progress) }   // a CefBrowserWindow
+```
+
+In AppKit, `CefWindowedBrowserView` and `CefOffscreenBrowserView` turn the
+built-in indicator off with `showsBuiltInGestureIndicator = false`, and
+`CefBrowserWindow.navigationGestureIndicatorView` takes a view of your own.
+
+A view claims a swipe as it begins, when there is history in its direction,
+so the page does not also scroll sideways; in a `CefBrowserWindow`, Chrome
+lets the page scroll first and swipes only at its edge.
 
 ### Offscreen accessibility
 
@@ -911,6 +938,93 @@ calls the delegate's `browser(_:handleChromeCommand:disposition:)`. Return
 `hiddenAppMenuCommands`, `disabledAppMenuCommands`, `showsToolbarButtons`
 and `showsPageActionIcons`.
 
+### Chromium's own interface
+
+Chromium shows some of its interface over a `CefBrowserWindow` in windows
+of its own: bubbles such as the QR code generator and Cast, the HTTP
+sign-in dialog, the find bar, the status bubble with a hovered link's
+address. These are surfaces, `CefChromiumSurface`, of a `Kind`. Without
+Chrome's toolbar, Chromium hangs the toolbar's bubbles from the top right
+of the page. `window.chromiumUI` decides, per kind, how each is presented:
+
+| Presentation | Effect |
+|---|---|
+| `.native` (default) | Chromium draws it, under its anchor if it has one. |
+| `.custom` | Chromium's is kept off screen; your interface shows instead. |
+| `.hidden` | Nothing shows; a dialog that asks something is cancelled. |
+
+Anchors put Chromium's surfaces under your controls:
+
+```swift
+window.chromiumUI.anchor = .view(addressField, alignment: .trailing)  // every toolbar surface
+window.chromiumUI.anchors[.qrCode] = .view(qrButton, alignment: .trailing)
+window.chromiumUI[.statusBubble] = .hidden
+```
+
+In SwiftUI, mark the views in your toolbar:
+
+```swift
+AddressField(browser: browser)
+    .chromiumSurfaceAnchor(alignment: .trailing)
+Button("QR Code", systemImage: "qrcode") { browser.execute(.createQRCode) }
+    .chromiumSurfaceAnchor([.qrCode])
+```
+
+- `CefSurfaceAnchor` is `.view(_:alignment:spacing:)` or
+  `.rect(_:alignment:spacing:)`, a rectangle in window coordinates. The
+  surface hangs below it, `spacing` points away, lined up with its leading
+  or trailing edge or centered, and kept inside the window. Surfaces follow
+  their anchor as the window moves or resizes, and when Chromium lays them
+  out again.
+- `anchor` applies to the kinds that hang from Chrome's toolbar
+  (`kind.hangsFromToolbar`). The find bar and the sign-in dialog belong to
+  the page and move only with an anchor of their own in `anchors`.
+  Untitled widgets attached to the page, such as autofill suggestions,
+  never move.
+
+Your own interface replaces a kind with `setCustomPresentation(for:_:)`.
+The presenter receives the surface whenever Chromium would show it: from
+its command (`.find`, `.createQRCode`, `.castMedia`, `.showSharingHub`),
+its keyboard shortcut or menu item, or anything else, in which case
+Chromium's window is hidden before it is seen. In SwiftUI:
+
+```swift
+window.setFindBar { session in FindBar(session: session) }      // under the toolbar, as in Safari
+window.setStatusBubble { text in StatusBubble(text: text) }      // over the page
+window.setCustomPresentation(for: .qrCode) { surface in         // in a panel at the kind's anchor
+    CefQRCodeView(url: surface.url).frame(width: 200, height: 200).padding()
+}
+```
+
+A surface carries what a replacement needs: `kind`, `title`, `browser`,
+`url` (the address a QR code encodes, or the page's), `anchorRect`,
+`position(_:)` to place a window of yours as Chromium would, and
+`dismiss()`. A panel from the SwiftUI method closes on Esc, on a click
+elsewhere, and when the surface is dismissed. `presentationForSurface`
+decides per surface as it appears, `chromiumSurfaces` lists those on
+screen, and `onChromiumSurface` hears about each one, custom ones without
+a presenter included.
+
+| Surface | Kind | Native | Custom: what you get | Notes |
+|---|---|---|---|---|
+| Find bar | `.findBar` | Yes | `browser.findSession`: `text`, `isCaseSensitive`, `matchCount`, `activeMatch`, `next()`, `previous()`, `end()` | ⌘G and ⇧⌘G move through the matches. |
+| QR code | `.qrCode` | Yes | `url`; draw it with `CefQRCodeView` or `CefQRCode.image(for:size:)` | |
+| Cast | `.cast` | Yes | `url`; `CefMediaRouter.shared` lists `sinks` and `routes` and casts Cast apps and presentation URLs | Mirroring a tab needs Chromium's dialog. |
+| Share | `.share` | No: Chromium's share menu needs its toolbar | `url`, `title` | By default the command opens macOS's share menu at the anchor. |
+| HTTP sign-in | `.signIn` | Yes | No: the credentials go to Chromium's dialog | Dismissing cancels the sign-in. |
+| Status bubble | `.statusBubble` | Yes | `browser.statusText` | `setStatusBubble(_:)` or `statusBubbleView`. Not anchorable. |
+| Fullscreen notice | `.fullscreenNotice` | Yes | `browser.isFullscreen` | |
+| Downloads | `.downloads` | Yes | `browser.downloads` and the delegate's download decisions | |
+| Permission prompt | `.permissionPrompt` | No | `browser(_:decidePermissionFor:)` | CefSwift answers every request through the delegate. |
+| Translate, save password, bookmark, page info, zoom | `.translate`, `.savePassword`, `.bookmark`, `.pageInfo`, `.zoom` | Recognized if shown | No | CEF 156 does not show these without Chrome's toolbar. |
+| Other bubbles (install app, …) | `.other(title)` | Yes | No | Identifiers are Chromium's. |
+| Autofill and password suggestions | `.other(…)` | Yes | No | Attached to the page; left as Chromium places them. |
+
+Other interface Chromium shows lives elsewhere: JavaScript dialogs, the
+`beforeunload` question, HTTP authentication answers and certificate errors
+go through the [delegate](#decisions); tooltips, `<select>` menus, date
+pickers and the color panel are AppKit or page popups Chromium places at
+the page element; crash pages and Safe Browsing warnings are pages.
 ### Tabs Chromium opens itself
 
 Chromium sometimes opens a tab on its own, without an opener: following a
@@ -1258,6 +1372,14 @@ driver crash cannot end the app.
   popup windows.
 - `CefAutocomplete` is experimental, and `CefBookmarks`, `CefHistory` and
   `CefAutocomplete` depend on Chromium-internal pages.
+- `chromiumUI` and swipe navigation in `CefBrowserWindow` depend on
+  Chromium's AppKit classes and the view class names its accessibility
+  reports ([architecture](architecture.md#chromiums-appkit-classes)). If a
+  CEF update renames them, surfaces show as Chromium draws them, where it
+  puts them, with unknown ones reported as `.other`, and browser windows
+  swipe as Chrome does, with its arrow, whatever the options say. Commands
+  that open surfaces (`.find`, `.createQRCode`, …) still reach custom
+  presenters. SelfTest fails on such an update.
 - Passkeys answered by the app (`CefPasskeyMode.app`) are software keys the
   app keeps, not iCloud Keychain passkeys, and their attestation is
   "none". CEF offers no way to hand a request's options to
@@ -1266,8 +1388,7 @@ driver crash cannot end the app.
   authenticator (`.chromium`, with the entitlement). The app's
   authenticator is a platform authenticator: a request that asks for a
   cross-platform one (`authenticatorAttachment: "cross-platform"`) waits
-  until its timeout. A call made by a document's first scripts, before
-  CefKit has set up its watch on the new document, also waits until its
-  timeout without reaching the delegate, and so do calls from cross-site
-  iframes. The app's mode uses the browser's DevTools `Debugger` and
+  until its timeout. Calls from cross-site iframes, which run in a
+  DevTools target of their own, also wait until their timeout without
+  reaching the delegate. The app's mode uses the browser's DevTools `Debugger` and
   `WebAuthn` domains; do not use those domains yourself in such a browser.

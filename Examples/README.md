@@ -18,7 +18,18 @@ A tabbed browser (`Sources/Browser`). Each tab is a Chrome-style
 
 - A SwiftUI toolbar in three parts. The address field shows the site and its
   security, edits the full address, and offers Chromium-ranked suggestions
-  as you type: ↑ and ↓ choose, Return opens, Esc closes.
+  as you type: ↑ and ↓ choose, Return opens, Esc closes. The top
+  suggestion completes the address inline, selected after the caret:
+  typing on keeps what still matches, Delete removes the completion,
+  Return opens it and Esc goes back to what you typed.
+- Chromium's interface, arranged around the toolbar: the QR code bubble
+  hangs from its button, the Share button opens macOS's share menu, and
+  Cast and Chromium's other toolbar bubbles hang from the address field.
+  The find bar (⌘F) and the link status bubble are the browser's own
+  SwiftUI views; with "Use the browser's QR code and Cast panels" in
+  Settings, so are the QR code bubble and the Cast picker
+  (`ChromiumPanels.swift`).
+- Two-finger swipes go back and forward, with CefSwift's swipe indicator.
 - A bookmark star (⌘D), Bookmarks and History menus, and a start page at
   `browser://start/` with frequently visited sites and recent bookmarks,
   whose data comes through a `CefBridge`.
@@ -65,6 +76,8 @@ It prints one line per check, quits through `cef_shutdown()`, and exits with
 the number of failures. CI runs it; [CONTRIBUTING](../CONTRIBUTING.md#verify-with-selftest)
 describes running it locally.
 
+`SELFTEST_ONLY=<group>[,<group>…]` runs only the named groups of checks
+(`SelfTest.checkGroups` lists them), such as `SELFTEST_ONLY=passkeys`.
 `SELFTEST_ONLY=accessibility` runs only the offscreen accessibility
 checks, and adds `NOTE` lines measuring a large page's load with and
 without the tree. `SELFTEST_ONLY=accessibility-external` instead shows the
@@ -102,6 +115,7 @@ Examples/dist/Browser.app/Contents/MacOS/Browser -private YES -addressBarText sw
 | `-addressBarText <text>` | Starts editing with that text typed. |
 | `-private YES` | Opens the tabs as private tabs. |
 | `-appearance light\|dark\|system` | Overrides the appearance setting. |
+| `-customChromiumPanels YES` | Uses the browser's QR code and Cast panels, as the setting does. |
 | `-cacheDirectory <path>` | Keeps Chromium's data there instead of in Application Support. |
 
 Minimal and Browser also take `-benchmark YES`: the app prints
