@@ -22,9 +22,13 @@ A tabbed browser (`Sources/Browser`). Each tab is a Chrome-style
   suggestion completes the address inline, selected after the caret:
   typing on keeps what still matches, Delete removes the completion,
   Return opens it and Esc goes back to what you typed.
-- Chromium's bubbles under the toolbar: the QR code button's bubble hangs
-  from the button, and Cast, translate and the other toolbar bubbles from
-  the address field.
+- Chromium's interface, arranged around the toolbar: the QR code bubble
+  hangs from its button, the Share button opens macOS's share menu, and
+  Cast and Chromium's other toolbar bubbles hang from the address field.
+  The find bar (⌘F) and the link status bubble are the browser's own
+  SwiftUI views; with "Use the browser's QR code and Cast panels" in
+  Settings, so are the QR code bubble and the Cast picker
+  (`ChromiumPanels.swift`).
 - Two-finger swipes go back and forward, with CefSwift's swipe indicator.
 - A bookmark star (⌘D), Bookmarks and History menus, and a start page at
   `browser://start/` with frequently visited sites and recent bookmarks,
@@ -91,6 +95,7 @@ Examples/dist/Browser.app/Contents/MacOS/Browser -private YES -addressBarText sw
 | `-addressBarText <text>` | Starts editing with that text typed. |
 | `-private YES` | Opens the tabs as private tabs. |
 | `-appearance light\|dark\|system` | Overrides the appearance setting. |
+| `-customChromiumPanels YES` | Uses the browser's QR code and Cast panels, as the setting does. |
 | `-dataDirectory <path>` | Keeps profile data in that folder, which also runs an instance separate from one using the default folder. |
 
 Cocoa reads a value that starts with `(` as a list, so prefix such a script

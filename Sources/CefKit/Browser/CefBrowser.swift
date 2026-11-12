@@ -254,6 +254,9 @@ public final class CefBrowser: Identifiable {
     /// give the popup's window, for instance.
     @ObservationIgnored public internal(set) var popupFeatures: CefPopupFeatures?
 
+    /// Find in page as an observable model, for a find bar of your own.
+    @ObservationIgnored public private(set) lazy var findSession = CefFindSession(browser: self)
+
     /// Chrome DevTools Protocol access to this browser.
     @ObservationIgnored public private(set) lazy var devTools = CefDevTools(browser: self)
 
@@ -524,7 +527,12 @@ public final class CefBrowser: Identifiable {
 
     /// Runs one of Chrome's own commands — open history, zoom, find, print,
     /// bookmark, and so on. Chrome-style browsers only.
+    ///
+    /// In a ``CefBrowserWindow``, a command whose surface the window
+    /// presents with your interface or hides (``CefBrowserWindow/chromiumUI``)
+    /// goes there instead of to Chrome.
     public func execute(_ command: CefChromeCommand, disposition: CefWindowOpenDisposition = .currentTab) {
+        if let window = CefBrowserWindow.hosting(self), window.handleSurfaceCommand(command) { return }
         withHost { $0.pointee.execute_chrome_command($0, Int32(command.rawValue), disposition.cefValue) }
         if command.isZoomCommand { CefBrowser.refreshZoomLevels() }
     }
@@ -887,7 +895,14 @@ extension CefBrowser {
 
     func applyFullscreen(_ isFullscreen: Bool) { self.isFullscreen = isFullscreen }
     func applyStatusText(_ text: String) { statusText = text }
-    func applyFindResult(_ result: CefFindResult) { findResult = result }
+    func applyFindResult(_ result: CefFindResult) {
+        var result = result
+        // Updates that only recount leave the active match out.
+        if result.activeMatchIndex <= 0, result.matchCount > 0, let previous = findResult?.activeMatchIndex, previous > 0 {
+            result.activeMatchIndex = min(previous, result.matchCount)
+        }
+        findResult = result
+    }
 
     func applyDownload(_ download: CefDownload, control: CefRef<cef_download_item_callback_t>?) {
         if let index = downloads.firstIndex(where: { $0.id == download.id }) {
