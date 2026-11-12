@@ -182,7 +182,7 @@ final class CefMemorySaverMonitor {
 // MARK: - Chromium's tab discarding
 
 /// Discards Chrome-style tabs through the Mojo interface behind
-/// `chrome://discards`, from a hidden service browser on that page.
+/// `chrome://discards`, from a hidden service host on that page.
 ///
 /// Chromium's own discard policies never pick a CefKit tab: each is the
 /// active tab of its own Chromium window, and the active tab is protected.
@@ -191,14 +191,10 @@ final class CefMemorySaverMonitor {
 /// (``CefBrowser/discardBlockers()``) and reads Chromium's protections from
 /// the same page. Chromium identifies tabs by address and title only.
 ///
-/// The service page costs a renderer of its own, so it closes after a
-/// while without calls.
+/// Lifecycle units belong to the browser process, so the default profile's
+/// service host answers for tabs of every profile.
 @MainActor
 final class CefTabDiscarder {
-    private lazy var service = CefInternalPageService(
-        profile: .default, page: "chrome://discards/", setup: Self.setup)
-    private var idleStop: Task<Void, Never>?
-
     /// Chromium's reasons, mapped to blockers, for keeping the tab of
     /// `browser`. Reasons that CefKit overrides (the tab being active, its
     /// DevTools session, its address scheme) are left out.
@@ -241,15 +237,7 @@ final class CefTabDiscarder {
     }
 
     private func call(_ function: String, _ arguments: CefJSON) async throws -> CefJSON {
-        idleStop?.cancel()
-        defer {
-            idleStop = Task { [weak self] in
-                try? await Task.sleep(for: .seconds(30))
-                guard !Task.isCancelled else { return }
-                self?.service.stopIfIdle()
-            }
-        }
-        return try await service.call(function, arguments, timeout: .seconds(10))
+        try await CefProfile.default.services.call(Self.module, function, arguments, timeout: .seconds(10))
     }
 
     static func blocker(forReason reason: String) -> CefDiscardBlocker? {
@@ -269,7 +257,9 @@ final class CefTabDiscarder {
 
     /// Binds a `DetailsProvider` of its own. Tab IDs are numbered afresh on
     /// every `getTabDiscardsInfo`, so each call looks its tab up again.
-    private static let setup = """
+    static let module = CefServiceModule(
+        name: "discards", hosts: [.discards],
+        setup: """
         async () => {
           const m = await import('chrome://discards/discards.mojom-webui.js');
           const provider = m.DetailsProvider.getRemote();
@@ -282,5 +272,5 @@ final class CefTabDiscarder {
           };
           return { provider, find };
         }
-        """
+        """)
 }

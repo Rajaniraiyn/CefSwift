@@ -130,10 +130,17 @@ extension SelfTest {
             options.profile = profile
             let window = CefBrowserWindow(browser: CefBrowser(url: URL(string: "selftest://app/second.html")!, options: options))
             check("service lifetime: incognito tab loads", await waitUntil { window.browser.title == "second" })
-            // Starts the profile's hidden suggestions browser.
+            // Starts the profile's suggestions host.
             await expect("service lifetime: incognito suggestions answer") {
-                await profile.autocomplete.prepare()
-                return try await !profile.autocomplete.suggestions(for: "cefswift").isEmpty
+                try await !profile.autocomplete.suggestions(for: "cefswift").isEmpty
+            }
+            await expect("service lifetime: incognito favicons throw, as its history does") {
+                do {
+                    _ = try await profile.history.favicon(for: URL(string: "selftest://edge/favicon.html")!)
+                    return false
+                } catch {
+                    return true
+                }
             }
             await expect("service lifetime: incognito history throws instead of opening chrome://history") {
                 do {
