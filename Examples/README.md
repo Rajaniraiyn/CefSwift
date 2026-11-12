@@ -37,6 +37,8 @@ A tabbed browser (`Sources/Browser`). Each tab is a Chrome-style
   page's tiles; the page as an inset card; and popups as panels layered over
   the window that opened them.
 - Private tabs, downloads, and a customized context menu.
+- Passkeys answered by Chromium or by the browser itself, chosen in
+  Settings, which also lists and removes the browser's saved passkeys.
 - `chrome://settings` without what does nothing in an embedded Chromium
   (sign-in, default browser, and the Appearance options for Chrome's own
   toolbar, tab strip and bookmarks bar), and an About page of its own in
@@ -73,6 +75,14 @@ End-to-end checks against the real Chromium runtime (`Sources/SelfTest`).
 It prints one line per check, quits through `cef_shutdown()`, and exits with
 the number of failures. CI runs it; [CONTRIBUTING](../CONTRIBUTING.md#verify-with-selftest)
 describes running it locally.
+
+`SELFTEST_ONLY=accessibility` runs only the offscreen accessibility
+checks, and adds `NOTE` lines measuring a large page's load with and
+without the tree. `SELFTEST_ONLY=accessibility-external` instead shows the
+accessibility test page without reading it, prints `READY <pid>`, and
+waits `SELFTEST_AX_HOLD` seconds (15 by default) for a separate process to
+read it through the `AXUIElement` API, which needs that process to have
+Accessibility permission.
 
 ## Launch arguments
 

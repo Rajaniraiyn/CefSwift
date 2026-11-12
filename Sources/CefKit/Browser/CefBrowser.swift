@@ -53,6 +53,14 @@ public struct CefBrowserOptions {
     /// (Offscreen only) Forward raw trackpad touches to Chromium instead of
     /// translating gestures natively.
     public var forwardsRawTouchEvents = false
+    /// Who answers the pages' WebAuthn requests (passkeys and security
+    /// keys): Chromium (the default), the app from a ``CefPasskeyStore``,
+    /// or nobody. Popups use their opener's mode.
+    public var passkeys: CefPasskeyMode = .chromium
+    /// (Offscreen only) When Chromium builds the page's accessibility tree,
+    /// which VoiceOver and other assistive apps read. Building it costs
+    /// time and memory, so by default it starts on first demand.
+    public var offscreenAccessibility: CefOffscreenAccessibility = .automatic
 
     public init() {}
 }
@@ -286,6 +294,7 @@ public final class CefBrowser: Identifiable {
     @ObservationIgnored private let offscreenHostBox = WeakOffscreenHost()
     @ObservationIgnored var initialURL: URL?
     @ObservationIgnored private(set) var isBootstrapping = false
+    @ObservationIgnored private var passkeyAuthenticator: CefPasskeyAuthenticator?
     @ObservationIgnored private var readyWaiters: [CheckedContinuation<Void, Error>] = []
     @ObservationIgnored var downloadControls: [UInt32: CefRef<cef_download_item_callback_t>] = [:]
     @ObservationIgnored private(set) var isChromeStyle = false
@@ -305,6 +314,18 @@ public final class CefBrowser: Identifiable {
     /// The view hosting this browser: the parent of a windowed browser's
     /// native view, or the offscreen host.
     @ObservationIgnored public internal(set) weak var hostView: NSView?
+
+    /// Whether Chromium is building the page's accessibility tree for an
+    /// offscreen browser. See ``CefBrowserOptions/offscreenAccessibility``.
+    public internal(set) var isAccessibilityEnabled = false
+    /// The page's accessibility tree, for offscreen browsers while
+    /// ``isAccessibilityEnabled`` is on; empty otherwise.
+    @ObservationIgnored public private(set) lazy var accessibilityTree = CefAccessibilityTree()
+    /// Whether the tree was asked for before the browser was created.
+    @ObservationIgnored var wantsAccessibility = false
+    /// Whether the DevTools `Accessibility` domain, which accessibility
+    /// actions use to find a node's DOM node, is enabled.
+    @ObservationIgnored var isDevToolsAccessibilityEnabled = false
 
     /// Creates a browser model. Nothing is created in Chromium until the
     /// browser is hosted.
@@ -725,6 +746,7 @@ extension CefBrowser {
         // Bridges and user scripts must be installed before the first real
         // document, so such browsers start blank and navigate once set up.
         isBootstrapping = !options.bridges.isEmpty || !options.userScripts.isEmpty || !addedUserScripts.isEmpty
+            || !options.passkeys.isChromium
         let url = isBootstrapping ? "about:blank" : (initialURL?.absoluteString ?? "about:blank")
 
         return Blueprint(
@@ -875,6 +897,7 @@ extension CefBrowser {
         readyWaiters.forEach { $0.resume() }
         readyWaiters = []
         refreshZoomLevel()
+        applyInitialAccessibilityState()
         if isRestoring {
             discardPhase = .restoring
         } else {
@@ -882,11 +905,32 @@ extension CefBrowser {
         }
         if isBootstrapping {
             Task { await bootstrap() }
+        } else if !options.passkeys.isChromium {
+            // A popup: Chromium loads its page right away, so its first
+            // document may be answered by Chromium.
+            Task { await startPasskeys() }
+        }
+    }
+
+    /// Takes WebAuthn requests over from Chromium, for
+    /// ``CefBrowserOptions/passkeys`` other than ``CefPasskeyMode/chromium``.
+    ///
+    /// A browser discarded by closing it starts again here when it is
+    /// created anew, since its DevTools state went with the old browser.
+    private func startPasskeys() async {
+        passkeyAuthenticator?.stop()
+        let authenticator = CefPasskeyAuthenticator(browser: self, mode: options.passkeys)
+        passkeyAuthenticator = authenticator
+        do {
+            try await authenticator.start()
+        } catch {
+            CefLog.error("passkeys: setup failed for browser \(identifier): \(error)")
         }
     }
 
     /// Installs bridges and user scripts, then performs the real first load.
     private func bootstrap() async {
+        if !options.passkeys.isChromium { await startPasskeys() }
         do {
             // Scripts added at runtime, when a discarded browser is created
             // again, follow those of the options; only they are remembered.
@@ -1060,6 +1104,9 @@ extension CefBrowser {
         canGoBack = false
         canGoForward = false
         downloadControls = [:]
+        passkeyAuthenticator?.stop()
+        passkeyAuthenticator = nil
+        accessibilityDidClose()
         devTools.invalidate()
         readyWaiters.forEach { $0.resume(throwing: CefError.browserClosed) }
         readyWaiters = []

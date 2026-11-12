@@ -135,6 +135,7 @@ final class CefBrowserClient {
         handlers.set(makeCommandHandler())
         if offscreenHost != nil {
             handlers.set(makeRenderHandler())
+            handlers.set(makeAccessibilityHandler())
         }
         if let requestFilter {
             handlers.set(ResourceRequestFilter(filter: requestFilter).makeHandler())
