@@ -122,7 +122,10 @@ widget and moves it under its anchor with `setFrameOrigin(_:)` (and again
 when the widget or the window moves or resizes), or keeps it transparent,
 ignoring the mouse, and closes it as Esc would, or for the find bar with
 `IDC_CLOSE_FIND_OR_STOP`. Status bubbles and fullscreen notices are only
-kept transparent, since Chromium reuses their windows.
+kept transparent, since Chromium reuses their windows. Chromium fades some
+widgets in by setting their window's alpha, the status bubble on every
+hover, so an override of `-setAlphaValue:` in `NativeWidgetMacNSWindow`
+keeps a hidden surface's window at 0.
 
 A widget's kind comes from the class of the view inside it. Views reports
 each view's class name to accessibility as `AXDOMClassList`, so the tracker
@@ -138,7 +141,11 @@ field's accessibility value.
 Commands that open a surface the window replaces or hides never reach
 Chromium: `CefBrowser.execute(_:)` and the command handler's
 `on_chrome_command` hand them to the window's presenter first. The custom
-find bar drives CEF's `find`/`stop_finding` and reads `on_find_result`; the
+find bar drives CEF's `find`/`stop_finding` and reads `on_find_result`. A
+new search only highlights its matches (Chromium reports an active ordinal
+of 0 and an empty selection), so once its count is final `CefFindSession`
+repeats the request, which selects the first match, as Chrome's find bar
+does; the
 custom status bubble reads `on_status_message`; the Cast picker uses CEF's
 `cef_media_router_t`.
 

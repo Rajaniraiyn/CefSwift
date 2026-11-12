@@ -36,7 +36,7 @@ public final class CefFindSession {
     public var text = "" {
         didSet {
             guard text != oldValue else { return }
-            search(backwards: false)
+            search(backwards: false, isNewSearch: true)
         }
     }
 
@@ -44,7 +44,7 @@ public final class CefFindSession {
     public var isCaseSensitive = false {
         didSet {
             guard isCaseSensitive != oldValue else { return }
-            search(backwards: false)
+            search(backwards: false, isNewSearch: true)
         }
     }
 
@@ -68,17 +68,17 @@ public final class CefFindSession {
     /// opening does, and searches for it again.
     public func begin() {
         isActive = true
-        if !text.isEmpty { search(backwards: false) }
+        if !text.isEmpty { search(backwards: false, isNewSearch: true) }
     }
 
     /// Highlights the next match.
     public func next() {
-        search(backwards: false)
+        search(backwards: false, isNewSearch: false)
     }
 
     /// Highlights the previous match.
     public func previous() {
-        search(backwards: true)
+        search(backwards: true, isNewSearch: false)
     }
 
     /// Ends the session and clears the highlights, keeping the selection on
@@ -89,12 +89,29 @@ public final class CefFindSession {
         browser?.stopFinding(clearingSelection: false)
     }
 
-    private func search(backwards: Bool) {
+    /// Whether the search just started still has to select its first match.
+    @ObservationIgnored private var selectsFirstMatch = false
+
+    private func search(backwards: Bool, isNewSearch: Bool) {
         guard let browser else { return }
         if text.isEmpty {
+            selectsFirstMatch = false
             browser.stopFinding()
         } else {
+            // A new search only highlights the matches: Chromium reports
+            // them with no active match (ordinal 0, empty selection) until
+            // the next find request. didReceive(_:) makes that request once.
+            selectsFirstMatch = isNewSearch
             browser.find(text, backwards: backwards, caseSensitive: isCaseSensitive)
         }
+    }
+
+    /// Selects the first match of a new search once Chromium has counted
+    /// them, as Chrome's find bar does.
+    func didReceive(_ result: CefFindResult) {
+        guard selectsFirstMatch, result.isFinal else { return }
+        selectsFirstMatch = false
+        guard result.matchCount > 0, result.activeMatchIndex <= 0, !text.isEmpty else { return }
+        browser?.find(text, backwards: false, caseSensitive: isCaseSensitive)
     }
 }
