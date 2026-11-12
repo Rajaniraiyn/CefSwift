@@ -76,9 +76,10 @@ struct BrowserPages: CefSchemeHandler {
         </style>
         """
 
-    /// Frequently visited sites and recent bookmarks as tiles. The data
-    /// comes from Swift through the `startPage` bridge (`BrowserLibrary`),
-    /// which also says when bookmarks change.
+    /// Frequently visited sites and recent bookmarks as tiles, with the
+    /// sites' icons where Chromium has them. The data comes from Swift
+    /// through the `startPage` bridge (`BrowserLibrary`), which also says
+    /// when bookmarks change.
     private static let startPage = """
         <title>New Tab</title>
         <style>
@@ -94,6 +95,8 @@ struct BrowserPages: CefSchemeHandler {
           .monogram { width: 56px; height: 56px; border-radius: 14px; display: grid; place-items: center;
             font-size: 24px; font-weight: 600; color: white; background: hsl(var(--hue) 52% 50%);
             box-shadow: 0 1px 2px rgb(0 0 0 / 0.18), inset 0 0 0 0.5px rgb(255 255 255 / 0.2); }
+          .monogram.icon { background: color-mix(in srgb, currentColor 8%, transparent); }
+          .monogram.icon img { width: 32px; height: 32px; }
           .name { font-size: 12px; line-height: 1.3; max-width: 100%; overflow: hidden; text-overflow: ellipsis;
             white-space: nowrap; text-align: center; }
           .note { display: flex; gap: 12px; align-items: center; padding: 14px 16px; margin-bottom: 36px;
@@ -123,7 +126,15 @@ struct BrowserPages: CefSchemeHandler {
             const monogram = document.createElement('span');
             monogram.className = 'monogram';
             monogram.style.setProperty('--hue', hue(host));
-            monogram.textContent = (host[0] ?? '?').toUpperCase();
+            if (site.icon) {
+              const icon = document.createElement('img');
+              icon.src = site.icon;
+              icon.alt = '';
+              monogram.classList.add('icon');
+              monogram.append(icon);
+            } else {
+              monogram.textContent = (host[0] ?? '?').toUpperCase();
+            }
             const name = document.createElement('span');
             name.className = 'name';
             name.textContent = site.title || host;

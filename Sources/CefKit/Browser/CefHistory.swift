@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 /// A page in a profile's browsing history.
@@ -45,7 +46,8 @@ public struct CefMostVisitedSite: Sendable, Identifiable, Hashable {
 ///
 /// Chromium records visits made in Chrome-style browsers (``CefBrowserWindow``
 /// and Chrome UI windows). Browsers embedded with `CefWebView` use the Alloy
-/// style, which keeps no history.
+/// style, which keeps no history. An incognito profile has none either: its
+/// methods throw.
 ///
 /// CEF exposes no history API, so this one talks to the Mojo interfaces
 /// behind Chromium's own `chrome://history` and new tab pages, through
@@ -58,9 +60,12 @@ public final class CefHistory {
     private let newTabPage: CefInternalPageService
 
     init(profile: CefProfile) {
-        history = CefInternalPageService(profile: profile, page: "chrome://history/", setup: Self.historySetup)
+        // Incognito profiles keep no history.
+        history = CefInternalPageService(
+            profile: profile, page: "chrome://history/", setup: Self.historySetup, isAvailableInIncognito: false)
         newTabPage = CefInternalPageService(
-            profile: profile, page: "chrome://new-tab-page-third-party/", setup: Self.mostVisitedSetup)
+            profile: profile, page: "chrome://new-tab-page-third-party/", setup: Self.mostVisitedSetup,
+            isAvailableInIncognito: false)
     }
 
     /// Visited pages whose title or address matches `text` (everything
@@ -116,6 +121,48 @@ public final class CefHistory {
         ).decode([TileRecord].self).compactMap { tile in
             URL(string: tile.url).map { CefMostVisitedSite(url: $0, title: tile.title) }
         }
+    }
+
+    /// The icon Chromium keeps for `pageURL` — the one the page showed when
+    /// it was last visited — at `size` points, or `nil` when it has none.
+    ///
+    /// For pages that are not open, such as history entries, bookmarks and
+    /// most-visited sites. An open page's icon is ``CefBrowser/favicon``.
+    public func favicon(for pageURL: URL, size: Int = 16) async throws -> NSImage? {
+        let scale = Int(NSScreen.main?.backingScaleFactor ?? 2)
+        let dataURL = try await history.call(
+            """
+            async (s, a) => {
+              const load = page => new Promise(resolve => {
+                const image = new Image();
+                image.onload = () => {
+                  const canvas = document.createElement('canvas');
+                  canvas.width = image.naturalWidth;
+                  canvas.height = image.naturalHeight;
+                  canvas.getContext('2d').drawImage(image, 0, 0);
+                  resolve(canvas.toDataURL('image/png'));
+                };
+                image.onerror = () => resolve(null);
+                image.src = 'chrome://favicon2/?' + new URLSearchParams({
+                  pageUrl: page, size: a.size, scaleFactor: a.scale + 'x', allowGoogleServerFallback: '0' });
+              });
+              // Chromium answers with a generic icon when it has none.
+              s.fallbacks ??= {};
+              s.fallbacks[a.size + 'x' + a.scale] ??= load('https://cefswift.invalid/');
+              const [icon, fallback] = await Promise.all([load(a.url), s.fallbacks[a.size + 'x' + a.scale]]);
+              return icon && icon !== fallback ? icon : null;
+            }
+            """,
+            ["url": .string(pageURL.absoluteString), "size": .number(Double(size)), "scale": .number(Double(scale))]
+        ).stringValue
+        guard let dataURL, let comma = dataURL.firstIndex(of: ","),
+              let data = Data(base64Encoded: String(dataURL[dataURL.index(after: comma)...])),
+              let representation = NSBitmapImageRep(data: data)
+        else { return nil }
+        representation.size = NSSize(width: size, height: size)
+        let image = NSImage(size: representation.size)
+        image.addRepresentation(representation)
+        return image
     }
 
     // MARK: Page setup

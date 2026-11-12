@@ -156,8 +156,13 @@ public final class CefBookmarks {
         AsyncStream { continuation in
             let token = UUID()
             subscribers[token] = continuation
+            service.keepsRunning = true
             continuation.onTermination = { [weak self] _ in
-                Task { @MainActor in self?.subscribers[token] = nil }
+                Task { @MainActor in
+                    guard let self else { return }
+                    self.subscribers[token] = nil
+                    self.service.keepsRunning = !self.subscribers.isEmpty
+                }
             }
             // Listeners are installed when the service page is set up.
             Task { try? await self.service.start() }

@@ -60,6 +60,24 @@ public final class CefProfile {
     /// Omnibox-ranked address-bar suggestions. Experimental.
     public private(set) lazy var autocomplete = CefAutocomplete(profile: self)
 
+    /// The hidden browsers behind ``bookmarks``, ``history`` and
+    /// ``autocomplete`` that have been set up.
+    private var services: [CefInternalPageService] = []
+
+    func register(_ service: CefInternalPageService) {
+        services.append(service)
+    }
+
+    /// The profile's last browser has closed. Its service browsers close
+    /// too — they hold the profile, so an incognito profile and its data
+    /// could not go otherwise — and start again on the next call. The
+    /// default profile keeps them: apps read its bookmarks and history with
+    /// no window open.
+    func lastBrowserDidClose() {
+        guard self !== CefProfile.default else { return }
+        services.forEach { $0.stopIfIdle() }
+    }
+
     // MARK: Preferences
 
     /// Reads a Chromium preference — the settings behind `chrome://settings`

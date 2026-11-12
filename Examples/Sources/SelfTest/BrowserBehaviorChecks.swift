@@ -362,6 +362,10 @@ struct EdgePages: CefSchemeHandler {
         case "/slow.html":
             try? await Task.sleep(for: .seconds(4))
             return Self.page("<title>slow</title>")
+        case "/icon.png":
+            return CefSchemeResponse(mimeType: "image/png", body: Self.iconPNG)
+        case "/favicon.html":
+            return Self.page("<title>favicon</title><link rel=icon href=icon.png><p>favicon</p>")
         case "/leave.html":
             return Self.page("""
                 <title>leave</title><p>leave</p>
@@ -372,6 +376,15 @@ struct EdgePages: CefSchemeHandler {
             return Self.page("<title>\(name)</title><p>\(name)</p>")
         }
     }
+
+    /// A solid red 32 × 32 PNG.
+    static let iconPNG: Data = {
+        let bitmap = NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: 32, pixelsHigh: 32, bitsPerSample: 8, samplesPerPixel: 4,
+            hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+        for x in 0..<32 { for y in 0..<32 { bitmap.setColor(NSColor(deviceRed: 1, green: 0, blue: 0, alpha: 1), atX: x, y: y) } }
+        return bitmap.representation(using: .png, properties: [:])!
+    }()
 
     private static func page(_ html: String) -> CefSchemeResponse {
         CefSchemeResponse(mimeType: "text/html", body: Data(html.utf8))

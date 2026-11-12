@@ -41,6 +41,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         CefRuntime.shared.registerSchemeHandler(scheme: BrowserPages.scheme, handler: BrowserPages())
         Appearance.current.apply()
         controller.adoptTabsOpenedByChromium()
+        // Launching the app again while it runs opens a tab, or the
+        // addresses it was given (`Browser https://swift.org`).
+        CefRuntime.shared.onRelaunch = { [controller] arguments, directory in
+            let urls = arguments.compactMap { LaunchOptions.url(fromArgument: $0, relativeTo: directory) }
+            if urls.isEmpty { controller.openTab() } else { urls.forEach { controller.openTab(url: $0) } }
+        }
         controller.library.start()
 
         let launch = LaunchOptions()
@@ -105,6 +111,15 @@ struct LaunchOptions {
         addressBarText = defaults.string(forKey: "addressBarText")
         opensPrivateTabs = defaults.bool(forKey: "private")
         focusesAddressBar = defaults.bool(forKey: "focusAddressBar") || addressBarText != nil
+    }
+
+    /// A URL from a command-line argument: an address with a scheme, or a
+    /// file path. Switches and anything else give `nil`.
+    static func url(fromArgument argument: String, relativeTo directory: URL?) -> URL? {
+        guard !argument.hasPrefix("-") else { return nil }
+        if argument.contains(":"), let url = URL(string: argument), url.scheme != nil { return url }
+        let file = URL(fileURLWithPath: argument, relativeTo: directory).absoluteURL
+        return FileManager.default.fileExists(atPath: file.path) ? file : nil
     }
 }
 

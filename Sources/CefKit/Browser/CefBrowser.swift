@@ -198,7 +198,18 @@ public final class CefBrowser: Identifiable {
     public private(set) var canGoForward = false
     /// Load progress of the current navigation, 0…1.
     public private(set) var estimatedProgress = 0.0
+    /// The address of the page's icon, as the page declares it. `nil` until
+    /// the page reports one, and again when a new page starts loading.
     public private(set) var faviconURL: URL?
+    /// The page's icon, downloaded from ``faviconURL`` at up to 32 points
+    /// (with Retina representations when the site offers them). `nil` until
+    /// it arrives, for pages without an icon, and again when a new page
+    /// starts loading.
+    ///
+    /// ```swift
+    /// Image(nsImage: browser.favicon ?? NSImage(systemSymbolName: "globe", accessibilityDescription: nil)!)
+    /// ```
+    public private(set) var favicon: NSImage?
     /// Whether the page is in HTML fullscreen.
     public private(set) var isFullscreen = false
     /// Status text, such as the URL of the link under the pointer.
@@ -709,7 +720,11 @@ extension CefBrowser {
     /// pages, so user scripts are evaluated there as each page starts
     /// loading instead.
     func mainFrameDidStartLoading(_ url: URL?) {
-        guard !isBootstrapping, url?.scheme == "chrome", !options.userScripts.isEmpty else { return }
+        guard !isBootstrapping else { return }
+        // The new document reports its own icon.
+        faviconURL = nil
+        favicon = nil
+        guard url?.scheme == "chrome", !options.userScripts.isEmpty else { return }
         Task {
             for script in options.userScripts where script.isolatedWorldName == nil {
                 _ = try? await devTools.send("Runtime.evaluate", ["expression": .string(script.injectedSource)])
@@ -740,7 +755,31 @@ extension CefBrowser {
         estimatedProgress = progress
     }
 
-    func applyFavicon(_ url: URL?) { faviconURL = url }
+    /// The page reported its icons, best first; downloads the first.
+    func applyFavicon(_ candidates: [URL]) {
+        guard !isBootstrapping else { return }
+        let url = candidates.first
+        guard url != faviconURL || (url != nil && favicon == nil) else { return }
+        faviconURL = url
+        // The previous icon stays until the new one arrives, so the tab
+        // does not flash empty when a page swaps its icon.
+        guard let url else {
+            favicon = nil
+            return
+        }
+        let callback = FaviconDownload { [weak self] image in
+            // A newer icon, or a new page, may have replaced this one.
+            guard let self, self.faviconURL == url else { return }
+            self.favicon = image
+        }.makeCallback()
+        let started: Void? = withHost { host in
+            CefStringUtil.withCefString(url.absoluteString) {
+                host.pointee.download_image(host, $0, 1, UInt32(FaviconDownload.maximumSize), 0, callback)
+            }
+        }
+        if started == nil { cefRelease(callback) }
+    }
+
     func applyFullscreen(_ isFullscreen: Bool) { self.isFullscreen = isFullscreen }
     func applyStatusText(_ text: String) { statusText = text }
     func applyFindResult(_ result: CefFindResult) { findResult = result }
@@ -846,6 +885,53 @@ public struct CefJavaScriptError: Error, Sendable, CustomStringConvertible {
     }
 
     public var description: String { message }
+}
+
+/// Receives a favicon from `download_image` and converts it to an
+/// `NSImage` with one representation per scale factor Chromium decoded.
+private final class FaviconDownload: @unchecked Sendable {
+    /// The largest icon asked for, in points.
+    static let maximumSize = 32
+
+    private let completion: @MainActor (NSImage?) -> Void
+
+    init(completion: @escaping @MainActor (NSImage?) -> Void) {
+        self.completion = completion
+    }
+
+    /// The returned +1 reference is consumed by `download_image`.
+    func makeCallback() -> UnsafeMutablePointer<cef_download_image_callback_t> {
+        let callback = cefAllocate(cef_download_image_callback_t.self, owner: self)
+        callback.pointee.on_download_image_finished = { s, _, _, image in
+            defer { cefRelease(image) }
+            guard let owner = cefOwner(FaviconDownload.self, s) else { return }
+            nonisolated(unsafe) let image = image
+            MainActor.assumeIsolated { owner.completion(image.flatMap(FaviconDownload.makeImage)) }
+        }
+        return callback
+    }
+
+    @MainActor
+    static func makeImage(_ image: UnsafeMutablePointer<cef_image_t>) -> NSImage? {
+        let size = NSSize(width: image.pointee.get_width(image), height: image.pointee.get_height(image))
+        guard size.width > 0, size.height > 0 else { return nil }
+        let result = NSImage(size: size)
+        // Exact representations first; failing those, whatever is closest to 1x.
+        var scales: [Float] = [1, 2, 3].filter { image.pointee.has_representation(image, $0) != 0 }
+        if scales.isEmpty { scales = [1] }
+        for scale in scales {
+            var width: Int32 = 0, height: Int32 = 0
+            guard let png = image.pointee.get_as_png(image, scale, 1, &width, &height) else { continue }
+            defer { cefRelease(png) }
+            var data = Data(count: png.pointee.get_size(png))
+            let count = data.count
+            data.withUnsafeMutableBytes { _ = png.pointee.get_data(png, $0.baseAddress, count, 0) }
+            guard let representation = NSBitmapImageRep(data: data) else { continue }
+            representation.size = size
+            result.addRepresentation(representation)
+        }
+        return result.representations.isEmpty ? nil : result
+    }
 }
 
 /// Bridges `cef_pdf_print_callback_t` to a continuation, which resumes with

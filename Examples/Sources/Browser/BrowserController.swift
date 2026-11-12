@@ -106,6 +106,11 @@ final class BrowserController: CefBrowserDelegate {
         if let current { current.load(url) } else { openTab(url: url) }
     }
 
+    /// The browser of a tab showing `url`, if there is one.
+    func tab(showing url: URL) -> CefBrowser? {
+        windows.first { $0.browser.url == url }?.browser
+    }
+
     /// Brings the tab showing `url` to the front, if there is one.
     @discardableResult
     func switchToTab(showing url: URL) -> Bool {

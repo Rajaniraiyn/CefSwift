@@ -103,6 +103,32 @@ public final class CefRuntime {
     /// Chrome's UI. Assign a delegate here to manage those browsers.
     @ObservationIgnored public var onBrowserCreated: ((CefBrowser) -> Void)?
 
+    /// Called when the app is launched again while it is running — from
+    /// the command line, or by another app — with the new launch's
+    /// arguments (without the program path) and its working directory.
+    ///
+    /// Only one instance can use a cache directory, so the second launch
+    /// hands its arguments over to this one and exits. Open a window, or
+    /// the URLs among the arguments:
+    ///
+    /// ```swift
+    /// CefRuntime.shared.onRelaunch = { arguments, _ in
+    ///     let urls = arguments.compactMap(URL.init(string:)).filter { $0.scheme != nil }
+    ///     urls.isEmpty ? openTab(nil) : urls.forEach(openTab)
+    /// }
+    /// ```
+    ///
+    /// When `nil`, the running app is brought to the front.
+    @ObservationIgnored public var onRelaunch: ((_ arguments: [String], _ workingDirectory: URL?) -> Void)?
+
+    func handleRelaunch(arguments: [String], workingDirectory: URL?) {
+        // Not from inside Chromium's callback, which may open windows.
+        DispatchQueue.main.async {
+            NSApp.activate()
+            self.onRelaunch?(arguments, workingDirectory)
+        }
+    }
+
     @ObservationIgnored var messagePump: CefMessagePump?
     @ObservationIgnored private var appContext: CefAppContext?
     @ObservationIgnored private var settings: MappedCefSettings?
@@ -394,7 +420,13 @@ public final class CefRuntime {
 
     func unregister(_ browser: CefBrowser) {
         browsersByIdentifier[browser.identifier] = nil
-        browsers.removeAll { $0 === browser }
+        if browsers.contains(where: { $0 === browser }) {
+            browsers.removeAll { $0 === browser }
+            let profile = browser.options.profile ?? .default
+            if !browsers.contains(where: { ($0.options.profile ?? .default) === profile }) {
+                profile.lastBrowserDidClose()
+            }
+        }
         serviceBrowsers.removeAll { $0 === browser }
         serviceBrowserIDs.remove(browser.id)
         continueTerminationIfReady()

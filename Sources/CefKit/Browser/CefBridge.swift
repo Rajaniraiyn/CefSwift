@@ -23,23 +23,32 @@ import Foundation
 /// app.on("themeChanged", theme => applyTheme(theme));
 /// ```
 ///
-/// The global exists before any page script runs, in every document the
-/// browser loads. Arguments and results travel as JSON, so any `Codable`
-/// type works on the Swift side. A handler that throws rejects the promise.
+/// The global exists before any page script runs. Arguments and results
+/// travel as JSON, so any `Codable` type works on the Swift side. A handler
+/// that throws rejects the promise.
 ///
 /// **Who may call.** Handlers run with your app's privileges, so the bridge
-/// only answers callers permitted by ``access`` — by default the top-level
-/// page, never embedded frames. Each handler can also inspect the caller's
-/// ``CefBridgeCall/origin``, which comes from Chromium rather than the page
-/// and cannot be forged.
+/// only exists where ``access`` permits — by default in the top-level page,
+/// never in embedded frames. A bridge for your own pages in a browser that
+/// also shows the web is limited to their origin; other pages never see the
+/// global:
+///
+/// ```swift
+/// bridge.access = .origins(["app://start"])
+/// ```
+///
+/// Calls are checked again in Swift against the caller's origin and frame
+/// as Chromium reports them, which a page cannot forge; each handler can
+/// also inspect ``CefBridgeCall/origin``.
 @MainActor
 public final class CefBridge {
 
-    /// Which JavaScript contexts may call this bridge.
+    /// Which documents get the bridge and may call it.
     public enum Access: Sendable, Equatable {
-        /// Only the top-level document (the default).
+        /// Only top-level documents (the default).
         case mainFrame
-        /// Any frame whose origin is listed, e.g. `"https://app.example.com"`.
+        /// Documents, in any frame, whose origin is listed, e.g.
+        /// `"https://app.example.com"` or `"app://start"`.
         case origins(Set<String>)
         /// Every frame of every page. Use only for browsers that load
         /// nothing but your own content.
@@ -49,8 +58,16 @@ public final class CefBridge {
     /// The name of the JavaScript global, e.g. `"app"` for `window.app`.
     public let name: String
 
-    /// Who may call the bridge. Applies to subsequent calls.
-    public var access: Access = .mainFrame
+    /// Which documents get the bridge and may call it. A document outside
+    /// it has no global; a change applies to calls from then on and to
+    /// documents loaded afterwards.
+    public var access: Access = .mainFrame {
+        didSet {
+            guard access != oldValue else { return }
+            sessions = sessions.filter { $0.value.browser?.state == .live }
+            for session in sessions.values { Task { await reinject(into: session) } }
+        }
+    }
 
     private typealias Handler = @MainActor (CefJSON, CefBridgeCall) async throws -> CefJSON
     private var handlers: [String: Handler] = [:]
@@ -162,7 +179,18 @@ public final class CefBridge {
         session.mainFrameID = try await devTools.send("Page.getFrameTree")["frameTree"]["frame"]["id"].stringValue ?? ""
         try await devTools.send("Runtime.enable")
         try await devTools.send("Runtime.addBinding", ["name": .string(bindingName)])
-        try await devTools.send("Page.addScriptToEvaluateOnNewDocument", ["source": .string(shim)])
+        session.scriptID = try await devTools.send(
+            "Page.addScriptToEvaluateOnNewDocument", ["source": .string(shim)])["identifier"].stringValue
+    }
+
+    /// Replaces the document-start script after ``access`` changed.
+    private func reinject(into session: Session) async {
+        guard let browser = session.browser else { return }
+        if let scriptID = session.scriptID {
+            _ = try? await browser.devTools.send("Page.removeScriptToEvaluateOnNewDocument", ["identifier": .string(scriptID)])
+        }
+        session.scriptID = try? await browser.devTools.send(
+            "Page.addScriptToEvaluateOnNewDocument", ["source": .string(shim)])["identifier"].stringValue
     }
 
     // MARK: Dispatch
@@ -221,12 +249,31 @@ public final class CefBridge {
     private var replyFunction: String { "__cefswift_\(name)_reply" }
     private var emitFunction: String { "__cefswift_\(name)_emit" }
 
+    /// Whether a document gets the global, by the same rule as
+    /// ``isPermitted(_:)``; a JavaScript expression.
+    private var installCondition: String {
+        switch access {
+        case .mainFrame:
+            return "globalThis === globalThis.top"
+        case .origins(let allowed):
+            return "\(CefJSON.array(allowed.sorted().map(CefJSON.string)).text).includes(location.origin)"
+        case .anyFrame:
+            return "true"
+        }
+    }
+
     /// The page-side half of the bridge, injected at document start.
+    ///
+    /// Chromium adds the binding it calls to every document; the shim takes
+    /// it off the global object, so pages only ever see the bridge itself,
+    /// and only where ``access`` allows.
     var shim: String {
         """
         (() => {
           const send = globalThis.\(bindingName);
-          if (typeof send !== 'function' || globalThis.\(name)) return;
+          if (typeof send !== 'function') return;
+          delete globalThis.\(bindingName);
+          if (!(\(installCondition)) || globalThis.\(name)) return;
           let sequence = 0;
           const pending = new Map();
           const listeners = new Map();
@@ -282,6 +329,8 @@ public final class CefBridge {
         weak var browser: CefBrowser?
         var contexts: [Int: Context] = [:]
         var mainFrameID = ""
+        /// The document-start script's identifier, for replacing it.
+        var scriptID: String?
 
         init(browser: CefBrowser) {
             self.browser = browser

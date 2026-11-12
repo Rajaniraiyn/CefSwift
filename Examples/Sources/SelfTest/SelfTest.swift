@@ -23,8 +23,20 @@ enum SelfTest {
         configuration.customSchemes = [CefCustomScheme(name: "selftest")]
         configuration.rootCacheDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("cefswift-selftest-\(ProcessInfo.processInfo.processIdentifier)")
+        // relaunchChecks() starts this app a second time on the same cache
+        // directory, which must hand its arguments over and exit.
+        let relaunchDirectory = ProcessInfo.processInfo.environment[relaunchEnvironmentKey]
+        if let relaunchDirectory {
+            configuration.rootCacheDirectory = URL(fileURLWithPath: relaunchDirectory)
+        }
         do {
             try CefRuntime.shared.initialize(configuration: configuration)
+            if relaunchDirectory != nil {
+                print("FAIL relaunch: a second instance started")
+                exit(3)
+            }
+        } catch .anotherInstanceRunning where relaunchDirectory != nil {
+            exit(0)
         } catch {
             print("FAIL initialize: \(error)")
             exit(1)
@@ -70,7 +82,11 @@ enum SelfTest {
         await profileChecks()
         await browserWindowChecks()
         await browserBehaviorChecks()
+        await faviconChecks()
+        await bridgeScopeChecks()
         await internalPageDataChecks()
+        await serviceLifetimeChecks()
+        await relaunchChecks()
         await chromeWindowChecks()
     }
 
