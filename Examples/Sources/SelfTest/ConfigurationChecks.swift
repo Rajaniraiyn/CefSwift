@@ -32,9 +32,16 @@ extension SelfTest {
 
         // The others, with a recommended policy in a preferences domain of
         // the probe's own.
-        let domain = "dev.rajaniraiyn.cefswift.selftest.policy.\(ProcessInfo.processInfo.processIdentifier)"
+        let domain = "dev.rajaniraiyn.cefswift.selftest.policy"
         UserDefaults(suiteName: domain)?.set(true, forKey: "ShowHomeButton")
-        defer { UserDefaults.standard.removePersistentDomain(forName: domain) }
+        defer {
+            // Emptying the domain leaves its file behind.
+            UserDefaults.standard.removePersistentDomain(forName: domain)
+            CFPreferencesAppSynchronize(domain as CFString)
+            let file = FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent("Library/Preferences/\(domain).plist")
+            try? FileManager.default.removeItem(at: file)
+        }
         await runProbe("policies", label: "configuration (probe)", environment: [policyDomainKey: domain])
     }
 
