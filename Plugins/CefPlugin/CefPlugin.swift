@@ -56,8 +56,14 @@ struct CefPlugin: CommandPlugin {
       bundle --product <Name> [--configuration debug|release] [--flavor minimal|standard]
              [--platform macosarm64|macosx64] [--output <dir>] [--bundle-id <id>]
              [--name <DisplayName>] [--manifest <path>] [--sign <identity|->]
+             [--version <1.2.3>] [--build <42>]
           Build <Name> and cef-helper, then assemble a runnable <Name>.app
           (framework + five helper apps + Info.plists + codesign).
+          --version / --build: CFBundleShortVersionString / CFBundleVersion.
+          Precedence: option > cefapp.json "version"/"build" > 1.0 / 1.
+          LSMinimumSystemVersion: cefapp.json "minimumSystemVersion", else the
+          deployment target the product was built for (the package's
+          platforms), else 14.0.
           --sign: codesign identity; '-' forces ad-hoc. Default: auto-detect
           (first "Apple Development", else "Developer ID Application", else
           ad-hoc). Precedence: --sign > cefapp.json "signingIdentity" > auto.
@@ -107,6 +113,8 @@ struct CefPlugin: CommandPlugin {
         let bundleIDOption = extractor.extractOption(named: "bundle-id").last
         let nameOption = extractor.extractOption(named: "name").last
         let signOption = extractor.extractOption(named: "sign").last
+        let versionOption = extractor.extractOption(named: "version").last
+        let buildOption = extractor.extractOption(named: "build").last
         // Undocumented: bundle prebuilt executables, or skip straight to the
         // `swift build` fallback.
         let testExe = extractor.extractOption(named: "_test-exe").last
@@ -177,7 +185,10 @@ struct CefPlugin: CommandPlugin {
             appName: appName,
             displayName: displayName,
             bundleIdentifier: bundleID,
-            minimumSystemVersion: appConfig?.minimumSystemVersion ?? "14.0",
+            minimumSystemVersion: appConfig?.minimumSystemVersion
+                ?? MachOVersion.minimumSystemVersion(of: mainExecutable) ?? "14.0",
+            version: versionOption ?? appConfig?.version ?? "1.0",
+            build: buildOption ?? appConfig?.build ?? "1",
             mainExecutable: mainExecutable,
             helperExecutable: helperExecutable,
             frameworkSource: framework,

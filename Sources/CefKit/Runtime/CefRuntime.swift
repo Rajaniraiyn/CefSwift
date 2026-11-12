@@ -101,6 +101,9 @@ public final class CefRuntime {
     /// Called for each browser Chromium creates on its own initiative: a
     /// native popup, a DevTools window, a tab or window opened through
     /// Chrome's UI. Assign a delegate here to manage those browsers.
+    ///
+    /// Tabs that ``onChromiumOpensTab`` takes over are closed and handed to
+    /// it as a URL instead, so they never reach this closure.
     @ObservationIgnored public var onBrowserCreated: ((CefBrowser) -> Void)?
 
     /// Called when the app is launched again while it is running — from
@@ -191,7 +194,9 @@ public final class CefRuntime {
     /// ``CefConfiguration/productName``.
     ///
     /// Tabs and windows the user opens from there are reported through
-    /// ``onBrowserCreated`` and listed in ``browsers``.
+    /// ``onBrowserCreated`` and listed in ``browsers``. The returned
+    /// browser holds `delegate` weakly, like ``CefBrowser/delegate``; keep
+    /// your own reference to it.
     @discardableResult
     public func openChromeWindow(
         url: URL, frame: CGRect? = nil, options: CefBrowserOptions = .init(), delegate: CefBrowserDelegate? = nil

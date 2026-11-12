@@ -226,6 +226,15 @@ public final class CefBrowser: Identifiable {
 
     // MARK: Configuration
 
+    /// The object that makes policy decisions and receives one-shot events
+    /// for this browser.
+    ///
+    /// The browser holds its delegate weakly, as `WKWebView` does: keep a
+    /// strong reference to it elsewhere — in your view model, window
+    /// controller or app delegate — for as long as the browser lives. A
+    /// popup inherits its opener's delegate. Without a delegate, each
+    /// decision gets the default implementation from
+    /// ``CefBrowserDelegate``.
     @ObservationIgnored public weak var delegate: CefBrowserDelegate?
     @ObservationIgnored public let options: CefBrowserOptions
     /// Chromium's identifier for this browser; `-1` until created.
@@ -257,6 +266,13 @@ public final class CefBrowser: Identifiable {
 
     /// Creates a browser model. Nothing is created in Chromium until the
     /// browser is hosted.
+    ///
+    /// - Parameters:
+    ///   - url: The page the browser opens with.
+    ///   - options: Creation-time settings.
+    ///   - delegate: The browser's ``delegate``, held weakly. Keep your own
+    ///     strong reference to it; a delegate created inline, such as
+    ///     `CefBrowser(url: url, delegate: Policy())`, is released at once.
     public init(url: URL? = nil, options: CefBrowserOptions = .init(), delegate: CefBrowserDelegate? = nil) {
         self.url = url
         self.initialURL = url
@@ -350,10 +366,53 @@ public final class CefBrowser: Identifiable {
 
     // MARK: Page controls
 
-    /// Zoom level: 0 is 100%, each step is roughly 20%.
+    /// The page's zoom level: 0 is 100%, and each step of 1 scales the page
+    /// by 20% (1.2ⁿ).
+    ///
+    /// The value is observable. Besides your own changes, it follows the
+    /// zoom Chromium applies itself: the level it remembers for each site,
+    /// which changes as the browser moves between sites and when another
+    /// browser zooms the same site, and Chrome's zoom commands
+    /// (``CefChromeCommand/zoomIn``, ``CefChromeCommand/zoomOut``,
+    /// ``CefChromeCommand/resetZoom``), whether run through
+    /// ``execute(_:disposition:)`` or chosen in a Chrome-style browser. CEF
+    /// reports no zoom changes, so CefKit reads the level back after each of
+    /// those events; a change Chromium makes in any other way shows up at
+    /// the next navigation.
+    ///
+    /// In a windowed browser, pinching magnifies the page without changing
+    /// its zoom level; `CefOffscreenBrowserView` turns pinches into
+    /// zoom-level changes. Setting the level before the browser is live
+    /// has no effect.
     public var zoomLevel: Double {
-        get { withHost { $0.pointee.get_zoom_level($0) } ?? 0 }
-        set { withHost { $0.pointee.set_zoom_level($0, newValue) } }
+        get { observedZoomLevel }
+        set {
+            withHost { $0.pointee.set_zoom_level($0, newValue) }
+            // Chromium applies the level per site, so other browsers on the
+            // same site follow.
+            CefBrowser.refreshZoomLevels()
+        }
+    }
+
+    private var observedZoomLevel = 0.0
+
+    /// Reads the zoom level back from Chromium.
+    func refreshZoomLevel() {
+        let level = withHost { $0.pointee.get_zoom_level($0) } ?? observedZoomLevel
+        if level != observedZoomLevel { observedZoomLevel = level }
+    }
+
+    /// Reads every browser's zoom level back, now and once Chromium has
+    /// finished applying an asynchronous change.
+    static func refreshZoomLevels() {
+        let refresh = { CefRuntime.shared.browsers.forEach { $0.refreshZoomLevel() } }
+        refresh()
+        Task {
+            await Task.yield()
+            refresh()
+            try? await Task.sleep(for: .milliseconds(250))
+            refresh()
+        }
     }
 
     public var isAudioMuted: Bool {
@@ -458,6 +517,7 @@ public final class CefBrowser: Identifiable {
     /// bookmark, and so on. Chrome-style browsers only.
     public func execute(_ command: CefChromeCommand, disposition: CefWindowOpenDisposition = .currentTab) {
         withHost { $0.pointee.execute_chrome_command($0, Int32(command.rawValue), disposition.cefValue) }
+        if command.isZoomCommand { CefBrowser.refreshZoomLevels() }
     }
 
     // MARK: Downloads
@@ -490,8 +550,35 @@ public final class CefBrowser: Identifiable {
             if state == .pending { state = .closed }
             return
         }
+        if let signInPromptURL, signInPromptURL == url {
+            // Chromium's sign-in window for an Alloy-style browser crashes
+            // the process when its browser closes under it. A navigation
+            // dismisses the window, so leave the page first and close once
+            // the window has gone.
+            self.signInPromptURL = nil
+            let browserWindows = Set(CefBrowserWindow.all.compactMap(\.window).map(ObjectIdentifier.init))
+            let chromiumWindows = NSApp.windows.filter {
+                $0.isVisible && $0 !== hostWindow && !browserWindows.contains(ObjectIdentifier($0))
+                    && NSStringFromClass(type(of: $0)) == "NativeWidgetMacNSWindow"
+            }.map { WeakWindow(window: $0) }
+            load(URL(string: "about:blank")!)
+            Task {
+                let deadline = ContinuousClock.now + .seconds(3)
+                while chromiumWindows.contains(where: { $0.window?.isVisible == true }), state == .live,
+                      ContinuousClock.now < deadline {
+                    try? await Task.sleep(for: .milliseconds(20))
+                }
+                withHost { $0.pointee.close_browser($0, force ? 1 : 0) }
+            }
+            return
+        }
         withHost { $0.pointee.close_browser($0, force ? 1 : 0) }
     }
+
+    /// The address that last failed with `ERR_INVALID_AUTH_CREDENTIALS` in
+    /// an Alloy-style browser. While the browser still shows it, Chromium
+    /// may be showing its own sign-in window for it.
+    @ObservationIgnored private var signInPromptURL: URL?
 
     /// Suspends until the browser exists in Chromium. Throws if it closes
     /// first.
@@ -688,6 +775,7 @@ extension CefBrowser {
         CefRuntime.shared.register(self)
         readyWaiters.forEach { $0.resume() }
         readyWaiters = []
+        refreshZoomLevel()
         delegate?.browserDidCreate(self)
         if isBootstrapping {
             Task { await bootstrap() }
@@ -748,6 +836,8 @@ extension CefBrowser {
         self.canGoBack = canGoBack
         self.canGoForward = canGoForward
         if !isLoading { estimatedProgress = 1 }
+        // Chromium restores each site's own zoom level as it navigates.
+        refreshZoomLevel()
     }
 
     func applyProgress(_ progress: Double) {
@@ -778,6 +868,12 @@ extension CefBrowser {
             }
         }
         if started == nil { cefRelease(callback) }
+    }
+
+    func mainFrameDidFailLoad(_ error: CefLoadError) {
+        // ERR_INVALID_AUTH_CREDENTIALS: Chromium asks for credentials itself.
+        if error.code == -338, !isChromeStyle { signInPromptURL = error.url }
+        delegate?.browser(self, didFailLoad: error)
     }
 
     func applyFullscreen(_ isFullscreen: Bool) { self.isFullscreen = isFullscreen }
@@ -885,6 +981,10 @@ public struct CefJavaScriptError: Error, Sendable, CustomStringConvertible {
     }
 
     public var description: String { message }
+}
+
+private struct WeakWindow {
+    weak var window: NSWindow?
 }
 
 /// Receives a favicon from `download_image` and converts it to an

@@ -22,7 +22,8 @@ A tabbed browser (`Sources/Browser`). Each tab is a Chrome-style
 - A bookmark star (⌘D), Bookmarks and History menus, and a start page at
   `browser://start/` with frequently visited sites and recent bookmarks,
   whose data comes through a `CefBridge`.
-- Tab icons, the page as an inset card, and popups as panels layered over
+- Site icons on tabs, on "Switch to Tab" suggestions and on the start
+  page's tiles; the page as an inset card; and popups as panels layered over
   the window that opened them.
 - Private tabs, downloads, and a customized context menu.
 - `chrome://settings` without what does nothing in an embedded Chromium
@@ -30,6 +31,8 @@ A tabbed browser (`Sources/Browser`). Each tab is a Chrome-style
   toolbar, tab strip and bookmarks bar), and an About page of its own in
   place of Chromium's.
 - Tabs that Chromium opens itself, shown as the app's own tabs.
+- A single instance: launching the app again while it runs opens a new tab,
+  or a tab for each URL or file path passed on the command line.
 
 `browser://playground/` has popups, a download, a page that asks before
 leaving, and an unreachable site to try.

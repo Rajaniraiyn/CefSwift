@@ -15,7 +15,10 @@ CefSwift is pre-1.0; its API can change between releases.
 ### Add the package
 
 ```swift
+// swift-tools-version: 6.0
 // Package.swift
+import PackageDescription
+
 let package = Package(
     name: "MyApp",
     platforms: [.macOS(.v14)],

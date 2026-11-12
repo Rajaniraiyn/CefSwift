@@ -1,8 +1,9 @@
 import AppKit
 import CefSwiftUI
+import SwiftUI
 
-/// Favicons, where a bridge is installed, when a profile's hidden service
-/// browsers close, and what a second launch does.
+/// Favicons, toolbars and zoom, where a bridge is installed, when a
+/// profile's hidden service browsers close, and what a second launch does.
 extension SelfTest {
     static let relaunchEnvironmentKey = "CEFSWIFT_SELFTEST_RELAUNCH_ROOT"
 
@@ -41,6 +42,47 @@ extension SelfTest {
               detail: "\(String(describing: browser.faviconURL))")
         window.close()
         _ = await waitUntil { window.isClosed }
+    }
+
+    // MARK: Toolbar and zoom
+
+    static func toolbarAndZoomChecks() async {
+        let browser = CefBrowser(url: URL(string: "selftest://app/second.html")!)
+        let window = CefBrowserWindow(browser: browser)
+        let renders = RenderLog()
+        window.setToolbar { TitleProbe(browser: browser, log: renders) }
+        window.setTabAccessory { TitleProbe(browser: browser, log: renders) }
+        window.show()
+        _ = await waitUntil { browser.title == "second" && !browser.isLoading }
+        check("toolbar: installed in the window",
+              window.window?.toolbar?.items.count == 5 && window.window?.tab.accessoryView != nil)
+        check("toolbar: its views follow the browser's state", await waitUntil { renders.titles.last == "second" },
+              detail: "\(renders.titles)")
+
+        let zoom = ZoomObserver(browser)
+        browser.zoomLevel = 1
+        check("zoom: a level set reads back and is observed",
+              await waitUntil { browser.zoomLevel == 1 && zoom.changes == 1 },
+              detail: "\(browser.zoomLevel), \(zoom.changes) changes")
+        browser.execute(.zoomIn)
+        check("zoom: Chrome's zoom commands are observed",
+              await waitUntil { browser.zoomLevel > 1 && zoom.changes >= 2 },
+              detail: "\(browser.zoomLevel)")
+        browser.load(URL(string: "selftest://edge/tab.html")!)
+        check("zoom: each site keeps its own level", await waitUntil {
+            browser.title == "tab" && !browser.isLoading && browser.zoomLevel == 0
+        }, detail: "\(browser.zoomLevel)")
+        browser.goBack()
+        check("zoom: returning to a site restores its level", await waitUntil {
+            browser.title == "second" && browser.zoomLevel > 1
+        }, detail: "\(browser.zoomLevel)")
+        browser.zoomLevel = 0
+
+        window.close()
+        _ = await waitUntil { window.isClosed }
+        var ranAfterClose = false
+        window.withWindow { _ in ranAfterClose = true }
+        check("toolbar: setup after the window closed is ignored", !ranAfterClose)
     }
 
     // MARK: Bridge scope
@@ -101,6 +143,10 @@ extension SelfTest {
                     return true
                 }
             }
+            await expect("service lifetime: incognito bookmarks are the default profile's") {
+                guard profile.bookmarks === CefProfile.default.bookmarks else { return false }
+                return try await profile.bookmarks.tree().contains { $0.permanentFolder == .bookmarksBar }
+            }
             window.close()
             _ = await waitUntil { window.isClosed }
         }
@@ -140,5 +186,43 @@ extension SelfTest {
         check("relaunch: no window of Chromium's appears",
               NSApp.windows.filter(\.isVisible).count == visibleBefore && CefRuntime.shared.browsers.isEmpty,
               detail: "\(NSApp.windows.filter(\.isVisible).map(\.title)), \(CefRuntime.shared.browsers.count) browsers")
+    }
+}
+
+/// Records what a SwiftUI view saw each time it rendered.
+@MainActor
+final class RenderLog {
+    var titles: [String] = []
+}
+
+/// Shows a browser's title and logs each render.
+struct TitleProbe: View {
+    let browser: CefBrowser
+    let log: RenderLog
+
+    var body: some View {
+        let _ = log.titles.append(browser.title)
+        Text(browser.title)
+    }
+}
+
+/// Counts changes to a browser's observable zoom level.
+@MainActor
+final class ZoomObserver {
+    let browser: CefBrowser
+    private(set) var changes = 0
+
+    init(_ browser: CefBrowser) {
+        self.browser = browser
+        observe()
+    }
+
+    private func observe() {
+        withObservationTracking { _ = browser.zoomLevel } onChange: { [weak self] in
+            Task { @MainActor in
+                self?.changes += 1
+                self?.observe()
+            }
+        }
     }
 }

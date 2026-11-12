@@ -52,9 +52,17 @@ public final class CefProfile {
     // CefHistory.swift and CefAutocomplete.swift.
 
     /// The profile's bookmarks.
-    public private(set) lazy var bookmarks = CefBookmarks(profile: self)
+    ///
+    /// An incognito profile shares the default profile's bookmarks, as
+    /// Chrome's incognito windows share the bookmarks of the profile they
+    /// belong to: for an incognito profile this is
+    /// `CefProfile.default.bookmarks`, and bookmarks added through it are
+    /// kept on disk with the default profile.
+    public private(set) lazy var bookmarks: CefBookmarks =
+        kind == .incognito ? CefProfile.default.bookmarks : CefBookmarks(profile: self)
 
-    /// The profile's browsing history and most-visited sites.
+    /// The profile's browsing history and most-visited sites. An incognito
+    /// profile keeps no history; its ``CefHistory`` methods throw.
     public private(set) lazy var history = CefHistory(profile: self)
 
     /// Omnibox-ranked address-bar suggestions. Experimental.

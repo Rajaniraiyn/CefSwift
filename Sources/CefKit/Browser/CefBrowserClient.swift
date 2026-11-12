@@ -244,7 +244,7 @@ final class CefBrowserClient {
             )
             CefBrowserClient.run(s, browser, default: ()) { _, b in
                 guard isMain else { return }
-                b.delegate?.browser(b, didFailLoad: error)
+                b.mainFrameDidFailLoad(error)
             }
         }
         return h
@@ -628,10 +628,12 @@ final class CefBrowserClient {
         let h = cefAllocate(cef_command_handler_t.self, owner: self)
         h.pointee.on_chrome_command = { s, browser, commandID, disposition in
             CefBrowserClient.run(s, browser, default: 0) { _, b in
-                guard let delegate = b.delegate else { return 0 }
-                let handled = delegate.browser(
-                    b, handleChromeCommand: CefChromeCommand(rawValue: Int(commandID)),
-                    disposition: CefWindowOpenDisposition(cefValue: disposition))
+                let command = CefChromeCommand(rawValue: Int(commandID))
+                let handled = b.delegate?.browser(
+                    b, handleChromeCommand: command,
+                    disposition: CefWindowOpenDisposition(cefValue: disposition)) ?? false
+                // Chrome runs the command after this returns.
+                if !handled, command.isZoomCommand { CefBrowser.refreshZoomLevels() }
                 return handled ? 1 : 0
             }
         }

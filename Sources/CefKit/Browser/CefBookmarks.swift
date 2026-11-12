@@ -52,6 +52,9 @@ public struct CefBookmark: Sendable, Identifiable, Hashable {
 /// hidden service browser parked on that page, created on first use. Because
 /// it relies on a Chromium-internal page, this API is more likely than the
 /// rest of CefKit to need attention when Chromium updates.
+///
+/// Incognito profiles have no bookmarks of their own; their
+/// ``CefProfile/bookmarks`` are the default profile's.
 @MainActor
 public final class CefBookmarks {
     private let service: CefInternalPageService
