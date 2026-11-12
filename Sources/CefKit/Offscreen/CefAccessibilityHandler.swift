@@ -37,10 +37,14 @@ extension CefBrowserClient {
         _ apply: @escaping @MainActor @Sendable (CefBrowser, CefJSON) -> Void
     ) {
         guard let client = cefOwner(CefBrowserClient.self, handler), let value else { return }
+        let started = CefDiagnostics.start()
+        defer { CefDiagnostics.record(.accessibilityIngestMain, since: started) }
         // cef_write_json takes over a reference; the callback keeps its own.
         cefAddRef(value)
         guard let text = CefStringUtil.takingUserFree(cef_write_json(value, JSON_WRITER_DEFAULT)) else { return }
         accessibilityQueue.async {
+            let parseStarted = CefDiagnostics.start()
+            defer { CefDiagnostics.record(.accessibilityIngestBackground, since: parseStarted) }
             let object = try? JSONSerialization.jsonObject(with: Data(text.utf8), options: [.fragmentsAllowed])
             let json = object.map(CefJSON.init(foundationObject:)) ?? .null
             DispatchQueue.main.async {

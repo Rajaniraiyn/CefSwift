@@ -39,6 +39,25 @@ extension SelfTest {
         // surface), so only changes on screen count.
         check("compositor: a presented frame never changes on screen while the view resizes",
               resized.mutated == 0 && resized.presented > 10, detail: resized.summary)
+
+        // A page that changes one block of a 4×4 grid each frame: Chromium
+        // reports only that block as damaged.
+        for scale in [1, 2] {
+            guard let damaged = await CompositorStage(
+                points: CGSize(width: 1280 / scale, height: 800 / scale), page: .damage)
+            else {
+                check("compositor: the damage page loads", false)
+                return
+            }
+            let steady = await damaged.animate(for: .seconds(3), resizing: false)
+            let resizing = await damaged.animate(for: .seconds(2), resizing: true)
+            damaged.close()
+            _ = await waitUntil { damaged.browser.state == .closed }
+            check("compositor: every presented frame of a partly damaged page is whole (\(scale == 1 ? "1280×800" : "640×400") points)",
+                  steady.inconsistent == 0 && steady.mutated == 0 && steady.presented > 30 && steady.samplesTaken > 100
+                      && resizing.mutated == 0,
+                  detail: "\(steady.summary); resizing: \(resizing.summary)")
+        }
     }
 }
 
@@ -59,11 +78,12 @@ extension Benchmarks {
             ("2560x1600 @2x", CGSize(width: 2560, height: 1600)),
         ]
         let only = UserDefaults.standard.string(forKey: "compositorSize")
+        let page = CompositorStage.Page(rawValue: UserDefaults.standard.string(forKey: "compositorPage") ?? "") ?? .full
         for (label, points) in sizes where only == nil || label.hasPrefix(only!) {
             for run in 1...2 {
                 let memory = MemorySampler()
                 memory.start()
-                guard let stage = await CompositorStage(points: points) else {
+                guard let stage = await CompositorStage(points: points, page: page) else {
                     print("bench error: \(label) did not load")
                     continue
                 }
@@ -72,17 +92,17 @@ extension Benchmarks {
                 let animated = await stage.animate(for: .seconds(3), resizing: false)
                 let used = ProcessCPU.used(from: cpuStart, to: ProcessCPU.sample())
                 memory.stop()
-                let latencies = await stage.mouseLatencies(count: 30)
+                let latencies = page == .full ? await stage.mouseLatencies(count: 30) : []
                 let resized = await stage.animate(for: .seconds(2), resizing: true)
                 print(String(
-                    format: "bench compositor %@ run %d (%.0fx%.0f px): presented %.1f/s, rAF %.1f/s, app CPU %.1f%%, all CPU %.1f%%; mouse to screen median %.1f ms, p90 %.1f ms (%d); peak footprint while animating +%.0f MB; changed on screen %d, torn %d; while resizing changed %d, torn %d of %d",
+                    format: "bench compositor \(page.rawValue) %@ run %d (%.0fx%.0f px): presented %.1f/s, rAF %.1f/s, app CPU %.1f%%, all CPU %.1f%%; mouse to screen median %.1f ms, p90 %.1f ms (%d); peak footprint while animating +%.0f MB; changed on screen %d, torn %d; while resizing changed %d, torn %d of %d",
                     label, run, animated.pixelSize.width, animated.pixelSize.height,
                     animated.presentedPerSecond, animated.rafPerSecond,
                     used.app / animated.seconds * 100, used.total / animated.seconds * 100,
                     latencies.isEmpty ? 0 : latencies[latencies.count / 2],
                     latencies.isEmpty ? 0 : latencies[latencies.count * 9 / 10], latencies.count,
                     memory.peakMB - memory.startMB, animated.mutated, animated.torn,
-                    resized.mutated, resized.torn, resized.presented))
+                    resized.mutated, resized.torn, resized.presented) + "; inconsistent \(animated.inconsistent + resized.inconsistent)")
                 stage.close()
                 _ = await SelfTest.waitUntil { CefRuntime.shared.browsers.isEmpty }
                 try? await Task.sleep(for: .seconds(1))
@@ -116,6 +136,8 @@ final class CompositorStage {
         var top: Int
         var bottom: Int
         var time: CFTimeInterval
+        /// For the damage page: the grid's blocks disagree.
+        var inconsistent = false
     }
 
     struct Result {
@@ -126,13 +148,25 @@ final class CompositorStage {
         var seconds = 1.0
         var rafPerSecond = 0.0
         var pixelSize = CGSize.zero
+        var inconsistent = 0
+        var samplesTaken = 0
         var presentedPerSecond: Double { Double(presented) / seconds }
         var summary: String {
-            "\(presented) frames presented, \(mutated) changed on screen, \(torn) torn, own surfaces: \(ownedSurfaces)"
+            "\(presented) frames presented, \(samplesTaken) readings, \(mutated) changed on screen, \(torn) torn, \(inconsistent) inconsistent, own surfaces: \(ownedSurfaces)"
         }
     }
 
-    init?(points: CGSize) async {
+    enum Page: String {
+        /// The whole background shows the frame number.
+        case full = "compositor"
+        /// One block of a 4×4 grid changes per frame.
+        case damage
+    }
+
+    let page: Page
+
+    init?(points: CGSize, page: Page = .full) async {
+        self.page = page
         let screen = NSScreen.main?.frame ?? .zero
         // Borderless, so a view larger than the screen keeps its size.
         window = NSWindow(
@@ -142,13 +176,13 @@ final class CompositorStage {
         window.level = .floating
         var options = CefBrowserOptions()
         options.rendering = .offscreen(frameRate: 120)
-        browser = CefBrowser(url: URL(string: "selftest://bench/compositor.html")!, options: options)
+        browser = CefBrowser(url: URL(string: "selftest://bench/\(page.rawValue).html")!, options: options)
         view.frame = window.contentView!.bounds
         view.autoresizingMask = [.width, .height]
         window.contentView!.addSubview(view)
         view.browser = browser
         window.orderFrontRegardless()
-        guard await SelfTest.waitUntil({ browser.title == "compositor" }) else { return nil }
+        guard await SelfTest.waitUntil({ browser.title == page.rawValue }) else { return nil }
         observation = view.layer?.sublayers?.first?.observe(\.contents, options: [.new]) { [weak self] _, _ in
             // Set on the main thread, in the view's paint callback.
             MainActor.assumeIsolated { self?.presented(self?.contentLayer?.contents) }
@@ -177,15 +211,27 @@ final class CompositorStage {
             return
         }
         let surface = contents as! IOSurfaceRef
-        shown = Self.readCodes(surface).map { (surface, $0.0) }
+        if page == .damage {
+            shown = Self.readGrid(surface).map { (surface, $0.reduce(0) { $0 * 64 + $1 }) }
+        } else {
+            shown = Self.readCodes(surface).map { (surface, $0.0) }
+        }
         if recording { presentations += 1 }
     }
 
     private func refresh() {
         guard recording, let shown, let contents = contentLayer?.contents,
-              (contents as CFTypeRef) === shown.surface,
-              let (top, bottom) = Self.readCodes(shown.surface)
+              (contents as CFTypeRef) === shown.surface
         else { return }
+        if page == .damage {
+            guard let grid = Self.readGrid(shown.surface) else { return }
+            let hash = grid.reduce(0) { $0 * 64 + $1 }
+            samples.append(Sample(
+                changedOnScreen: hash != shown.code, top: 0, bottom: 0, time: CACurrentMediaTime(),
+                inconsistent: !Self.isConsistent(grid)))
+            return
+        }
+        guard let (top, bottom) = Self.readCodes(shown.surface) else { return }
         samples.append(Sample(changedOnScreen: top != shown.code, top: top, bottom: bottom, time: CACurrentMediaTime()))
     }
 
@@ -203,6 +249,37 @@ final class CompositorStage {
             return decode(Int(pixel[2])) + decode(Int(pixel[1])) * 8
         }
         return (code(2), code(height - 3))
+    }
+
+    /// The codes of the damage page's 16 blocks, in order.
+    nonisolated static func readGrid(_ surface: IOSurfaceRef) -> [Int]? {
+        guard IOSurfaceLock(surface, .readOnly, nil) == kIOReturnSuccess else { return nil }
+        defer { IOSurfaceUnlock(surface, .readOnly, nil) }
+        let width = IOSurfaceGetWidth(surface), height = IOSurfaceGetHeight(surface)
+        let row = IOSurfaceGetBytesPerRow(surface)
+        guard width > 16, height > 16 else { return nil }
+        let base = IOSurfaceGetBaseAddress(surface)
+        return (0..<16).map { block in
+            let x = (block % 4) * width / 4 + width / 8, y = (block / 4) * height / 4 + height / 8
+            let pixel = base.advanced(by: y * row + x * 4).assumingMemoryBound(to: UInt8.self)
+            return decode(Int(pixel[2])) + decode(Int(pixel[1])) * 8
+        }
+    }
+
+    /// Whether the blocks show one moment of the page: block `f % 16`
+    /// holds `f % 64` for the last 16 frames `f`.
+    nonisolated static func isConsistent(_ grid: [Int]) -> Bool {
+        // Frames before the 16th leave blocks at their initial 0.
+        if grid.allSatisfy({ $0 == 0 }) { return true }
+        // The newest block is the one whose successor does not continue it.
+        for newest in 0..<16 {
+            let code = grid[newest]
+            let matches = (1..<16).allSatisfy { back in
+                grid[(newest - back + 16) % 16] == (code - back + 64) % 64
+            }
+            if matches, code % 16 == newest { return true }
+        }
+        return false
     }
 
     private nonisolated static func decode(_ value: Int) -> Int { max(0, min(7, Int((Double(value - 16) / 32).rounded()))) }
@@ -244,6 +321,8 @@ final class CompositorStage {
         result.presented = presentations
         result.torn = samples.filter { $0.top != $0.bottom }.count
         result.mutated = samples.filter(\.changedOnScreen).count
+        result.inconsistent = samples.filter(\.inconsistent).count
+        result.samplesTaken = samples.count
         return result
     }
 
@@ -284,6 +363,35 @@ final class CompositorStage {
           requestAnimationFrame(tick);
           addEventListener('mousemove', e => { if (!window.__animate) show(Math.floor(e.clientX / 10) % 64); });
           addEventListener('DOMContentLoaded', () => show(0));
+        </script>
+        """
+
+    /// The damage page: a 4×4 grid of blocks; on animation frame `f`,
+    /// block `f % 16` shows `f % 64`, and the others keep what they had.
+    nonisolated static let damagePage = """
+        <title>damage</title>
+        <style>html, body { margin: 0; height: 100%; overflow: hidden; }
+          div { position: absolute; width: 25vw; height: 25vh; background: rgb(16, 16, 128); }</style>
+        <script>
+          window.__animate = false; window.__rafs = 0;
+          addEventListener('DOMContentLoaded', () => {
+            const blocks = [];
+            for (let i = 0; i < 16; i++) {
+              const d = document.createElement('div');
+              d.style.left = (i % 4) * 25 + 'vw'; d.style.top = Math.floor(i / 4) * 25 + 'vh';
+              document.body.appendChild(d); blocks.push(d);
+            }
+            let frame = 15;
+            const tick = () => {
+              if (window.__animate) {
+                window.__rafs++; frame++;
+                const code = frame % 64, r = (code % 8) * 32 + 16, g = (Math.floor(code / 8) % 8) * 32 + 16;
+                blocks[frame % 16].style.background = `rgb(${r}, ${g}, 128)`;
+              }
+              requestAnimationFrame(tick);
+            };
+            requestAnimationFrame(tick);
+          });
         </script>
         """
 }

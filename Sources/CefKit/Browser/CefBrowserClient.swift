@@ -848,6 +848,11 @@ final class ResourceRequestFilter: Sendable {
     func makeHandler() -> UnsafeMutablePointer<cef_resource_request_handler_t> {
         let h = cefAllocate(cef_resource_request_handler_t.self, owner: self)
         h.pointee.on_before_resource_load = { s, browser, frame, request, callback in
+            let started = CefDiagnostics.start()
+            var filterTime: UInt64 = 0
+            defer {
+                if started != 0 { CefDiagnostics.record(.requestFilterOverhead, since: started &+ filterTime) }
+            }
             cefRelease(browser)
             cefRelease(frame)
             cefRelease(callback)
@@ -862,7 +867,13 @@ final class ResourceRequestFilter: Sendable {
             )
             // CEF calls this on the IO thread, which the filter is isolated to.
             let filter = owner.filter
-            switch CefIOActor.assumeIsolated({ filter(snapshot) }) {
+            let filterStarted = CefDiagnostics.start()
+            let action = CefIOActor.assumeIsolated({ filter(snapshot) })
+            if filterStarted != 0 {
+                filterTime = clock_gettime_nsec_np(CLOCK_UPTIME_RAW) &- filterStarted
+                CefDiagnostics.record(.requestFilter, since: filterStarted)
+            }
+            switch action {
             case .allow:
                 break
             case .block:
