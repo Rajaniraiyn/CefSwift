@@ -138,7 +138,9 @@ public final class CefBridge {
         }
         let expression = "globalThis.\(emitFunction)?.(\(CefJSON.string(event).text), \(payload.text))"
         sessions = sessions.filter { $0.value.browser?.state == .live }
-        for session in sessions.values where browser == nil || session.browser === browser {
+        // A discarded page is gone; its next document starts afresh.
+        for session in sessions.values where (browser == nil || session.browser === browser)
+            && session.browser?.isDiscarded == false {
             session.browser?.executeJavaScript(expression)
         }
     }

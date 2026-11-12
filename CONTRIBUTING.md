@@ -46,9 +46,9 @@ arguments.
 
 SelfTest checks CefSwift against the real Chromium runtime: windowed and
 offscreen browsers, the bridge, profiles and preferences, Chrome-style
-windows, popups, downloads, `beforeunload`, renderer crashes, bookmarks,
-history, autocomplete, passkeys and a clean quit. Bundle and run it before sending a
-change that touches anything CEF does:
+windows, popups, downloads, `beforeunload`, renderer crashes, tab
+discarding, bookmarks, history, autocomplete, passkeys and a clean quit. Bundle and
+run it before sending a change that touches anything CEF does:
 
 ```sh
 swift package --package-path Examples \
