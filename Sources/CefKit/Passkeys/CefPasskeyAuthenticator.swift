@@ -39,7 +39,7 @@ final class CefPasskeyAuthenticator {
     /// Breakpoint IDs by the request kind they report.
     private var breakpointKinds: [String: CefPasskeyRequest.Kind] = [:]
     private var mainFrameID: String?
-    private var listeners: [Task<Void, Never>] = []
+    private var listeners: [(method: String, token: UUID)] = []
     /// The authenticator put in place for the latest call.
     private var authenticatorID: String?
     /// Credentials Chromium reported, by the authenticator that reported them.
@@ -73,22 +73,23 @@ final class CefPasskeyAuthenticator {
         try await devTools.send("Runtime.enable")
     }
 
-    /// Ends the event streams. The browser's DevTools session ends with it.
+    /// Stops listening. The browser's DevTools session ends with it.
     func stop() {
-        listeners.forEach { $0.cancel() }
+        guard let devTools = browser?.devTools else { return }
+        for (method, token) in listeners { devTools.removeListener(token, for: method) }
         listeners = []
     }
 
+    /// Listens synchronously, so events are handled in the order Chromium
+    /// sends them: a script's `scriptParsed` before the pause in it.
     private func listen(
         _ devTools: CefDevTools, _ event: String, _ handler: @escaping @MainActor (CefPasskeyAuthenticator, CefJSON) -> Void
     ) {
-        let stream = devTools.events(event)
-        listeners.append(Task { [weak self] in
-            for await parameters in stream {
-                guard let self else { return }
-                handler(self, parameters)
-            }
-        })
+        let token = devTools.addListener(for: event) { [weak self] parameters in
+            guard let self else { return }
+            handler(self, parameters)
+        }
+        listeners.append((event, token))
     }
 
     // MARK: Contexts and breakpoints

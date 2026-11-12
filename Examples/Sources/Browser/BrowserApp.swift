@@ -19,6 +19,9 @@ struct BrowserApp: CefSwiftApp {
         configuration.customSchemes = [CefCustomScheme(name: BrowserPages.scheme)]
         // Quit immediately on ⌘Q instead of Chromium's "Hold ⌘Q to Quit".
         configuration.preferences["browser.confirm_to_quit"] = false
+        if let path = UserDefaults.standard.string(forKey: "cacheDirectory") {
+            configuration.rootCacheDirectory = URL(fileURLWithPath: path, isDirectory: true)
+        }
         return configuration
     }
 
@@ -40,6 +43,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         CefRuntime.shared.registerSchemeHandler(scheme: BrowserPages.scheme, handler: BrowserPages())
         Appearance.current.apply()
+        MemorySaver.current.apply()
         controller.adoptTabsOpenedByChromium()
         // Launching the app again while it runs opens a tab, or the
         // addresses it was given (`Browser https://swift.org`).
@@ -51,6 +55,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let launch = LaunchOptions()
         let urls = launch.urls.isEmpty ? [nil] : launch.urls.map(Optional.some)
+        if launch.benchmarks { reportFirstLoadAndQuitWhenInputCloses() }
         let browsers = urls.map { controller.openTab(url: $0, isPrivate: launch.opensPrivateTabs) }
         if let browser = browsers.last, launch.script != nil || launch.focusesAddressBar {
             Task {
@@ -70,6 +75,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     }
                 }
             }
+        }
+    }
+
+    /// `-benchmark YES`: prints `cefswift-benchmark loaded <seconds since
+    /// 1970>` when a page first finishes loading, and quits when standard
+    /// input closes. `Scripts/measure-footprint.py` drives it.
+    private func reportFirstLoadAndQuitWhenInputCloses() {
+        controller.onPageLoad = { [controller] _ in
+            print("cefswift-benchmark loaded \(Date().timeIntervalSince1970)")
+            fflush(stdout)
+            controller.onPageLoad = nil
+        }
+        Thread.detachNewThread {
+            while readLine() != nil {}
+            DispatchQueue.main.async { NSApp.terminate(nil) }
         }
     }
 
@@ -95,6 +115,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 ///   shows its suggestions.
 /// - `-private YES` opens the tabs as private tabs.
 /// - `-appearance dark` (or `light`, `system`) overrides the setting.
+/// - `-cacheDirectory <path>` keeps Chromium's data there.
+/// - `-benchmark YES` reports the first finished load and quits when
+///   standard input closes, for `Scripts/measure-footprint.py`.
 @MainActor
 struct LaunchOptions {
     var urls: [URL] = []
@@ -102,6 +125,7 @@ struct LaunchOptions {
     var focusesAddressBar = false
     var addressBarText: String?
     var opensPrivateTabs = false
+    var benchmarks = false
 
     init(defaults: UserDefaults = .standard) {
         urls = (defaults.string(forKey: "urls") ?? "")
@@ -110,6 +134,7 @@ struct LaunchOptions {
         script = defaults.string(forKey: "evaluate")
         addressBarText = defaults.string(forKey: "addressBarText")
         opensPrivateTabs = defaults.bool(forKey: "private")
+        benchmarks = defaults.bool(forKey: "benchmark")
         focusesAddressBar = defaults.bool(forKey: "focusAddressBar") || addressBarText != nil
     }
 
@@ -143,6 +168,33 @@ enum Appearance: String, CaseIterable {
         case .dark:
             NSApp.appearance = NSAppearance(named: .darkAqua)
             CefProfile.default.setColorScheme(.dark)
+        }
+    }
+}
+
+/// The Memory Saver setting: when tabs in the background are put to sleep.
+enum MemorySaver: String, CaseIterable {
+    case off, underPressure, after15Minutes, after1Hour
+
+    static var current: MemorySaver {
+        MemorySaver(rawValue: UserDefaults.standard.string(forKey: "memorySaver") ?? "") ?? .after1Hour
+    }
+
+    var title: String {
+        switch self {
+        case .off: "Off"
+        case .underPressure: "When Memory Is Low"
+        case .after15Minutes: "After 15 Minutes in the Background"
+        case .after1Hour: "After an Hour in the Background"
+        }
+    }
+
+    @MainActor func apply() {
+        CefRuntime.shared.memorySaver = switch self {
+        case .off: .off
+        case .underPressure: .underMemoryPressure
+        case .after15Minutes: .after(.seconds(15 * 60))
+        case .after1Hour: .after(.seconds(60 * 60))
         }
     }
 }
@@ -258,6 +310,7 @@ private struct BookmarkMenuItem: View {
 struct SettingsView: View {
     @AppStorage("newTabPage") private var newTabPage = BrowserController.defaultNewTabPage
     @AppStorage("appearance") private var appearance = Appearance.system.rawValue
+    @AppStorage("memorySaver") private var memorySaver = MemorySaver.current.rawValue
 
     var body: some View {
         Form {
@@ -268,6 +321,13 @@ struct SettingsView: View {
                 Text("Dark").tag(Appearance.dark.rawValue)
             }
             .onChange(of: appearance) { Appearance.current.apply() }
+            Picker(selection: $memorySaver) {
+                ForEach(MemorySaver.allCases, id: \.self) { Text($0.title).tag($0.rawValue) }
+            } label: {
+                Text("Put tabs to sleep")
+                Text("Sleeping tabs free their memory and reload when you return to them.")
+            }
+            .onChange(of: memorySaver) { MemorySaver.current.apply() }
             PasskeySettings()
         }
         .formStyle(.grouped)

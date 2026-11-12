@@ -104,6 +104,16 @@ extension SelfTest {
             policy.answer = { request in request.passkeys.first.map { .signIn(with: $0) } ?? .deny }
             let afterReload = await PasskeyCall.run(browser, "signIn()")
             check("\(name): a new document is watched too", afterReload.ok, detail: "\(afterReload)")
+
+            // Discarding closes an Alloy browser's Chromium browser; the
+            // new one must be set up again.
+            view?.isHidden = true
+            let discarded = (try? await browser.discard()) != nil && browser.isDiscarded
+            view?.isHidden = false
+            _ = await waitUntil { !browser.isDiscarded && !browser.isLoading && browser.title == "passkeys" }
+            let afterRestore = await PasskeyCall.run(browser, "signIn()")
+            check("\(name): the app still answers after a discard and restore",
+                  discarded && afterRestore.ok, detail: "discarded: \(discarded), \(afterRestore)")
         } else {
             if let passkey = saved.first { try? await store.remove(passkey) }
             check("\(name): removing from the store", (try? await store.passkeys())?.isEmpty == true)
@@ -127,7 +137,7 @@ extension SelfTest {
         check("passkeys (disabled): requests are refused without asking",
               !result.ok && result.error == "NotAllowedError" && policy.requests.isEmpty
                   && ContinuousClock.now - start < .seconds(5),
-              detail: "\(result)")
+              detail: "\(result) after \(ContinuousClock.now - start), \(policy.requests.count) asked")
         window.close()
         _ = await waitUntil { window.isClosed }
     }
