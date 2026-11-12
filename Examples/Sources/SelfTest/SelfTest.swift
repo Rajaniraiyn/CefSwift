@@ -40,8 +40,8 @@ enum SelfTest {
         window.makeKeyAndOrderFront(nil)
         NSApp.activate()
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 180) {
-            print("FAIL watchdog: checks did not finish in 180s")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 240) {
+            print("FAIL watchdog: checks did not finish in 240s")
             exit(124)
         }
         Task {
@@ -70,6 +70,7 @@ enum SelfTest {
         await profileChecks()
         await browserWindowChecks()
         await browserBehaviorChecks()
+        await internalPageDataChecks()
         await chromeWindowChecks()
     }
 
@@ -270,6 +271,90 @@ enum SelfTest {
         check("browser window: closes", await waitUntil { browserWindow.isClosed && browser.state == .closed })
     }
 
+    /// Bookmarks, history, most-visited and autocomplete reach Chromium
+    /// through its internal pages; these checks catch a Chromium update that
+    /// moves them.
+    static func internalPageDataChecks() async {
+        let profile = CefProfile.default
+        let bookmarks = profile.bookmarks
+        var bookmarkChanges = 0
+        let watcher = Task { for await _ in bookmarks.changes { bookmarkChanges += 1 } }
+        defer { watcher.cancel() }
+
+        await expect("bookmarks: tree has the permanent folders") {
+            try await bookmarks.tree().contains { $0.permanentFolder == .bookmarksBar }
+        }
+        let bookmarkURL = URL(string: "https://selftest.invalid/zanzibar")!
+        var added: CefBookmark?
+        await expect("bookmarks: add") {
+            added = try await bookmarks.add(bookmarkURL, title: "CefSwift Zanzibar Bookmark")
+            return added?.url == bookmarkURL && added?.isFolder == false
+        }
+        var folder: CefBookmark?
+        if let added {
+            await expect("bookmarks: read back") { try await bookmarks.bookmark(added.id)?.title == "CefSwift Zanzibar Bookmark" }
+            await expect("bookmarks: search") { try await bookmarks.search("zanzibar").contains { $0.id == added.id } }
+            await expect("bookmarks: by URL") { try await bookmarks.bookmarks(for: bookmarkURL).map(\.id) == [added.id] }
+            await expect("bookmarks: folder, update, move") {
+                let created = try await bookmarks.addFolder("CefSwift Folder")
+                folder = created
+                try await bookmarks.update(added.id, title: "CefSwift Zanzibar Renamed")
+                try await bookmarks.move(added.id, to: created.id)
+                let children = try await bookmarks.children(of: created.id)
+                return children.map(\.title) == ["CefSwift Zanzibar Renamed"] && children[0].parentID == created.id
+            }
+            check("bookmarks: change events", await waitUntil(timeout: .seconds(5)) { bookmarkChanges >= 4 },
+                  detail: "\(bookmarkChanges) events")
+        }
+
+        // Visit a page in a Chrome-style browser so Chromium records it.
+        let visitedURL = URL(string: "selftest://app/history-probe.html")!
+        let visitor = CefBrowserWindow(browser: CefBrowser(url: visitedURL))
+        check("history: page visited", await waitUntil { visitor.browser.title == "CefSwift History Probe" })
+        visitor.close()
+        _ = await waitUntil { visitor.isClosed }
+
+        let history = profile.history
+        var entry: CefHistoryEntry?
+        check("history: visit found", await waitUntilAsync(timeout: .seconds(15)) {
+            entry = try? await history.search("History Probe").first { $0.url == visitedURL }
+            return entry != nil
+        })
+        if let entry {
+            check("history: entry details", entry.title == "CefSwift History Probe" && !entry.visitDates.isEmpty
+                  && abs(entry.lastVisitDate.timeIntervalSinceNow) < 120)
+        }
+        check("history: most visited includes the visit", await waitUntilAsync(timeout: .seconds(20)) {
+            (try? await history.mostVisited().contains { $0.url == visitedURL }) == true
+        })
+
+        await expect("autocomplete: bookmark ranked for a title prefix") {
+            let suggestions = try await profile.autocomplete.suggestions(for: "CefSwift Zanzib")
+            return suggestions.contains { $0.kind == .bookmark && $0.url == bookmarkURL && $0.isBookmarked }
+        }
+        await expect("autocomplete: address prefix finds the bookmark") {
+            let suggestions = try await profile.autocomplete.suggestions(for: "selftest.invalid/zan")
+            return suggestions.contains { $0.url == bookmarkURL } && suggestions.contains { $0.kind == .search }
+        }
+
+        check("internal pages: service browsers stay out of public lists",
+              CefRuntime.shared.browsers.isEmpty && CefBrowserWindow.all.isEmpty,
+              detail: "\(CefRuntime.shared.browsers.count) browsers, \(CefBrowserWindow.all.count) windows")
+
+        if let entry {
+            await expect("history: remove") {
+                try await history.remove([entry])
+                return try await history.search("History Probe").allSatisfy { $0.url != visitedURL }
+            }
+        }
+        if let folder {
+            await expect("bookmarks: remove folder with contents") {
+                try await bookmarks.remove(folder.id)
+                return try await bookmarks.search("CefSwift Zanzibar").isEmpty
+            }
+        }
+    }
+
     static func chromeWindowChecks() async {
         var created: [CefBrowser] = []
         CefRuntime.shared.onBrowserCreated = { created.append($0) }
@@ -341,6 +426,8 @@ struct StaticPage: CefSchemeHandler {
                 """
         case "/second.html":
             html = "<title>second</title><h1>second</h1>"
+        case "/history-probe.html":
+            html = "<title>CefSwift History Probe</title><h1>history</h1>"
         default:
             html = "ok"
         }

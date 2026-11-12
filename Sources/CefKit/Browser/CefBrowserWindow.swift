@@ -82,6 +82,10 @@ public final class CefBrowserWindow: Identifiable {
     /// Every open browser window, in creation order.
     public private(set) static var all: [CefBrowserWindow] = []
 
+    /// How many windows Chromium has yet to destroy, hidden service windows
+    /// included. Shutting down has to wait for this to reach zero.
+    private(set) static var liveCount = 0
+
     @ObservationIgnored private var cefWindow: CefRef<cef_window_t>?
     @ObservationIgnored private var browserView: CefRef<cef_browser_view_t>?
     @ObservationIgnored private var accessoryController: NSTitlebarAccessoryViewController?
@@ -92,6 +96,7 @@ public final class CefBrowserWindow: Identifiable {
         self.browser = browser
         self.configuration = configuration
         Self.all.append(self)
+        Self.liveCount += 1
 
         let viewDelegate = BrowserViewDelegate(toolbar: configuration.toolbar, window: self)
         browserView = CefRef(adopting: browser.createBrowserView(delegate: viewDelegate.makeDelegate()))
@@ -106,11 +111,21 @@ public final class CefBrowserWindow: Identifiable {
         self.configuration = configuration
         self.isPopup = true
         Self.all.append(self)
+        Self.liveCount += 1
         browserView = popupView
         createWindow()
     }
 
     @ObservationIgnored private var isPopup = false
+
+    /// A hidden window hosting an internal-page service browser
+    /// (``CefProfile/bookmarks`` and friends). Such windows are left out of
+    /// ``all``.
+    @ObservationIgnored var isService = false {
+        didSet {
+            if isService { Self.all.removeAll { $0 === self } }
+        }
+    }
 
     private func createWindow() {
         // Creation is synchronous: windowCreated(_:) has run by the time
@@ -278,6 +293,7 @@ public final class CefBrowserWindow: Identifiable {
         browserView = nil
         isClosed = true
         Self.all.removeAll { $0 === self }
+        Self.liveCount -= 1
         onClose?()
         CefRuntime.shared.continueTerminationIfReady()
     }
