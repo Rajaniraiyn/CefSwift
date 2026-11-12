@@ -9,6 +9,10 @@ enum CefLog {
         logger.error("\(message, privacy: .public)")
     }
 
+    static func notice(_ message: String) {
+        logger.notice("\(message, privacy: .public)")
+    }
+
     static func info(_ message: String) {
         logger.info("\(message, privacy: .public)")
     }
