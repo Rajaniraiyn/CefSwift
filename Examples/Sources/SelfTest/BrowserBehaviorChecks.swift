@@ -67,7 +67,7 @@ extension SelfTest {
         _ = await waitUntil { browser.title == "opener" }
 
         await expect("popup: requested size is reported") {
-            try await browser.evaluateJavaScript("window.__popup = window.open('popup.html', 'p', 'width=420,height=360'); 0")
+            try await browser.evaluateJavaScript("window.__popup = window.open('popup.html', 'p', 'width=420,height=360'); 0", userGesture: true)
             guard await waitUntil(timeout: .seconds(5), { popups.count == 1 }) else { return false }
             return popups[0].browser.popupFeatures?.size == CGSize(width: 420, height: 360)
         }
@@ -82,7 +82,7 @@ extension SelfTest {
         check("popup: leaves its opener's child windows", opener.window?.childWindows?.isEmpty != false)
 
         await expect("popup: closing the opener with a popup open is clean") {
-            try await browser.evaluateJavaScript("window.open('popup.html', 'q', 'width=300,height=200'); 0")
+            try await browser.evaluateJavaScript("window.open('popup.html', 'q', 'width=300,height=200'); 0", userGesture: true)
             guard await waitUntil(timeout: .seconds(5), { popups.count == 2 }) else { return false }
             let popup = popups[1]
             opener.close()
@@ -158,7 +158,7 @@ extension SelfTest {
         window.show()
         _ = await waitUntil { browser.title == "leave" }
         // beforeunload needs the page to have seen a user gesture.
-        _ = try? await browser.evaluateJavaScript("document.body.click(); 0")
+        _ = try? await browser.evaluateJavaScript("document.body.click(); 0", userGesture: true)
 
         recorder.leavesPage = false
         window.close()

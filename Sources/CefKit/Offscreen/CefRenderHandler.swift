@@ -2,6 +2,7 @@ import AppKit
 import CCef
 import Foundation
 import IOSurface
+import CefBase
 
 /// A frame painted by an offscreen browser.
 ///
@@ -29,7 +30,15 @@ public enum CefOffscreenPaintElement: Sendable {
 
 /// The geometry an offscreen host reports to Chromium.
 ///
-/// Call ``CefBrowser/hostViewDidResize()`` after the size changes and
+/// Positions are in screen points with a top-left origin at the top-left
+/// corner of the primary display, the coordinates Chromium uses for
+/// windowed browsers too. Pages read them as `window.screenX` and
+/// `screenY`, `outerWidth` and `outerHeight`, `screen.width` and
+/// `screen.availWidth` and the like, so report the real window and screen:
+/// a page sees an offscreen browser as the window it is shown in.
+///
+/// Call ``CefBrowser/hostViewDidResize()`` after the size changes,
+/// ``CefBrowser/hostViewDidMove()`` after the view's window moves, and
 /// ``CefBrowser/hostViewDidChangeBackingProperties()`` after the scale or
 /// screen changes.
 public struct CefOffscreenViewInfo: Sendable {
@@ -37,22 +46,39 @@ public struct CefOffscreenViewInfo: Sendable {
     public var size: CGSize
     /// The backing scale factor, such as `2` on Retina displays.
     public var deviceScaleFactor: CGFloat
-    /// The view's top-left corner in screen points (top-left origin), used
-    /// to place popups and convert view coordinates to screen coordinates.
+    /// The view's top-left corner on screen, used to place popups and
+    /// convert view coordinates to screen coordinates.
     public var screenOrigin: CGPoint
-    /// The screen's frame in points, used to keep popups on screen.
+    /// The frame of the screen showing the view.
     public var screenFrame: CGRect
+    /// The part of that screen windows can use, without the menu bar and
+    /// the Dock (`NSScreen.visibleFrame`); `screen.availWidth` and the
+    /// like. `nil` uses ``screenFrame``.
+    public var screenVisibleFrame: CGRect?
+    /// The frame of the window showing the view, title bar included;
+    /// `window.screenX`, `outerWidth` and the like. `nil` reports the view
+    /// itself as the window.
+    public var windowFrame: CGRect?
+    /// The screen's color depth in bits per pixel, `screen.colorDepth`:
+    /// 24, or 30 for a wide-gamut display, as Chromium reports it.
+    public var screenColorDepth: Int
 
     public init(
         size: CGSize = CGSize(width: 1, height: 1),
         deviceScaleFactor: CGFloat = 1,
         screenOrigin: CGPoint = .zero,
-        screenFrame: CGRect = CGRect(x: 0, y: 0, width: 1, height: 1)
+        screenFrame: CGRect = CGRect(x: 0, y: 0, width: 1, height: 1),
+        screenVisibleFrame: CGRect? = nil,
+        windowFrame: CGRect? = nil,
+        screenColorDepth: Int = 24
     ) {
         self.size = size
         self.deviceScaleFactor = deviceScaleFactor
         self.screenOrigin = screenOrigin
         self.screenFrame = screenFrame
+        self.screenVisibleFrame = screenVisibleFrame
+        self.windowFrame = windowFrame
+        self.screenColorDepth = screenColorDepth
     }
 }
 
@@ -121,11 +147,18 @@ extension CefBrowserClient {
             let info = CefBrowserClient.offscreenViewInfo(s)
             let screen = cef_rect_t(info.screenFrame)
             screenInfo.pointee.device_scale_factor = Float(info.deviceScaleFactor)
-            screenInfo.pointee.depth = 24
-            screenInfo.pointee.depth_per_component = 8
+            screenInfo.pointee.depth = Int32(info.screenColorDepth)
+            screenInfo.pointee.depth_per_component = Int32(info.screenColorDepth / 3)
             screenInfo.pointee.is_monochrome = 0
             screenInfo.pointee.rect = screen
-            screenInfo.pointee.available_rect = screen
+            screenInfo.pointee.available_rect = info.screenVisibleFrame.map(cef_rect_t.init) ?? screen
+            return 1
+        }
+
+        handler.pointee.get_root_screen_rect = { s, browser, rect in
+            cefRelease(browser)
+            guard let rect, let window = CefBrowserClient.offscreenViewInfo(s).windowFrame else { return 0 }
+            rect.pointee = cef_rect_t(window)
             return 1
         }
 

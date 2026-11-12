@@ -145,7 +145,7 @@ extension SelfTest {
             tone.connect(gain).connect(context.destination);
             tone.start();
             context.state
-            """)
+            """, userGesture: true)  // Audio starts only after a user gesture.
         pinned.browser.allowsDiscarding = false
         try? await Task.sleep(for: .seconds(1))
         windows.forEach { $0.hide() }

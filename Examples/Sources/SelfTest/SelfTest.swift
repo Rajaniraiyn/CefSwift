@@ -103,6 +103,7 @@ enum SelfTest {
         ("favicon", faviconChecks),
         ("toolbarAndZoom", toolbarAndZoomChecks),
         ("bridgeScope", bridgeScopeChecks),
+        ("compatibility", compatibilityChecks),
         ("internalPages", internalPageDataChecks),
         ("serviceLifetime", serviceLifetimeChecks),
         ("serviceHosts", serviceHostChecks),
@@ -230,6 +231,7 @@ enum SelfTest {
 
         browser.load(URL(string: "selftest://app/second.html")!)
         check("navigation: history", await waitUntil { browser.title == "second" && browser.canGoBack })
+        print("dbg", (try? await browser.evaluateJavaScript("[typeof app, typeof app.invoke, typeof app.greet, String(Object.getOwnPropertyNames(window).filter(k => k === 'app')), location.href]").text) ?? "error")
         await expect("bridge survives navigation") {
             try await browser.evaluateJavaScript("app.greet({name: 'Bob'})").stringValue == "Hello, Bob from main!"
         }
@@ -339,7 +341,7 @@ enum SelfTest {
                 "getComputedStyle(document.body).getPropertyValue('--cefswift-probe').trim()").stringValue == "7"
         }
         await expect("browser window: popup is hosted by the app") {
-            try await browser.evaluateJavaScript("window.open('about:blank', '_blank', 'width=320,height=240'); 0")
+            try await browser.evaluateJavaScript("window.open('about:blank', '_blank', 'width=320,height=240'); 0", userGesture: true)
             let arrived = await waitUntil(timeout: .seconds(5)) { !popups.isEmpty }
             return arrived && popups[0].window != nil && popups[0].browser.opener === browser
         }
@@ -539,6 +541,21 @@ struct StaticPage: CefSchemeHandler {
                 """
         case "/second.html":
             html = "<title>second</title><h1>second</h1>"
+        case "/compat.html":
+            // What bot-detection pages read about the browser, at document
+            // start (CompatibilityChecks.swift).
+            html = """
+                <title>compat</title>
+                <script>
+                  const start = performance.now();
+                  debugger;
+                  window.__debuggerMs = performance.now() - start;
+                  window.__globals = Object.getOwnPropertyNames(window)
+                    .filter(name => /cefswift|cdc_|__pw|puppeteer|webdriver/i.test(name));
+                  window.__webdriver = navigator.webdriver;
+                </script>
+                <h1>compat</h1>
+                """
         case "/history-probe.html":
             html = "<title>CefSwift History Probe</title><h1>history</h1>"
         default:

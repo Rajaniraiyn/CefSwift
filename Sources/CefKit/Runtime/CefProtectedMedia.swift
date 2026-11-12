@@ -1,4 +1,5 @@
 import CCef
+import CefBase
 import Foundation
 
 /// Whether Chromium can play protected (DRM) media through Encrypted Media

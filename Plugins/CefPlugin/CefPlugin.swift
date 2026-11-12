@@ -230,7 +230,7 @@ struct CefPlugin: CommandPlugin {
             print("[cef] Bundling prebuilt \(mainExecutable.path)")
         } else {
             mainExecutable = try buildProduct(
-                named: productName, configuration: configuration, context: context,
+                named: productName, kind: .executable, configuration: configuration, context: context,
                 manifest: manifest, linkerFlags: Self.frameworkLinkerFlags(framework),
                 forceCLIBuild: forceCLIBuild
             )
@@ -238,7 +238,7 @@ struct CefPlugin: CommandPlugin {
         let minimumSystemVersion = appConfig?.minimumSystemVersion
             ?? MachOVersion.minimumSystemVersion(of: mainExecutable) ?? "14.0"
 
-        // 4. Compile the helper against the framework.
+        // 4. Build the helper against the framework.
         let helper: HelperBuilder.Products
         if let testHelperExe {
             helper = .init(
@@ -246,18 +246,14 @@ struct CefPlugin: CommandPlugin {
                 startupLibrary: URL(fileURLWithPath: testHelperExe).deletingLastPathComponent()
                     .appendingPathComponent(HelperBuilder.startupLibraryName))
         } else {
-            guard let packageDirectory = HelperBuilder.cefSwiftPackageDirectory(in: context.package) else {
-                throw CefPluginError(
-                    "Could not find the CefSwift package among \(context.package.displayName)'s dependencies. " +
-                    "Add CefSwift as a dependency of the package you bundle from.")
-            }
             helper = try HelperBuilder(
-                packageDirectory: packageDirectory,
                 framework: framework,
-                platform: platform,
-                minimumSystemVersion: minimumSystemVersion,
                 workDirectory: context.pluginWorkDirectoryURL.appendingPathComponent("helper")
-            ).build()
+            ).build { product, kind, linkerFlags in
+                try buildProduct(
+                    named: product, kind: kind, configuration: configuration, context: context,
+                    manifest: manifest, linkerFlags: linkerFlags, forceCLIBuild: forceCLIBuild)
+            }
         }
 
         let outputDirectory = outputPath.map { packageRelative($0, context: context) }
@@ -482,11 +478,13 @@ struct CefPlugin: CommandPlugin {
         ["-F", framework.deletingLastPathComponent().path, "-weak_framework", "Chromium Embedded Framework"]
     }
 
-    /// Builds a product through SwiftPM. A product SwiftPM cannot build that
-    /// way, such as one from a dependency, falls back to `swift build` in
-    /// the package holding the manifest.
+    /// Builds a product through SwiftPM and returns the built file. A
+    /// product SwiftPM cannot build that way, such as one from a
+    /// dependency, falls back to `swift build` in the package holding the
+    /// manifest.
     private func buildProduct(
         named productName: String,
+        kind: PackageManager.BuildResult.BuiltArtifact.Kind,
         configuration: PackageManager.BuildConfiguration,
         context: PluginContext,
         manifest: CefManifest,
@@ -494,6 +492,7 @@ struct CefPlugin: CommandPlugin {
         forceCLIBuild: Bool
     ) throws -> URL {
         print("[cef] Building product '\(productName)' (\(configuration))…")
+        let fileName = kind == .dynamicLibrary ? "lib\(productName).dylib" : productName
 
         let proxyFailure: String
         if forceCLIBuild {
@@ -504,13 +503,13 @@ struct CefPlugin: CommandPlugin {
                     configuration: configuration, logging: .concise, echoLogs: true)
                 parameters.otherLinkerFlags = linkerFlags
                 let result = try packageManager.build(.product(productName), parameters: parameters)
-                let executables = result.builtArtifacts.filter { $0.kind == .executable }
+                let artifacts = result.builtArtifacts.filter { $0.kind == kind }
                 if result.succeeded,
-                   let artifact = executables.first(where: { $0.url.lastPathComponent == productName })
-                       ?? executables.first {
+                   let artifact = artifacts.first(where: { $0.url.lastPathComponent == fileName })
+                       ?? (kind == .executable ? artifacts.first : nil) {
                     return artifact.url
                 }
-                proxyFailure = result.succeeded ? "the build produced no executable" : result.logText
+                proxyFailure = result.succeeded ? "the build produced no \(fileName)" : result.logText
             } catch {
                 proxyFailure = "\(error)"
             }
@@ -518,7 +517,11 @@ struct CefPlugin: CommandPlugin {
 
         // The running `swift package` holds the lock on the invoking package's
         // .build directory, so the fallback builds into its own scratch path.
-        let providerRoot = manifest.sourceURL.deletingLastPathComponent()
+        // A product of a dependency, such as CefSwift's helper, builds in the
+        // package that declares it.
+        let providerRoot = HelperBuilder.isHelperProduct(productName)
+            ? (HelperBuilder.cefSwiftPackageDirectory(in: context.package) ?? manifest.sourceURL.deletingLastPathComponent())
+            : manifest.sourceURL.deletingLastPathComponent()
         let configName = configuration == .release ? "release" : "debug"
         let scratch = context.pluginWorkDirectoryURL.appendingPathComponent("fallback-build")
         print("[cef] PackageManager build of '\(productName)' did not yield a binary; " +
@@ -535,7 +538,7 @@ struct CefPlugin: CommandPlugin {
         ] + linkerFlags.flatMap { ["-Xlinker", $0] })
         let binary = scratch
             .appendingPathComponent(configName)
-            .appendingPathComponent(productName)
+            .appendingPathComponent(fileName)
         guard status == 0, FileManager.default.fileExists(atPath: binary.path) else {
             throw CefPluginError(
                 "Could not build product '\(productName)'.\n" +

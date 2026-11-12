@@ -1,6 +1,7 @@
 import CCef
 import Foundation
 import Observation
+import CefBase
 
 /// A device content can be cast to: a Cast receiver or a DIAL device.
 public struct CefMediaSink: Identifiable, Hashable, Sendable {

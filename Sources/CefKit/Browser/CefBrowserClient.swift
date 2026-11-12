@@ -1,6 +1,7 @@
 import AppKit
 import CCef
 import Foundation
+import CefBase
 
 /// The `cef_client_t` and handler structs behind one or more browsers.
 ///
@@ -154,6 +155,18 @@ final class CefBrowserClient {
         client.pointee.get_find_handler = { CefBrowserClient.handler($0) }
         client.pointee.get_command_handler = { CefBrowserClient.handler($0) }
         client.pointee.get_render_handler = { CefBrowserClient.handler($0) }
+        client.pointee.on_process_message_received = { s, browser, frame, _, message in
+            let received = message.map(CefProcessMessage.init(reading:))
+            cefRelease(message)
+            guard let received, let frame = CefRef(adopting: frame) else {
+                cefRelease(browser)
+                return 0
+            }
+            let frameBox = frame
+            return CefBrowserClient.run(s, browser, default: 0) { _, b in
+                b.pageScripting.received(received, from: frameBox) ? 1 : 0
+            }
+        }
         return client
     }
 
@@ -186,11 +199,12 @@ final class CefBrowserClient {
             CefBrowserClient.run(s, browser, default: ()) { client, b in client.browserClosed(b) }
         }
         h.pointee.on_before_popup = {
-            s, browser, frame, _, targetURL, targetFrameName, disposition, userGesture, features, _, _, _, _, _ in
+            s, browser, frame, _, targetURL, targetFrameName, disposition, userGesture, features, _, _, _, extraInfo, _ in
             cefRelease(frame)
             let url = URL(string: CefStringUtil.string(from: targetURL))
             let frameName = CefStringUtil.string(from: targetFrameName)
             let popupFeatures = features.map { CefPopupFeatures(raw: $0.pointee) } ?? CefPopupFeatures()
+            nonisolated(unsafe) let extraInfo = extraInfo
             // Non-zero cancels CEF's own popup.
             return CefBrowserClient.run(s, browser, default: 0) { client, b in
                 let request = CefWindowOpenRequest(
@@ -204,6 +218,12 @@ final class CefBrowserClient {
                 )
                 let isHandled = b.route(request)
                 client.pendingPopupFeatures = isHandled ? nil : popupFeatures
+                // A popup gets its opener's bridges and user scripts, like
+                // the CefBrowser that wraps it.
+                if !isHandled, let extraInfo, extraInfo.pointee == nil {
+                    extraInfo.pointee = CefPageScripting.makeExtraInfo(CefPageScripting.configuration(
+                        bridges: b.options.bridges, scripts: b.options.userScripts, generation: 0))
+                }
                 return isHandled ? 1 : 0
             }
         }
@@ -580,6 +600,7 @@ final class CefBrowserClient {
         h.pointee.on_render_process_terminated = { s, browser, status, _, _ in
             let reason = CefTerminationReason(cefValue: status)
             CefBrowserClient.run(s, browser, default: ()) { _, b in
+                b.pageScripting.failPendingEvaluations()
                 b.delegate?.browser(b, renderProcessDidTerminate: reason)
             }
         }

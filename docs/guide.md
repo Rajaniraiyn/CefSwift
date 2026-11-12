@@ -34,6 +34,7 @@ are `@MainActor`.
 - [Profiles](#profiles)
   - [Bookmarks, history and suggestions](#bookmarks-history-and-suggestions)
 - [DevTools](#devtools)
+- [Compatibility with bot protection](#compatibility-with-bot-protection)
 - [Serving your own content](#serving-your-own-content)
 - [Playing streaming services](#playing-streaming-services)
   - [Widevine in Chromium](#widevine-in-chromium)
@@ -126,7 +127,7 @@ Common options:
 | `rootCacheDirectory`, `cacheDirectory` | Where profile data lives. Defaults to `~/Library/Application Support/<bundle ID>/CefSwift`. |
 | `persistsSessionCookies` | Whether session cookies survive a relaunch. |
 | `locale`, `acceptLanguages` | UI locale and `Accept-Language` list. |
-| `userAgent`, `userAgentProduct` | The whole User-Agent string, or its product part. |
+| `userAgent` | How the browser names itself to sites: Chromium's own, with your product's token, or a string of your own. See [Compatibility with bot protection](#compatibility-with-bot-protection). |
 | `logSeverity`, `logFile` | Chromium's log. |
 | `remoteDebuggingPort` | Exposes the DevTools Protocol on a localhost port. Leave it `nil` in shipping apps. |
 | `defaultRuntimeStyle` | Chrome or Alloy style for browsers that do not choose. |
@@ -352,8 +353,8 @@ AppKit drives a view:
 
 - Lifecycle: `hostViewDidResize()`, `hostViewDidHide()`,
   `hostViewDidUnhide()`, `hostViewDidBecomeKey()`, `hostViewDidResignKey()`,
-  `hostViewDidChangeBackingProperties()`, and `displayIfNeeded()` on every
-  display refresh.
+  `hostViewDidChangeBackingProperties()`, and `hostViewDidMove()` when the
+  view's window moves.
 - Input: `sendMouseMove(to:modifiers:)`,
   `sendMouseDown(at:button:clickCount:modifiers:)`,
   `sendMouseUp(at:button:clickCount:modifiers:)`,
@@ -533,11 +534,18 @@ let count = try await browser.evaluateJavaScript("document.links.length").intVal
 let size = try await browser.evaluateJavaScript("({w: innerWidth, h: innerHeight})", as: Size.self)
 ```
 
-`evaluateJavaScript(_:)` runs in the main frame, waits for a returned
-promise, and returns the value as `CefJSON`. The `as:` form decodes it into
-any `Decodable` type. An exception thrown by the script arrives as
-`CefJavaScriptError`. `executeJavaScript(_:)` runs a script without waiting
-for a result.
+`evaluateJavaScript(_:)` runs in the main frame's own JavaScript context,
+waits for a returned promise, and returns the value as `CefJSON`. The `as:`
+form decodes it into any `Decodable` type. An exception thrown by the script
+arrives as `CefJavaScriptError`, and so does a navigation that replaces the
+page before the result is ready. `executeJavaScript(_:)` runs a script
+without waiting for a result.
+
+Some web APIs need a user gesture: opening a popup, entering fullscreen,
+starting audio, a `beforeunload` prompt. `evaluateJavaScript(_:userGesture:
+true)` runs the script as if the user had just clicked. Only the DevTools
+Protocol can do that, so it attaches `devTools` to the browser; see
+[Compatibility with bot protection](#compatibility-with-bot-protection).
 
 ### User scripts and style sheets
 
@@ -555,14 +563,19 @@ options.userScripts = [
 - `matching:` limits a script to URLs that match the pattern as a whole,
   where `*` stands for any run of characters. A matched script runs inside a
   function, so its top-level declarations are not global.
-- `isolatedWorldName:` runs the script in an isolated world the page cannot
-  see.
+- `injectionTime: .documentEnd` runs the script when the document has been
+  parsed (`DOMContentLoaded`), before the page's own listeners for it.
+- `frames: .mainFrame` runs it in top-level documents only; by default it
+  runs in every frame, cross-site frames included.
+- Scripts share the page's globals: CEF's API has no isolated worlds.
 - `CefUserScript.styleSheet(_:matching:includingShadowRoots:)` adds CSS. With
   `includingShadowRoots` (the default) its rules also apply inside every
   shadow root, including roots whose component sets its own
   `adoptedStyleSheets`.
 - `browser.addUserScript(_:)` adds a script after creation; it applies from
-  the next document on.
+  the next document on. A renderer process the browser moves to later
+  learns of it as its first document of the browser starts, and runs it
+  from the next one.
 
 A selector cannot cross a shadow boundary, even when the rules reach inside
 shadow roots. If `#row` lives in the shadow root of `settings-section`, the
@@ -592,13 +605,15 @@ const reply = await app.greet({ name: "Ada" });
 const stop = app.on("themeChanged", theme => apply(theme));
 ```
 
-- The global exists before any page script runs.
+- The global exists before any page script runs, in every frame `access`
+  permits, cross-site frames and popups included.
 - A handler that throws rejects the promise.
 - `bridge.emit("themeChanged", theme)` delivers an event to `app.on`
   listeners, in every browser the bridge is attached to or in one
   (`to: browser`).
 - `CefBridgeCall` describes the caller: `browser`, `method`, `origin` and
-  `isMainFrame`. Chromium reports the origin and frame, so a page cannot
+  `isMainFrame`. The renderer reads the origin from the document and the
+  browser process checks it against the frame's address, so a page cannot
   forge them.
 
 Handlers run with your app's privileges, so `bridge.access` decides where
@@ -610,9 +625,8 @@ the global exists:
 | `.origins(["https://app.example.com"])` | Documents from the listed origins, in any frame. |
 | `.anyFrame` | Every document. Use it only for browsers that show nothing but your own content. |
 
-A document outside `access` has no global and no way to reach the bridge's
-underlying binding. Calls are checked again in Swift against the origin and
-frame Chromium reports. A change to `access` applies to calls at once and to
+A document outside `access` has no global and no way to reach the bridge.
+Calls are checked again in Swift against the caller's origin and frame. A change to `access` applies to calls at once and to
 the global from the next document load:
 
 ```swift
@@ -722,6 +736,11 @@ func browser(_ browser: CefBrowser, decideDestinationFor download: CefDownload, 
 | `.chromium` (default) | Chromium, with its own dialog and authenticators. |
 | `.app(store)` | Your app, from a `CefPasskeyStore`, through the delegate. Chromium's dialog and authenticators are not used. |
 | `.disabled` | Nobody: every call rejects with `NotAllowedError`. |
+
+`.app` and `.disabled` take the calls over through the DevTools Protocol,
+with a debugger that stops each document as it starts; pages can observe
+both ([Compatibility with bot protection](#compatibility-with-bot-protection)).
+Use them for browsers that show your own or trusted pages.
 
 With `.chromium`, what Chromium can offer depends on how the app is
 signed and configured. The `passkeys` capability of `cef bundle` adds what
@@ -1121,9 +1140,8 @@ a selector cannot cross a shadow boundary: write `#themeRow`, not
 `settings-appearance-page #themeRow`, because the row lives in that
 component's shadow root. Matching rows by the preference they edit
 (`settings-toggle-button[pref-key="browser.show_home_button"]`) holds up
-across Chromium updates better than matching by position. On `chrome://`
-pages, scripts run as the page starts loading rather than before its own
-scripts, and scripts with an `isolatedWorldName` do not run.
+across Chromium updates better than matching by position. Scripts run
+on `chrome://` pages as on any other, before the page's own scripts.
 
 **Replacing a page.** Cancel the navigation and load a page of your own,
 served from a [custom scheme](#serving-your-own-content):
@@ -1273,6 +1291,108 @@ first.
 `browser.showDevTools()` opens the DevTools window, and
 `showDevTools(inspecting:)` inspects the element at a point in view
 coordinates.
+
+## Compatibility with bot protection
+
+Sites behind bot protection read what a page can observe about the browser
+and compare it with what stock browsers show. A CefSwift browser is the
+browser a person is using; this section lists what CefSwift itself adds
+that a page can observe, the settings that decide how the app names itself,
+and the differences from Google Chrome that come with CEF.
+`Scripts/compat-matrix.py` measures all of it against local and public
+test pages, in each kind of host, with each feature on by itself, and in
+Chrome for comparison.
+
+### What a page sees of CefSwift
+
+Nothing, for a browser that uses no bridge, user script or DevTools
+feature: no global, no injected script, no DevTools session, and
+`navigator.webdriver` is `false`. No preset passes a switch that sets it
+(`--enable-automation`, `--headless`, `--remote-debugging-pipe`,
+`--remote-debugging-port=0`); `remoteDebuggingPort` does not either, but
+it opens a debugging port to anything on the machine, so leave it `nil` in
+shipping apps.
+
+Bridges, user scripts and `evaluateJavaScript(_:)` run in the helper's
+renderer code with the V8 API, without the DevTools Protocol. A page sees
+a bridge's global, where `access` allows it, and what a user script or an
+evaluated script does, and nothing else: the bridge's functions are native
+functions, and scripts leave no `sourceURL`. A script that returns a
+promise is awaited through the promise's `then`, which the page could
+replace.
+
+### Features that use the DevTools Protocol
+
+These attach `devTools` to the browser. CEF keeps the session attached
+until the browser closes. A session with no protocol domain enabled
+changes nothing a page can measure; an enabled domain can be seen.
+
+| Feature | What attaches | What a page can observe |
+|---|---|---|
+| `browser.devTools` | Whatever you send | `Runtime.enable` makes every `console` call serialize its arguments: logging a large object takes 2–3 times as long. `Debugger.enable` stops the page at `debugger` statements. `Page.enable`, `Network.enable` and the like: nothing measured. |
+| `CefPasskeyMode.app` and `.disabled` | `WebAuthn`, `Debugger`, `Page` and `Runtime`, for the browser's lifetime | Each `debugger` statement takes about 10 ms (CefKit resumes at once), and `console` calls serialize their arguments as above. Use `.chromium` for browsers that show sites you do not control. |
+| `evaluateJavaScript(_:userGesture: true)` | `Runtime.evaluate`, no domain | The gesture itself. |
+| `snapshot()` | `Page.captureScreenshot`, no domain | Nothing measured. |
+| `discard()` | `Runtime.evaluate` and `DOMDebugger.getEventListeners`, no domain | Nothing measured; the page is about to be unloaded. |
+| Offscreen accessibility actions | `Accessibility` for the length of one lookup; `DOM.focus`, `DOM.scrollIntoViewIfNeeded`, `Input.insertText` | Nothing measured. Only an assistive app's actions use it. |
+
+CefKit's own services (bookmarks, history, suggestions) use the protocol
+only in hidden browsers that show Chromium's own pages.
+
+### How the app names itself
+
+`CefConfiguration.userAgent` sets the `User-Agent` header and
+`navigator.userAgent`:
+
+| Choice | `User-Agent` | Client hints |
+|---|---|---|
+| `.chromium` (default) | `… AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36` | All |
+| `.appendingProduct("MyApp/1.0")` | `… Chrome/156.0.0.0 MyApp/1.0 Safari/537.36` | All |
+| `.replacingProduct("MyApp/1.0")` | `… (KHTML, like Gecko) MyApp/1.0 Safari/537.36` | All |
+| `.custom("…")` | That string | Low-entropy ones only: `getHighEntropyValues()` returns no versions or architecture |
+
+The client hints (`Sec-CH-UA` and `navigator.userAgentData`) name the
+brands `Chromium` and a GREASE brand, as every Chromium build does; Chrome
+adds `Google Chrome`. CEF has no setting for them. The DevTools Protocol's
+`Emulation.setUserAgentOverride` changes them per browser, at the cost of
+an attached session. Sites look for an engine they know in the
+`User-Agent`, compare it with the client hints, and compare both with what
+the page can measure; a `User-Agent` that names another browser than the
+one running fails those comparisons.
+
+### Offscreen browsers
+
+An offscreen browser reports the window it is shown in: `screenX`,
+`screenY`, `outerWidth` and `outerHeight` are the window's,
+`screen.availWidth` and the like leave out the menu bar and the Dock,
+`screen.colorDepth` and `devicePixelRatio` are the display's, and
+`document.visibilityState` follows whether the view can be seen. Pages lose
+focus when the view stops being first responder in the key window, as in a
+browser window. `CefOffscreenViewInfo` carries these values; a custom
+`CefOffscreenHost` should fill in all of them. Chromium times the frames
+itself at the browser's frame rate (`.offscreen(frameRate:)`, 60 by
+default), so `requestAnimationFrame` runs as often as in a window.
+
+### Differences that stay
+
+These come with CEF and Chromium as CefSwift uses them; no setting of
+CefSwift's changes them, and some need a different Chromium build:
+
+- **Client hint brands**: `Chromium` and no `Google Chrome`, as above.
+- **Codecs**: CEF's standard builds have no H.264, AAC or HEVC, so
+  `canPlayType('video/mp4; codecs="avc1.42E01E"')` returns `""` where Chrome
+  returns `"probably"`. Adding them takes a CEF build with
+  `proprietary_codecs` and the licenses that come with them.
+- **Google services**: no Google network voices for speech synthesis
+  (Chrome lists about 20 more), no Safe Browsing, sync or Google sign-in.
+- **Alloy style** (`CefWebView`): CEF answers Chromium's media permission
+  check with "allowed", so `navigator.mediaDevices.enumerateDevices()`
+  lists every camera, microphone and speaker before the user grants
+  anything, where Chrome lists one of each kind. Chrome-style browsers
+  (`CefBrowserWindow`) list what Chrome lists. Browse the web in
+  `CefBrowserWindow`.
+- **The window**: `outerHeight - innerHeight` is your window's title bar
+  and toolbar, not Chrome's; it is what the window is.
 
 ## Serving your own content
 

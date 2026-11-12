@@ -27,6 +27,13 @@ let package = Package(
             dependencies: [.product(name: "CefSwiftUI", package: "CefSwift")],
             exclude: ["cefapp.json"]
         ),
+        // One page in one host with chosen CefSwift features: the
+        // web-compatibility matrix (Scripts/compat-matrix.py).
+        .executableTarget(
+            name: "Compat",
+            dependencies: [.product(name: "CefSwiftUI", package: "CefSwift")],
+            exclude: ["cefapp.json"]
+        ),
         // End-to-end checks against the real Chromium runtime; CI runs it.
         .executableTarget(
             name: "SelfTest",

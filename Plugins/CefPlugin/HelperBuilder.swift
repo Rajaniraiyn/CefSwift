@@ -1,9 +1,9 @@
 import Foundation
 import PackagePlugin
 
-/// Compiles the helper executable and its startup library from the C
-/// sources in `Plugins/CefPlugin/Helper/`, against the framework being
-/// bundled.
+/// Builds the helper executable and its startup library, CefSwift's
+/// `cefswift-helper` and `cefswift_helper_startup` products, against the
+/// framework being bundled.
 ///
 /// The helper links the framework when it launches rather than loading it
 /// with `dlopen`: the kernel then fixes up the framework's pointers as
@@ -14,22 +14,21 @@ import PackagePlugin
 struct HelperBuilder {
     /// The startup library's file name in the app's `Contents/Frameworks/`.
     static let startupLibraryName = "libcefswift_helper_startup.dylib"
+    static let helperProduct = "cefswift-helper"
+    static let startupProduct = "cefswift_helper_startup"
 
     /// The framework's path from a helper executable,
     /// `<App>.app/Contents/Frameworks/<Helper>.app/Contents/MacOS/<Helper>`.
     static let frameworkPathFromHelper =
         "@executable_path/../../../Chromium Embedded Framework.framework/Chromium Embedded Framework"
-    static let sandboxLibraryPathFromHelper =
-        "@executable_path/../../../Chromium Embedded Framework.framework/Libraries/libcef_sandbox.dylib"
     static let startupLibraryPathFromHelper = "@executable_path/../../../\(startupLibraryName)"
 
-    /// CefSwift's package directory, which holds the sources and headers.
-    let packageDirectory: URL
+    static func isHelperProduct(_ name: String) -> Bool {
+        name == helperProduct || name == startupProduct
+    }
+
     /// The converted `Chromium Embedded Framework.framework` in `.cef/dist`.
     let framework: URL
-    /// `macosarm64` or `macosx64`.
-    let platform: String
-    let minimumSystemVersion: String
     let workDirectory: URL
 
     struct Products {
@@ -37,60 +36,40 @@ struct HelperBuilder {
         let startupLibrary: URL
     }
 
-    func build() throws -> Products {
+    /// Builds both products with `buildProduct` (a product name, its kind
+    /// and extra linker flags; the built file), then points the helper at
+    /// the libraries' places in the bundle.
+    func build(
+        _ buildProduct: (String, PackageManager.BuildResult.BuiltArtifact.Kind, [String]) throws -> URL
+    ) throws -> Products {
         let fm = FileManager.default
         try? fm.removeItem(at: workDirectory)
         try fm.createDirectory(at: workDirectory, withIntermediateDirectories: true)
 
-        let sources = packageDirectory.appendingPathComponent("Plugins/CefPlugin/Helper")
-        let headers = packageDirectory.appendingPathComponent("Sources/CCef/include")
-        let startupLibrary = workDirectory.appendingPathComponent(Self.startupLibraryName)
-        let executable = workDirectory.appendingPathComponent("cefswift-helper")
-        let common = [
-            "-O2", "-Wall", "-Wextra",
-            "-arch", platform == "macosx64" ? "x86_64" : "arm64",
-            "-mmacosx-version-min=\(minimumSystemVersion)",
-            // Room for the longer library paths install_name_tool writes.
-            "-headerpad_max_install_names",
-        ]
-
-        print("[cef] Compiling the helper…")
-        try compile(common + [
-            "-dynamiclib", "-install_name", Self.startupLibraryPathFromHelper,
-            sources.appendingPathComponent("helper_startup.c").path,
-            framework.appendingPathComponent("Libraries/libcef_sandbox.dylib").path,
-            "-o", startupLibrary.path,
-        ])
-        try changeLibraryPath(
-            of: startupLibrary,
-            from: installName(of: framework.appendingPathComponent("Libraries/libcef_sandbox.dylib")),
-            to: Self.sandboxLibraryPathFromHelper)
-
-        try compile(common + [
-            "-I", headers.path,
-            sources.appendingPathComponent("helper_main.c").path,
-            // The startup library must precede the framework.
-            startupLibrary.path,
+        // Room for the longer library paths install_name_tool writes.
+        let builtStartup = try buildProduct(Self.startupProduct, .dynamicLibrary, ["-headerpad_max_install_names"])
+        let builtHelper = try buildProduct(Self.helperProduct, .executable, [
+            // Drop libraries the helper does not use, such as Foundation,
+            // which the build system links by default; keep the two below,
+            // in this order: the startup library, then the framework.
+            "-dead_strip_dylibs",
+            "-needed_library", builtStartup.path,
             "-F", framework.deletingLastPathComponent().path,
-            "-framework", "Chromium Embedded Framework",
-            "-o", executable.path,
+            "-needed_framework", "Chromium Embedded Framework",
+            "-headerpad_max_install_names",
         ])
+
+        let startupLibrary = workDirectory.appendingPathComponent(Self.startupLibraryName)
+        let executable = workDirectory.appendingPathComponent(Self.helperProduct)
+        try fm.copyItem(at: builtStartup, to: startupLibrary)
+        try fm.copyItem(at: builtHelper, to: executable)
+        try setInstallName(of: startupLibrary, to: Self.startupLibraryPathFromHelper)
+        try changeLibraryPath(of: executable, from: installName(of: builtStartup), to: Self.startupLibraryPathFromHelper)
         try changeLibraryPath(
             of: executable,
             from: installName(of: framework.appendingPathComponent("Chromium Embedded Framework")),
             to: Self.frameworkPathFromHelper)
-
         return Products(executable: executable, startupLibrary: startupLibrary)
-    }
-
-    private func compile(_ arguments: [String]) throws {
-        let result = try Shell.run("/usr/bin/xcrun", ["clang"] + arguments)
-        guard result.exitCode == 0 else {
-            throw CefPluginError(
-                "Could not compile the CefSwift helper:\n\(result.stderr)\n" +
-                "The helper is compiled with the Xcode toolchain's clang (xcrun clang). Check that " +
-                "'xcrun clang --version' works.")
-        }
     }
 
     /// A library's install name, as `otool -D` prints it.
@@ -102,6 +81,12 @@ struct HelperBuilder {
             throw CefPluginError("\(library.path) has no install name. Run 'swift package cef clean' and bundle again.")
         }
         return String(name)
+    }
+
+    private func setInstallName(of library: URL, to name: String) throws {
+        try Shell.runChecked(
+            "/usr/bin/xcrun", ["install_name_tool", "-id", name, library.path],
+            hint: "Could not set the install name of \(library.lastPathComponent).")
     }
 
     private func changeLibraryPath(of binary: URL, from old: String, to new: String) throws {

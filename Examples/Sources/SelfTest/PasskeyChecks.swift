@@ -94,8 +94,13 @@ extension SelfTest {
             // A user gesture reaches the delegate; a waiting, ignored request
             // does not keep a later one from being answered.
             policy.answer = { request in request.hasUserGesture ? (request.passkeys.first.map { .signIn(with: $0) } ?? .deny) : .ignore }
-            browser.executeJavaScript("window.__waiting = signIn({ timeout: 60000 })")
+            // Chromium allows one pending request per frame, so the ignored
+            // one times out (Chromium waits at least 10 seconds) before the click.
+            browser.executeJavaScript("window.__waiting = signIn({ timeout: 1000 })")
             _ = await waitUntil(timeout: .seconds(5)) { policy.requests.last?.hasUserGesture == false && policy.requests.count == 4 }
+            _ = await waitUntilAsync(timeout: .seconds(15)) {
+                (try? await browser.evaluateJavaScript("window.__waiting.then(() => true, () => true)").boolValue) == true
+            }
             let clicked = await PasskeyCall.click(browser)
             check("\(name): a click's request carries its user gesture",
                   policy.requests.last?.hasUserGesture == true && clicked.ok, detail: "\(clicked)")

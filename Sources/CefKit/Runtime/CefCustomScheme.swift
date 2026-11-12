@@ -1,5 +1,6 @@
 import CCef
 import Foundation
+import CefBase
 
 /// A URL scheme of your own, such as `myapp://`.
 ///
@@ -61,7 +62,7 @@ public struct CefCustomScheme: Sendable, Equatable {
 extension CefCustomScheme {
     /// The switch that carries the scheme list to helper processes, as
     /// `--cefswift-schemes=name:options,name:options`. The helper's parser
-    /// is in `Plugins/CefPlugin/Helper/helper_main.c`.
+    /// is `CefHelper.parseSchemes` in `Sources/CefRenderer/CefHelper.swift`.
     static let childProcessSwitchName = "cefswift-schemes"
 
     /// Encodes a scheme list as the switch value.
