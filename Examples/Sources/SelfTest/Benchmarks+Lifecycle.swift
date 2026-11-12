@@ -1,5 +1,5 @@
 import AppKit
-import CefKit
+@_spi(Testing) import CefKit
 import CefSwiftUI
 import Darwin
 
@@ -29,7 +29,7 @@ final class HostedBenchmarkBrowser {
             var configuration = CefBrowserWindow.Configuration()
             configuration.frame = frame
             let browserWindow = CefBrowserWindow(browser: browser, configuration: configuration)
-            self.browserWindow = browserWindow
+            self.browserWindow = browserWindow; browserWindow.show()
             guard await SelfTest.waitUntil({ browserWindow.window != nil }), let window = browserWindow.window else { return nil }
             self.window = window; window.level = .floating
         case .windowed, .offscreen:
@@ -128,15 +128,44 @@ extension Benchmarks {
                 let end = ProcessCPU.sample()
                 let page = try? await hosted.browser.evaluateJavaScript("[document.visibilityState, window.__raf, document.hasFocus()]")
                 let used = ProcessCPU.used(from: start, to: end)
+                if name == "visible", !hosted.window.occlusionState.contains(.visible) {
+                    let frame = hosted.window.frame
+                    let infos = CGWindowListCopyWindowInfo([.optionOnScreenAboveWindow], CGWindowID(hosted.window.windowNumber))
+                        as? [[String: Any]] ?? []
+                    for info in infos {
+                        let bounds = (info[kCGWindowBounds as String] as? [String: CGFloat]) ?? [:]
+                        print("bench note: above \(info[kCGWindowOwnerName as String] ?? "?") layer \(info[kCGWindowLayer as String] ?? "?") bounds \(bounds) (window \(frame))")
+                    }
+                }
                 print(String(
-                    format: "bench lifecycle %@ %@: CPU %.1f%% (app %.1f%%), page %@, rAF %.0f/s, focus %@",
+                    format: "bench lifecycle %@ %@: CPU %.1f%% (app %.1f%%), page %@, rAF %.0f/s, focus %@; window visible %@, lifecycle %@",
                     host.rawValue, name, used.total / interval * 100, used.app / interval * 100,
                     page?[0].stringValue ?? "?", (page?[1].doubleValue ?? 0) / interval,
-                    page?[2].boolValue == true ? "yes" : "no"))
+                    page?[2].boolValue == true ? "yes" : "no",
+                    hosted.window.occlusionState.contains(.visible) ? "yes" : "no", "\(hosted.browser.lifecycle)"))
                 leave()
                 try? await Task.sleep(for: .seconds(1.5))
             }
             cover.close()
+            await hosted.close()
+        }
+        // An offscreen page at the energy saver's frame rate and at full rate.
+        if let hosted = await HostedBenchmarkBrowser(.offscreen, url: URL(string: "selftest://bench/animated.html")!) {
+            _ = await SelfTest.waitUntil { hosted.browser.title == "animated" }
+            for (label, saver) in [("energy saver off", CefEnergySaver.off), ("Low Power Mode, energy saver on", .automatic)] {
+                CefRuntime.shared.energySaver = saver
+                CefRuntime.shared.simulateEnergyConditions(lowPowerMode: true, thermalState: .nominal)
+                try? await Task.sleep(for: .seconds(1.5))
+                _ = try? await hosted.browser.evaluateJavaScript("window.__raf = 0")
+                let start = ProcessCPU.sample()
+                try? await Task.sleep(for: .seconds(interval))
+                let used = ProcessCPU.used(from: start, to: ProcessCPU.sample())
+                let raf = (try? await hosted.browser.evaluateJavaScript("window.__raf").doubleValue) ?? 0
+                print(String(format: "bench lifecycle offscreen visible, %@: CPU %.1f%% (app %.1f%%), rAF %.0f/s",
+                             label, used.total / interval * 100, used.app / interval * 100, raf / interval))
+            }
+            CefRuntime.shared.energySaver = .automatic
+            CefRuntime.shared.stopSimulatingEnergyConditions()
             await hosted.close()
         }
         SelfTest.window.orderFront(nil)
@@ -157,15 +186,31 @@ extension Benchmarks {
         let fps = window.screen?.maximumFramesPerSecond ?? 60
         print("bench frames display \(fps) Hz")
 
+        CefRuntime.shared.energySaver = .off
+        defer { CefRuntime.shared.energySaver = .automatic }
+        // (label, external begin frames, frame rate, a second request 4 ms after each refresh)
+        let timings: [(String, Bool, Int, Bool)] = [
+            ("chromium timer, rate 60", false, 60, false),
+            ("display link, rate 30", true, 30, false),
+            ("display link, rate 60", true, 60, false),
+            ("display link, rate 120", true, 120, false),
+            ("display link, rate 240", true, 240, false),
+            ("display link + 4 ms retry, rate 60", true, 60, true),
+        ]
+        let only = UserDefaults.standard.string(forKey: "frameTiming")
+        for (label, external, rate, retry) in timings where only == nil || label.hasPrefix(only!) {
+        CefBrowser.usesExternalBeginFrames = external
         var options = CefBrowserOptions()
-        options.rendering = .offscreen
+        options.rendering = .offscreen(frameRate: rate)
         let browser = CefBrowser(url: URL(string: "selftest://bench/frames.html")!, options: options)
+        probe.drive(external ? browser : nil, retry: retry)
         browser.host(offscreenIn: probe, size: probe.bounds.size)
         browser.hostViewDidUnhide()
         _ = await SelfTest.waitUntil { browser.title == "frames" }
         try? await Task.sleep(for: .seconds(1))
+        print("bench frames \(label): window visible \(window.occlusionState.contains(.visible)), rate \(browser.currentOffscreenFrameRate ?? -1)")
 
-        for run in 1...3 {
+        for run in 1...2 {
             // Animation frames for 3 s.
             probe.paints = []
             let start = ProcessCPU.sample()
@@ -203,8 +248,11 @@ extension Benchmarks {
                 latencies.isEmpty ? 0 : latencies[latencies.count / 2],
                 latencies.isEmpty ? 0 : latencies[latencies.count * 9 / 10], latencies.count))
         }
+        probe.drive(nil, retry: false)
         browser.close(force: true)
         _ = await SelfTest.waitUntil { browser.state == .closed }
+        }
+        CefBrowser.usesExternalBeginFrames = false
         window.close()
         SelfTest.window.orderFront(nil)
     }
@@ -220,6 +268,31 @@ extension Benchmarks {
 @MainActor
 final class FrameProbeView: NSView, CefOffscreenHost {
     var paints: [CFTimeInterval] = []
+    private var displayLink: CADisplayLink?
+    private weak var driven: CefBrowser?
+    private var retries = false
+
+    /// Requests a frame from `browser` on every display refresh (and again
+    /// 4 ms later with `retry`); `nil` stops.
+    func drive(_ browser: CefBrowser?, retry: Bool) {
+        displayLink?.invalidate()
+        displayLink = nil
+        driven = browser
+        retries = retry
+        guard browser != nil else { return }
+        let link = displayLink(target: self, selector: #selector(refresh))
+        link.add(to: .main, forMode: .common)
+        displayLink = link
+    }
+
+    @objc private func refresh() {
+        driven?.sendExternalBeginFrame()
+        if retries {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.004) { [weak self] in
+                MainActor.assumeIsolated { self?.driven?.sendExternalBeginFrame() }
+            }
+        }
+    }
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -274,6 +347,17 @@ extension BenchmarkPages {
         </script>
         """
 
+    static let timersPage = """
+        <title>timers</title>
+        <script>
+          window.__ticks = []; window.__events = [];
+          setInterval(() => window.__ticks.push(performance.now()), 50);
+          document.addEventListener('freeze', () => window.__events.push('freeze'));
+          document.addEventListener('resume', () => window.__events.push('resume'));
+          document.addEventListener('visibilitychange', () => window.__events.push(document.visibilityState));
+        </script>
+        """
+
     static let framesPage = """
         <title>frames</title>
         <style>body { margin: 0; background: #fff; } #dot { position: absolute; width: 20px; height: 20px; background: #c33; }
@@ -289,6 +373,90 @@ extension BenchmarkPages {
 }
 
 extension Benchmarks {
+    /// `probes`: whether `Page.setWebLifecycleState` freezes a hidden
+    /// page's timers, and how late the app's main-thread timers fire while
+    /// the app is hidden, with and without a page playing audio (App Nap).
+    static func probes() async {
+        SelfTest.window.orderOut(nil)
+        guard let hosted = await HostedBenchmarkBrowser(.offscreen, url: URL(string: "selftest://bench/timers.html")!) else { return }
+        _ = await SelfTest.waitUntil { hosted.browser.title == "timers" }
+
+        // Freezing.
+        hosted.browser.hostViewDidHide()
+        try? await Task.sleep(for: .seconds(1))
+        _ = try? await hosted.browser.evaluateJavaScript("window.__ticks = []; window.__events = []")
+        _ = try? await hosted.browser.devTools.send("Page.setWebLifecycleState", ["state": "frozen"])
+        try? await Task.sleep(for: .seconds(3))
+        _ = try? await hosted.browser.devTools.send("Page.setWebLifecycleState", ["state": "active"])
+        try? await Task.sleep(for: .seconds(1))
+        let frozen = try? await hosted.browser.evaluateJavaScript("""
+            (() => { const t = window.__ticks; let gap = 0; for (let i = 1; i < t.length; i++) gap = Math.max(gap, t[i] - t[i - 1]);
+              return [t.length, Math.round(gap), window.__events.join(','), document.visibilityState, document.wasDiscarded ?? null]; })()
+            """)
+        print("bench probes freeze: ticks \(frozen?[0].text ?? "?") over 4 s, longest gap \(frozen?[1].text ?? "?") ms, events \(frozen?[2].text ?? "?"), visibility \(frozen?[3].text ?? "?")")
+        // CPU of a hidden page with busy timers, then frozen.
+        _ = try? await hosted.browser.evaluateJavaScript(
+            "setInterval(() => { const end = performance.now() + 20; while (performance.now() < end); }, 50); 0")
+        for state in ["hidden", "frozen"] {
+            if state == "frozen" { _ = try? await hosted.browser.devTools.send("Page.setWebLifecycleState", ["state": "frozen"]) }
+            try? await Task.sleep(for: .seconds(2))
+            let start = ProcessCPU.sample()
+            try? await Task.sleep(for: .seconds(8))
+            let used = ProcessCPU.used(from: start, to: ProcessCPU.sample())
+            print(String(format: "bench probes busy timers, %@: CPU %.2f%% (app %.2f%%)", state, used.total / 8 * 100, used.app / 8 * 100))
+        }
+        _ = try? await hosted.browser.devTools.send("Page.setWebLifecycleState", ["state": "active"])
+        print("bench probes NSAppSleepDisabled default: \(UserDefaults.standard.object(forKey: "NSAppSleepDisabled") ?? "unset")")
+        hosted.browser.hostViewDidUnhide()
+
+        // App Nap.
+        for withAudio in [false, true] {
+            if withAudio {
+                _ = try? await hosted.browser.evaluateJavaScript("""
+                    (() => { const c = new AudioContext(); const o = c.createOscillator(); const g = c.createGain(); g.gain.value = 0.0001;
+                      o.connect(g).connect(c.destination); o.start(); window.__audio = c; return c.state; })()
+                    """, userGesture: true)
+            }
+            NSApp.hide(nil)
+            var lateness: [Double] = []
+            var last = CACurrentMediaTime()
+            let timer = Timer(timeInterval: 0.05, repeats: true) { _ in
+                let now = CACurrentMediaTime()
+                MainActor.assumeIsolated {
+                    lateness.append((now - last - 0.05) * 1000)
+                    last = now
+                }
+            }
+            RunLoop.main.add(timer, forMode: .common)
+            try? await Task.sleep(for: .seconds(25))
+            timer.invalidate()
+            let assertions = shell("/usr/bin/pmset", ["-g", "assertions"])
+                .split(separator: "\n").filter { line in
+                    line.contains("pid \(getpid())") || ProcessCPU.sample().keys.contains { line.contains("pid \($0)(") }
+                }
+            NSApp.unhide(nil)
+            lateness.sort()
+            print(String(format: "bench probes app hidden, audio %@: timer lateness median %.1f ms, p99 %.1f ms, max %.1f ms (%d fires)",
+                         withAudio ? "on" : "off", lateness.isEmpty ? 0 : lateness[lateness.count / 2],
+                         lateness.isEmpty ? 0 : lateness[lateness.count * 99 / 100], lateness.last ?? 0, lateness.count))
+            assertions.forEach { print("bench probes assertion: \($0.trimmingCharacters(in: .whitespaces))") }
+            try? await Task.sleep(for: .seconds(1))
+        }
+        await hosted.close()
+    }
+
+    static func shell(_ path: String, _ arguments: [String]) -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: path)
+        process.arguments = arguments
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        try? process.run()
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        return String(decoding: data, as: UTF8.self)
+    }
+
     /// `visibility`: what a windowed page reports as its window is shown,
     /// covered, minimized and hidden, for a browser hosted before and after
     /// its window is shown.

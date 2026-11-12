@@ -73,6 +73,26 @@ private func incrementFromUnknownContext() {
     }
 }
 
+@Suite struct EnergySaverTests {
+    @Test func constrainedInLowPowerModeOrUnderSeriousHeat() {
+        #expect(CefEnergyConditions(isLowPowerModeEnabled: true, thermalState: .nominal).isConstrained)
+        #expect(CefEnergyConditions(isLowPowerModeEnabled: false, thermalState: .serious).isConstrained)
+        #expect(CefEnergyConditions(isLowPowerModeEnabled: false, thermalState: .critical).isConstrained)
+        #expect(!CefEnergyConditions(isLowPowerModeEnabled: false, thermalState: .fair).isConstrained)
+    }
+
+    @Test func presets() {
+        #expect(CefEnergySaver.automatic.reducedOffscreenFrameRate == 30)
+        #expect(CefEnergySaver.off.reducedOffscreenFrameRate == nil)
+        #expect(CefEnergySaver(reducedOffscreenFrameRate: 0).reducedOffscreenFrameRate == 1)
+    }
+
+    @Test func lifecycleVisibility() {
+        #expect(CefBrowser.Lifecycle.active.isVisible && CefBrowser.Lifecycle.passive.isVisible)
+        #expect(!CefBrowser.Lifecycle.hidden.isVisible && !CefBrowser.Lifecycle.discarded.isVisible)
+    }
+}
+
 @Suite struct SchemeByteRangeTests {
     @Test func parsesSingleRanges() {
         #expect(SchemeByteRange(header: "bytes=0-99", totalLength: 1000) == .partial(0...99))

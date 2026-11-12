@@ -264,7 +264,9 @@ public final class CefBrowser: Identifiable {
     /// stays in your UI; dim its tab, for instance. It loads its page again
     /// when it is shown, navigated or used, and this turns `false` as that
     /// load starts.
-    public internal(set) var isDiscarded = false
+    public internal(set) var isDiscarded = false {
+        didSet { if isDiscarded != oldValue { CefRuntime.shared.lifecycleCoordinator.setNeedsUpdate() } }
+    }
     /// The page as it looked just before it was discarded, to show in its
     /// place while it loads again. `nil` when the browser is not discarded
     /// or the capture failed; released once the page has loaded again.
@@ -273,6 +275,10 @@ public final class CefBrowser: Identifiable {
     /// browser. Turn it off for tabs the user pinned, or pages that must
     /// keep running.
     public var allowsDiscarding = true
+    /// Where the page is in its lifecycle: whether the user can see it,
+    /// whether it has their input, or whether it is discarded. The page's
+    /// `document.visibilityState` agrees with it. See ``Lifecycle``.
+    public internal(set) var lifecycle = Lifecycle.hidden
 
     // MARK: Configuration
 
@@ -338,6 +344,16 @@ public final class CefBrowser: Identifiable {
     /// The view hosting this browser: the parent of a windowed browser's
     /// native view, or the offscreen host.
     @ObservationIgnored public internal(set) weak var hostView: NSView?
+    /// Whether the offscreen host last reported that it cannot be seen
+    /// (``hostViewDidHide()``).
+    @ObservationIgnored var isHostViewHidden = false
+    /// Whether the lifecycle coordinator hid a windowed browser's native
+    /// view, and the responder to give focus back to when it shows it.
+    @ObservationIgnored var lifecycleHidNativeView = false
+    @ObservationIgnored weak var responderBeforeLifecycleHide: NSResponder?
+    /// The offscreen frame rate the lifecycle coordinator last set; `nil`
+    /// for the rate the browser was created with.
+    @ObservationIgnored var appliedOffscreenFrameRate: Int?
 
     /// Whether Chromium is building the page's accessibility tree for an
     /// offscreen browser. See ``CefBrowserOptions/offscreenAccessibility``.
@@ -816,6 +832,7 @@ extension CefBrowser {
     /// this; call it yourself to host a browser in AppKit.
     public func host(windowedIn parentView: NSView) {
         guard state != .closed else { return }
+        CefRuntime.shared.lifecycleCoordinator.setNeedsUpdate()
         if client == nil {
             // A browser discarded by closing it comes back when shown.
             guard state == .pending || isDiscarded else { return }
@@ -886,10 +903,11 @@ extension CefBrowser {
         windowInfo.windowless_rendering_enabled = 1
         windowInfo.shared_texture_enabled = 1
         // Chromium times frames itself, at the browser's frame rate. Frames
-        // requested from outside (external begin frames) go out one at a
-        // time, each after the previous one is done, which runs a page's
-        // animation frames at about half the rate a window does.
-        windowInfo.external_begin_frame_enabled = 0
+        // requested from a display link (external begin frames) reach the
+        // same rate only with a frame rate at least the display's, and a
+        // mouse move then takes longer to reach a frame; see the
+        // architecture guide's "Frame timing".
+        windowInfo.external_begin_frame_enabled = Self.usesExternalBeginFrames ? 1 : 0
         windowInfo.bounds = cef_rect_t(CGRect(origin: .zero, size: size))
         windowInfo.runtime_style = CEF_RUNTIME_STYLE_ALLOY
         hostView = host as? NSView
@@ -947,6 +965,7 @@ extension CefBrowser {
     /// Takes over the live `cef_browser_t` once Chromium has created it.
     func adopt(_ raw: CefRef<cef_browser_t>) {
         self.raw = raw
+        appliedOffscreenFrameRate = nil
         identifier = raw.pointer.pointee.get_identifier(raw.pointer)
         let isRestoring = isDiscarded
         state = .live
@@ -955,6 +974,11 @@ extension CefBrowser {
         readyWaiters = []
         refreshZoomLevel()
         applyInitialAccessibilityState()
+        // A host that could not be seen when it asked for the browser told
+        // nobody: Chromium creates offscreen browsers visible.
+        if isOffscreen, isHostViewHidden {
+            withHost { $0.pointee.was_hidden($0, 1) }
+        }
         if isRestoring {
             discardPhase = .restoring
         } else {

@@ -49,13 +49,13 @@ public struct CefMemorySaver: Sendable, Equatable {
 
 /// Tracks how long each browser has been hidden, applies
 /// ``CefRuntime/memorySaver``, and brings back browsers discarded by closing
-/// them when their view is shown again.
+/// them when their view is shown again. The lifecycle coordinator reports
+/// every change of what is on screen.
 @MainActor
 final class CefMemorySaverMonitor {
     var policy = CefMemorySaver.off {
         didSet {
             guard policy != oldValue else { return }
-            startObserving()
             schedule()
         }
     }
@@ -63,34 +63,15 @@ final class CefMemorySaverMonitor {
     private var hiddenSince: [ObjectIdentifier: ContinuousClock.Instant] = [:]
     private var timer: Task<Void, Never>?
     private var pressureSource: DispatchSourceMemoryPressure?
-    private var observers: [NSObjectProtocol] = []
     private var isDiscarding = false
 
-    /// Starts following window changes. Needed from the first discard on,
-    /// since browsers discarded by closing them come back when shown.
-    func startObserving() {
-        guard observers.isEmpty else { return }
-        let names: [(NotificationCenter, Notification.Name)] = [
-            (.default, NSWindow.didChangeOcclusionStateNotification),
-            (.default, NSWindow.didDeminiaturizeNotification),
-            (.default, NSWindow.didBecomeKeyNotification),
-            (.default, NSApplication.didUnhideNotification),
-        ]
-        observers = names.map { center, name in
-            center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.visibilityDidChange() }
-            }
-        }
-    }
-
     func browserDidDiscard(_ browser: CefBrowser) {
-        startObserving()
         hiddenSince[ObjectIdentifier(browser)] = nil
     }
 
     /// Records which browsers are hidden, and restores discarded ones that
-    /// are on screen.
-    private func visibilityDidChange() {
+    /// are on screen. Called by ``CefLifecycleCoordinator``.
+    func visibilityDidChange() {
         updateHiddenBrowsers()
         for browser in CefRuntime.shared.browsers where browser.isDiscarded && browser.isOnScreen {
             switch browser.discardPhase {

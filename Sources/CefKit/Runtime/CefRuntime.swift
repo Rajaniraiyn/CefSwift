@@ -190,6 +190,7 @@ public final class CefRuntime {
         messagePump = pump
         pump.start()
         isInitialized = true
+        lifecycleCoordinator.start()
         applyApplicationWidePreferences(configuration.preferences)
         logCapabilities()
     }
@@ -359,6 +360,7 @@ public final class CefRuntime {
     // MARK: Browser registry / termination
 
     func register(_ browser: CefBrowser) {
+        lifecycleCoordinator.setNeedsUpdate()
         browsersByIdentifier[browser.identifier] = browser
         // Internal-page service browsers stay out of the public list. A
         // browser restored after a discard is listed already.
@@ -387,6 +389,7 @@ public final class CefRuntime {
 
     func unregister(_ browser: CefBrowser) {
         browsersByIdentifier[browser.identifier] = nil
+        browser.lifecycle = .hidden
         if browsers.contains(where: { $0 === browser }) {
             browsers.removeAll { $0 === browser }
             let profile = browser.options.profile ?? .default
@@ -406,7 +409,10 @@ public final class CefRuntime {
     /// from the run loop once nothing is left.
     func continueTerminationIfReady() {
         guard isTerminationRequested, hasNoBrowsers, CefBrowserWindow.liveCount == 0 else { return }
-        DispatchQueue.main.async { NSApp.terminate(nil) }
+        DispatchQueue.main.async {
+            self.replyToQuitEvent(cancelled: false)
+            NSApp.terminate(nil)
+        }
     }
 
     private var hasNoBrowsers: Bool { browsers.isEmpty && serviceBrowsers.isEmpty }
@@ -415,6 +421,37 @@ public final class CefRuntime {
     /// closing the last window later does not end the app.
     func cancelTermination() {
         isTerminationRequested = false
+        replyToQuitEvent(cancelled: true)
+    }
+
+    /// The quit Apple Event (from logging out, restarting, shutting down,
+    /// or another app) the app is answering by closing its browsers.
+    @ObservationIgnored private var suspendedQuitEvent: NSAppleEventManager.SuspensionID?
+
+    /// Holds back the reply to a quit Apple Event until the browsers have
+    /// closed, as `NSApplication.TerminateReply.terminateLater` does. The
+    /// sender, such as loginwindow, then waits for the answer instead of
+    /// reading an early reply.
+    private func suspendQuitEventIfNeeded() {
+        let manager = NSAppleEventManager.shared()
+        guard suspendedQuitEvent == nil, let event = manager.currentAppleEvent,
+              event.eventClass == AEEventClass(kCoreEventClass), event.eventID == AEEventID(kAEQuitApplication)
+        else { return }
+        suspendedQuitEvent = manager.suspendCurrentAppleEvent()
+    }
+
+    /// Answers a held quit event: done, or cancelled by a page that asked
+    /// to stay, which makes a logout or restart stop as it does when an
+    /// app cancels it.
+    private func replyToQuitEvent(cancelled: Bool) {
+        guard let suspension = suspendedQuitEvent else { return }
+        suspendedQuitEvent = nil
+        let manager = NSAppleEventManager.shared()
+        if cancelled {
+            manager.replyAppleEvent(forSuspensionID: suspension)
+                .setParam(NSAppleEventDescriptor(int32: Int32(userCanceledErr)), forKeyword: AEKeyword(keyErrorNumber))
+        }
+        manager.resume(withSuspensionID: suspension)
     }
 
     func browser(withIdentifier identifier: Int32) -> CefBrowser? {
@@ -435,13 +472,16 @@ public final class CefRuntime {
             // Not from inside Chromium's message loop work, where a Chrome
             // command or a page may have asked to quit.
             guard CefBrowserWindow.liveCount == 0, messagePump?.isPerformingWork != true else {
+                suspendQuitEventIfNeeded()
                 CefBrowserWindow.all.forEach { $0.close() }
                 continueTerminationIfReady()
                 return false
             }
+            replyToQuitEvent(cancelled: false)
             shutdown()
             return true
         }
+        suspendQuitEventIfNeeded()
         for browser in browsers {
             browser.close()
         }
@@ -487,6 +527,35 @@ public final class CefRuntime {
     }
 
     @ObservationIgnored private(set) lazy var memorySaverMonitor = CefMemorySaverMonitor()
+
+    // MARK: Energy Saver
+
+    /// When CefKit spends less energy on its own. `.automatic`, the
+    /// default, lowers offscreen browsers' frame rate to 30 while Low Power
+    /// Mode is on or the Mac is under serious thermal pressure.
+    ///
+    /// ```swift
+    /// CefRuntime.shared.energySaver = .off   // a game or video player
+    /// ```
+    public var energySaver: CefEnergySaver {
+        get { lifecycleCoordinator.energySaver }
+        set { lifecycleCoordinator.energySaver = newValue }
+    }
+
+    /// Low Power Mode and the thermal state as the energy saver should see
+    /// them, instead of the system's; `nil` reads the system's.
+    @_spi(Testing) public func simulateEnergyConditions(lowPowerMode: Bool, thermalState: ProcessInfo.ThermalState) {
+        lifecycleCoordinator.simulatedConditions = CefEnergyConditions(
+            isLowPowerModeEnabled: lowPowerMode, thermalState: thermalState)
+    }
+
+    @_spi(Testing) public func stopSimulatingEnergyConditions() {
+        lifecycleCoordinator.simulatedConditions = nil
+    }
+
+    /// Follows windows, the app and the system, and publishes each
+    /// browser's ``CefBrowser/lifecycle``.
+    @ObservationIgnored private(set) lazy var lifecycleCoordinator = CefLifecycleCoordinator()
 
     /// Discards Chrome-style browsers through Chromium's own tab discarding.
     @ObservationIgnored private(set) lazy var tabDiscarder = CefTabDiscarder()

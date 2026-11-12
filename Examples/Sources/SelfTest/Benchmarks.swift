@@ -23,6 +23,9 @@ enum Benchmarks {
         case "visibility":
             CefRuntime.shared.registerSchemeHandler(scheme: "selftest", domain: "bench", handler: BenchmarkPages())
             await windowedVisibility()
+        case "probes":
+            CefRuntime.shared.registerSchemeHandler(scheme: "selftest", domain: "bench", handler: BenchmarkPages())
+            await probes()
         case "frames":
             CefRuntime.shared.registerSchemeHandler(scheme: "selftest", domain: "bench", handler: BenchmarkPages())
             await frames()
@@ -101,6 +104,8 @@ struct BenchmarkPages: CefSchemeHandler {
                 """.utf8))
         case "/animated.html":
             return CefSchemeResponse(mimeType: "text/html", body: Data(Self.animatedPage.utf8))
+        case "/timers.html":
+            return CefSchemeResponse(mimeType: "text/html", body: Data(Self.timersPage.utf8))
         case "/frames.html":
             return CefSchemeResponse(mimeType: "text/html", body: Data(Self.framesPage.utf8))
         case "/big-data":

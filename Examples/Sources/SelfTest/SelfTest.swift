@@ -59,8 +59,8 @@ enum SelfTest {
         window.makeKeyAndOrderFront(nil)
         NSApp.activate()
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + (ServiceBenchmark.isRequested || Benchmarks.requested != nil ? 900 : 240)) {
-            print("FAIL watchdog: checks did not finish in 240s")
+        DispatchQueue.main.asyncAfter(deadline: .now() + (ServiceBenchmark.isRequested || Benchmarks.requested != nil ? 900 : 360)) {
+            print("FAIL watchdog: checks did not finish in 360s")
             exit(124)
         }
         Task {
@@ -85,7 +85,17 @@ enum SelfTest {
                     exit(Int32(failures))
                 }
             }
-            NSApp.terminate(nil)
+            if ProcessInfo.processInfo.environment["SELFTEST_QUIT"] == "logout" {
+                // As loginwindow asks when the user logs out.
+                let event = NSAppleEventDescriptor(
+                    eventClass: AEEventClass(kCoreEventClass), eventID: AEEventID(kAEQuitApplication),
+                    targetDescriptor: NSAppleEventDescriptor(processIdentifier: getpid()),
+                    returnID: AEReturnID(kAutoGenerateReturnID), transactionID: AETransactionID(kAnyTransactionID))
+                event.setParam(NSAppleEventDescriptor(enumCode: OSType(kAELogOut)), forKeyword: AEKeyword(kAEQuitReason))
+                _ = try? event.sendEvent(options: [.noReply], timeout: 5)
+            } else {
+                NSApp.terminate(nil)
+            }
         }
         NSApp.run()
     }
@@ -101,6 +111,8 @@ enum SelfTest {
         ("windowed", windowedBrowserChecks),
         ("offscreen", offscreenBrowserChecks),
         ("threads", threadChecks),
+        ("lifecycle", lifecycleChecks),
+        ("frames", frameChecks),
         ("accessibility", offscreenAccessibilityChecks),
         ("profile", profileChecks),
         ("browserWindow", browserWindowChecks),

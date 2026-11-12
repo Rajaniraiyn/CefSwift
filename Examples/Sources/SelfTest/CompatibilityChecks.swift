@@ -92,6 +92,10 @@ extension SelfTest {
     }
 
     private static func offscreenGeometryChecks() async {
+        // A window draws at the display's rate whatever the energy saver
+        // does; compare at full rate, as on a Mac on power.
+        CefRuntime.shared.energySaver = .off
+        defer { CefRuntime.shared.energySaver = .automatic }
         var options = CefBrowserOptions()
         options.rendering = .offscreen
         let browser = CefBrowser(url: URL(string: "selftest://app/compat.html")!, options: options)

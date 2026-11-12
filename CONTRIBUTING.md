@@ -63,13 +63,25 @@ Examples/dist/SelfTest.app/Contents/MacOS/SelfTest
 ```
 
 It prints one `PASS`, `FAIL` or `SKIP` line per check and exits with the
-number of failures, or 124 if it does not finish within 240 seconds. Keep the
+number of failures, or 124 if it does not finish within 360 seconds. Keep the
 screen unlocked while it runs; the offscreen painting check is skipped when
 its window cannot be seen. CI runs it on every pull request. Add a check in
 `Examples/Sources/SelfTest` for new behavior that crosses into CEF.
 `SELFTEST_ONLY=passkeys,discard` runs only the named groups of checks
 (`SelfTest.checkGroups` lists them), which is quicker while you work on one
 area.
+
+## Measure threads, lifecycle and frames
+
+`SelfTest -benchmark <name>` runs one measurement instead of the checks
+and prints `bench` lines: `requests` (500 small responses and a 200 MB one
+through a scheme handler: load time, main-thread busy time, peak memory),
+`lifecycle` (CPU time of an animated page in each host while visible,
+covered, minimized and with the app hidden), `frames` (offscreen frame
+rate, pacing, mouse-to-paint latency and CPU, with Chromium's timer and a
+display link; `-frameTiming <label prefix>` runs one) and `probes`
+(freezing and App Nap). Run them with nothing else on screen; note the
+power source and Low Power Mode, which change the numbers.
 
 ## Measure web compatibility
 

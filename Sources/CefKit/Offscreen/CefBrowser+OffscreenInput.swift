@@ -193,15 +193,44 @@ extension CefBrowser {
     /// Tells Chromium the host view can no longer be seen — hidden,
     /// occluded or out of a window. Hidden browsers stop painting.
     public func hostViewDidHide() {
+        isHostViewHidden = true
         withHost { $0.pointee.was_hidden($0, 1) }
+        CefRuntime.shared.lifecycleCoordinator.setNeedsUpdate()
     }
 
     /// Tells Chromium the host view can be seen again, and restores a
     /// discarded browser.
     public func hostViewDidUnhide() {
+        isHostViewHidden = false
         // A discarded browser comes back when it can be seen.
         if isDiscarded { restore() }
-        withHost { $0.pointee.was_hidden($0, 0) }
+        withHost { host in
+            host.pointee.was_hidden(host, 0)
+            // Showing the browser can bring back the rate it was created
+            // with; keep the energy saver's.
+            if let rate = appliedOffscreenFrameRate { host.pointee.set_windowless_frame_rate(host, Int32(rate)) }
+        }
+        CefRuntime.shared.lifecycleCoordinator.setNeedsUpdate()
+    }
+
+    /// Whether offscreen browsers created from now on wait for
+    /// ``sendExternalBeginFrame()`` instead of timing frames themselves.
+    /// For measuring frame timing.
+    @_spi(Testing) public static var usesExternalBeginFrames = false
+
+    /// Asks Chromium for one frame (`send_external_begin_frame`).
+    @_spi(Testing) public func sendExternalBeginFrame() {
+        withHost { $0.pointee.send_external_begin_frame($0) }
+    }
+
+    /// Sets the offscreen frame rate directly.
+    @_spi(Testing) public func setOffscreenFrameRate(_ rate: Int) {
+        withHost { $0.pointee.set_windowless_frame_rate($0, Int32(rate)) }
+    }
+
+    /// The frame rate Chromium draws this offscreen browser at now.
+    @_spi(Testing) public var currentOffscreenFrameRate: Int? {
+        withHost { Int($0.pointee.get_windowless_frame_rate($0)) }
     }
 
     /// Marks the whole view as needing to be repainted. The repaint arrives

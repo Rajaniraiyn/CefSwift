@@ -88,8 +88,8 @@ public struct CefSchemeResponse: Sendable {
         /// progress and Chromium can answer range requests.
         ///
         /// ```swift
-        /// let chunks = AsyncThrowingStream<Data, Error> { continuation in … }
-        /// return CefSchemeResponse(mimeType: "video/mp4", body: .stream(chunks, length: size))
+        /// // recording.chunks: an AsyncSequence of Data
+        /// return CefSchemeResponse(mimeType: "video/mp4", body: .stream(recording.chunks, length: recording.size))
         /// ```
         ///
         /// The sequence is iterated in a task of its own, at most about a

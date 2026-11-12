@@ -261,8 +261,28 @@ let browser = CefBrowser(url: URL(string: "https://swift.org")!, options: option
 ```
 
 A `requestFilter` sees every network request and returns `.allow`, `.block`,
-`.redirect(_:)` or `.setHeaders(_:)`. It runs on Chromium's IO thread, so it
-must be fast and must not touch main-actor state.
+`.redirect(_:)` or `.setHeaders(_:)`. Chromium waits for the answer on its
+IO thread, so the filter runs there, isolated to `CefIOActor`, and must be
+fast. State it keeps on `CefIOActor` needs no lock; state on the main actor
+it cannot read. Keep a copy on `CefIOActor` and update it from the main
+actor:
+
+```swift
+@CefIOActor var blockedHosts: Set<String> = []
+
+options.requestFilter = { @CefIOActor request in
+    blockedHosts.contains(request.url?.host() ?? "") ? .block : .allow
+}
+
+// When the user edits the list, on the main actor:
+let hosts = Set(settings.blockedHosts)
+Task { @CefIOActor in blockedHosts = hosts }
+```
+
+`CefIOActor` runs on Chromium's IO thread, which carries every request
+and message between processes: never block it. `CefFileActor` runs on
+Chromium's sequence for blocking work the user waits on, such as reading
+files.
 
 `favicon` is the page's icon as an `NSImage`, downloaded at up to 32 points
 from the address in `faviconURL`. Both are `nil` until the page reports an
@@ -526,6 +546,44 @@ its window is shown. A browser in a view is discarded by closing its
 Chromium browser and creating a new one in the same view; it stays in
 `CefRuntime.shared.browsers` meanwhile. Quitting with discarded browsers
 needs nothing special.
+
+## Lifecycle and energy
+
+`browser.lifecycle` says whether the user can see a page and whether it
+has their input, following the web's Page Lifecycle. It is observable, and
+the page's `document.visibilityState` agrees with it:
+
+| `lifecycle` | `visibilityState` | When |
+|---|---|---|
+| `.active` | `visible`, and `document.hasFocus()` | On screen, in the key window of the active app, with focus in the browser's view |
+| `.passive` | `visible` | On screen without focus |
+| `.hidden` | `hidden` | Its window is covered, minimized or ordered out, the app is hidden, its tab is not selected, or its view is hidden or out of a window |
+| `.discarded` | — | Discarded to free memory |
+
+```swift
+Text(browser.title)
+    .foregroundStyle(browser.lifecycle.isVisible ? .primary : .secondary)
+```
+
+A hidden page draws nothing and runs no animation frames, in every kind
+of host: for a browser in one of your views, CefKit hides Chromium's view
+while its window is minimized or ordered out or the app is hidden, which
+Chromium does not notice by itself. You do not need to do anything for it.
+Chromium also keeps App Nap off for your app and watches memory pressure
+and sleep itself.
+
+`CefRuntime.shared.energySaver` lowers offscreen browsers to 30 frames a
+second while Low Power Mode is on or the Mac reports serious thermal
+pressure, which roughly halves the CPU time an animated page takes. Turn
+it off for content that must stay smooth:
+
+```swift
+CefRuntime.shared.energySaver = .off
+CefRuntime.shared.energySaver = CefEnergySaver(reducedOffscreenFrameRate: 45)
+```
+
+Windowed and Chrome-style browsers draw at the display's rate in any
+case.
 
 ## JavaScript
 
@@ -1433,10 +1491,71 @@ struct Pages: CefSchemeHandler {
 }
 ```
 
-Requests arrive off the main thread, so handlers are `Sendable`. A
-registered handler serves every profile, including incognito and persistent
-ones. The default `CefCustomScheme` options make the scheme standard,
-secure, CORS-enabled and fetchable; pass `options:` to change them.
+A registered handler serves every profile, including incognito and
+persistent ones. The default `CefCustomScheme` options make the scheme
+standard, secure, CORS-enabled and fetchable; pass `options:` to change
+them.
+
+### Where a handler runs
+
+Chromium asks for responses on its IO thread and never waits there for
+the handler: `response(for:)` runs with the handler's own isolation.
+
+| Handler | Runs on | For |
+|---|---|---|
+| A `Sendable` type, as above | Swift's concurrent executor, many requests at once | Computing or looking up a response |
+| Isolated to `CefIOActor` | Chromium's IO thread, without a hop | Quick answers from state kept there, such as a cache; never blocking |
+| Isolated to `@MainActor` | The main thread | Reading your app's model |
+
+```swift
+@MainActor
+final class LibraryPages: CefSchemeHandler {
+    let library: Library
+    init(library: Library) { self.library = library }
+
+    func response(for request: CefSchemeRequest) async -> CefSchemeResponse {
+        CefSchemeResponse(mimeType: "text/html", body: Data(library.html.utf8))
+    }
+}
+```
+
+### Large and streamed bodies
+
+A body is `.data(_:)`, `.file(_:)` or `.stream(_:length:)`. Chromium reads
+a file or a stream as the page consumes it, never more than about a
+megabyte ahead, so a 200 MB response costs about 12 MB of memory instead
+of 200 MB. A file is read on `CefFileActor`. A stream is any
+`AsyncSequence` of `Data`; give its length when you know it.
+
+```swift
+struct Media: CefSchemeHandler {
+    let library: MediaLibrary
+
+    func response(for request: CefSchemeRequest) async -> CefSchemeResponse {
+        guard let file = library.file(for: request.url) else { return .notFound() }
+        return CefSchemeResponse(mimeType: "video/mp4", body: .file(file))
+    }
+}
+
+struct Generated: CefSchemeHandler {
+    func response(for request: CefSchemeRequest) async -> CefSchemeResponse {
+        let chunks = AsyncThrowingStream<Data, any Error> { continuation in
+            Task {
+                for part in 0..<100 { continuation.yield(Data("part \(part)\n".utf8)) }
+                continuation.finish()
+            }
+        }
+        return CefSchemeResponse(mimeType: "text/plain", body: .stream(chunks))
+    }
+}
+```
+
+A request with a single `Range` header, as `<video>` and `<audio>` send
+when they seek, gets `206 Partial Content` with only those bytes, or `416`
+past the end, for any body whose length is known; a file skips to the
+range without reading what comes before. Responses with a known length
+carry `Accept-Ranges: bytes`. A handler that sets a status other than 200
+answers ranges itself.
 
 ## Playing streaming services
 

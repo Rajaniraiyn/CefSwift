@@ -63,10 +63,72 @@ CEF objects are intrusively reference-counted.
 
 Chromium's UI thread is the app's main thread. CEF runs with an external
 message pump driven from the main run loop (`CefMessagePump`), so SwiftUI and
-Chromium share one thread, and the public API is `@MainActor`. The few
-callbacks CEF makes on its IO thread (request filters, HTTP authentication,
-scheme handlers) are `Sendable` closures or hop to the main actor before
-reaching app code.
+Chromium share one thread, and the public API is `@MainActor`.
+
+CEF calls a few handlers on other threads. Where each arrives in CEF 156,
+from the C API's comments and checked with `cef_currently_on` and thread
+names at run time:
+
+| Callback | Thread | CefKit |
+|---|---|---|
+| `cef_resource_request_handler_t.on_before_resource_load`, `get_resource_request_handler` | IO (`Chrome_IOThread`) | The request filter runs there, isolated to `CefIOActor`. |
+| `cef_scheme_handler_factory_t.create` | IO | Creates the resource handler. |
+| `cef_resource_handler_t.get_response_headers`, `cancel` | IO | Read and change the handler's locked state. |
+| `cef_resource_handler_t.open`, `skip`, `read` | Chromium's thread pool (`ThreadPoolForegroundWorker`), in sequence | `open` starts the `CefSchemeHandler` in a task; `read` copies buffered bytes or waits for them. |
+| `cef_request_handler_t.get_auth_credentials` | IO | Hops to the main actor for the delegate; CEF 156 does not call it. |
+| `cef_cookie_visitor_t.visit`, `cef_download_handler_t` | UI | No hop needed. |
+| `cef_render_handler_t`, `cef_accessibility_handler_t`, everything else | UI | `MainActor.assumeIsolated`. |
+| `on_schedule_message_pump_work` | Any | Posts to the main queue. |
+
+**Thread actors.** `CefIOActor` and `CefFileActor` are global actors
+whose executor, `CefThreadExecutor`, posts each job to a CEF thread with
+`cef_post_task`: `TID_IO`, and `TID_FILE_USER_VISIBLE`, a sequence on
+Chromium's thread pool for blocking work. Its isolation checks
+(`checkIsolated()`, `isIsolatingCurrentContext()`) ask
+`cef_currently_on`, so a CEF callback on the IO thread is code isolated
+to `CefIOActor` without a hop. The runtime asks an executor only from
+macOS 15 on; `CefIOActor.assumeIsolated` and
+`CefFileActor.assumeIsolated` check the thread themselves, so they work
+on macOS 14 too.
+
+Chromium's task runners exist from `on_context_initialized` to the end of
+`cef_shutdown()`. Outside that span, jobs run on a serial dispatch queue
+of the executor's own: before start-up at once; on start-up the queue
+empties before jobs go to Chromium; from the moment `CefRuntime` begins
+shutting down, jobs wait and run on the queue after `cef_shutdown()`
+returns, once Chromium's threads are gone. A job Chromium destroys without
+running goes to the queue the same way. So no job is lost or runs at the
+same time as another, and quitting waits for nothing.
+
+**Scheme handlers.** A `CefSchemeHandler` runs with its own isolation:
+nonisolated on Swift's concurrent executor, or on `CefIOActor` or the
+main actor if its type is isolated to one. Its body is data, a file or an
+async sequence of `Data`. A file is read in 256 KB chunks on
+`CefFileActor`; a sequence is iterated in a task. Either runs at most
+1 MB ahead of the page: a write waits until `read` drains the buffer.
+`read` copies what is buffered, or, with nothing buffered, keeps CEF's
+buffer and callback until the next chunk arrives. Chromium skips to the
+start of a requested range itself, then serves the rest of the body with
+the handler's status, so CefKit answers single byte ranges completely
+(206 with `Content-Range` and only the range's bytes, or 416) and reports
+Chromium's skip as done.
+
+The request filter was already synchronous on the IO thread, and the
+scheme handler already answered off the main thread, so neither changed
+the main thread's work. A page that fetches 500 1 KB responses and one of
+200 MB through a scheme handler, with a request filter on every request,
+keeps the main thread busy for about 70 ms either way (Chromium's own work
+for the requests). The 200 MB body raised the app's peak footprint by
+194 MB as one `Data`, and by 12 MB as a stream or a file, in the same
+time (about 200 ms).
+
+The renderer side runs on the renderer's main thread (`TID_RENDERER`),
+which is the helper process's main thread, so its extensions are
+`@MainActor` and CEF's callbacks enter it with `MainActor.assumeIsolated`.
+CEF 156's `cef_render_process_handler_t` reports only frames' contexts
+(`on_context_created`, `on_context_released`); it has no callbacks for
+worker or service-worker contexts, so the renderer side has no worker
+hooks.
 
 ## Browsers and clients
 
@@ -176,6 +238,38 @@ such delegate; views track swipes themselves with
 and the windowed view from a local event monitor, since Chromium's view
 receives the events. The built-in indicator is a layer-backed view over the
 page that never takes events.
+
+## Frame timing
+
+Offscreen browsers are created without external begin frames, so
+Chromium's compositor times frames from its own timer at the browser's
+frame rate (`windowless_frame_rate`), and each frame arrives through
+`on_accelerated_paint` as an `IOSurface`.
+
+Driving frames from the view's display link instead
+(`external_begin_frame_enabled` and `send_external_begin_frame` on every
+refresh) was measured on a 60 Hz display; the Mac had no 120 Hz display.
+CEF keeps one external begin frame in flight and ignores a request until
+the last one is acknowledged, and a frame's deadline is the frame
+interval the frame rate gives. At a frame rate of 30, CEF's default, the
+acknowledgement comes after the next refresh, so every other request is
+dropped: pages run 60 animation frames a second but 30 reach the screen.
+At a frame rate of 60 or more, every refresh paints. A second request
+4 ms after each refresh runs animation frames twice per refresh. An
+offscreen page that animates, and one that follows the mouse, measured
+over 3 s, twice each:
+
+| Frame timing | Painted frames a second | Spread of paint intervals | Mouse move to painted frame, median / 90th percentile | CPU |
+|---|---|---|---|---|
+| Chromium's timer, rate 60 | 59.7 | 1.4–2.0 ms | 12–17 / 17–23 ms | 34–40% |
+| Display link, rate 30 | 30 | 5.7–6.4 ms | 20–24 / 35–37 ms | 35–36% |
+| Display link, rate 60 | 59.7 | 1.6–2.4 ms | 16–23 / 35–37 ms | 40–42% |
+| Display link, rate 120 or 240 | 59.3–59.7 | 1.6–2.4 ms | 17–25 / 29–38 ms | 39–43% |
+
+The display link matches the timer's rate and pacing and adds latency: a
+mouse move waits for the next refresh, then for the main thread to send
+the request. CefKit keeps Chromium's timer. `Benchmarks.frames()` in
+SelfTest (`-benchmark frames`) measures both on another display.
 
 ## Offscreen accessibility
 
@@ -517,9 +611,69 @@ process until its last frame goes.
 `CefRuntime.memorySaver` is applied by a monitor that polls which browsers
 are off screen, at a quarter of the policy's interval and at most every 30
 seconds, and listens for memory pressure through
-`DispatchSource.makeMemoryPressureSource`. Window occlusion notifications
-restore browsers discarded by closing when their view comes back on
-screen.
+`DispatchSource.makeMemoryPressureSource`. The lifecycle coordinator tells
+it of every change of what is on screen, which restores browsers
+discarded by closing when their view comes back.
+
+## Lifecycle
+
+`CefLifecycleCoordinator` turns window, app and system signals into what
+Chromium is told, and publishes `CefBrowser.lifecycle`. It listens for
+window occlusion, miniaturizing, key-window and first-responder changes
+(`firstResponder` is key-value observable), app hiding and activation,
+screen changes, screen sleep, thermal state and Low Power Mode, and
+updates every browser once per run-loop turn.
+
+What Chromium does by itself decides what is left to do. Measured with an
+animated page and `document.visibilityState`:
+
+| Host | Window covered | Minimized | Ordered out, or a tab not selected | App hidden |
+|---|---|---|---|---|
+| Alloy, in an app's view | Hidden by Chromium | Stays visible | Stays visible | Stays visible, 60 frames a second |
+| Chrome style (`CefBrowserWindow`) | Hidden by Chromium | Hidden by Chromium | Hidden by Chromium | Hidden by Chromium |
+| Offscreen | Hidden by the view (`was_hidden`) | Same | Same | Same |
+
+`was_hidden` does nothing for windowed browsers in CEF 156. For an Alloy
+browser in an app's view, the coordinator hides Chromium's `NSView`
+whenever its window cannot be seen (its occlusion state is not visible,
+or it is minimized or ordered out, or the app is hidden), which
+Chromium's `WebContentsViewCocoa` reports as hidden. Covered windows are
+included: Chromium notices a window of the same session covering it, but
+not a full-screen app on another space, and it reports the page visible
+again whenever its view moves or shows. The coordinator gives focus back
+to the responder that had it when it shows the view again, and shows it
+on `willUnhide`, before the windows return. With the app hidden, an
+animated page then takes 2% of a CPU core instead of 23%.
+
+An offscreen view that could not be seen when it asked for its browser
+told nobody, since the browser did not exist yet, and Chromium creates
+offscreen browsers visible; a new browser starts hidden when its host
+last reported so.
+
+The lifecycle is derived the way Chromium decides visibility: hidden
+unless the window is visible, unminimized and not covered (occlusion
+state), the host view is in it and not hidden, and Chromium's view is in
+a window; active when, in addition, the app is active, the window is key
+and the first responder is the browser's view or inside it.
+
+Chromium handles the rest itself. It listens for memory pressure and
+system sleep in every process, and sets `NSAppSleepDisabled`, which keeps
+App Nap off for the app: with the app hidden, a 50 ms main-thread timer
+fires within 12 ms of its time over 25 s, with or without a page playing
+audio. CefKit holds no activity assertion. `Page.setWebLifecycleState`
+with `frozen` fires the page's `freeze` event and stops timers set before
+it, but a timer added later kept running, and a hidden page with busy
+timers took more CPU frozen than not; CefKit offers no freezing.
+
+**Energy.** While Low Power Mode is on or the thermal state is serious or
+critical, `CefRuntime.energySaver` caps offscreen browsers' frame rate
+(`set_windowless_frame_rate`) at 30. An animated offscreen page takes
+about 30% of a core at 30 frames a second and 50% at 60. A rate below the
+one a browser was created with does not hold by itself: every few
+seconds Chromium paints at the creation rate again while
+`get_windowless_frame_rate` still reports the lower one, so the
+coordinator sets the reduced rate again twice a second while it applies. Windowed and
+Chrome-style browsers draw at the display's rate, which CEF cannot change.
 
 ## Quitting
 
@@ -530,6 +684,13 @@ the last browser and the last Chromium window are destroyed, it calls
 `cef_shutdown()` earlier, or from inside a CEF callback, crashes. A page that
 asks to stay cancels the quit. A browser discarded by closing has no
 Chromium browser left and is marked closed at once.
+
+Logging out, restarting and shutting down send the app a quit Apple Event,
+which AppKit handles with `terminate(_:)`. While the browsers close, the
+runtime suspends that event (`NSAppleEventManager.suspendCurrentAppleEvent`),
+as `NSApplication.TerminateReply.terminateLater` does, and resumes it when
+they are gone, or with `userCanceledErr` when a page asks to stay, which
+stops the logout as an app that cancels it does.
 
 ## Relaunching
 

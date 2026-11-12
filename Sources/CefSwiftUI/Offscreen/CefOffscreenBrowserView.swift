@@ -11,9 +11,9 @@ import Foundation
 /// forwarding mouse, keyboard, scroll, IME and drag input, applying cursors,
 /// and presenting context menus.
 ///
-/// Frames are requested once per display refresh while the view can be seen.
+/// Chromium paints at the browser's frame rate while the view can be seen.
 /// When its window is occluded or miniaturized, or the view is hidden, the
-/// view stops requesting frames and tells the browser it is hidden.
+/// view tells the browser it is hidden, and Chromium stops painting.
 ///
 /// `CefWebView` uses this for browsers whose ``CefBrowserOptions/rendering``
 /// is `.offscreen`; use it directly in AppKit by assigning ``browser``.
