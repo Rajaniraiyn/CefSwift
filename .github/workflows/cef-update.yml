@@ -41,9 +41,11 @@ jobs:
     permissions:
       actions: write        # start CI for the update branch
       contents: write       # push the update branch
+      issues: write         # report a failed run
       pull-requests: write  # open, refresh or close the pull request; enable auto-merge
     env:
       GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
       API_VERSION: ${{ inputs.api_version }}
       BRANCH: ${{ inputs.api_version && 'cef-api-update' || 'cef-update' }}
       BASE: ${{ github.event.repository.default_branch }}
@@ -80,11 +82,13 @@ jobs:
           git add CEF_VERSION.json Sources/CCef
           git commit --quiet --file "$RUNNER_TEMP/message.txt"
 
-          # An open pull request from an earlier run is refreshed in place;
-          # if it already holds exactly this tree, there is nothing to push.
+          # An open pull request from an earlier run is refreshed in place
+          # only when it pins something else. If it already pins this CEF and
+          # API version it is left alone, so fixes pushed to it survive.
           state="$(gh pr view "$BRANCH" --json state --jq .state 2>/dev/null || true)"
-          if [ "$state" = OPEN ] && git fetch --quiet --depth=1 origin "$BRANCH" && git diff --quiet FETCH_HEAD HEAD; then
-            echo "The open pull request already has this change."
+          if [ "$state" = OPEN ] && git fetch --quiet --depth=1 origin "$BRANCH" &&
+             git diff --quiet FETCH_HEAD HEAD -- CEF_VERSION.json Sources/CCef/include/ccef_config.h; then
+            echo "The open pull request already pins this version."
             exit 0
           fi
           git push --force origin "$BRANCH"
@@ -118,4 +122,21 @@ jobs:
         run: |
           if [ "$(gh pr view "$BRANCH" --json state --jq .state 2>/dev/null)" = OPEN ]; then
             gh pr close "$BRANCH" --delete-branch --comment "$BASE already has CEF $CURRENT."
+          fi
+
+      # A failed scheduled run otherwise only shows as a red run in the
+      # Actions tab. Keep one open issue and add each failure to it.
+      - name: Report the failure
+        if: failure()
+        env:
+          TITLE: CEF update failed
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          body="The CEF update run failed: $RUN_URL"
+          issue="$(gh issue list --state open --search "in:title \"$TITLE\"" --json number,title \
+            --jq "map(select(.title == \"$TITLE\"))[0].number // empty")"
+          if [ -n "$issue" ]; then
+            gh issue comment "$issue" --body "$body"
+          else
+            gh issue create --title "$TITLE" --body "$body. Close this once an update run succeeds."
           fi
