@@ -244,14 +244,10 @@ and then navigated, so the first real document already has them.
 
 ## Internal-page services
 
-CEF has no API for bookmarks, history or omnibox suggestions, but
-Chromium's own pages reach those services: `chrome://bookmarks` through the
-`chrome.bookmarks` extension API, and `chrome://history`, the new tab page
-and `chrome://omnibox` through Mojo page handlers. `CefInternalPageService`
-parks a hidden Chrome-style browser on such a page, created on first use,
-and calls into the page through the DevTools Protocol. A call that times
-out, or a renderer that dies, discards the browser; the next call starts a
-new one.
+CEF has no API for bookmarks, history, most-visited sites, omnibox
+suggestions or tab discarding, but Chromium's own WebUI pages reach those
+services. `CefInternalServices`, one per profile, calls them from hidden
+Chrome-style browsers it calls service hosts.
 
 `CefHistory.mostVisited()` binds a new most-visited page handler for each
 call. Chromium's `TopSites` reads the list from history once, shortly after
@@ -260,20 +256,84 @@ that cached list; creating a handler is what makes `TopSites` read history
 again. The handler reports the cached tiles first and the fresh ones when
 they differ, so the call waits a moment for a second report.
 
-Service browsers are left out of `CefRuntime.browsers` and
-`CefBrowserWindow.all`. Their windows are transparent, ignore the mouse and
-are ordered out whenever Chromium shows them, as it does when it brings its
-windows forward. A service browser holds its profile, so a non-default
-profile's service browsers close when its last browser closes, and start
-again on the next call; the default profile's stay until the app quits.
-Chromium saves every Chrome-style window in its session, these included,
-and reopens them after a crash; their addresses carry a marker fragment, so
-`CefRuntime` recognizes and closes them.
+**What binds where.** The browser process binds a WebUI page's Mojo
+interfaces, and grants its extension APIs, by the page's host, whatever
+its path. A renderer that asks for an interface its host does not bind is
+killed (`WebUIController binder missing for: …`, bad IPC message 221). So
+each interface has one host, and the hosts cannot share a renderer:
+Chromium locks a WebUI renderer to its host, and neither
+`--process-per-site` nor `--renderer-process-limit=1` changes that.
 
-`chrome://history` cannot open in an incognito profile, so `CefHistory`
-throws there instead of starting a service. An incognito profile's
-bookmarks are the default profile's `CefBookmarks`, since Chromium shares
-the original profile's bookmarks with its incognito profile.
+| Host | Reaches | Used for |
+|---|---|---|
+| `chrome://bookmarks` | `chrome.bookmarks`, `chrome.tabs`, `chrome://favicon2` | `CefBookmarks`, `CefHistory.favicon` |
+| `chrome://history` | `history.mojom.PageHandler`, `chrome://favicon2` | `CefHistory.search`, `remove` |
+| `chrome://new-tab-page-third-party` | `most_visited.mojom.MostVisitedPageHandlerFactory` | `CefHistory.mostVisited` |
+| `chrome://omnibox` | `mojom.OmniboxPageHandler` | `CefAutocomplete` |
+| `chrome://discards` | `discards.mojom.DetailsProvider` | Discarding |
+
+`chrome://new-tab-page` binds most-visited and the search box's
+`searchbox.mojom.PageHandlerFactory` too, and the search box answers
+queries with Chromium's autocomplete. It ranks for the new tab page,
+though: a web search first even when a bookmark matches the typed
+address, no match on bookmark titles, and no relevance or bookmarked flag
+in its results. CefKit keeps `chrome://omnibox`, whose controller is the
+address bar's.
+
+**The smallest document.** A service host loads the host's
+`strings.m.js`, a few kilobytes of JavaScript that Chromium shows as text,
+instead of the page's app, and each service imports only the generated
+`*.mojom-webui.js` module it needs, from `chrome://resources` where
+Chromium serves it there. Its renderer has the host's bindings and none of
+the app's scripts, styles or elements. A host starts in about a tenth of a
+second.
+
+**Services as modules.** A `CefServiceModule` names the hosts that can
+serve it and a JavaScript `setup` that builds a service object once per
+document — a bound Mojo remote, or an extension API with listeners. A
+call evaluates a function against that object through the DevTools
+Protocol and returns its JSON result; a module that serves from several
+hosts (favicons) uses whichever of them runs. A module reports events
+through one DevTools binding per host, and subscribers hear them while the
+host runs. Adding a service is declaring a module and calling it.
+
+**Lifetime.** A host starts on the first call that needs it and closes 30
+seconds after its last one, when macOS reports memory pressure, when its
+profile's last browser closes (except the default profile's), and when
+the app quits. A call that times out, or a renderer that dies, closes the
+host; the call throws and the next one starts the host again. Service
+browsers are left out of `CefRuntime.browsers` and
+`CefBrowserWindow.all`. Their windows are 1 × 1 point, since a hidden
+window's compositor keeps buffers the size of the window, about 11 MB of
+GPU memory for a default-sized one, and they are transparent, ignore the
+mouse and are ordered out whenever Chromium shows them, as it does when it
+brings its windows forward. Chromium saves every Chrome-style window in
+its session, these included, and reopens them after a crash; their
+addresses carry a marker fragment, so `CefRuntime` recognizes and closes
+them. Alloy-style and offscreen browsers do not get WebUI bindings for
+these hosts, so a service host has to be a Chrome-style window.
+
+**Reads without a renderer.** Chromium saves a profile's bookmarks to the
+JSON file `Bookmarks` about 2.5 seconds after each change, replacing it
+atomically. While the bookmarks host is not running, and nothing was
+changed through it in the last 5 seconds, `CefBookmarks` reads the tree,
+a folder's contents, a bookmark and the recent bookmarks from that file,
+and `changes` watches it with a `DispatchSource`. A file in another
+format version, or a profile with managed or account bookmarks, which the
+file does not hold, falls back to the host. Searches and lookups by
+address, whose matching is Chromium's, and every change go through the
+host. History, favicons and top sites live in SQLite databases that
+Chromium opens with exclusive locking: a read-only open fails with
+`SQLITE_BUSY` once Chromium has written, and an `immutable` open reads
+pages Chromium may be writing, so CefKit reads them only through the
+hosts. The DevTools Protocol of Chromium 156 has no domain for any of
+these services.
+
+`chrome://history` cannot open in an incognito profile, and an incognito
+profile keeps no history, so `CefHistory` throws there instead of starting
+a host. An incognito profile's bookmarks are the default profile's
+`CefBookmarks`, since Chromium shares the original profile's bookmarks
+with its incognito profile.
 
 ## Passkeys
 
@@ -350,16 +410,18 @@ eligibility policy protects the active tab of every window, as it does a
 tab with DevTools attached, which CefKit's DevTools connection counts as.
 The `EXTERNAL` discard reason, which `chrome.tabs.discard()` uses, skips
 those protections. CefKit calls `DiscardById` with it on the
-`discards.mojom.DetailsProvider` of a hidden service browser parked on
-`chrome://discards`, after its own checks. It reads Chromium's other
+`discards.mojom.DetailsProvider` of the default profile's
+`chrome://discards` service host, after its own checks. It reads Chromium's other
 protections (audio, media capture, form interaction, connected devices)
 from `GetTabDiscardsInfo` as blockers, leaving out the ones it overrides.
 That interface numbers tabs afresh on every query and describes them only
 by address and title, so each discard looks its tab up again. CEF's frame
 count for a browser drops to zero when Chromium discards its tab; when two
 hidden tabs share an address and title, that tells which one went, and a
-discard that reached the other tab reloads it and tries the next. The
-service browser closes after 30 seconds without calls.
+discard that reached the other tab reloads it and tries the next.
+`chrome.tabs`, which the bookmarks host also has, numbers tabs stably and
+discards with the same reason, but reports none of the protections other
+than audio, so discarding stays on `chrome://discards`.
 
 When the window is shown again, Chromium loads the tab
 (`NavigationController::SetActive`), with its scroll position from the

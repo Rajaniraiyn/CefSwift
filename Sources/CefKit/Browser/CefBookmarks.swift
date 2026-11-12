@@ -47,46 +47,64 @@ public struct CefBookmark: Sendable, Identifiable, Hashable {
 /// try await bookmarks.remove(added.id)
 /// ```
 ///
-/// Built on the documented `chrome.bookmarks` extension API, which Chromium
-/// grants its own `chrome://bookmarks` page. CefKit reaches it through a
-/// hidden service browser parked on that page, created on first use. Because
-/// it relies on a Chromium-internal page, this API is more likely than the
-/// rest of CefKit to need attention when Chromium updates.
+/// Changes, searches and lookups by address go through the documented
+/// `chrome.bookmarks` extension API, which Chromium grants its own
+/// `chrome://bookmarks` host; CefKit reaches it from a hidden service host
+/// that starts on first use and closes when idle. While that host is not
+/// running, ``tree()``, ``children(of:)``, ``bookmark(_:)`` and
+/// ``recent(limit:)`` read Chromium's `Bookmarks` file instead, and
+/// ``changes`` watches it; neither needs a renderer. Chromium writes the
+/// file about 2.5 seconds after a change, so an edit made in Chrome's own
+/// UI can take that long to show in those reads. Both paths rely on
+/// Chromium internals, so this API is more likely than the rest of CefKit
+/// to need attention when Chromium updates.
 ///
 /// Incognito profiles have no bookmarks of their own; their
 /// ``CefProfile/bookmarks`` are the default profile's.
 @MainActor
 public final class CefBookmarks {
-    private let service: CefInternalPageService
+    private unowned let profile: CefProfile
     private var subscribers: [UUID: AsyncStream<Void>.Continuation] = [:]
+    private var liveEvents: Task<Void, Never>?
+    private var fileWatch: CefFileWatch?
+    private var lastLiveEvent: ContinuousClock.Instant?
+    private var lastWrite: ContinuousClock.Instant?
 
     init(profile: CefProfile) {
-        service = CefInternalPageService(
-            profile: profile,
-            page: "chrome://bookmarks/",
-            setup: Self.setup,
-            notificationBinding: Self.notificationBinding)
-        service.onNotification = { [weak self] _ in
-            self?.subscribers.values.forEach { $0.yield() }
-        }
+        self.profile = profile
     }
+
+    private var services: CefInternalServices { profile.services }
+
+    /// Where reads come from. `.automatic` reads Chromium's file while the
+    /// service host is not running.
+    @_spi(Testing) public enum ReadSource: Sendable { case automatic, file, service }
+    @_spi(Testing) public var readSource = ReadSource.automatic
 
     // MARK: Reading
 
     /// The permanent folders (bookmarks bar, other bookmarks, …) with all
     /// their contents.
     public func tree() async throws -> [CefBookmark] {
-        try await nodes("async b => (await b.getTree())[0]?.children ?? []")
+        if let file = try storedBookmarks() { return file.roots }
+        return try await nodes("async b => (await b.getTree())[0]?.children ?? []")
     }
 
     /// The bookmark with `id`, or `nil` if there is none.
     public func bookmark(_ id: CefBookmark.ID) async throws -> CefBookmark? {
-        try await nodes("(b, a) => b.get(a.id).catch(() => [])", ["id": .string(id.rawValue)]).first
+        if let file = try storedBookmarks() { return file.node(id)?.withoutChildren }
+        return try await nodes("(b, a) => b.get(a.id).catch(() => [])", ["id": .string(id.rawValue)]).first
     }
 
     /// The direct contents of `folder`, in order.
     public func children(of folder: CefBookmark.ID) async throws -> [CefBookmark] {
-        try await nodes("(b, a) => b.getChildren(a.id)", ["id": .string(folder.rawValue)])
+        if let file = try storedBookmarks() {
+            guard let node = file.node(folder) else {
+                throw CefError.operationFailed("bookmarks: Can't find parent bookmark for id.")
+            }
+            return (node.children ?? []).map(\.withoutChildren)
+        }
+        return try await nodes("(b, a) => b.getChildren(a.id)", ["id": .string(folder.rawValue)])
     }
 
     /// Bookmarks and folders whose title or address contains every word of
@@ -102,7 +120,8 @@ public final class CefBookmarks {
 
     /// The most recently added bookmarks, newest first.
     public func recent(limit: Int = 10) async throws -> [CefBookmark] {
-        try await nodes("(b, a) => b.getRecent(a.limit)", ["limit": .number(Double(max(1, limit)))])
+        if let file = try storedBookmarks() { return file.recent(limit: max(1, limit)) }
+        return try await nodes("(b, a) => b.getRecent(a.limit)", ["limit": .number(Double(max(1, limit)))])
     }
 
     // MARK: Changing
@@ -130,7 +149,7 @@ public final class CefBookmarks {
         var changes: [String: CefJSON] = [:]
         if let title { changes["title"] = .string(title) }
         if let url { changes["url"] = .string(url.absoluteString) }
-        return try await node(
+        return try await write(
             "(b, a) => b.update(a.id, a.changes)", ["id": .string(id.rawValue), "changes": .object(changes)])
     }
 
@@ -139,13 +158,15 @@ public final class CefBookmarks {
     public func move(_ id: CefBookmark.ID, to folder: CefBookmark.ID, at index: Int? = nil) async throws -> CefBookmark {
         var destination: [String: CefJSON] = ["parentId": .string(folder.rawValue)]
         if let index { destination["index"] = .number(Double(index)) }
-        return try await node(
+        return try await write(
             "(b, a) => b.move(a.id, a.destination)", ["id": .string(id.rawValue), "destination": .object(destination)])
     }
 
     /// Removes a bookmark, or a folder with everything in it.
     public func remove(_ id: CefBookmark.ID) async throws {
-        _ = try await service.call(
+        lastWrite = .now
+        _ = try await services.call(
+            Self.module,
             "async (b, a) => { const [n] = await b.get(a.id); await (n.url ? b.remove(a.id) : b.removeTree(a.id)); return true; }",
             ["id": .string(id.rawValue)])
     }
@@ -155,52 +176,120 @@ public final class CefBookmarks {
     /// Yields whenever bookmarks are added, changed, moved or removed — by
     /// the user in Chrome's UI or through this API. The stream ends when the
     /// consuming task is cancelled.
+    ///
+    /// While the service host runs, every change is reported at once;
+    /// otherwise when Chromium has written its `Bookmarks` file, about 2.5
+    /// seconds later. Watching starts no service host.
     public var changes: AsyncStream<Void> {
         AsyncStream { continuation in
             let token = UUID()
             subscribers[token] = continuation
-            service.keepsRunning = true
+            startObserving()
             continuation.onTermination = { [weak self] _ in
                 Task { @MainActor in
                     guard let self else { return }
                     self.subscribers[token] = nil
-                    self.service.keepsRunning = !self.subscribers.isEmpty
+                    if self.subscribers.isEmpty { self.stopObserving() }
                 }
             }
-            // Listeners are installed when the service page is set up.
-            Task { try? await self.service.start() }
         }
+    }
+
+    private func startObserving() {
+        if liveEvents == nil {
+            let events = services.events(Self.module, "changed")
+            liveEvents = Task { [weak self] in
+                for await _ in events {
+                    guard let self else { return }
+                    self.lastLiveEvent = .now
+                    self.notify()
+                }
+            }
+        }
+        if fileWatch == nil, let url = bookmarksFileURL {
+            fileWatch = CefFileWatch(url: url) { [weak self] in
+                guard let self else { return }
+                // Chromium saving changes the service host reported already.
+                if let last = self.lastLiveEvent, ContinuousClock.now - last < .seconds(5) { return }
+                self.notify()
+            }
+        }
+    }
+
+    private func stopObserving() {
+        liveEvents?.cancel()
+        liveEvents = nil
+        fileWatch = nil
+    }
+
+    private func notify() {
+        subscribers.values.forEach { $0.yield() }
     }
 
     // MARK: Plumbing
 
-    private static let notificationBinding = "__cefswiftBookmarksChanged"
+    /// `chrome.bookmarks`, with listeners that report every change.
+    static let module = CefServiceModule(
+        name: "bookmarks", hosts: [.bookmarks],
+        setup: """
+            async emit => {
+              const b = chrome.bookmarks;
+              if (!b) throw new Error('chrome.bookmarks is not available on this page');
+              for (const event of ['onCreated', 'onRemoved', 'onChanged', 'onMoved', 'onChildrenReordered', 'onImportEnded']) {
+                b[event].addListener(() => emit('changed', event));
+              }
+              return b;
+            }
+            """)
 
-    private static let setup = """
-        async () => {
-          const b = chrome.bookmarks;
-          if (!b) throw new Error('chrome.bookmarks is not available on this page');
-          for (const event of ['onCreated', 'onRemoved', 'onChanged', 'onMoved', 'onChildrenReordered', 'onImportEnded']) {
-            b[event].addListener(() => window.\(notificationBinding)?.(event));
-          }
-          return b;
+    private var bookmarksFileURL: URL? {
+        profile.directory?.appendingPathComponent("Bookmarks")
+    }
+
+    /// Chromium's `Bookmarks` file, when it can stand in for the service:
+    /// the service host is not running and nothing was changed through it
+    /// in the last seconds (so Chromium has saved every change), the file
+    /// is in the format CefKit reads, and the profile has no
+    /// enterprise-managed or account bookmarks, which the file does not
+    /// hold.
+    private func storedBookmarks() throws -> CefBookmarkFile? {
+        switch readSource {
+        case .service:
+            return nil
+        case .file:
+            guard let file = loadFile() else { throw CefError.operationFailed("bookmarks: no readable Bookmarks file") }
+            return file
+        case .automatic:
+            guard !services.isRunning(.bookmarks) else { return nil }
+            if let lastWrite, ContinuousClock.now - lastWrite < .seconds(5) { return nil }
+            return loadFile()
         }
-        """
+    }
+
+    private func loadFile() -> CefBookmarkFile? {
+        guard let url = bookmarksFileURL else { return nil }
+        let account = url.deletingLastPathComponent().appendingPathComponent("AccountBookmarks")
+        guard !FileManager.default.fileExists(atPath: account.path),
+              (profile.preference("policy.managed_bookmarks")?.arrayValue ?? []).isEmpty
+        else { return nil }
+        return CefBookmarkFile(contentsOf: url)
+    }
 
     private func create(title: String, url: URL?, folder: CefBookmark.ID?, index: Int?) async throws -> CefBookmark {
         var details: [String: CefJSON] = ["title": .string(title)]
         if let url { details["url"] = .string(url.absoluteString) }
         if let folder { details["parentId"] = .string(folder.rawValue) }
         if let index { details["index"] = .number(Double(index)) }
-        return try await node("(b, a) => b.create(a)", .object(details))
+        return try await write("(b, a) => b.create(a)", .object(details))
     }
 
     private func nodes(_ function: String, _ arguments: CefJSON = [:]) async throws -> [CefBookmark] {
-        try await service.call(function, arguments).decode([BookmarkNode].self).map(CefBookmark.init)
+        try await services.call(Self.module, function, arguments, as: [BookmarkNode].self).map(CefBookmark.init)
     }
 
-    private func node(_ function: String, _ arguments: CefJSON) async throws -> CefBookmark {
-        CefBookmark(try await service.call(function, arguments).decode(BookmarkNode.self))
+    private func write(_ function: String, _ arguments: CefJSON) async throws -> CefBookmark {
+        lastWrite = .now
+        return CefBookmark(try await services.call(Self.module, function, arguments, as: BookmarkNode.self))
     }
 }
 
@@ -218,6 +307,13 @@ private struct BookmarkNode: Decodable {
 }
 
 extension CefBookmark {
+    /// The bookmark as `chrome.bookmarks` returns it outside a tree.
+    var withoutChildren: CefBookmark {
+        var node = self
+        node.children = nil
+        return node
+    }
+
     fileprivate init(_ node: BookmarkNode) {
         id = ID(rawValue: node.id)
         parentID = node.parentId.flatMap { $0 == "0" ? nil : ID(rawValue: $0) }

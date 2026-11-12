@@ -4,9 +4,11 @@ import CefSwiftUI
 /// The browser's bookmarks and history, kept current for the menus, the
 /// address field's star and the start page.
 ///
-/// Bookmarks follow `CefBookmarks.changes`; recent history is re-read when
-/// the menu bar opens and shortly after each navigation. Private tabs share
-/// the regular profile's bookmarks, as in Safari, and record no history.
+/// Bookmarks are read at launch and follow `CefBookmarks.changes`, which
+/// reads Chromium's own file and starts no service host. Recent history is
+/// read only when the menu bar opens, so a host for it runs only while
+/// the History menu is in use. Private tabs share the regular profile's
+/// bookmarks, as in Safari, and record no history.
 @MainActor
 @Observable
 final class BrowserLibrary {
@@ -37,11 +39,10 @@ final class BrowserLibrary {
         }
     }
 
-    /// Reads bookmarks and history and starts following bookmark changes.
-    /// Call once CEF is running.
+    /// Reads bookmarks and starts following their changes. Call once CEF
+    /// is running.
     func start() {
         Task { await observeBookmarks() }
-        reloadHistory()
     }
 
     // MARK: Bookmarks
@@ -100,18 +101,9 @@ final class BrowserLibrary {
 
     // MARK: History
 
-    /// Re-reads recent history once a navigation has had time to commit.
-    func historyMayHaveChanged() {
+    private func reloadHistory() {
         historyRefresh?.cancel()
         historyRefresh = Task {
-            try? await Task.sleep(for: .seconds(2))
-            guard !Task.isCancelled else { return }
-            reloadHistory()
-        }
-    }
-
-    private func reloadHistory() {
-        Task {
             guard let entries = try? await profile.history.search(limit: 40) else { return }
             var seen = Set<URL>()
             recentHistory = Array(

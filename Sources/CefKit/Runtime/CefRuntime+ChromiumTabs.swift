@@ -29,13 +29,13 @@ extension CefRuntime {
     /// ``onChromiumOpensTab``. Returns whether it did.
     ///
     /// Either way, a restored service page is closed: Chromium saves the
-    /// hidden windows of ``CefInternalPageService`` in its session like any
+    /// hidden windows of ``CefInternalServices`` in its session like any
     /// other and reopens them after a crash.
     func redirectChromiumTab(_ browser: CefBrowser) -> Bool {
         guard browser.opener == nil else { return false }
         guard let handler = chromiumTabHandler else {
             Task {
-                if let url = await browser.firstNavigationURL(), CefInternalPageService.isServicePage(url) {
+                if let url = await browser.firstNavigationURL(), CefInternalServices.isServicePage(url) {
                     browser.close(force: true)
                 }
             }
@@ -45,7 +45,7 @@ extension CefRuntime {
         Task {
             let url = await browser.firstNavigationURL()
             browser.close(force: true)
-            if let url, !CefInternalPageService.isServicePage(url) { handler(url) }
+            if let url, !CefInternalServices.isServicePage(url) { handler(url) }
         }
         return true
     }

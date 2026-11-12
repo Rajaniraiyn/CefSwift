@@ -226,7 +226,6 @@ final class BrowserController: CefBrowserDelegate {
     }
 
     func browser(_ browser: CefBrowser, decidePolicyFor navigation: CefNavigationAction) -> CefNavigationDecision {
-        library.historyMayHaveChanged()
         // Show this app's pages in place of some of Chromium's.
         guard let replacement = BrowserPages.replacement(for: navigation.url) else { return .allow }
         browser.load(replacement)
