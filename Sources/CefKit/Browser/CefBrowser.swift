@@ -85,18 +85,31 @@ public struct CefUserScript: Sendable, Equatable {
     /// Pages built from web components — every `chrome://` page — keep their
     /// markup inside shadow roots that ordinary stylesheets cannot reach.
     /// With `includingShadowRoots` the rules are applied inside each shadow
-    /// root as well, so a selector written for a component's internals
-    /// matches there.
+    /// root as well — including roots whose component later sets its own
+    /// `adoptedStyleSheets` — so a selector written for a component's
+    /// internals matches there. Selectors still cannot cross a shadow
+    /// boundary: `settings-section #row` matches nothing when `#row` lives in
+    /// the section's shadow root; write `#row`.
     public static func styleSheet(
         _ css: String, matching urlPattern: String? = nil, includingShadowRoots: Bool = true
     ) -> CefUserScript {
         // Covers shadow roots that already exist and those created later.
+        // Components commonly assign their own `adoptedStyleSheets` after
+        // attaching a shadow root (Lit does), which would drop the sheet, so
+        // such assignments keep it.
         let shadowRoots = """
               const visit = root => {
                 for (const element of root.querySelectorAll('*')) {
                   if (element.shadowRoot) { adopt(element.shadowRoot); visit(element.shadowRoot); }
                 }
               };
+              const sheets = Object.getOwnPropertyDescriptor(ShadowRoot.prototype, 'adoptedStyleSheets');
+              if (sheets?.set) {
+                Object.defineProperty(ShadowRoot.prototype, 'adoptedStyleSheets', {
+                  ...sheets,
+                  set(value) { sheets.set.call(this, [...value].includes(sheet) ? value : [...value, sheet]); },
+                });
+              }
               visit(document);
               const attachShadow = Element.prototype.attachShadow;
               Element.prototype.attachShadow = function (options) {

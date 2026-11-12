@@ -273,6 +273,11 @@ reported to `CefRuntime.shared.onBrowserCreated` and listed in
 `CefRuntime.shared.browsers`. Leave `onChromiumOpensTab` unset when you use
 `openChromeWindow`, whose new tabs Chromium also opens itself.
 
+Chromium saves every Chrome-style window in its session, including the
+hidden ones CefKit keeps for bookmarks, history and suggestions, and
+reopens them after a crash. Those are recognized and closed, never handed
+to `onChromiumOpensTab`.
+
 ## Customizing Chromium's own pages
 
 Chrome-style browsers show Chromium's internal pages — `chrome://settings`,
@@ -302,7 +307,12 @@ options.userScripts = [
 Internal pages are built from web components whose markup sits in shadow
 roots; `styleSheet(_:matching:includingShadowRoots:)` applies its rules
 inside every shadow root as well (the default), so selectors for a
-component's internals match. On `chrome://` pages scripts run as the page
+component's internals match — also in components that set their own
+`adoptedStyleSheets`. A selector still cannot cross a shadow boundary:
+write `#themeRow`, not `settings-appearance-page #themeRow`, since the row
+lives in that component's shadow root. Matching rows by the preference
+they edit (`settings-toggle-button[pref-key="browser.show_home_button"]`)
+holds up better across Chromium updates than matching by position. On `chrome://` pages scripts run as the page
 starts loading rather than before its own scripts, and scripts with an
 `isolatedWorldName` do not run there. A scoped script runs inside a
 function, so its top-level declarations are not global.
@@ -360,7 +370,18 @@ let suggestions = try await profile.autocomplete.suggestions(for: "cef")
 ```
 
 `suggestions(for:)` returns what Chrome's address bar would show, ranked,
-with `relevance` and `inlineCompletion`.
+with `relevance` and `inlineCompletion`. Call it on every keystroke: a
+newer query supersedes one still running, which returns no suggestions.
+The first query waits for the service to start; call
+`autocomplete.prepare()` when your address field begins editing to start
+it early. Each suggestion has a `kind` (history, bookmark, open tab,
+search, …) for choosing an icon, `detail` for a page's title, and
+`isBookmarked`.
+
+The Browser example puts all three to use: suggestions under the address
+field (`AddressSuggestions.swift`), a star and a Bookmarks menu, a History
+menu, and a start page whose tiles come from `mostVisited()` and
+`bookmarks.recent()` through a `CefBridge` (`BrowserLibrary.swift`).
 
 CEF has no API for any of this. CefKit asks the same services Chromium's
 own pages use, from a hidden browser that it opens on first use and closes
@@ -393,6 +414,9 @@ CefRuntime.shared.registerSchemeHandler(
     scheme: "app", handler: CefDirectorySchemeHandler(directory: webRoot))
 // load app://local/index.html
 ```
+
+A registered handler serves every profile, incognito and persistent ones
+included.
 
 ## Known limits
 

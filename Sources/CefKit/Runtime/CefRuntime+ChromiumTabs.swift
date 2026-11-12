@@ -14,7 +14,10 @@ extension CefRuntime {
     /// CefRuntime.shared.onChromiumOpensTab = { url in openTab(url) }
     /// ```
     ///
-    /// Popups and DevTools, which have an opener, are not affected. Leave
+    /// Popups and DevTools, which have an opener, are not affected. Pages
+    /// CefKit itself keeps in hidden windows (for ``CefProfile/bookmarks``
+    /// and the like) that Chromium restores from a crashed session are
+    /// closed, never handed over. Leave
     /// this `nil` in apps that use ``openChromeWindow(url:frame:options:delegate:)``,
     /// whose new tabs Chromium also opens itself.
     public var onChromiumOpensTab: ((URL) -> Void)? {
@@ -24,13 +27,25 @@ extension CefRuntime {
 
     /// Redirects `browser`, which Chromium just created, to
     /// ``onChromiumOpensTab``. Returns whether it did.
+    ///
+    /// Either way, a restored service page is closed: Chromium saves the
+    /// hidden windows of ``CefInternalPageService`` in its session like any
+    /// other and reopens them after a crash.
     func redirectChromiumTab(_ browser: CefBrowser) -> Bool {
-        guard let handler = chromiumTabHandler, browser.opener == nil else { return false }
+        guard browser.opener == nil else { return false }
+        guard let handler = chromiumTabHandler else {
+            Task {
+                if let url = await browser.firstNavigationURL(), CefInternalPageService.isServicePage(url) {
+                    browser.close(force: true)
+                }
+            }
+            return false
+        }
         ChromiumWindowHider.hide(browser)
         Task {
             let url = await browser.firstNavigationURL()
             browser.close(force: true)
-            if let url { handler(url) }
+            if let url, !CefInternalPageService.isServicePage(url) { handler(url) }
         }
         return true
     }

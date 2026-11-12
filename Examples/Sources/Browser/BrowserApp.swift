@@ -41,10 +41,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         CefRuntime.shared.registerSchemeHandler(scheme: BrowserPages.scheme, handler: BrowserPages())
         Appearance.current.apply()
         controller.adoptTabsOpenedByChromium()
+        controller.library.start()
 
         let launch = LaunchOptions()
         let urls = launch.urls.isEmpty ? [nil] : launch.urls.map(Optional.some)
-        let browsers = urls.map { controller.openTab(url: $0) }
+        let browsers = urls.map { controller.openTab(url: $0, isPrivate: launch.opensPrivateTabs) }
         if let browser = browsers.last, launch.script != nil || launch.focusesAddressBar {
             Task {
                 await controller.waitUntilLoaded(browser)
@@ -55,6 +56,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     while !NSApp.isActive { try? await Task.sleep(for: .milliseconds(100)) }
                     try? await Task.sleep(for: .milliseconds(500))
                     controller.focusAddressBar()
+                    if let text = launch.addressBarText {
+                        try? await Task.sleep(for: .milliseconds(200))
+                        // Typed into the field editor, as the keyboard would.
+                        let editor = NSApp.keyWindow?.firstResponder as? NSTextView
+                        editor?.insertText(text, replacementRange: editor?.selectedRange() ?? NSRange())
+                    }
                 }
             }
         }
@@ -78,19 +85,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 /// - `-evaluate "openPopup()"` runs JavaScript in the last tab once loaded
 ///   (a script starting with `(` would be read as a list; prefix `void `).
 /// - `-focusAddressBar YES` starts with the address field editing.
+/// - `-addressBarText swift` starts editing with that text typed, which
+///   shows its suggestions.
+/// - `-private YES` opens the tabs as private tabs.
 /// - `-appearance dark` (or `light`, `system`) overrides the setting.
 @MainActor
 struct LaunchOptions {
     var urls: [URL] = []
     var script: String?
     var focusesAddressBar = false
+    var addressBarText: String?
+    var opensPrivateTabs = false
 
     init(defaults: UserDefaults = .standard) {
         urls = (defaults.string(forKey: "urls") ?? "")
             .split(separator: " ")
             .compactMap { AddressBar.destination(for: String($0)) }
         script = defaults.string(forKey: "evaluate")
-        focusesAddressBar = defaults.bool(forKey: "focusAddressBar")
+        addressBarText = defaults.string(forKey: "addressBarText")
+        opensPrivateTabs = defaults.bool(forKey: "private")
+        focusesAddressBar = defaults.bool(forKey: "focusAddressBar") || addressBarText != nil
     }
 }
 
@@ -133,7 +147,8 @@ struct BrowserCommands: Commands {
         CommandGroup(after: .textEditing) {
             Button("Find…") { controller.current?.execute(.find) }.keyboardShortcut("f")
         }
-        CommandMenu("View") {
+        // Into the system's View menu, beside its tab bar and full screen items.
+        CommandGroup(before: .toolbar) {
             Button("Reload") { controller.current?.reload() }.keyboardShortcut("r")
             Button("Reload Ignoring Cache") { controller.current?.reload(ignoringCache: true) }
                 .keyboardShortcut("r", modifiers: [.command, .shift])
@@ -144,14 +159,11 @@ struct BrowserCommands: Commands {
             Divider()
             Button("Developer Tools") { controller.current?.execute(.showDevTools) }
                 .keyboardShortcut("i", modifiers: [.command, .option])
-        }
-        CommandMenu("History") {
-            Button("Back") { controller.current?.goBack() }.keyboardShortcut("[")
-            Button("Forward") { controller.current?.goForward() }.keyboardShortcut("]")
             Divider()
-            Button("Show History") { controller.openTab(url: URL(string: "chrome://history")!) }.keyboardShortcut("y")
-            Button("Downloads") { controller.openTab(url: URL(string: "chrome://downloads")!) }
         }
+        // Menu contents are views, so they follow the library as it changes.
+        CommandMenu("History") { HistoryMenu(controller: controller) }
+        CommandMenu("Bookmarks") { BookmarksMenu(controller: controller) }
         CommandMenu("Browser") {
             Button("Extensions") { controller.openTab(url: URL(string: "chrome://extensions")!) }
             Button("Passwords") { controller.openTab(url: URL(string: "chrome://password-manager")!) }
@@ -162,15 +174,79 @@ struct BrowserCommands: Commands {
             Button("Playground") { controller.openTab(url: BrowserPages.playground) }
         }
     }
+
+    static func menuTitle(_ title: String, _ url: URL?) -> String {
+        let text = title.isEmpty ? (url?.absoluteString ?? "Untitled") : title
+        return text.count > 60 ? text.prefix(59) + "…" : text
+    }
+}
+
+/// Back, Forward and the latest pages, re-read whenever the menu bar opens
+/// (`BrowserLibrary`).
+private struct HistoryMenu: View {
+    let controller: BrowserController
+
+    var body: some View {
+        Button("Back") { controller.current?.goBack() }.keyboardShortcut("[")
+        Button("Forward") { controller.current?.goForward() }.keyboardShortcut("]")
+        Divider()
+        ForEach(controller.library.recentHistory) { entry in
+            Button(BrowserCommands.menuTitle(entry.title, entry.url)) { controller.openInFrontmostTab(entry.url) }
+        }
+        if !controller.library.recentHistory.isEmpty { Divider() }
+        Button("Show All History") { controller.openTab(url: URL(string: "chrome://history")!) }.keyboardShortcut("y")
+        Button("Downloads") { controller.openTab(url: URL(string: "chrome://downloads")!) }
+    }
+}
+
+/// Add or remove the frontmost page's bookmark, then the bookmarks: the
+/// bookmarks bar's contents first, the other folders as submenus.
+private struct BookmarksMenu: View {
+    let controller: BrowserController
+
+    private var library: BrowserLibrary { controller.library }
+
+    var body: some View {
+        Button(library.isBookmarked(controller.current?.url) ? "Remove Bookmark" : "Add Bookmark") {
+            if let browser = controller.current { library.toggleBookmark(for: browser) }
+        }
+        .keyboardShortcut("d")
+        .disabled(!BrowserLibrary.canBookmark(controller.current?.url))
+        Button("Show All Bookmarks") { controller.openTab(url: URL(string: "chrome://bookmarks")!) }
+            .keyboardShortcut("b", modifiers: [.command, .option])
+        let bar = library.bookmarkTree.first { $0.permanentFolder == .bookmarksBar }?.children ?? []
+        if !bar.isEmpty { Divider() }
+        ForEach(bar) { BookmarkMenuItem(bookmark: $0, open: controller.openInFrontmostTab) }
+        let folders = library.bookmarkTree.filter { $0.permanentFolder != .bookmarksBar && !($0.children ?? []).isEmpty }
+        if !folders.isEmpty { Divider() }
+        ForEach(folders) { BookmarkMenuItem(bookmark: $0, open: controller.openInFrontmostTab) }
+    }
+}
+
+/// A bookmark as a menu item, or a folder as a submenu.
+private struct BookmarkMenuItem: View {
+    let bookmark: CefBookmark
+    let open: (URL) -> Void
+
+    var body: some View {
+        if let url = bookmark.url {
+            Button(BrowserCommands.menuTitle(bookmark.title, url)) { open(url) }
+        } else {
+            Menu(bookmark.title.isEmpty ? "Untitled Folder" : bookmark.title) {
+                ForEach(bookmark.children ?? []) { BookmarkMenuItem(bookmark: $0, open: open) }
+                if (bookmark.children ?? []).isEmpty { Text("Empty") }
+            }
+        }
+    }
 }
 
 struct SettingsView: View {
-    @AppStorage("homePage") private var homePage = BrowserController.defaultHomePage
+    @AppStorage("newTabPage") private var newTabPage = BrowserController.defaultNewTabPage
     @AppStorage("appearance") private var appearance = Appearance.system.rawValue
 
     var body: some View {
         Form {
-            TextField("Home page", text: $homePage)
+            TextField("New tabs open", text: $newTabPage, prompt: Text(BrowserController.defaultNewTabPage))
             Picker("Appearance", selection: $appearance) {
                 Text("System").tag(Appearance.system.rawValue)
                 Text("Light").tag(Appearance.light.rawValue)

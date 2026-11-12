@@ -16,8 +16,22 @@ import Foundation
 /// fresh one. Service browsers are listed in neither
 /// ``CefRuntime/browsers`` nor ``CefBrowserWindow/all``, and are closed when
 /// the app quits.
+///
+/// Service pages are loaded with the ``addressMarker`` fragment. Chromium
+/// saves every Chrome-style window in its session, service windows
+/// included, and reopens them after a crash; the marker lets
+/// ``CefRuntime`` recognize those and close them instead of showing them.
 @MainActor
 final class CefInternalPageService {
+    /// The fragment that marks a service page's address.
+    nonisolated static let addressMarker = "cefswift-service"
+
+    /// Whether `url` is a service page's address — one Chromium reopened
+    /// from a previous session, when it does not belong to a live service.
+    nonisolated static func isServicePage(_ url: URL) -> Bool {
+        url.scheme == "chrome" && url.fragment == addressMarker
+    }
+
     /// The profile owns this service, and its browser keeps it alive.
     unowned let profile: CefProfile
     /// The page's address, e.g. `chrome://history/`.
@@ -100,7 +114,7 @@ final class CefInternalPageService {
     private func launch() async throws -> CefBrowser {
         var options = CefBrowserOptions()
         options.profile = profile
-        let browser = CefBrowser(url: URL(string: page), options: options, delegate: delegate)
+        let browser = CefBrowser(url: URL(string: "\(page)#\(Self.addressMarker)"), options: options, delegate: delegate)
         CefRuntime.shared.registerServiceBrowser(browser)
         let window = CefBrowserWindow(browser: browser)
         window.isService = true
@@ -117,6 +131,13 @@ final class CefInternalPageService {
             let loaded = try? await browser.evaluateJavaScript(
                 "document.readyState === 'complete' && location.href.startsWith(\(CefJSON.string(page).text))")
             if loaded?.boolValue == true {
+                // Some pages rewrite their address as they start (the
+                // history page drops the fragment); mark it again.
+                _ = try? await browser.evaluateJavaScript(
+                    """
+                    location.hash === '#\(Self.addressMarker)'
+                      || history.replaceState(history.state, '', location.pathname + location.search + '#\(Self.addressMarker)')
+                    """)
                 // Set the service up now, so page-side listeners run
                 // before the first call.
                 _ = try? await browser.evaluateJavaScript(script("async () => true", [:]))

@@ -182,6 +182,10 @@ public final class CefRuntime {
     /// ``initialize(configuration:)``; for custom (non-built-in) schemes the
     /// scheme must also be declared in ``CefConfiguration/customSchemes``.
     /// Registering again for the same scheme/domain replaces the handler.
+    ///
+    /// The handler serves every profile: the default one, and the
+    /// ``CefProfile/incognito()`` and ``CefProfile/persistent(name:)``
+    /// profiles, whose request contexts Chromium keeps separately.
     public func registerSchemeHandler(scheme: String, domain: String? = nil, handler: some CefSchemeHandler) {
         precondition(
             isInitialized,
@@ -201,7 +205,21 @@ public final class CefRuntime {
         if registered == 0 {
             CefLog.error("cef_register_scheme_handler_factory failed for scheme '\(scheme)'")
         }
+        schemeHandlers.removeAll { $0.scheme == scheme && $0.domain == domain }
+        schemeHandlers.append(RegisteredSchemeHandler(scheme: scheme, domain: domain, factory: factory))
+        CefProfile.registerSchemeHandler(schemeHandlers[schemeHandlers.count - 1])
     }
+
+    /// A scheme handler registered with ``registerSchemeHandler(scheme:domain:handler:)``.
+    struct RegisteredSchemeHandler {
+        var scheme: String
+        var domain: String?
+        var factory: SchemeHandlerFactory
+    }
+
+    /// Every registered scheme handler, for profiles that create their
+    /// request context later.
+    @ObservationIgnored private(set) var schemeHandlers: [RegisteredSchemeHandler] = []
 
     /// Shuts CEF down and unloads the framework. All browsers must already
     /// be closed. Call once, at process exit.

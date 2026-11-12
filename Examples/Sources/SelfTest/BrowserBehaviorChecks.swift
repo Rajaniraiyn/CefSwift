@@ -233,11 +233,14 @@ extension SelfTest {
 
     // MARK: Chromium's settings
 
-    /// Mirrors `BrowserController.internalPageStyles` in the Browser example.
+    /// Mirrors part of `BrowserController.internalPageStyles` in the
+    /// Browser example. The appearance page's rows live in a component that
+    /// sets its own `adoptedStyleSheets` after attaching its shadow root.
     static let settingsStyles = """
         #about-menu, a[href="/people"], a[href="/syncSetup"], a[href="/defaultBrowser"],
         settings-people-page-index, settings-default-browser-page,
-        settings-about-page #updateStatusMessage, settings-about-page #relaunch
+        settings-about-page #updateStatusMessage, settings-about-page #relaunch,
+        #themeRow, settings-toggle-button[pref-key="browser.show_home_button"], .cr-row:has(> #tabStripPosition)
         { display: none !important }
         """
 
@@ -263,6 +266,24 @@ extension SelfTest {
         let shown = (try? await browser.evaluateJavaScript(visibility).stringValue) ?? ""
         check("settings: About, You and Google and Default browser are hidden; the rest shows",
               shown == "false,false,false,true,false", detail: shown)
+
+        // Components that assign their own adoptedStyleSheets keep the sheet.
+        browser.load(URL(string: "chrome://settings/appearance")!)
+        let appearance = """
+            (() => {
+              const deepAll = (sel, root = document) => [...root.querySelectorAll(sel)].concat(
+                ...[...root.querySelectorAll('*')].filter(e => e.shadowRoot).map(e => deepAll(sel, e.shadowRoot)));
+              const shown = sel => deepAll(sel).some(e => e.getClientRects().length > 0);
+              return [shown('#themeRow'), shown('settings-toggle-button[pref-key="browser.show_home_button"]'),
+                      shown('#tabStripPosition'), shown('#zoomLevel')].join();
+            })()
+            """
+        _ = await waitUntilAsync {
+            (try? await browser.evaluateJavaScript(appearance).stringValue)?.hasSuffix("true") == true
+        }
+        let appearanceShown = (try? await browser.evaluateJavaScript(appearance).stringValue) ?? ""
+        check("settings: styles reach components that set their own adoptedStyleSheets",
+              appearanceShown == "false,false,false,true", detail: appearanceShown)
 
         // The password manager link opens a tab Chromium creates itself.
         var opened: [URL] = []
