@@ -114,18 +114,43 @@ description to `.cef/update/`.
 `.github/workflows/ci.yml` runs on pushes and pull requests to `main`, and
 when dispatched, on one `macos-15` runner:
 
-1. The update script's self-test.
-2. Download CEF (minimal, arm64), cached by CEF version.
-3. `Scripts/generate-bindings.py --check --framework …`: the generated
+1. Print the macOS, Xcode and Swift versions. The `macos-15` label selects
+   an image family that GitHub updates in place, so these can change
+   between runs without a commit.
+2. The update script's self-test.
+3. Download CEF (minimal, arm64), cached by CEF version.
+4. `Scripts/generate-bindings.py --check --framework …`: the generated
    bridge must match the headers, and the framework must export every
    function it binds.
-4. `swift build` and `swift test`.
-5. Build the Examples package, then bundle SelfTest. The Examples package
-   gets a copy-on-write clone of the downloaded archive instead of
-   downloading it again.
-6. Run SelfTest. It exits with the number of failed checks; its `FAIL` and
-   `SKIP` lines go to the run summary.
-7. Check that the build left the working tree clean.
+5. `swift build --build-tests`, then check that the built code's
+   deployment target is macOS 14.
+6. `swift test`, with `CEF_FRAMEWORK_PATH` set, so the loader tests run.
+7. `Scripts/check-doc-samples.py`: every Swift sample in the README and
+   the docs compiles.
+8. Build the Examples package, then bundle SelfTest and run `cef doctor`
+   on it. The Examples package gets a copy-on-write clone of the
+   downloaded archive instead of downloading it again.
+9. Run SelfTest with `SELFTEST_ISOLATED=1` (each group in a process of its
+   own), `SELFTEST_STRICT=1` (a skip for a reason of the environment
+   fails) and `SELFTEST_JSON`. Its `FAIL` and `SKIP` lines and the counts
+   go to the run summary. On failure, the log, the JSON results and the
+   crash reports written during the run are uploaded as the
+   `selftest-diagnostics` artifact.
+10. Check that the build left the working tree clean.
+
+What CI verifies, and what it does not:
+
+- Compiling against the macOS 14 deployment target means the compiler
+  rejects any newer API used without an availability check. Nothing runs
+  on macOS 14, so `if #available` fallbacks and behavior that differs on
+  macOS 14 are untested.
+- Everything runs on Apple silicon. Nothing is built or run for Intel.
+  Covering it needs an Intel runner (`macos-15-intel` or `macos-13`), the
+  `macosx64` CEF archive in the cache, `cef bundle --platform macosx64`
+  there, and a SelfTest run; on a schedule rather than per pull request,
+  given what those runners cost.
+- One toolchain: whichever Xcode the runner image selects. The oldest
+  Swift 6 toolchain the package claims is not built with.
 
 ## Releases
 

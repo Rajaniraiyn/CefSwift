@@ -21,7 +21,7 @@ The two `--allow-…` options pre-approve the plugin's permissions: it writes
 | Subcommand | Does |
 |---|---|
 | `download` | Downloads the pinned CEF distribution into `.cef/`, verifies its size and SHA-1, extracts it and converts the framework to the versioned layout. Does nothing if it is already prepared. |
-| `bundle` | Builds the product, compiles the helper, then assembles and signs `<Name>.app`. Downloads CEF first if needed. |
+| `bundle` | Builds the product, compiles the helper, then assembles and signs `<Name>.app`. Downloads CEF first if needed. See [What `bundle` puts in the app](#what-bundle-puts-in-the-app). |
 | `doctor <App.app>` | Inspects a built bundle and reports, per feature, whether it works and what is missing. See [cef doctor](#cef-doctor). |
 | `package <App.app>` | Wraps the app in a zip (`ditto`) or a disk image (`hdiutil`). |
 | `notarize <App.app>` | Packages the app, submits it with `xcrun notarytool submit --wait`, and staples the ticket. |
@@ -35,10 +35,10 @@ Options of `bundle`:
 
 | Option | Default | Effect |
 |---|---|---|
-| `--product <Name>` | Required | The executable product to bundle. |
+| `--product <Name>` | Required | The executable product to bundle, from the invoking package or a dependency. |
 | `--configuration debug\|release` | `release` | Build configuration. |
 | `--output <dir>` | `dist` | Output directory, relative to the package. |
-| `--config <file>` | `cefapp.json` beside the target's sources | The settings file. See [Per-product settings](#per-product-settings). |
+| `--config <file>` | `cefapp.json` beside the sources of the product's executable target | The settings file. See [Per-product settings](#per-product-settings). |
 | `--bundle-id <id>` | `bundleIdentifier`, else `com.cefswift.<name>` | The app's bundle identifier. |
 | `--name <Name>` | The product name | The app, executable and display name. |
 | `--version <version>` | `version`, else `1.0` | `CFBundleShortVersionString`, the version users see. |
@@ -55,7 +55,7 @@ Options of `bundle`:
 | `--package zip\|dmg` | None | Packages the result, as `cef package` does. |
 | `--notarize` | Off | Packages and notarizes the result; needs `--keychain-profile <name>` or `notarization.keychainProfile`. |
 | `--flavor minimal\|standard` | `minimal` | Which CEF distribution to download. See [Flavors](#flavors). |
-| `--platform macosarm64\|macosx64` | The build machine's | Which architecture's CEF to bundle. |
+| `--platform macosarm64\|macosx64` | The build machine's | Which architecture's CEF to bundle. It must be the architecture SwiftPM builds for, which is the one `swift package` runs as; anything else is an error. Run `arch -x86_64 swift package …` to bundle for Intel on Apple silicon. |
 | `--manifest <path>` | `CEF_VERSION.json` | A different CEF manifest. |
 
 `download` takes `--platform`, `--flavor` and `--manifest` as well, and
@@ -73,7 +73,8 @@ to `.gitignore`.
 
 ## Per-product settings
 
-A `cefapp.json` beside the product's sources sets what the command-line
+A `cefapp.json` beside the sources of the product's executable target (the
+target, whatever its name, that the product's `targets` names) sets what the command-line
 options override. It may contain comments and trailing commas (JSON5).
 Paths in it are relative to its directory. An unknown key is an error, so
 a misspelled key does not go unnoticed.
@@ -124,6 +125,35 @@ unhandled files. The Browser example's
 its `Browser-Distribution.entitlements` is a template for a team-signed
 build.
 
+## What `bundle` puts in the app
+
+`bundle` collects what the SwiftPM build of the product produced:
+
+- The executable.
+- The resource bundle of each target the product is built from, its
+  dependencies' targets included, that declares resources:
+  `<Package>_<Target>.bundle`, the bundle `Bundle.module` loads. They go in
+  `Contents/Resources/`, the first place SwiftPM's generated accessor looks
+  (`Bundle.main.resourceURL`). A missing one is an error.
+- Each dynamic library and framework the executable loads through `@rpath`
+  from the build directory, such as a `.dynamic` library product of a
+  dependency, and the ones those load. They go in `Contents/Frameworks/`.
+  The Swift runtime and the system's libraries are part of macOS and are
+  not copied.
+
+The build links executables with run paths into the build directory and
+the toolchain. `bundle` removes each absolute run path outside `/usr/lib`
+and `/System` from the binaries it copies, and adds
+`@executable_path/../Frameworks` to the app's executable, so the app loads
+its libraries from the bundle on every Mac, the build machine included.
+Every Mach-O file in the bundle must have the product's architecture.
+
+`bundle` assembles the app in a staging directory beside the destination,
+signs it there, and only then replaces `<Name>.app`. A build that fails
+leaves the previous app as it was. `cef doctor` lists the app's libraries
+and resource bundles and reports code that loads or searches for
+libraries outside the bundle.
+
 ## Bundle anatomy
 
 ```
@@ -134,7 +164,10 @@ MyApp.app/
     ├── embedded.provisionprofile              # when provisioningProfile is set
     ├── MacOS/
     │   └── MyApp                          # your product
+    ├── Resources/
+    │   └── MyApp_MyApp.bundle             # each target's resources (Bundle.module)
     └── Frameworks/
+        ├── libMyLibrary.dylib             # dynamic libraries the product loads
         ├── libcefswift_helper_startup.dylib   # seals the helpers' sandbox
         ├── Chromium Embedded Framework.framework/
         │   ├── Versions/
@@ -251,8 +284,11 @@ with `--deep`:
    library validation load them.
 2. The framework.
 3. `libcefswift_helper_startup.dylib`.
-4. Each helper app, with its entitlements.
-5. The app, with its entitlements and the embedded profile.
+4. The app's own libraries and frameworks.
+5. Each resource bundle that has an `Info.plist`; a flat one is sealed as
+   resources by the app's signature.
+6. Each helper app, with its entitlements.
+7. The app, with its entitlements and the embedded profile.
 
 Executables (the app and helpers) get `--options runtime` when the hardened
 runtime is on; libraries and the framework take no options or entitlements,
@@ -474,8 +510,13 @@ It reads the bundle with `codesign`, `security`, `spctl`, `stapler` and
 
 - the signature (ad hoc, Apple Development, Developer ID), the team, the
   hardened runtime and the secure timestamp;
-- each helper's signature and entitlements, and whether the framework and
-  its libraries are signed like the app;
+- each helper's signature and entitlements, and whether the framework, its
+  libraries, and the app's own libraries and resource bundles are signed
+  like the app;
+- linking: the app's libraries and resource bundles, and an error for code
+  without the app's architecture, or that loads or searches for libraries
+  outside the bundle (it would run on the build machine and fail on
+  others);
 - the embedded profile and its checks;
 - Gatekeeper's verdict, the stapled ticket and the quarantine attribute;
 - per feature, whether it works and what is missing; the safe-storage

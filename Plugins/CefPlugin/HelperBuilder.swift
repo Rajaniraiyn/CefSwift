@@ -23,10 +23,6 @@ struct HelperBuilder {
         "@executable_path/../../../Chromium Embedded Framework.framework/Chromium Embedded Framework"
     static let startupLibraryPathFromHelper = "@executable_path/../../../\(startupLibraryName)"
 
-    static func isHelperProduct(_ name: String) -> Bool {
-        name == helperProduct || name == startupProduct
-    }
-
     /// The converted `Chromium Embedded Framework.framework` in `.cef/dist`.
     let framework: URL
     let workDirectory: URL
@@ -93,19 +89,5 @@ struct HelperBuilder {
         try Shell.runChecked(
             "/usr/bin/xcrun", ["install_name_tool", "-change", old, new, binary.path],
             hint: "Could not set the library paths of \(binary.lastPathComponent).")
-    }
-
-    /// The package that provides CefSwift's `CCef` target: the invoking
-    /// package itself or one of its dependencies.
-    static func cefSwiftPackageDirectory(in package: Package) -> URL? {
-        if package.targets.contains(where: { $0.name == "CCef" }) {
-            return package.directoryURL
-        }
-        for dependency in package.dependencies {
-            if let directory = cefSwiftPackageDirectory(in: dependency.package) {
-                return directory
-            }
-        }
-        return nil
     }
 }

@@ -172,10 +172,21 @@ struct CefPlugin: CommandPlugin {
             throw CefPluginError("Invalid --configuration '\(configurationName)'. Use 'debug' or 'release'.")
         }
 
+        // SwiftPM builds for the architecture it runs on; the CEF
+        // distribution must match it.
+        guard platform == hostCefPlatform else {
+            throw CefPluginError(
+                "--platform \(platform) does not match this build's architecture: SwiftPM builds " +
+                "\(productName) for \(hostCefPlatform == "macosarm64" ? "arm64" : "x86_64") here, and a bundle " +
+                "cannot mix architectures. To bundle for Intel on Apple silicon, run the command under Rosetta: " +
+                "arch -x86_64 swift package … cef bundle.")
+        }
+
         // 1. Settings, checked before anything slow runs. cefapp.json sits
-        // beside the target's sources.
+        // beside the sources of the product's executable target.
+        let located = try LocatedProduct.locate(productName, in: context.package)
         let appConfig = try CefAppConfig.load(
-            near: targetDirectory(named: productName, in: context.package),
+            near: located.sourceDirectory,
             explicit: configPath.map { packageRelative($0, context: context) })
         if let appConfig { print("[cef] Settings: \(appConfig.source.path)") }
         let appName = nameOption ?? productName
@@ -231,12 +242,17 @@ struct CefPlugin: CommandPlugin {
         } else {
             mainExecutable = try buildProduct(
                 named: productName, kind: .executable, configuration: configuration, context: context,
-                manifest: manifest, linkerFlags: Self.frameworkLinkerFlags(framework),
+                // Room for the run path AppBundler adds.
+                linkerFlags: Self.frameworkLinkerFlags(framework) + ["-headerpad_max_install_names"],
                 forceCLIBuild: forceCLIBuild
             )
         }
-        let minimumSystemVersion = appConfig?.minimumSystemVersion
-            ?? MachOVersion.minimumSystemVersion(of: mainExecutable) ?? "14.0"
+        let product = try BuiltProduct.collect(
+            executable: mainExecutable, resourceBundleNames: located.resourceBundleNames)
+        for item in product.resourceBundles + product.libraries {
+            print("[cef] Includes \(item.lastPathComponent)")
+        }
+        let minimumSystemVersion = appConfig?.minimumSystemVersion ?? product.deploymentTarget ?? "14.0"
 
         // 4. Build the helper against the framework.
         let helper: HelperBuilder.Products
@@ -252,7 +268,7 @@ struct CefPlugin: CommandPlugin {
             ).build { product, kind, linkerFlags in
                 try buildProduct(
                     named: product, kind: kind, configuration: configuration, context: context,
-                    manifest: manifest, linkerFlags: linkerFlags, forceCLIBuild: forceCLIBuild)
+                    linkerFlags: linkerFlags, forceCLIBuild: forceCLIBuild)
             }
         }
 
@@ -273,7 +289,7 @@ struct CefPlugin: CommandPlugin {
             minimumSystemVersion: minimumSystemVersion,
             version: versionOption ?? appConfig?.version ?? "1.0",
             build: buildOption ?? appConfig?.build ?? "1",
-            mainExecutable: mainExecutable,
+            product: product,
             helperExecutable: helper.executable,
             helperStartupLibrary: helper.startupLibrary,
             frameworkSource: framework,
@@ -311,20 +327,6 @@ struct CefPlugin: CommandPlugin {
     private func packageRelative(_ path: String, context: PluginContext) -> URL {
         URL(fileURLWithPath: (path as NSString).expandingTildeInPath, relativeTo: context.package.directoryURL)
             .standardizedFileURL
-    }
-
-    /// The directory of a target's sources: the closest directory that holds
-    /// all of them. (`Target.directoryURL` needs tools version 6.1.)
-    private func targetDirectory(named name: String, in package: Package) -> URL? {
-        guard let target = package.targets.first(where: { $0.name == name }) as? SourceModuleTarget else {
-            return nil
-        }
-        let directories = target.sourceFiles.map { $0.url.deletingLastPathComponent().standardizedFileURL.pathComponents }
-        guard var common = directories.first else { return nil }
-        for components in directories.dropFirst() {
-            common = Array(zip(common, components).prefix { $0 == $1 }.map(\.0))
-        }
-        return URL(fileURLWithPath: NSString.path(withComponents: common))
     }
 
     private struct ResolvedDistribution {
@@ -480,14 +482,13 @@ struct CefPlugin: CommandPlugin {
 
     /// Builds a product through SwiftPM and returns the built file. A
     /// product SwiftPM cannot build that way, such as one from a
-    /// dependency, falls back to `swift build` in the package holding the
-    /// manifest.
+    /// dependency, falls back to `swift build` in the package that declares
+    /// it.
     private func buildProduct(
         named productName: String,
         kind: PackageManager.BuildResult.BuiltArtifact.Kind,
         configuration: PackageManager.BuildConfiguration,
         context: PluginContext,
-        manifest: CefManifest,
         linkerFlags: [String],
         forceCLIBuild: Bool
     ) throws -> URL {
@@ -517,11 +518,10 @@ struct CefPlugin: CommandPlugin {
 
         // The running `swift package` holds the lock on the invoking package's
         // .build directory, so the fallback builds into its own scratch path.
-        // A product of a dependency, such as CefSwift's helper, builds in the
-        // package that declares it.
-        let providerRoot = HelperBuilder.isHelperProduct(productName)
-            ? (HelperBuilder.cefSwiftPackageDirectory(in: context.package) ?? manifest.sourceURL.deletingLastPathComponent())
-            : manifest.sourceURL.deletingLastPathComponent()
+        // A product builds in the package that declares it: the invoking
+        // package for the app, CefSwift for the helper.
+        let providerRoot = (try? LocatedProduct.locate(productName, in: context.package))?.package.directoryURL
+            ?? context.package.directoryURL
         let configName = configuration == .release ? "release" : "debug"
         let scratch = context.pluginWorkDirectoryURL.appendingPathComponent("fallback-build")
         print("[cef] PackageManager build of '\(productName)' did not yield a binary; " +

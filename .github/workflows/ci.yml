@@ -3,10 +3,19 @@
 # which start it with workflow_dispatch (docs/automation.md).
 #
 # Cost notes (keep this cheap):
-#   - One macos-15 (arm64) job. The runner is pinned so an image change never
-#     arrives unannounced; macos-latest moves.
+#   - One macos-15 (arm64) job. The label selects the macOS 15 image family;
+#     GitHub updates that image (Xcode, tools) in place every week or two,
+#     so a run can change without a commit here. The "Toolchain" step
+#     prints what each run used.
 #   - Only the minimal arm64 CEF flavor is downloaded, and `.cef/downloads`
 #     (~135 MB) is cached keyed on the pinned CEF version.
+#
+# What this verifies, and what it does not (docs/automation.md#ci):
+#   - Everything compiles against the macOS 14 deployment target that
+#     Package.swift declares: the compiler rejects macOS 15 API used without
+#     an availability check. It does not run anything on macOS 14.
+#   - Everything runs on Apple silicon with macOS 15. Nothing is built or
+#     run for Intel.
 name: CI
 
 on:
@@ -28,13 +37,22 @@ jobs:
     # Keep the job name "ci": it is the required status check that gates the
     # auto-merged CEF update pull requests.
     runs-on: macos-15
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
+      - name: Toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          swift --version
+
       - name: Read the pinned CEF version
         id: cef
-        run: echo "version=$(jq -r .cef CEF_VERSION.json)" >> "$GITHUB_OUTPUT"
+        run: |
+          version="$(jq -r .cef CEF_VERSION.json)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "framework=$GITHUB_WORKSPACE/.cef/dist/${version}_macosarm64_minimal/Release/Chromium Embedded Framework.framework" >> "$GITHUB_OUTPUT"
 
       # Offline checks of the update logic (release selection, manifest,
       # archive extraction, API-version handling).
@@ -60,15 +78,28 @@ jobs:
       # function it binds must be exported by the framework it will load —
       # a mismatch would otherwise abort at first call.
       - name: C bridge matches the headers and the framework
-        env:
-          FRAMEWORK: .cef/dist/${{ steps.cef.outputs.version }}_macosarm64_minimal/Release/Chromium Embedded Framework.framework
-        run: Scripts/generate-bindings.py --check --framework "$FRAMEWORK"
+        run: Scripts/generate-bindings.py --check --framework "${{ steps.cef.outputs.framework }}"
 
       - name: Build
-        run: swift build
+        run: swift build --build-tests
 
+      # The package's deployment target reaches the built code: availability
+      # checking above was against macOS 14.
+      - name: Deployment target is macOS 14
+        run: |
+          xcrun vtool -show-build .build/debug/cefswift-helper | tee "$RUNNER_TEMP/build-version.txt"
+          grep -Eq 'minos 14\.0$' "$RUNNER_TEMP/build-version.txt"
+
+      # With the framework's path, the loader tests run instead of skipping.
       - name: Test
+        env:
+          CEF_FRAMEWORK_PATH: ${{ steps.cef.outputs.framework }}
         run: swift test
+
+      # Every Swift sample in README.md and docs/ compiles against this
+      # checkout, for macOS 14.
+      - name: Documentation samples compile
+        run: Scripts/check-doc-samples.py
 
       - name: Build examples
         run: swift build --package-path Examples
@@ -85,22 +116,59 @@ jobs:
             --allow-network-connections all \
             cef bundle --product SelfTest --configuration release --output dist
 
-      # Runs every end-to-end check against the real Chromium runtime; the
-      # app exits with the number of failed checks. FAIL and SKIP lines go to
-      # the run summary.
+      - name: The bundle passes cef doctor
+        run: |
+          swift package --package-path Examples \
+            --allow-writing-to-package-directory \
+            --allow-network-connections all \
+            cef doctor dist/SelfTest.app
+
+      # Runs every end-to-end check against the real Chromium runtime, each
+      # group in a process of its own; the app exits with the number of
+      # failed checks. SELFTEST_STRICT makes a skip for a reason of the
+      # environment (offline, window not visible) a failure, since this
+      # runner's environment is under our control. FAIL and SKIP lines go
+      # to the run summary.
       - name: SelfTest
         shell: bash
+        env:
+          SELFTEST_ISOLATED: "1"
+          SELFTEST_STRICT: "1"
+          SELFTEST_JSON: ${{ runner.temp }}/selftest.json
         run: |
           set -o pipefail
           status=0
-          ./Examples/dist/SelfTest.app/Contents/MacOS/SelfTest | tee "$RUNNER_TEMP/selftest.log" || status=$?
+          ./Examples/dist/SelfTest.app/Contents/MacOS/SelfTest 2>&1 | tee "$RUNNER_TEMP/selftest.log" || status=$?
           {
-            echo "### SelfTest: $(grep -c '^PASS' "$RUNNER_TEMP/selftest.log") passed, exit status $status"
+            echo "### SelfTest: exit status $status"
+            if [ -f "$SELFTEST_JSON" ]; then
+              jq -r '"\(.passed) passed, \(.failed) failed, skipped: environment \(.skipped.environment), limitation \(.skipped.limitation), uncategorized \(.skipped.uncategorized); \(.durationSeconds | floor) s"' "$SELFTEST_JSON"
+            fi
             echo '```'
-            grep -E '^(FAIL|SKIP)|CHECK' "$RUNNER_TEMP/selftest.log" || true
+            grep -E '^(FAIL|SKIP|SUMMARY)|CHECK' "$RUNNER_TEMP/selftest.log" || true
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           exit "$status"
+
+      # On failure: the full log, the results, and any crash reports from
+      # this run (Chromium's helpers report under their own names).
+      - name: Collect SelfTest diagnostics
+        if: failure()
+        run: |
+          mkdir -p "$RUNNER_TEMP/diagnostics"
+          cp "$RUNNER_TEMP"/selftest.* "$RUNNER_TEMP/diagnostics/" 2>/dev/null || true
+          find "$HOME/Library/Logs/DiagnosticReports" -newer "$GITHUB_WORKSPACE/Package.swift" -type f \
+            -exec cp {} "$RUNNER_TEMP/diagnostics/" \; 2>/dev/null || true
+          ls -la "$RUNNER_TEMP/diagnostics"
+
+      - name: Upload SelfTest diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: selftest-diagnostics
+          path: ${{ runner.temp }}/diagnostics
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Working tree must stay clean
         run: |

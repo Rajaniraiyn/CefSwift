@@ -494,7 +494,7 @@ do {
     print("kept loaded:", blockers)          // [.visible], [.playingAudio], …
 }
 
-CefRuntime.shared.memorySaver = .after(.minutes(30))   // hidden 30 minutes, or memory is low
+CefRuntime.shared.memorySaver = .after(.seconds(30 * 60))   // hidden 30 minutes, or memory is low
 CefRuntime.shared.memorySaver = .underMemoryPressure    // only when macOS runs low on memory
 ```
 
@@ -613,7 +613,9 @@ scripts:
 ```swift
 options.userScripts = [
     CefUserScript(source: "window.appVersion = '1.2'"),
-    CefUserScript(source: "document.body.dataset.app = 'yes'", matching: "https://*.example.com/*"),
+    // At document start the page has no <body> yet; this one waits for it.
+    CefUserScript(source: "document.body.dataset.app = 'yes'", matching: "https://*.example.com/*",
+                  injectionTime: .documentEnd),
     .styleSheet("header { display: none }", matching: "https://news.example/*"),
 ]
 ```
@@ -651,7 +653,7 @@ let bridge = CefBridge(name: "app")
 bridge.handle("greet") { (person: Person) in "Hello, \(person.name)!" }
 bridge.handle("save") { (document: Document, call: CefBridgeCall) in
     guard call.origin == "https://app.example.com" else { throw AppError.forbidden }
-    try store.save(document)
+    try documents.save(document)
 }
 
 var options = CefBrowserOptions()
@@ -1319,9 +1321,6 @@ latency the median of five calls.
 | `autocomplete` | `chrome://omnibox` | 23 MB | 234 ms | 9 ms |
 | Discarding | `chrome://discards` | 22 MB | 122 ms | 1 ms |
 
-Hosts that open the WebUI app instead, as CefKit did before, cost 38 to
-83 MB each and their first call took as long.
-
 The Browser example uses them for address-field suggestions
 (`AddressSuggestions.swift`), a bookmark star, Bookmarks and History menus,
 and a start page whose tiles come from `mostVisited()` and
@@ -1385,8 +1384,16 @@ replace.
 ### Features that use the DevTools Protocol
 
 These attach `devTools` to the browser. CEF keeps the session attached
-until the browser closes. A session with no protocol domain enabled
-changes nothing a page can measure; an enabled domain can be seen.
+until the browser closes. An enabled domain can be seen. A session with no
+domain enabled showed no difference in what `Scripts/compat-matrix.py`'s
+probe page reads (`Scripts/compat/probe.html`: whether `console` calls
+read an `Error`'s properties, the time to log a large object, the time a
+`debugger` statement takes, automation globals, `navigator.webdriver`,
+window geometry, focus and visibility, animation frame rate, plugins,
+client-hint brands, codecs, WebGL, permissions, voices, media devices),
+measured with CEF 156.0.28 on 2026-11-13 in a windowed and an offscreen
+browser. That is what those probes found, not a guarantee about every
+measurement a page can make.
 
 | Feature | What attaches | What a page can observe |
 |---|---|---|
@@ -1688,7 +1695,7 @@ It has the parts of `CefBrowser`'s surface WebKit offers:
 | `url`, `title`, `isLoading`, `estimatedProgress`, `canGoBack`, `canGoForward`, `hasOnlySecureContent` | Observable, as on `CefBrowser`. |
 | `load(_:)`, `loadHTML(_:baseURL:)`, `goBack()`, `goForward()`, `reload(ignoringCache:)`, `stopLoading()`, `close()` | Navigation. |
 | `evaluateJavaScript(_:)`, `evaluateJavaScript(_:as:)` | Awaits promises; throws `CefJavaScriptError`. |
-| `options.userScripts` | `CefUserScript`s, with `urlPattern` and `isolatedWorldName` (a WebKit content world). |
+| `options.userScripts` | `CefUserScript`s, with `urlPattern`, `injectionTime` and `frames`, in the page's content world. |
 | `find(_:backwards:caseSensitive:)`, `pageZoom`, `snapshot()` | Find, zoom, a PNG of the page. |
 | `decidePolicy`, `onOpenWindow` | Main-frame navigation decisions and new windows. |
 | `options.identifiesAsSafari` | On by default: the User-Agent ends `Version/<Safari's version> Safari/605.1.15`. |
@@ -1772,16 +1779,13 @@ executable to the page's `didFinishLoad`.
 | App | Processes | Memory | Launch |
 |---|---|---|---|
 | `CefWebView` with `.embedded` (the Minimal example) | 5 | 88 MB | 306 ms |
-| The same, before the changes below | 6 | 185 MB | 276 ms |
 | The same with `memoryPolicy = .minimal` | 4 | 82 MB | 284 ms |
 | Browser example, one tab, `.browser` | 7 | 166 MB | 551 ms |
-| The same, before the changes below | 8 | 371 MB | 559 ms |
 | For comparison: a `WKWebView` app | 4 | 60 MB | 284 ms |
 | For comparison: Chrome 157, empty profile, one tab | 12 | 286 MB | – |
 
-Launch times vary by about 30 ms from run to run, so none of the changes
-measurably changes them. The first launch after a bundle is built or signed
-takes 2 to 3 s longer while macOS checks its signature. A first launch on
+Launch times vary by about 30 ms from run to run. The first launch after a
+bundle is built or signed takes 2 to 3 s longer while macOS checks its signature. A first launch on
 an empty profile measures within the same ranges, with up to 4 MB more
 memory. The Browser example starts no service host at launch: its
 bookmarks come from Chromium's `Bookmarks` file, and its history is read
@@ -1791,11 +1795,8 @@ Chromium-panel code, it uses:
 | Browser example (`measure-services.py browser`, median of 3) | Processes | Memory |
 |---|---|---|
 | At launch | 6 | 143 MB |
-| The same, with a host per internal page opening the page's app | 8 | 264 MB |
 | After typing in the address field, bookmarking the page and opening the menu bar | 9 | 217 MB |
-| The same, with a host per internal page opening the page's app | 10 | 305 MB |
 | 40 s later, once the hosts have closed | 6 | 157 MB |
-| The same, with a host per internal page opening the page's app | 10 | 290 MB |
 
 In the Minimal example, the 88 MB divide into the app process (39 MB), the
 GPU process (21 MB), the page's renderer (16 MB), and Chromium's network
@@ -1806,9 +1807,10 @@ GPU process (21 MB), the page's renderer (16 MB), and Chromium's network
 `swift package cef bundle` links the framework into the helper processes and
 the app executable, so dyld loads it at launch instead of CefKit loading it
 with `dlopen`. That keeps about 12 MB of the framework's data as shared,
-clean memory in each process instead of private memory, and is most of the
-difference between the "before" rows and the rest
-([architecture](architecture.md#loading-the-framework-at-launch)).
+clean memory in each process instead of private memory
+([architecture](architecture.md#loading-the-framework-at-launch);
+[design notes](design-notes.md#loading-the-framework-at-launch) record the
+measurement).
 
 ### What the presets turn off
 
@@ -1836,26 +1838,10 @@ configuration.memoryPolicy = .minimal
 | `.reduced` | 1 process, 13 MB | A page from a site without a renderer, and each new browser, waits for one to start: a navigation to a new site takes 52 ms instead of 14 ms (local server, median of 8). |
 | `.minimal` | 2 processes, 19 MB | As `.reduced`; and the network service runs in the app's process, so a crash in it ends the app instead of restarting the service, and code that parses network data shares the app's memory. |
 
-### Measured and left out
-
-These changes were measured on the Minimal example and left out, because
-they saved nothing on an idle page, cost more than they saved, or save the
-same as `.reduced`:
-
-- `--js-flags=--lite-mode` and `--js-flags=--optimize-for-size`: no
-  difference while idle; both slow JavaScript down.
-- `--disable-extensions`, `--disable-spell-checking`, and turning off
-  optimization-guide model downloads, Safe Browsing real-time lookups,
-  certificate-transparency updates and preloading: no difference.
-- `--disable-gpu-compositing`: 10 MB more.
-- `--renderer-process-limit=1` and `--disable-site-isolation-trials`: save
-  the spare renderer, as `.reduced` does; the second also gives up site
-  isolation.
-- `--enable-low-end-device-mode`: saves the spare renderer and 3 MB more in
-  the GPU process, and lowers rendering quality.
-
 The GPU process stays a process of its own in every policy, so that a GPU
-driver crash cannot end the app.
+driver crash cannot end the app. The
+[design notes](design-notes.md#memory-settings-measured-and-not-used) list
+the switches measured and not used.
 
 ## Known limits
 
