@@ -12,13 +12,14 @@ CefKit       CefRuntime, CefBrowser, CefBrowserWindow, CefBrowserDelegate, CefBr
     │        CefDevTools, CefProfile, configuration and policy types
 CCef         vendored CEF C headers, the generated bridge, the runtime loader (C)
 
-cef-helper   the helper-process executable, bundled five times by the plugin
-CefPlugin    swift package cef download | bundle | info | clean
+CefPlugin    swift package cef download | bundle | info | clean; compiles the
+             helper-process executable (C, Plugins/CefPlugin/Helper)
 ```
 
 ## The C bridge
 
-CefSwift calls CEF through its C API and never links the framework.
+CefSwift calls CEF through its C API and resolves every function at run
+time, so the Swift modules build without the framework.
 
 - `Scripts/generate-bindings.py` runs the C preprocessor over the vendored
   headers at the `CEF_API_VERSION` pinned in `ccef_config.h` and writes two
@@ -32,6 +33,9 @@ CefSwift calls CEF through its C API and never links the framework.
   compares `cef_api_hash` with the hash the headers define for the pinned
   version. A framework that does not match fails with
   `CefError.apiHashMismatch` instead of misbehaving.
+- In a bundle from `cef bundle`, the app executable also links the
+  framework, weakly, so dyld loads it at launch and `dlopen` returns the
+  library already loaded. See [Loading the framework at launch](#loading-the-framework-at-launch).
 
 Because the API version is pinned, CEF binaries update without changes to
 the Swift code. Adopting newer C APIs is a separate step that moves the pin
@@ -200,6 +204,61 @@ throws there instead of starting a service. An incognito profile's
 bookmarks are the default profile's `CefBookmarks`, since Chromium shares
 the original profile's bookmarks with its incognito profile.
 
+## Discarding
+
+`CefBrowser.discard()` frees a hidden browser's page and keeps the
+`CefBrowser`. How depends on the runtime style.
+
+A Chrome-style browser is a tab in a Chromium tab strip, so Chromium
+discards it. CefKit starts Chromium with the `WebContentsDiscard` feature,
+which discards a tab in place: the frame tree is torn down and the renderer
+process exits once no other frame uses it, while the `WebContents` and its
+navigation entries stay, marked to load again. Without the feature Chromium
+replaces the `WebContents` with a new one, which CEF reports as the browser
+closing and another opening.
+
+Chromium's own policies (Memory Saver, urgent discarding under memory
+pressure) never pick a CefKit tab. Each Chrome-style browser is the only,
+and so the active, tab of its own Chromium window, and the discard
+eligibility policy protects the active tab of every window, as it does a
+tab with DevTools attached, which CefKit's DevTools connection counts as.
+The `EXTERNAL` discard reason, which `chrome.tabs.discard()` uses, skips
+those protections. CefKit calls `DiscardById` with it on the
+`discards.mojom.DetailsProvider` of a hidden service browser parked on
+`chrome://discards`, after its own checks. It reads Chromium's other
+protections (audio, media capture, form interaction, connected devices)
+from `GetTabDiscardsInfo` as blockers, leaving out the ones it overrides.
+That interface numbers tabs afresh on every query and describes them only
+by address and title, so each discard looks its tab up again. CEF's frame
+count for a browser drops to zero when Chromium discards its tab; when two
+hidden tabs share an address and title, that tells which one went, and a
+discard that reached the other tab reloads it and tries the next. The
+service browser closes after 30 seconds without calls.
+
+When the window is shown again, Chromium loads the tab
+(`NavigationController::SetActive`), with its scroll position from the
+saved page state. A command sent to a hidden discarded tab reloads it. The
+DevTools session survives the discard, so bridges, user scripts and event
+streams carry on unchanged.
+
+An Alloy browser is not a tab, and Chromium has no lifecycle unit for it.
+CefKit closes the Chromium browser and keeps the `CefBrowser` in
+`CefRuntime.browsers` without an identifier. When its view is shown again,
+or the browser is used, a new Chromium browser is created in the same view
+on the saved address and set up as a new one is: bridges, user scripts and
+scripts added with `addUserScript` are installed first, and `CefDevTools`
+enables again the domains enabled before, so event streams keep
+delivering. Its back/forward list starts from that page. Closing a browser
+never ends a renderer process another browser shares; Chromium keeps the
+process until its last frame goes.
+
+`CefRuntime.memorySaver` is applied by a monitor that polls which browsers
+are off screen, at a quarter of the policy's interval and at most every 30
+seconds, and listens for memory pressure through
+`DispatchSource.makeMemoryPressureSource`. Window occlusion notifications
+restore browsers discarded by closing when their view comes back on
+screen.
+
 ## Quitting
 
 `CefApplication.terminate(_:)` asks `CefRuntime` first. The runtime closes
@@ -207,7 +266,8 @@ every browser, so pages can run `beforeunload`, and declines the request. As
 the last browser and the last Chromium window are destroyed, it calls
 `terminate(_:)` again from the run loop, then calls `cef_shutdown()`. Calling
 `cef_shutdown()` earlier, or from inside a CEF callback, crashes. A page that
-asks to stay cancels the quit.
+asks to stay cancels the quit. A browser discarded by closing has no
+Chromium browser left and is marked closed at once.
 
 ## Relaunching
 
@@ -222,8 +282,42 @@ callback.
 ## Processes
 
 The app is Chromium's browser process. Renderer, GPU and utility processes
-run from the helper apps inside the bundle, all the same `cef-helper` binary,
-which calls `CefRuntime.helperMain()`. Custom URL schemes reach helpers on
-their command line (`--cefswift-schemes`), so every process registers the
-same list. With the sandbox on, each helper seals itself before it loads the
-framework ([sandbox](sandbox.md)).
+run from the helper apps inside the bundle, all the same executable, which
+`cef bundle` compiles from `Plugins/CefPlugin/Helper/helper_main.c`. It
+checks the API hash, registers the custom URL schemes it receives on its
+command line (`--cefswift-schemes`), so every process registers the same
+list, and calls `cef_execute_process`. With the sandbox on, each helper
+seals itself before any framework code runs ([sandbox](sandbox.md)).
+
+### Loading the framework at launch
+
+The helper is a small C program that links two libraries, in this order:
+
+1. `Contents/Frameworks/libcefswift_helper_startup.dylib`
+   (`helper_startup.c`). Its initializer calls `cef_sandbox_initialize`
+   from CEF's `libcef_sandbox.dylib` unless the helper was started with
+   `--no-sandbox`. dyld runs a library's initializers before those of the
+   libraries listed after it, so the sandbox is sealed before the
+   framework's static initializers run.
+2. The CEF framework.
+
+A library that dyld loads at launch is fixed up by the kernel as its pages
+are read in (page-in linking), so the framework's `__DATA_CONST` segment,
+about 12 MB of pointers, stays clean memory that every process shares. A
+library loaded with `dlopen` has the same segment fixed up in the process,
+which makes all of it private, dirty memory. The app executable gets the
+same benefit from its weak link. Across the six processes of the Minimal
+example this takes the idle footprint from 185 MB to 101 MB
+([guide](guide.md#footprint-and-launch-time)).
+
+Chrome 157 does the same with its "Aperitif" helpers: separate helper apps
+(`Google Chrome Helper (Aperitif).app` and so on) that link
+`libaperitif.dylib`, which registers PartitionAlloc's malloc zone and seals
+the sandbox in an initializer, and then the framework
+(`content/public/app/aperitif_mac.h`). Chromium chooses those helper names
+when its `AperitifHelpers` feature is on. CEF 156 does not ship
+`libaperitif.dylib` or Aperitif helpers and leaves the feature off; turning
+it on with `--enable-features=AperitifHelpers` makes Chromium launch helper
+apps that the bundle does not contain. CefSwift's helper keeps CEF's
+classic helper names and gets the memory saving without the feature.
+

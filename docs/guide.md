@@ -13,6 +13,7 @@ are `@MainActor`.
 - [Showing a browser](#showing-a-browser)
   - [Offscreen rendering](#offscreen-rendering)
   - [Offscreen accessibility](#offscreen-accessibility)
+- [Discarding browsers](#discarding-browsers)
 - [JavaScript](#javascript)
   - [User scripts and style sheets](#user-scripts-and-style-sheets)
   - [Bridge](#bridge)
@@ -96,7 +97,7 @@ Start from a preset and change what you need:
 
 | Preset | Use |
 |---|---|
-| `CefConfiguration.embedded` | Showing your own or trusted web content. Turns off background networking, component updates, sync, translation, first-run and default-browser prompts. |
+| `CefConfiguration.embedded` | Showing your own or trusted web content. Turns off background networking, component updates, sync, translation, first-run and default-browser prompts, and starts renderer processes only when a page needs one. |
 | `CefConfiguration.browser` | A general-purpose browser. Keeps session cookies across launches and skips first-run and default-browser prompts. |
 | `CefConfiguration()` or `.default` | Chromium's defaults. |
 
@@ -110,6 +111,7 @@ Common options:
 | `productName`, `stringOverrides` | Your product name, and replacements for other built-in strings. See [Customizing Chromium's own pages](#customizing-chromiums-own-pages). |
 | `chromeUI` | Hides Chrome app-menu commands, toolbar buttons and page-action icons in Chrome-style windows. |
 | `extensions` | Unpacked extension folders (each with a `manifest.json`) to load. Extensions run in Chrome-style browsers. |
+| `memoryPolicy` | How many helper processes Chromium keeps running. See [Footprint and launch time](#footprint-and-launch-time). |
 | `enabledFeatures`, `disabledFeatures` | Chromium feature names, passed as `--enable-features` and `--disable-features`. |
 | `safeStorage` | Whether Chromium uses the keychain. See [Keychain access](#keychain-access). |
 | `rootCacheDirectory`, `cacheDirectory` | Where profile data lives. Defaults to `~/Library/Application Support/<bundle ID>/CefSwift`. |
@@ -201,6 +203,7 @@ when it is first shown.
 | JavaScript | `evaluateJavaScript(_:)`, `evaluateJavaScript(_:as:)`, `executeJavaScript(_:)`, `addUserScript(_:)` |
 | DevTools | `devTools`, `showDevTools(inspecting:)`, `closeDevTools()`, `isShowingDevTools` |
 | Lifetime | `ready()`, `close(force:)` |
+| Memory | `isDiscarded`, `discard()`, `restore()`, `discardBlockers()`, `allowsDiscarding`, `discardSnapshot` ([discarding](#discarding-browsers)) |
 | Relations | `delegate`, `options`, `opener`, `popupFeatures`, `hostWindow` |
 
 Options are fixed at creation:
@@ -381,6 +384,80 @@ points, `offscreenAccessibilityTreeDidChange(_:)` reports each change, and
 `browser.performAccessibilityAction(_:on:)` carries out actions. For tests
 and diagnostics, `CefOffscreenBrowserView.didPostAccessibilityNotification`
 reports every notification the view posts.
+
+## Discarding browsers
+
+A browser the user is not looking at can give back its page's memory
+while staying in your UI. Discarding ends the page's renderer process; the
+browser keeps its `url`, `title` and `favicon`, and loads the page again
+as soon as it is shown, navigated or used. `isDiscarded` is observable, so
+a tab can fade while it sleeps:
+
+```swift
+Image(nsImage: browser.favicon ?? fallbackIcon)
+    .opacity(browser.isDiscarded ? 0.4 : 1)
+```
+
+Discard one browser yourself, or let CefKit do it:
+
+```swift
+do {
+    try await tab.discard()
+} catch .blocked(let blockers) {
+    print("kept loaded:", blockers)          // [.visible], [.playingAudio], …
+}
+
+CefRuntime.shared.memorySaver = .after(.minutes(30))   // hidden 30 minutes, or memory is low
+CefRuntime.shared.memorySaver = .underMemoryPressure    // only when macOS runs low on memory
+```
+
+Only a browser that is off screen can be discarded: a window tab that is
+not selected, a hidden or minimized window, or a `CefWebView` that is
+hidden or out of a visible window. `discardBlockers()` lists what keeps a
+browser loaded, and `discard()` throws `CefDiscardError.blocked` with the
+same set:
+
+| Blocker | When |
+|---|---|
+| `.visible` | The browser is on screen. |
+| `.exempt` | `allowsDiscarding` is `false` (pinned tabs, say), or an extension protects the tab. |
+| `.notLoaded` | The browser is not open yet, is loading, or shows DevTools itself. |
+| `.playingAudio` | The page plays sound, or did in the last minute. |
+| `.capturingMedia` | The page uses the camera, microphone or screen capture, or is cast. |
+| `.formInteraction` | The user typed into the page. |
+| `.beforeUnloadHandler` | The page has a `beforeunload` handler. |
+| `.devToolsOpen` | The browser's DevTools window is open. |
+| `.downloading` | A download it started is in progress. |
+| `.pictureInPicture`, `.connectedToDevice` | Picture in picture; a Bluetooth or USB device. |
+
+In a `CefWebView`, audio and form input are read from the main frame's
+`<audio>`, `<video>`, `<input>` and `<textarea>` elements; Chrome-style
+browsers use Chromium's own signals, which cover every frame and Web Audio.
+
+`restore()` loads a discarded page at once, even while it is hidden. The
+delegate hears `browserWillDiscard(_:)`, while the page can still be read,
+then `browserDidDiscard(_:)`, and `browserDidRestore(_:)` when the page
+starts loading again. `discardSnapshot` is an image of the page taken
+just before it was discarded, for a tab preview or to show while it loads.
+
+What a discard keeps:
+
+| | `CefBrowserWindow`, Chrome UI windows | `CefWebView` |
+|---|---|---|
+| URL, title, favicon, zoom, profile, delegate | Kept | Kept |
+| Back/forward list | Kept | Starts again from the current page |
+| Scroll position | Restored | Lost |
+| Form input not yet submitted | Lost | Lost |
+| Bridges and user scripts | Work as before | Installed again |
+| `devTools` event streams | Keep delivering | Keep delivering; enabled domains are enabled again |
+| Other DevTools session state | Kept | Lost (overrides, scripts added through `devTools`) |
+| `identifier` | Kept | A new one |
+
+A Chrome-style browser is discarded by Chromium itself and comes back when
+its window is shown. A browser in a view is discarded by closing its
+Chromium browser and creating a new one in the same view; it stays in
+`CefRuntime.shared.browsers` meanwhile. Quitting with discarded browsers
+needs nothing special.
 
 ## JavaScript
 
@@ -969,6 +1046,95 @@ registered handler serves every profile, including incognito and persistent
 ones. The default `CefCustomScheme` options make the scheme standard,
 secure, CORS-enabled and fetchable; pass `options:` to change them.
 
+## Footprint and launch time
+
+Measured on an Apple M3 MacBook with 16 GB of memory, macOS 27.2.1, CEF
+156.0.28, on 2026-11-12, with
+[`Scripts/measure-footprint.py`](../Scripts/measure-footprint.py). Each
+figure is the median of five runs that relaunch the app on an existing
+profile and load a static local page. Memory is the physical footprint of
+the app and every helper process, read five seconds after the page
+finished loading; it is the figure Activity Monitor shows, not resident
+size; 1 MB here is 2^20 bytes. Launch time runs from starting the
+executable to the page's `didFinishLoad`.
+
+| App | Processes | Memory | Launch |
+|---|---|---|---|
+| `CefWebView` with `.embedded` (the Minimal example) | 5 | 88 MB | 306 ms |
+| The same, before the changes below | 6 | 185 MB | 276 ms |
+| The same with `memoryPolicy = .minimal` | 4 | 82 MB | 284 ms |
+| Browser example, one tab, `.browser` | 8 | 260 MB | 527 ms |
+| The same, before the changes below | 8 | 371 MB | 559 ms |
+| For comparison: a `WKWebView` app | 4 | 60 MB | 284 ms |
+| For comparison: Chrome 157, empty profile, one tab | 12 | 286 MB | – |
+
+Launch times vary by about 30 ms from run to run, so none of the changes
+measurably changes them. The first launch after a bundle is built or signed
+takes 2 to 3 s longer while macOS checks its signature. A first launch on
+an empty profile measures within the same ranges, with up to 4 MB more
+memory. The Browser example has four renderers: the tab, the spare
+renderer, and the hidden pages behind `profile.bookmarks` and
+`profile.history`, which the example reads at launch for its menus.
+
+In the Minimal example, the 88 MB divide into the app process (39 MB), the
+GPU process (21 MB), the page's renderer (16 MB), and Chromium's network
+(8 MB) and storage (6 MB) services.
+
+### What every bundle does
+
+`swift package cef bundle` links the framework into the helper processes and
+the app executable, so dyld loads it at launch instead of CefKit loading it
+with `dlopen`. That keeps about 12 MB of the framework's data as shared,
+clean memory in each process instead of private memory, and is most of the
+difference between the "before" rows and the rest
+([architecture](architecture.md#loading-the-framework-at-launch)).
+
+### What the presets turn off
+
+| | `.default` | `.embedded` | `.browser` |
+|---|---|---|---|
+| Background networking, component updates, sync, domain reliability, phishing detection, pings, crash reporting | On | Off | On |
+| Translate, Media Router (Cast), optimization hints, Autofill server, feed suggestions | On | Off | On |
+| First-run and default-browser prompts | On | Off | Off |
+| Spare renderer (`memoryPolicy`) | `.standard` | `.reduced` | `.standard` |
+| Session cookies across launches | Off | Off | On |
+
+### Memory policy
+
+`memoryPolicy` decides how many helper processes Chromium keeps running:
+
+```swift
+var configuration = CefConfiguration.embedded
+configuration.memoryPolicy = .minimal
+```
+
+| Policy | Saves | Costs |
+|---|---|---|
+| `.standard` | – | Chromium keeps a spare renderer running for the next new site or browser. |
+| `.reduced` | 1 process, 13 MB | A page from a site without a renderer, and each new browser, waits for one to start: a navigation to a new site takes 52 ms instead of 14 ms (local server, median of 8). |
+| `.minimal` | 2 processes, 19 MB | As `.reduced`; and the network service runs in the app's process, so a crash in it ends the app instead of restarting the service, and code that parses network data shares the app's memory. |
+
+### Measured and left out
+
+These changes were measured on the Minimal example and left out, because
+they saved nothing on an idle page, cost more than they saved, or save the
+same as `.reduced`:
+
+- `--js-flags=--lite-mode` and `--js-flags=--optimize-for-size`: no
+  difference while idle; both slow JavaScript down.
+- `--disable-extensions`, `--disable-spell-checking`, and turning off
+  optimization-guide model downloads, Safe Browsing real-time lookups,
+  certificate-transparency updates and preloading: no difference.
+- `--disable-gpu-compositing`: 10 MB more.
+- `--renderer-process-limit=1` and `--disable-site-isolation-trials`: save
+  the spare renderer, as `.reduced` does; the second also gives up site
+  isolation.
+- `--enable-low-end-device-mode`: saves the spare renderer and 3 MB more in
+  the GPU process, and lowers rendering quality.
+
+The GPU process stays a process of its own in every policy, so that a GPU
+driver crash cannot end the app.
+
 ## Known limits
 
 - Chrome style (`chrome://` pages, extensions, history, the password manager)
@@ -984,10 +1150,12 @@ secure, CORS-enabled and fetchable; pass `options:` to change them.
   `ERR_INVALID_AUTH_CREDENTIALS`, reported to `browser(_:didFailLoad:)`, and
   Chromium shows its sign-in dialog in a window of its own; closing the
   browser leaves the page first, which dismisses that window.
-- Tab discarding (Memory Saver) is unavailable. Each browser is the active
-  tab of its own Chromium window, and once CefKit's DevTools connection is
-  in use (JavaScript evaluation, user scripts, bridges) it stays attached,
-  so Chromium never discards a browser. Close browsers you do not need.
+- Chromium's own Memory Saver never discards a CefKit browser, since each
+  is the active tab of its own Chromium window; use
+  `CefRuntime.shared.memorySaver` instead. A `CefWebView` browser loses its
+  back/forward list when discarded, and Chromium tells tabs apart only by
+  address and title, so of two hidden Chrome-style tabs showing the same
+  page, discarding one may briefly reload the other.
 - DevTools opens in a window of its own; there is no docked DevTools.
 - In offscreen browsers, assistive apps can focus elements inside frames
   only by clicking text fields, and press them only while they are in

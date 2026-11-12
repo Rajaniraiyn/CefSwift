@@ -29,8 +29,9 @@ struct CefAppConfig: Decodable {
 }
 
 /// Assembles a runnable .app: the main executable and its Info.plist, the CEF
-/// framework, and five helper apps sharing one binary; then signs them
-/// inside out — framework, helpers, app. See docs/bundling.md.
+/// framework, the helpers' startup library, and five helper apps sharing
+/// one binary; then signs them inside out — framework, startup library,
+/// helpers, app. See docs/bundling.md.
 struct AppBundler {
     /// Each helper's name suffix and bundle identifier suffix.
     static let helpers: [(suffix: String?, bundleIDSuffix: String)] = [
@@ -48,7 +49,8 @@ struct AppBundler {
     let version: String              // CFBundleShortVersionString
     let build: String                // CFBundleVersion
     let mainExecutable: URL          // built product binary
-    let helperExecutable: URL        // built cef-helper binary
+    let helperExecutable: URL        // compiled helper binary (HelperBuilder)
+    let helperStartupLibrary: URL    // the helper's startup library (HelperBuilder)
     let frameworkSource: URL         // converted framework inside .cef/dist
     let outputDirectory: URL
     let signingIdentity: String      // codesign identity; "-" = ad-hoc
@@ -81,11 +83,14 @@ struct AppBundler {
             hint: "Could not copy the CEF framework into the app bundle. Check disk space and permissions."
         )
 
+        let startupLibrary = frameworks.appendingPathComponent(HelperBuilder.startupLibraryName)
+        try fm.copyItem(at: helperStartupLibrary, to: startupLibrary)
         let helperAppURLs = try Self.helpers.map {
             try makeHelperApp(in: frameworks, suffix: $0.suffix, bundleIDSuffix: $0.bundleIDSuffix)
         }
 
         try codesign(frameworkDest)
+        try codesign(startupLibrary)
         for helperApp in helperAppURLs { try codesign(helperApp) }
         try codesign(appURL)
 

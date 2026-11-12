@@ -26,6 +26,9 @@ struct TrailingButtons: View {
             if !browser.downloads.isEmpty {
                 DownloadsButton(browser: browser)
             }
+            if controller.sleepingTabs.count > 0 {
+                SleepingTabsButton(controller: controller)
+            }
             Button("New Tab", systemImage: "plus") { controller.openTab() }
         }
         .buttonStyle(ToolbarIconButtonStyle())
@@ -58,7 +61,26 @@ struct ToolbarIconButtonStyle: ButtonStyle {
     }
 }
 
+/// Says how many tabs Memory Saver has put to sleep, and wakes them.
+struct SleepingTabsButton: View {
+    let controller: BrowserController
+
+    var body: some View {
+        let count = controller.sleepingTabs.count
+        Menu {
+            Text("^[\(count) tab](inflect: true) asleep to save memory")
+            Button("Wake All Tabs") { controller.sleepingTabs.forEach { $0.restore() } }
+        } label: {
+            Label("Sleeping Tabs", systemImage: "moon.zzz")
+        }
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("^[\(count) tab](inflect: true) asleep to save memory")
+    }
+}
+
 /// A favicon, or a spinner while the page loads, shown in the tab itself.
+/// A tab that is asleep to save memory shows its icon faded.
 struct TabIcon: View {
     let browser: CefBrowser
 
@@ -73,6 +95,8 @@ struct TabIcon: View {
             }
         }
         .frame(width: 16, height: 16)
+        .opacity(browser.isDiscarded ? 0.4 : 1)
+        .help(browser.isDiscarded ? "Asleep to save memory" : "")
     }
 }
 
