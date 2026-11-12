@@ -3,6 +3,7 @@ import Testing
 
 @testable import CCef
 @testable import CefKit
+import CefBase
 
 /// Tests of the framework loader. Those that need the framework run only
 /// when `CEF_FRAMEWORK_PATH` points at it. None call `cef_initialize`, which

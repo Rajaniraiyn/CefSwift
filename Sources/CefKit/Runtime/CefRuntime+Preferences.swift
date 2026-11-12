@@ -1,4 +1,5 @@
 import CCef
+import CefBase
 
 extension CefRuntime {
     /// Reads an application-wide Chromium preference — one Chromium keeps

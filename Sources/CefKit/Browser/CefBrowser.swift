@@ -2,6 +2,7 @@ import AppKit
 import CCef
 import Foundation
 import Observation
+import CefBase
 
 // MARK: - Options
 
@@ -78,21 +79,48 @@ public struct CefBrowserOptions {
 ///                 matching: "chrome://settings/*"),
 /// ]
 /// ```
+///
+/// The helper's renderer code runs each script in the document's own
+/// JavaScript context (the page's main world) as the context is created,
+/// in every frame and process of the browser. Stack traces taken inside a
+/// script show it as an anonymous script; nothing else about it is
+/// visible to the page, other than what the script itself does. CEF's API
+/// has no isolated worlds, so scripts share the page's globals.
 public struct CefUserScript: Sendable, Equatable {
+    /// When the script runs.
+    public enum InjectionTime: Sendable, Equatable {
+        /// Before any of the document's own scripts.
+        case documentStart
+        /// When the document has been parsed (`DOMContentLoaded`), before
+        /// the page's own listeners for it.
+        case documentEnd
+    }
+
+    /// Which frames the script runs in.
+    public enum Frames: Sendable, Equatable {
+        /// Every frame, cross-site frames included.
+        case all
+        /// Only top-level documents.
+        case mainFrame
+    }
+
     public var source: String
     /// Limits the script to pages whose URL matches this pattern, where `*`
     /// stands for any run of characters: `"chrome://settings/*"`,
     /// `"https://*.example.com/*"`. `nil` runs it everywhere. A scoped script
     /// runs inside a function, so its top-level declarations are not global.
     public var urlPattern: String?
-    /// Run in an isolated world with this name instead of the page's own
-    /// JavaScript context (the page cannot see or tamper with it).
-    public var isolatedWorldName: String?
+    public var injectionTime: InjectionTime
+    public var frames: Frames
 
-    public init(source: String, matching urlPattern: String? = nil, isolatedWorldName: String? = nil) {
+    public init(
+        source: String, matching urlPattern: String? = nil,
+        injectionTime: InjectionTime = .documentStart, frames: Frames = .all
+    ) {
         self.source = source
         self.urlPattern = urlPattern
-        self.isolatedWorldName = isolatedWorldName
+        self.injectionTime = injectionTime
+        self.frames = frames
     }
 
     /// A script that adds `css` to matching pages.
@@ -144,18 +172,6 @@ public struct CefUserScript: Sendable, Equatable {
                 })();
                 """,
             matching: urlPattern)
-    }
-
-    /// The source as injected: wrapped in a URL check when scoped.
-    var injectedSource: String {
-        guard let urlPattern else { return source }
-        let expression = NSRegularExpression.escapedPattern(for: urlPattern).replacingOccurrences(of: "\\*", with: ".*")
-        return """
-            (() => {
-              if (!new RegExp(\(CefJSON.string("^" + expression + "$").text)).test(location.href)) return;
-              \(source)
-            })();
-            """
     }
 }
 
@@ -283,7 +299,15 @@ public final class CefBrowser: Identifiable {
     @ObservationIgnored public private(set) lazy var findSession = CefFindSession(browser: self)
 
     /// Chrome DevTools Protocol access to this browser.
+    ///
+    /// The protocol attaches to the browser the first time anything uses
+    /// it, and stays attached until the browser closes; pages can observe
+    /// some of what it does. CefKit uses it only for the features the
+    /// guide's "Compatibility with bot protection" lists.
     @ObservationIgnored public private(set) lazy var devTools = CefDevTools(browser: self)
+
+    /// Bridges, user scripts and evaluation through the helper's renderer.
+    @ObservationIgnored private(set) lazy var pageScripting = CefPageScripting(browser: self)
 
     public nonisolated var id: ObjectIdentifier { ObjectIdentifier(self) }
 
@@ -323,9 +347,6 @@ public final class CefBrowser: Identifiable {
     @ObservationIgnored public private(set) lazy var accessibilityTree = CefAccessibilityTree()
     /// Whether the tree was asked for before the browser was created.
     @ObservationIgnored var wantsAccessibility = false
-    /// Whether the DevTools `Accessibility` domain, which accessibility
-    /// actions use to find a node's DOM node, is enabled.
-    @ObservationIgnored var isDevToolsAccessibilityEnabled = false
 
     /// Creates a browser model. Nothing is created in Chromium until the
     /// browser is hosted.
@@ -349,6 +370,7 @@ public final class CefBrowser: Identifiable {
         self.client = client
         self.opener = opener
         self.isChromeStyle = opener?.isChromeStyle ?? true
+        options.bridges.forEach { $0.attach(to: self) }
         adopt(raw)
     }
 
@@ -403,13 +425,27 @@ public final class CefBrowser: Identifiable {
     /// Evaluates JavaScript in the main frame and returns its value.
     ///
     /// Promises are awaited. A thrown JavaScript exception surfaces as
-    /// ``CefJavaScriptError``.
+    /// ``CefJavaScriptError``. The value comes back as JSON: objects with
+    /// their own enumerable properties, `undefined` as `null`.
     ///
     /// ```swift
     /// let title = try await browser.evaluateJavaScript("document.title").stringValue
     /// ```
+    ///
+    /// The helper's renderer code runs the script in the page's main world
+    /// with the V8 API, without the DevTools protocol, and the page sees
+    /// only what the script does. A script that returns a promise is
+    /// awaited through the promise's `then`.
+    ///
+    /// - Parameter userGesture: Runs the script as if the user had just
+    ///   clicked, as some APIs require (opening popups, entering
+    ///   fullscreen, `beforeunload` prompts). Only the DevTools protocol can
+    ///   grant that, so the call attaches ``devTools`` to the browser,
+    ///   which stays attached; see the guide's "Compatibility with bot
+    ///   protection".
     @discardableResult
-    public func evaluateJavaScript(_ script: String) async throws -> CefJSON {
+    public func evaluateJavaScript(_ script: String, userGesture: Bool = false) async throws -> CefJSON {
+        guard userGesture else { return try await pageScripting.evaluate(script) }
         let reply = try await devTools.send(
             "Runtime.evaluate",
             ["expression": .string(script), "returnByValue": true, "awaitPromise": true, "userGesture": true])
@@ -420,21 +456,27 @@ public final class CefBrowser: Identifiable {
     }
 
     /// Evaluates JavaScript and decodes its value as `T`.
-    public func evaluateJavaScript<T: Decodable>(_ script: String, as type: T.Type = T.self) async throws -> T {
-        try await evaluateJavaScript(script).decode(T.self)
+    public func evaluateJavaScript<T: Decodable>(
+        _ script: String, as type: T.Type = T.self, userGesture: Bool = false
+    ) async throws -> T {
+        try await evaluateJavaScript(script, userGesture: userGesture).decode(T.self)
     }
 
     /// Injects `script` into every document loaded from now on, before the
     /// page's own scripts. For scripts known up front prefer
     /// ``CefBrowserOptions/userScripts``, which also cover the first page.
-    public func addUserScript(_ script: CefUserScript) async throws {
-        var params: [String: CefJSON] = ["source": .string(script.injectedSource)]
-        if let world = script.isolatedWorldName {
-            params["worldName"] = .string(world)
-        }
-        try await devTools.send("Page.addScriptToEvaluateOnNewDocument", .object(params))
+    ///
+    /// The script reaches every renderer process that shows the browser's
+    /// frames now. A renderer process that the browser moves to later (a
+    /// navigation to another site) learns of it as that process's first
+    /// document of the browser starts, and runs it from its next document.
+    public func addUserScript(_ script: CefUserScript) {
         addedUserScripts.append(script)
+        pageScripting.configurationDidChange()
     }
+
+    /// The user scripts of the options and those added at runtime.
+    var userScripts: [CefUserScript] { options.userScripts + addedUserScripts }
 
     // MARK: Page controls
 
@@ -548,6 +590,10 @@ public final class CefBrowser: Identifiable {
     }
 
     /// Captures the visible page as PNG data.
+    ///
+    /// CEF has no capture API for windowed browsers, so this uses the
+    /// DevTools protocol's `Page.captureScreenshot`, which attaches
+    /// ``devTools`` to the browser; no protocol domain is enabled.
     public func snapshot() async throws -> Data {
         let reply = try await devTools.send("Page.captureScreenshot", ["format": "png"])
         guard let base64 = reply["data"].stringValue, let data = Data(base64Encoded: base64) else {
@@ -723,6 +769,8 @@ extension CefBrowser {
         var settings: cef_browser_settings_t
         var url: String
         var requestContext: UnsafeMutablePointer<cef_request_context_t>?
+        /// Bridges and user scripts, for the renderer.
+        var extraInfo: UnsafeMutablePointer<cef_dictionary_value_t>?
     }
 
     /// Builds everything browser creation needs. Each returned reference is
@@ -746,18 +794,21 @@ extension CefBrowser {
             settings.background_color = cefColor(color.cgColor)
         }
 
-        // Bridges and user scripts must be installed before the first real
-        // document, so such browsers start blank and navigate once set up,
-        // as does every browser created again after a discard.
-        isBootstrapping = !options.bridges.isEmpty || !options.userScripts.isEmpty || !addedUserScripts.isEmpty
-            || !options.passkeys.isChromium || isDiscarded
+        // Bridges and user scripts reach the renderer with the browser
+        // itself (extra_info). App-answered passkeys set up a DevTools
+        // session before the first real document, so such browsers start
+        // blank and navigate once set up, as does every browser created
+        // again after a discard.
+        options.bridges.forEach { $0.attach(to: self) }
+        isBootstrapping = !options.passkeys.isChromium || isDiscarded
         let url = isBootstrapping ? "about:blank" : (initialURL?.absoluteString ?? "about:blank")
 
         return Blueprint(
             client: client.makeClient(),
             settings: settings,
             url: url,
-            requestContext: (options.profile ?? .default).makeRequestContext())
+            requestContext: (options.profile ?? .default).makeRequestContext(),
+            extraInfo: pageScripting.makeExtraInfo())
     }
 
     /// Shows the browser as a native child view of `parentView`: creates it
@@ -816,7 +867,7 @@ extension CefBrowser {
         // on_after_created adopts the browser before this returns.
         let created = CefStringUtil.withCefString(blueprint.url) {
             cef_browser_host_create_browser_sync(
-                &windowInfo, blueprint.client, $0, &blueprint.settings, nil, blueprint.requestContext)
+                &windowInfo, blueprint.client, $0, &blueprint.settings, blueprint.extraInfo, blueprint.requestContext)
         }
         cefRelease(created)
         if created == nil { creationFailed() }
@@ -834,16 +885,18 @@ extension CefBrowser {
         windowInfo.size = MemoryLayout<cef_window_info_t>.stride
         windowInfo.windowless_rendering_enabled = 1
         windowInfo.shared_texture_enabled = 1
-        // The host drives frames from a display link, so painting follows
-        // the real refresh rate.
-        windowInfo.external_begin_frame_enabled = 1
+        // Chromium times frames itself, at the browser's frame rate. Frames
+        // requested from outside (external begin frames) go out one at a
+        // time, each after the previous one is done, which runs a page's
+        // animation frames at about half the rate a window does.
+        windowInfo.external_begin_frame_enabled = 0
         windowInfo.bounds = cef_rect_t(CGRect(origin: .zero, size: size))
         windowInfo.runtime_style = CEF_RUNTIME_STYLE_ALLOY
         hostView = host as? NSView
 
         let started = CefStringUtil.withCefString(blueprint.url) {
             cef_browser_host_create_browser(
-                &windowInfo, blueprint.client, $0, &blueprint.settings, nil, blueprint.requestContext)
+                &windowInfo, blueprint.client, $0, &blueprint.settings, blueprint.extraInfo, blueprint.requestContext)
         }
         if started == 0 { creationFailed() }
     }
@@ -856,7 +909,7 @@ extension CefBrowser {
         var blueprint = makeBlueprint()
         isChromeStyle = true
         return CefStringUtil.withCefString(blueprint.url) {
-            cef_browser_view_create(blueprint.client, $0, &blueprint.settings, nil, blueprint.requestContext, delegate)
+            cef_browser_view_create(blueprint.client, $0, &blueprint.settings, blueprint.extraInfo, blueprint.requestContext, delegate)
         }
     }
 
@@ -873,7 +926,7 @@ extension CefBrowser {
         }
         let started = CefStringUtil.withCefString(blueprint.url) {
             cef_browser_host_create_browser(
-                &windowInfo, blueprint.client, $0, &blueprint.settings, nil, blueprint.requestContext)
+                &windowInfo, blueprint.client, $0, &blueprint.settings, blueprint.extraInfo, blueprint.requestContext)
         }
         if started == 0 { creationFailed() }
     }
@@ -932,32 +985,20 @@ extension CefBrowser {
         }
     }
 
-    /// Installs bridges and user scripts, then performs the real first load.
+    /// Sets up what needs the DevTools protocol before the first real
+    /// document, then performs the real first load.
     ///
     /// A browser created again after a discard always comes through here,
     /// so everything a page relies on is in place before its document
     /// starts: the DevTools domains enabled before the discard, the
-    /// accessibility state, passkeys, user scripts and bridges.
+    /// accessibility state and passkeys. Bridges and user scripts travel
+    /// with the browser's creation instead.
     private func bootstrap() async {
         if isDiscarded {
             await devTools.enableDomainsAgain()
             reassertAccessibilityState()
         }
         if !options.passkeys.isChromium { await startPasskeys() }
-        do {
-            // Scripts added at runtime, when a discarded browser is created
-            // again, follow those of the options; only they are remembered.
-            let added = addedUserScripts
-            defer { addedUserScripts = added }
-            for script in options.userScripts + added {
-                try await addUserScript(script)
-            }
-            for bridge in options.bridges {
-                try await bridge.install(in: self)
-            }
-        } catch {
-            CefLog.error("page bootstrap failed for browser \(identifier): \(error)")
-        }
         isBootstrapping = false
         if let initialURL, state == .live {
             load(initialURL)
@@ -968,11 +1009,9 @@ extension CefBrowser {
 // MARK: - Callbacks from the client
 
 extension CefBrowser {
-    /// Chromium does not run document-start scripts in its own `chrome://`
-    /// pages, so user scripts are evaluated there as each page starts
-    /// loading instead.
     func mainFrameDidStartLoading(_ url: URL?) {
         guard !isBootstrapping else { return }
+        pageScripting.mainFrameDidStartLoading()
         let wasDiscarded = isDiscarded
         pageDidStartLoading()
         // The new document reports its own icon. A restored page keeps the
@@ -980,12 +1019,6 @@ extension CefBrowser {
         if !wasDiscarded {
             faviconURL = nil
             favicon = nil
-        }
-        guard url?.scheme == "chrome", !options.userScripts.isEmpty else { return }
-        Task {
-            for script in options.userScripts where script.isolatedWorldName == nil {
-                _ = try? await devTools.send("Runtime.evaluate", ["expression": .string(script.injectedSource)])
-            }
         }
     }
 
@@ -1117,6 +1150,7 @@ extension CefBrowser {
         passkeyAuthenticator = nil
         accessibilityDidClose()
         devTools.invalidate()
+        pageScripting.failPendingEvaluations()
         readyWaiters.forEach { $0.resume(throwing: CefError.browserClosed) }
         readyWaiters = []
         delegate?.browserDidClose(self)

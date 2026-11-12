@@ -1,6 +1,7 @@
 import CCef
 import Foundation
 import UniformTypeIdentifiers
+import CefBase
 
 /// A request for a URL served by a ``CefSchemeHandler``.
 public struct CefSchemeRequest: Sendable {

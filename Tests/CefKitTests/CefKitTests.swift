@@ -3,6 +3,7 @@ import Testing
 
 @testable import CCef
 @testable import CefKit
+import CefBase
 
 @Suite struct CefStringTests {
     @Test func roundTrip() {

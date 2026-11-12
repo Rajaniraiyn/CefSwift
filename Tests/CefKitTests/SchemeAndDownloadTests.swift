@@ -3,6 +3,7 @@ import Testing
 
 @testable import CCef
 @testable import CefKit
+@testable import CefRenderer
 
 // Unit tests for the framework-free parts of custom schemes, the JS bridge,
 // and download plumbing. No CEF runtime required.
@@ -23,14 +24,15 @@ import Testing
         #expect(serialized == "myapp:89,assets:3,raw:0")
     }
 
-    /// The helper executable (C, compiled by the plugin) reads the same
-    /// switch.
-    @Test func helperReadsTheSchemeSwitch() throws {
-        let source = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("Plugins/CefPlugin/Helper/helper_main.c")
-        let text = try String(contentsOf: source, encoding: .utf8)
-        #expect(text.contains("\"--\(CefCustomScheme.childProcessSwitchName)=\""))
+    /// The helper executable reads the same switch, and skips what the
+    /// browser process's parser would.
+    @Test func helperReadsTheSchemeSwitch() {
+        #expect(CefHelper.schemesSwitch == "--\(CefCustomScheme.childProcessSwitchName)=")
+        let parsed = CefHelper.parseSchemes(CefCustomScheme.serialize([
+            CefCustomScheme(name: "myapp"), CefCustomScheme(name: "assets", options: [.standard, .local]),
+        ]) + ",broken,:4,odd:x")
+        #expect(parsed.map(\.name) == ["myapp", "assets"])
+        #expect(parsed.map(\.options) == [89, 3])
     }
 }
 

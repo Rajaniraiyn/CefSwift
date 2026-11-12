@@ -1,0 +1,454 @@
+import CCef
+import CefBase
+
+/// Bridges, user scripts and script evaluation, implemented in the
+/// renderer with the V8 API: the renderer half of `CefBridge`,
+/// `CefUserScript` and `CefBrowser.evaluateJavaScript`.
+///
+/// A browser's configuration (its bridges and user scripts) arrives in the
+/// browser's `extra_info`, so the first document already has it, and
+/// changes arrive as ``CefPageScriptingMessage/configure`` messages. A
+/// browser without bridges or scripts costs nothing here: no global, no
+/// script, no message.
+@MainActor
+final class PageScripting: CefRendererExtension {
+    let messagePrefix = "cefswift.page."
+
+    // MARK: Configuration
+
+    struct Bridge {
+        enum Access {
+            case mainFrame
+            case origins([String])
+            case anyFrame
+        }
+
+        var name: String
+        var access: Access
+
+        func permits(isMainFrame: Bool, origin: String) -> Bool {
+            switch access {
+            case .mainFrame: return isMainFrame
+            case .origins(let allowed): return allowed.contains(origin)
+            case .anyFrame: return true
+            }
+        }
+    }
+
+    struct Script {
+        var source: String
+        var urlPattern: String?
+        var atDocumentEnd: Bool
+        var mainFrameOnly: Bool
+
+        func applies(to url: String, isMainFrame: Bool) -> Bool {
+            if mainFrameOnly, !isMainFrame { return false }
+            return urlPattern.map { PageScripting.matches(url, pattern: $0) } ?? true
+        }
+
+        /// A scoped script runs inside a function, so its top-level
+        /// declarations stay out of the page's globals.
+        var runnableSource: String {
+            urlPattern == nil ? source : "(() => {\n\(source)\n})();"
+        }
+    }
+
+    struct Configuration {
+        var generation = 0
+        var bridges: [Bridge] = []
+        var scripts: [Script] = []
+
+        var isEmpty: Bool { bridges.isEmpty && scripts.isEmpty }
+
+        init() {}
+
+        init?(json: JSONValue) {
+            guard let generation = json["generation"]?.number else { return nil }
+            self.generation = Int(generation)
+            bridges = (json["bridges"]?.array ?? []).compactMap { bridge in
+                guard let name = bridge["name"]?.string else { return nil }
+                switch bridge["access"]?.string {
+                case "anyFrame":
+                    return Bridge(name: name, access: .anyFrame)
+                case "origins":
+                    return Bridge(name: name, access: .origins((bridge["origins"]?.array ?? []).compactMap(\.string)))
+                default:
+                    return Bridge(name: name, access: .mainFrame)
+                }
+            }
+            scripts = (json["scripts"]?.array ?? []).compactMap { script in
+                guard let source = script["source"]?.string else { return nil }
+                return Script(
+                    source: source, urlPattern: script["urlPattern"]?.string,
+                    atDocumentEnd: script["atDocumentEnd"]?.bool ?? false,
+                    mainFrameOnly: script["mainFrameOnly"]?.bool ?? false)
+            }
+        }
+    }
+
+    /// Each browser's configuration, by browser identifier.
+    private var configurations: [Int32: Configuration] = [:]
+    /// Browsers whose configuration generation this process has reported.
+    private var reportedBrowsers: Set<Int32> = []
+
+    // MARK: Per-document state
+
+    /// One main-world context that has a bridge.
+    final class Document {
+        let id: Int
+        let context: V8Context
+        let browserID: Int32
+        let isMainFrame: Bool
+        let origin: String
+        var nextCall = 0
+        /// Promises of calls waiting for the browser process, by bridge and call.
+        var pendingCalls: [String: [Int: V8Value]] = [:]
+        /// `<bridge>.on(event, listener)` listeners, by bridge and event.
+        var listeners: [String: [String: [V8Value]]] = [:]
+
+        init(id: Int, context: V8Context, browserID: Int32, isMainFrame: Bool, origin: String) {
+            self.id = id
+            self.context = context
+            self.browserID = browserID
+            self.isMainFrame = isMainFrame
+            self.origin = origin
+        }
+    }
+
+    private var documents: [Int: Document] = [:]
+    private var nextDocumentID = 0
+    /// Evaluations whose result is a promise that has not settled, by request.
+    private var pendingEvaluations: [Int: PendingEvaluation] = [:]
+
+    struct PendingEvaluation {
+        var context: V8Context
+        var frame: CefRendererFrame
+    }
+
+    // MARK: Browser lifetime
+
+    func browserCreated(_ browserID: Int32, extraInfo: UnsafeMutablePointer<cef_dictionary_value_t>?) {
+        guard let extraInfo else { return }
+        let text = CefStringUtil.withCefString(CefPageScriptingMessage.configurationKey) {
+            CefStringUtil.takingUserFree(extraInfo.pointee.get_string(extraInfo, $0))
+        }
+        guard let text, let json = JSONValue(parsing: text), let configuration = Configuration(json: json),
+              configuration.generation >= configurations[browserID]?.generation ?? -1
+        else { return }
+        configurations[browserID] = configuration
+    }
+
+    /// CEF reports a browser destroyed in this process when its last frame
+    /// here goes, which happens in the middle of a navigation that replaces
+    /// the main frame's renderer-side frame, and created again right after.
+    /// So the configuration, which may be newer than the one the browser
+    /// was created with, stays; documents go as their contexts are released.
+    func browserDestroyed(_ browserID: Int32) {}
+
+    // MARK: Contexts
+
+    func contextCreated(_ context: V8Context, in frame: CefRendererFrame) {
+        guard let configuration = configurations[frame.browserID] else { return }
+        // A renderer process that joins a browser later than its
+        // configuration changed learns of the change from the reply.
+        if reportedBrowsers.insert(frame.browserID).inserted {
+            frame.send(CefProcessMessage(CefPageScriptingMessage.sync, [.int(Int32(configuration.generation))]))
+        }
+        guard !configuration.isEmpty, let mainWorld = frame.mainWorldContext, mainWorld.isSame(context),
+              let global = context.global
+        else { return }
+
+        let isMainFrame = frame.isMain
+        let url = frame.url
+        for script in configuration.scripts where !script.atDocumentEnd && script.applies(to: url, isMainFrame: isMainFrame) {
+            run(script, in: context)
+        }
+        let atEnd = configuration.scripts.filter { $0.atDocumentEnd && $0.applies(to: url, isMainFrame: isMainFrame) }
+        if !atEnd.isEmpty { runAtDocumentEnd(atEnd, global: global, context: context) }
+
+        guard !configuration.bridges.isEmpty else { return }
+        let origin = global["location"]?["origin"]?.stringValue ?? ""
+        let permitted = configuration.bridges.filter { $0.permits(isMainFrame: isMainFrame, origin: origin) }
+        guard !permitted.isEmpty else { return }
+        nextDocumentID += 1
+        let document = Document(
+            id: nextDocumentID, context: context, browserID: frame.browserID, isMainFrame: isMainFrame, origin: origin)
+        documents[document.id] = document
+        for bridge in permitted where global[bridge.name]?.isUndefined ?? true {
+            if let object = makeBridgeObject(named: bridge.name, for: document) {
+                global.set(bridge.name, object, hidden: true)
+            }
+        }
+    }
+
+    func contextReleased(_ context: V8Context, in frame: CefRendererFrame) {
+        for (id, document) in documents where document.context.isSame(context) {
+            documents[id] = nil
+        }
+        for (request, pending) in pendingEvaluations where pending.context.isSame(context) {
+            pendingEvaluations[request] = nil
+            frame.send(CefProcessMessage(CefPageScriptingMessage.evaluated, [
+                .int(Int32(request)), .bool(false), .string("The document went away before the result was ready."),
+                .int(0), .int(0),
+            ]))
+        }
+    }
+
+    // MARK: User scripts
+
+    private func run(_ script: Script, in context: V8Context) {
+        if case .failure(let error) = context.run(script.runnableSource) {
+            report(error.message, in: context)
+        }
+    }
+
+    /// Runs `scripts` as the document's `DOMContentLoaded` fires, before
+    /// the page's own listeners for it, which are added later.
+    private func runAtDocumentEnd(_ scripts: [Script], global: V8Value, context: V8Context) {
+        guard let document = global["document"], let addEventListener = document["addEventListener"] else { return }
+        let listener = context.durableFunction { [weak self, weak context] _, _ in
+            if let context { for script in scripts { self?.run(script, in: context) } }
+            return .success(nil)
+        }
+        guard let listener else { return }
+        let options = V8Value.object()
+        options.set("once", .bool(true))
+        addEventListener.call(this: document, [.string("DOMContentLoaded"), listener, options])
+    }
+
+    /// Reports an exception of CefSwift's own making on the page's console,
+    /// as an uncaught one would be.
+    private func report(_ message: String, in context: V8Context) {
+        guard let console = context.global?["console"], let error = console["error"] else { return }
+        error.call(this: console, [.string(message)])
+    }
+
+    /// Whether `url` matches `pattern`, where `*` stands for any run of
+    /// characters.
+    nonisolated static func matches(_ url: String, pattern: String) -> Bool {
+        let text = Array(url.unicodeScalars)
+        let parts = pattern.split(separator: "*", omittingEmptySubsequences: false).map { Array($0.unicodeScalars) }
+        guard let first = parts.first, let last = parts.last else { return true }
+        if parts.count == 1 { return text == first }
+        guard text.starts(with: first) else { return false }
+        var position = first.count
+        for part in parts.dropFirst().dropLast() where !part.isEmpty {
+            guard let found = find(part, in: text, from: position) else { return false }
+            position = found + part.count
+        }
+        return text.count - position >= last.count && Array(text.suffix(last.count)) == last
+    }
+
+    private nonisolated static func find(_ needle: [Unicode.Scalar], in haystack: [Unicode.Scalar], from start: Int) -> Int? {
+        guard needle.count <= haystack.count - start else { return nil }
+        for index in start...(haystack.count - needle.count) where Array(haystack[index..<index + needle.count]) == needle {
+            return index
+        }
+        return nil
+    }
+
+    // MARK: Bridges
+
+    /// The names `Object.prototype` defines, which the bridge object
+    /// inherits instead of treating as methods.
+    private static let inheritedNames: Set<String> = [
+        "constructor", "hasOwnProperty", "isPrototypeOf", "propertyIsEnumerable", "toLocaleString", "toString",
+        "valueOf", "__proto__", "__defineGetter__", "__defineSetter__", "__lookupGetter__", "__lookupSetter__",
+    ]
+
+    /// The bridge's global object: `invoke`, `on`, `off`, and any other
+    /// name as a method that calls Swift.
+    private func makeBridgeObject(named bridge: String, for document: Document) -> V8Value? {
+        V8Value.object { [weak self, weak document] name in
+            guard let self, let document else { return nil }
+            switch name {
+            case "invoke":
+                return V8Value.function("invoke") { [weak self, weak document] _, arguments in
+                    guard let self, let document else { return .success(nil) }
+                    guard let method = arguments.first, method.isString else {
+                        return .failure(V8Exception(message: "\(bridge).invoke: the method name must be a string"))
+                    }
+                    return .success(self.call(bridge, method.stringValue, arguments.dropFirst().first, in: document))
+                }
+            case "on":
+                return V8Value.function("on") { [weak self, weak document] _, arguments in
+                    guard let self, let document, arguments.count >= 2, arguments[1].isFunction else {
+                        return .failure(V8Exception(message: "\(bridge).on: expected an event name and a function"))
+                    }
+                    let event = arguments[0].stringValue, listener = arguments[1]
+                    document.listeners[bridge, default: [:]][event, default: []].append(listener)
+                    return .success(V8Value.function("") { [weak self, weak document] _, _ in
+                        if let document { self?.removeListener(listener, for: event, of: bridge, in: document) }
+                        return .success(nil)
+                    })
+                }
+            case "off":
+                return V8Value.function("off") { [weak self, weak document] _, arguments in
+                    guard let self, let document, let event = arguments.first?.stringValue else { return .success(nil) }
+                    if arguments.count >= 2, arguments[1].isFunction {
+                        self.removeListener(arguments[1], for: event, of: bridge, in: document)
+                    } else {
+                        document.listeners[bridge]?[event] = nil
+                    }
+                    return .success(nil)
+                }
+            case "then":
+                // Not a thenable: `await bridge` gives the bridge itself.
+                return nil
+            case _ where Self.inheritedNames.contains(name):
+                return nil
+            default:
+                return V8Value.function(name) { [weak self, weak document] _, arguments in
+                    guard let self, let document else { return .success(nil) }
+                    return .success(self.call(bridge, name, arguments.first, in: document))
+                }
+            }
+        }
+    }
+
+    private func removeListener(_ listener: V8Value, for event: String, of bridge: String, in document: Document) {
+        document.listeners[bridge]?[event]?.removeAll { $0.isSame(listener) }
+    }
+
+    /// Sends a call to the browser process and returns its promise.
+    private func call(_ bridge: String, _ method: String, _ argument: V8Value?, in document: Document) -> V8Value? {
+        guard let promise = V8Value.promise() else { return nil }
+        guard let frame = document.context.raw.pointee.get_frame(document.context.raw) else {
+            promise.reject("\(bridge).\(method): the document is closing")
+            return promise
+        }
+        let rendererFrame = CefRendererFrame(adopting: frame, browserID: document.browserID)
+        document.nextCall += 1
+        let callID = document.nextCall
+        document.pendingCalls[bridge, default: [:]][callID] = promise
+        let arguments = argument.map(JSONValue.init) ?? .null
+        let sent = rendererFrame.send(CefProcessMessage(CefPageScriptingMessage.call, [
+            .string(bridge), .int(Int32(document.id)), .int(Int32(callID)), .string(method),
+            .string(arguments.text), .string(document.origin),
+        ]))
+        if !sent {
+            document.pendingCalls[bridge]?[callID] = nil
+            promise.reject("\(bridge).\(method): the document is closing")
+        }
+        return promise
+    }
+
+    private func settle(_ message: CefProcessMessage) {
+        let bridge = message.string(0)
+        guard let document = documents[message.int(1)],
+              let promise = document.pendingCalls[bridge]?.removeValue(forKey: message.int(2))
+        else { return }
+        let succeeded = message.bool(3), value = message.string(4)
+        document.context.entered {
+            if succeeded {
+                promise.resolve((JSONValue(parsing: value) ?? .null).v8Value())
+            } else {
+                promise.reject(value)
+            }
+        }
+        document.context.runMicrotasksSoon()
+    }
+
+    private func emit(_ message: CefProcessMessage, in frame: CefRendererFrame) {
+        guard let context = frame.mainWorldContext,
+              let document = documents.values.first(where: { $0.context.isSame(context) }),
+              let listeners = document.listeners[message.string(0)]?[message.string(1)], !listeners.isEmpty
+        else { return }
+        let payload = JSONValue(parsing: message.string(2)) ?? .null
+        context.entered {
+            for listener in listeners {
+                if case .failure(let error) = listener.call(this: nil, [payload.v8Value()]) {
+                    report(error.message, in: context)
+                }
+            }
+        }
+        context.runMicrotasksSoon()
+    }
+
+    // MARK: Evaluation
+
+    /// Runs a script for `CefBrowser.evaluateJavaScript` and sends its
+    /// result back; a promise is awaited first.
+    private func evaluate(_ message: CefProcessMessage, in frame: CefRendererFrame) {
+        let request = message.int(0)
+        func reply(_ succeeded: Bool, _ text: String, line: Int = 0, column: Int = 0) {
+            frame.send(CefProcessMessage(CefPageScriptingMessage.evaluated, [
+                .int(Int32(request)), .bool(succeeded), .string(text), .int(Int32(line)), .int(Int32(column)),
+            ]))
+        }
+        guard let context = frame.mainWorldContext else {
+            reply(false, "The frame has no document.")
+            return
+        }
+        context.entered {
+            switch context.run(message.string(1)) {
+            case .failure(let error):
+                reply(false, error.message, line: error.line, column: error.column)
+            case .success(let value) where value.isPromise:
+                awaitPromise(value, request: request, context: context, frame: frame)
+            case .success(let value):
+                reply(true, JSONValue(value).text)
+            }
+        }
+        // The script may have queued promise jobs of its own.
+        context.runMicrotasksSoon()
+    }
+
+    private func awaitPromise(_ promise: V8Value, request: Int, context: V8Context, frame: CefRendererFrame) {
+        let settle: (Bool) -> V8Value? = { [weak self] succeeded in
+            context.durableFunction { [weak self] _, arguments in
+                guard let self, self.pendingEvaluations.removeValue(forKey: request) != nil else { return .success(nil) }
+                let value = arguments.first ?? .undefined
+                let text = succeeded ? JSONValue(value).text : Self.describe(rejection: value)
+                frame.send(CefProcessMessage(CefPageScriptingMessage.evaluated, [
+                    .int(Int32(request)), .bool(succeeded), .string(text), .int(0), .int(0),
+                ]))
+                return .success(nil)
+            }
+        }
+        guard let then = promise["then"], let fulfilled = settle(true), let rejected = settle(false),
+              case .success = then.call(this: promise, [fulfilled, rejected])
+        else {
+            frame.send(CefProcessMessage(CefPageScriptingMessage.evaluated, [
+                .int(Int32(request)), .bool(false), .string("The promise could not be awaited."), .int(0), .int(0),
+            ]))
+            return
+        }
+        pendingEvaluations[request] = PendingEvaluation(context: context, frame: frame)
+    }
+
+    /// `Uncaught (in promise) Error: message`, as Chromium's console words a
+    /// rejection.
+    private static func describe(rejection value: V8Value) -> String {
+        var text: String
+        if value.isObject, let message = value["message"], message.isString {
+            let name = value["name"].flatMap { $0.isString ? $0.stringValue : nil } ?? "Error"
+            text = "\(name): \(message.stringValue)"
+        } else if value.isString {
+            text = value.stringValue
+        } else {
+            text = JSONValue(value).text
+        }
+        return "Uncaught (in promise) " + text
+    }
+
+    // MARK: Messages
+
+    func received(_ message: CefProcessMessage, in frame: CefRendererFrame) {
+        switch message.name {
+        case CefPageScriptingMessage.configure:
+            guard let json = JSONValue(parsing: message.string(0)), let configuration = Configuration(json: json),
+                  configuration.generation >= (configurations[frame.browserID]?.generation ?? -1)
+            else { return }
+            configurations[frame.browserID] = configuration
+        case CefPageScriptingMessage.reply:
+            settle(message)
+        case CefPageScriptingMessage.emit:
+            emit(message, in: frame)
+        case CefPageScriptingMessage.evaluate:
+            evaluate(message, in: frame)
+        default:
+            break
+        }
+    }
+}

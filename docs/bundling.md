@@ -160,16 +160,17 @@ Chromium runs renderers, the GPU process, plugins and notification
 app of its own, with its own bundle identifier and `Info.plist`. All five
 contain the same binary, copied and renamed.
 
-`cef bundle` compiles that binary with `xcrun clang` from
-`Plugins/CefPlugin/Helper/` in the CefSwift package, against the framework
-it bundles. The helper links `libcefswift_helper_startup.dylib` and then the
-framework, so dyld loads both at launch, and it builds the product with a
-weak link to the framework (`-weak_framework`). Libraries loaded at launch
+That binary is CefSwift's `cefswift-helper` product, a Swift executable
+(`Sources/CefHelper`), which `cef bundle` builds with SwiftPM alongside the
+app, together with the `cefswift_helper_startup` library. The helper links
+`libcefswift_helper_startup.dylib` and then the framework, so dyld loads
+both at launch, and the app product is built with a weak link to the
+framework (`-weak_framework`). Libraries loaded at launch
 keep the framework's 12 MB of fixed-up pointers as shared, clean memory in
 every process; see [architecture](architecture.md#loading-the-framework-at-launch).
-An app bundled another way, for example by an Xcode project, builds its
-helper from the same two files with the same link order (see
-`HelperBuilder.swift` in the plugin for the exact commands). Its app
+An app bundled another way, for example by an Xcode project, builds the
+same two products with the same link order (see `HelperBuilder.swift` in
+the plugin for the exact linker flags). Its app
 executable runs without the link to the framework, since CefKit loads the
 framework with `dlopen` if dyld has not, but that process then holds the
 12 MB privately.

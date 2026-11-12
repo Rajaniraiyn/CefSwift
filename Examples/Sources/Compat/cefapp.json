@@ -1,0 +1,5 @@
+{
+  "bundleIdentifier": "dev.rajaniraiyn.cefswift.compat",
+  "displayName": "CefSwift Compat",
+  "minimumSystemVersion": "15.0"
+}

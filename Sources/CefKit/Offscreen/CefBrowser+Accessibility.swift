@@ -86,7 +86,6 @@ extension CefBrowser {
     /// A browser discarded by closing it empties its tree, and builds it
     /// again when it is created anew.
     func accessibilityDidCloseForDiscard() {
-        isDevToolsAccessibilityEnabled = false
         guard isAccessibilityEnabled else { return }
         wantsAccessibility = true
         accessibilityDidClose()
@@ -212,10 +211,10 @@ extension CefBrowser {
         if let domNodeID = node.domNodeID { return domNodeID }
         guard node.id.tree == accessibilityTree.mainTreeID else { return nil }
         do {
-            if !isDevToolsAccessibilityEnabled {
-                try await devTools.send("Accessibility.enable")
-                isDevToolsAccessibilityEnabled = true
-            }
+            // Enabled for the lookup only, so the session holds no domain
+            // between actions.
+            try await devTools.send("Accessibility.enable")
+            defer { Task { _ = try? await devTools.send("Accessibility.disable") } }
             let nodes: CefJSON
             if let parent = node.parentID {
                 nodes = try await devTools.send("Accessibility.getChildAXNodes", ["id": .string(String(parent.node))])["nodes"]

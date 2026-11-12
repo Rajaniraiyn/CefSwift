@@ -246,6 +246,7 @@ extension CefBrowser {
         isCapturingMedia = false
         downloadControls = [:]
         devTools.prepareForNewSession()
+        pageScripting.failPendingEvaluations()
         CefRuntime.shared.forgetIdentifier(of: self)
         identifier = -1
         isDiscarded = true
@@ -324,18 +325,15 @@ extension CefBrowser {
     /// and edited form fields in the main frame.
     private func pageContentBlockers() async -> Set<CefDiscardBlocker> {
         let state = await withTimeout(.seconds(3)) {
-            try await self.devTools.send("Runtime.evaluate", [
-                "expression": """
-                    ({
-                      audio: [...document.querySelectorAll('audio, video')]
-                        .some(m => !m.paused && !m.ended && !m.muted && m.volume > 0),
-                      edited: [...document.querySelectorAll('input, textarea')].some(e =>
-                        e.type === 'checkbox' || e.type === 'radio' ? e.checked !== e.defaultChecked
-                          : e.type !== 'hidden' && e.type !== 'file' && e.value !== e.defaultValue),
-                    })
-                    """,
-                "returnByValue": true, "silent": true,
-            ])["result"]["value"]
+            try await self.pageScripting.evaluate("""
+                ({
+                  audio: [...document.querySelectorAll('audio, video')]
+                    .some(m => !m.paused && !m.ended && !m.muted && m.volume > 0),
+                  edited: [...document.querySelectorAll('input, textarea')].some(e =>
+                    e.type === 'checkbox' || e.type === 'radio' ? e.checked !== e.defaultChecked
+                      : e.type !== 'hidden' && e.type !== 'file' && e.value !== e.defaultValue),
+                })
+                """)
         }
         var blockers = Set<CefDiscardBlocker>()
         if state?["audio"].boolValue == true { blockers.insert(.playingAudio) }
