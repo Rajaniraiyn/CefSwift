@@ -136,7 +136,8 @@ open dist/MyApp.app
 
 The first run downloads the pinned CEF build (about 135 MB) into `.cef/`.
 Add `.cef/` and `dist/` to `.gitignore`. [Bundling](docs/bundling.md)
-covers identifiers, signing and the bundle layout.
+covers identifiers, signing, entitlements, notarization and the bundle layout;
+`swift package cef doctor <App.app>` reports what a built bundle can do.
 
 ## Two kinds of app
 
@@ -188,7 +189,7 @@ The CEF version is pinned in `CEF_VERSION.json` and updated by
 
 - [Guide](docs/guide.md): how to do each task.
 - [Architecture](docs/architecture.md): how CefSwift works inside.
-- [Bundling](docs/bundling.md): the app bundle, identifiers and signing.
+- [Bundling](docs/bundling.md): the app bundle, signing, capabilities and distribution.
 - [Sandbox](docs/sandbox.md): Chromium's macOS sandbox.
 - [Automation](docs/automation.md): CEF updates, CI and releases.
 - [Contributing](CONTRIBUTING.md): building, testing and regenerating the C bridge.

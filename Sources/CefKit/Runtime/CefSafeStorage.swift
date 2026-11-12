@@ -1,5 +1,4 @@
 import Foundation
-import Security
 
 /// Whether Chromium keeps the key that encrypts cookies and other secrets in
 /// the user's keychain, as the "Chromium Safe Storage" item.
@@ -26,28 +25,9 @@ public enum CefSafeStoragePolicy: Sendable {
 }
 
 extension CefSafeStoragePolicy {
-    /// The policy with ``automatic`` replaced by the policy for this app.
+    /// The policy with ``automatic`` replaced by the policy for this app:
+    /// ``keychain`` with a team signature, ``mockKeychain`` otherwise.
     func resolved() -> CefSafeStoragePolicy {
-        switch self {
-        case .keychain, .mockKeychain:
-            return self
-        case .automatic:
-            return Self.hasDeveloperSignature ? .keychain : .mockKeychain
-        }
+        CefAppCapabilities.current.resolvedSafeStorage(self)
     }
-
-    /// Whether the running app is signed with a team identity, as opposed to
-    /// unsigned or ad-hoc signed.
-    private static let hasDeveloperSignature: Bool = {
-        var code: SecCode?
-        var staticCode: SecStaticCode?
-        var information: CFDictionary?
-        guard SecCodeCopySelf([], &code) == errSecSuccess, let code,
-              SecCodeCopyStaticCode(code, [], &staticCode) == errSecSuccess, let staticCode,
-              SecCodeCopySigningInformation(
-                staticCode, SecCSFlags(rawValue: kSecCSSigningInformation), &information) == errSecSuccess,
-              let details = information as? [String: Any]
-        else { return false }
-        return details[kSecCodeInfoTeamIdentifier as String] is String
-    }()
 }
