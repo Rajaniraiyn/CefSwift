@@ -636,6 +636,10 @@ final class CefBrowserClient {
                 let handled = b.delegate?.browser(
                     b, handleChromeCommand: command,
                     disposition: CefWindowOpenDisposition(cefValue: disposition)) ?? false
+                // Surfaces the window replaces or hides.
+                if !handled, let window = CefBrowserWindow.hosting(b), window.handleSurfaceCommand(command) {
+                    return 1
+                }
                 // Chrome runs the command after this returns.
                 if !handled, command.isZoomCommand { CefBrowser.refreshZoomLevels() }
                 return handled ? 1 : 0

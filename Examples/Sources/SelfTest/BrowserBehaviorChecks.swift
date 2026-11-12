@@ -204,6 +204,15 @@ extension SelfTest {
         // style shows Chromium's own sign-in dialog, as a child window.
         check("authentication: Chromium's sign-in dialog appears",
               await waitUntil { window.window?.childWindows?.isEmpty == false })
+        check("surfaces: sign-in dialog recognized",
+              await waitUntil { window.chromiumSurfaces.contains { $0.kind == .signIn } },
+              detail: "\(window.chromiumSurfaces.map { "\($0.kind) '\($0.title)'" })")
+        if let signIn = window.chromiumSurfaces.first(where: { $0.kind == .signIn }) {
+            signIn.dismiss()
+            check("surfaces: dismissing the sign-in dialog cancels it",
+                  await waitUntil { signIn.window?.isVisible != true && window.chromiumSurfaces.isEmpty && browser.title == "denied" },
+                  detail: browser.title)
+        }
         if recorder.challenges.isEmpty {
             print("SKIP authentication: CEF does not call credentialFor (Chromium's dialog asks instead)")
         } else {
@@ -423,7 +432,7 @@ struct EdgePages: CefSchemeHandler {
 }
 
 /// A local HTTP server. `/private` wants Basic credentials `ada:lovelace`;
-/// `*.txt` is served as an attachment.
+/// `*.txt` is served as an attachment and `/page` as a plain page.
 final class LocalServer: @unchecked Sendable {
     private let listener: NWListener
     private(set) var port: UInt16 = 0
@@ -449,6 +458,9 @@ final class LocalServer: @unchecked Sendable {
                     head = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n"
                         + "Content-Disposition: attachment; filename=\"\(path.dropFirst())\"\r\n"
                     body = String(repeating: "CefSwift\n", count: 2048)
+                } else if path == "/page" {
+                    head = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n"
+                    body = "<title>page</title><p>A page on http, which Chrome's QR code generator accepts.</p><p><a id=link href=/page>A link</a></p>"
                 } else if request.contains("Authorization: Basic \(Data("ada:lovelace".utf8).base64EncodedString())") {
                     head = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n"
                     body = "<title>authorized</title>ok"
