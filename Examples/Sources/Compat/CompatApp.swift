@@ -54,6 +54,12 @@ enum CompatApp {
             configuration.rootCacheDirectory = URL(fileURLWithPath: path, isDirectory: true)
         }
         configuration.preferences["browser.confirm_to_quit"] = false
+        if let names = defaults.string(forKey: "enableFeatures") {
+            configuration.enabledFeatures.formUnion(names.split(separator: ",").map(String.init))
+        }
+        if let names = defaults.string(forKey: "enableBlinkFeatures") {
+            configuration.extraCommandLineSwitches["enable-blink-features"] = names
+        }
         if let token = defaults.string(forKey: "productToken") {
             configuration.userAgent = .appendingProduct(token)
         }
