@@ -132,6 +132,7 @@ enum SelfTest {
         ("systemEngine", systemEngineChecks),
         ("passkeys", passkeyChecks),
         ("chromeWindow", chromeWindowChecks),
+        ("operations", operationChecks),
         // Last: it leaves discarded browsers open for the quit.
         ("discard", discardChecks),
     ]

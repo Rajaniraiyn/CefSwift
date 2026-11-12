@@ -97,8 +97,11 @@ of the executor's own: before start-up at once; on start-up the queue
 empties before jobs go to Chromium; from the moment `CefRuntime` begins
 shutting down, jobs wait and run on the queue after `cef_shutdown()`
 returns, once Chromium's threads are gone. A job Chromium destroys without
-running goes to the queue the same way. So no job is lost or runs at the
-same time as another, and quitting waits for nothing.
+running goes to the queue the same way. Each job is routed, and each
+phase change made, under one lock, so a job always goes where the phase
+at its submission sends it; the path that takes back a job Chromium
+rejects inside `cef_post_task` never takes that lock. So no job is lost
+or runs at the same time as another, and quitting waits for nothing.
 
 **Scheme handlers.** A `CefSchemeHandler` runs with its own isolation:
 nonisolated on Swift's concurrent executor, or on `CefIOActor` or the
@@ -525,7 +528,9 @@ its DevTools connection, before the browser loads its first page:
   frame. `navigator.userActivation.isActive` is read in that frame with
   `throwOnSideEffect`, so the read cannot change the page. Nothing in the
   page is changed. Any other pause, such as a `debugger` statement in the
-  page, is resumed at once.
+  page, is resumed at once unless someone else debugs the page: the app,
+  holding its own `Debugger.enable` lease on the browser's session, or
+  the browser's DevTools window. Those pauses are theirs to resume.
 - While the page is stopped, the delegate decides, and CefKit adds a
   virtual authenticator (CTAP 2.1, internal transport, resident keys,
   user verification) for that one call: empty for a registration, holding

@@ -1390,7 +1390,7 @@ changes nothing a page can measure; an enabled domain can be seen.
 
 | Feature | What attaches | What a page can observe |
 |---|---|---|
-| `browser.devTools` | Whatever you send | `Runtime.enable` makes every `console` call serialize its arguments: logging a large object takes 2–3 times as long. `Debugger.enable` stops the page at `debugger` statements. `Page.enable`, `Network.enable` and the like: nothing measured. |
+| `browser.devTools` | Whatever you send; CefKit's features share the session, and a domain stays enabled until every `X.enable` sent through it has had its `X.disable` | `Runtime.enable` makes every `console` call serialize its arguments: logging a large object takes 2–3 times as long. `Debugger.enable` stops the page at `debugger` statements. `Page.enable`, `Network.enable` and the like: nothing measured. |
 | `CefPasskeyMode.app` and `.disabled` | `WebAuthn`, `Debugger`, `Page` and `Runtime`, for the browser's lifetime | Each `debugger` statement takes about 10 ms (CefKit resumes at once), and `console` calls serialize their arguments as above. Use `.chromium` for browsers that show sites you do not control. |
 | `evaluateJavaScript(_:userGesture: true)` | `Runtime.evaluate`, no domain | The gesture itself. |
 | `snapshot()` | `Page.captureScreenshot`, no domain | Nothing measured. |

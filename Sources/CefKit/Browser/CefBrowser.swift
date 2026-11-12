@@ -816,6 +816,9 @@ public final class CefBrowser: Identifiable {
         }
     }
 
+    /// Whether the browser is setting itself up before its first page.
+    @_spi(Testing) public var isSettingUp: Bool { isBootstrapping }
+
     /// The browser whose set-up (`bootstrap()`) the current task runs.
     @TaskLocal static var settingUp: ObjectIdentifier?
 
