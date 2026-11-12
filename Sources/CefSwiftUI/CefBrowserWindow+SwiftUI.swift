@@ -60,54 +60,58 @@ extension CefBrowserWindow {
 }
 
 extension View {
-    /// Makes this view the anchor of Chromium's bubbles in the
-    /// ``CefBrowserWindow`` it is in, such as a view of the window's toolbar:
-    /// bubbles appear beneath it instead of where Chrome's toolbar would be.
+    /// Makes this view the anchor of Chromium's surfaces in the
+    /// ``CefBrowserWindow`` it is in, such as a view of the window's
+    /// toolbar: Chromium's bubbles appear beneath it instead of where
+    /// Chrome's toolbar would be.
     ///
     /// Without `kinds`, the view becomes the window's
-    /// ``CefBrowserWindow/bubbleAnchor``, which every bubble Chromium would
-    /// attach to its toolbar follows; with them, it anchors only those
-    /// kinds (``CefBrowserWindow/bubbleAnchors``). The anchor is removed
-    /// when the view leaves the window.
+    /// ``CefChromiumUI/anchor``, which every surface that hangs from Chrome's
+    /// toolbar follows; with them, it is the anchor of those kinds in
+    /// ``CefChromiumUI/anchors``, Chromium's surfaces and your own interface
+    /// for them alike. The anchor is removed when the view leaves the
+    /// window.
     ///
     /// ```swift
     /// AddressField(browser: browser)
-    ///     .chromiumBubbleAnchor(alignment: .trailing)
+    ///     .chromiumSurfaceAnchor(alignment: .trailing)
+    /// Button("QR Code", systemImage: "qrcode") { browser.execute(.createQRCode) }
+    ///     .chromiumSurfaceAnchor([.qrCode])
     /// ```
-    public func chromiumBubbleAnchor(
-        for kinds: Set<CefChromiumBubble.Kind>? = nil,
-        alignment: CefBubbleAnchor.Alignment = .center,
+    public func chromiumSurfaceAnchor(
+        _ kinds: Set<CefChromiumSurface.Kind>? = nil,
+        alignment: CefSurfaceAnchor.Alignment = .center,
         spacing: CGFloat = 4
     ) -> some View {
-        background(BubbleAnchorRepresentable(kinds: kinds, alignment: alignment, spacing: spacing))
+        background(SurfaceAnchorRepresentable(kinds: kinds, alignment: alignment, spacing: spacing))
     }
 }
 
-private struct BubbleAnchorRepresentable: NSViewRepresentable {
-    let kinds: Set<CefChromiumBubble.Kind>?
-    let alignment: CefBubbleAnchor.Alignment
+private struct SurfaceAnchorRepresentable: NSViewRepresentable {
+    let kinds: Set<CefChromiumSurface.Kind>?
+    let alignment: CefSurfaceAnchor.Alignment
     let spacing: CGFloat
 
-    func makeNSView(context: Context) -> BubbleAnchorView {
-        BubbleAnchorView()
+    func makeNSView(context: Context) -> SurfaceAnchorView {
+        SurfaceAnchorView()
     }
 
-    func updateNSView(_ view: BubbleAnchorView, context: Context) {
+    func updateNSView(_ view: SurfaceAnchorView, context: Context) {
         view.configure(kinds: kinds, alignment: alignment, spacing: spacing)
     }
 }
 
-/// An invisible view that registers itself as a bubble anchor with the
+/// An invisible view that registers itself as a surface anchor with the
 /// browser window it is in.
-private final class BubbleAnchorView: NSView {
-    private var kinds: Set<CefChromiumBubble.Kind>?
-    private var alignment = CefBubbleAnchor.Alignment.center
+private final class SurfaceAnchorView: NSView {
+    private var kinds: Set<CefChromiumSurface.Kind>?
+    private var alignment = CefSurfaceAnchor.Alignment.center
     private var spacing: CGFloat = 4
     private weak var registeredWindow: CefBrowserWindow?
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
-    func configure(kinds: Set<CefChromiumBubble.Kind>?, alignment: CefBubbleAnchor.Alignment, spacing: CGFloat) {
+    func configure(kinds: Set<CefChromiumSurface.Kind>?, alignment: CefSurfaceAnchor.Alignment, spacing: CGFloat) {
         unregister()
         self.kinds = kinds
         self.alignment = alignment
@@ -123,11 +127,11 @@ private final class BubbleAnchorView: NSView {
 
     private func register() {
         guard let window, let owner = CefBrowserWindow.owning(window) else { return }
-        let anchor = CefBubbleAnchor.view(self, alignment: alignment, spacing: spacing)
+        let anchor = CefSurfaceAnchor.view(self, alignment: alignment, spacing: spacing)
         if let kinds {
-            for kind in kinds { owner.bubbleAnchors[kind] = anchor }
+            for kind in kinds { owner.chromiumUI.anchors[kind] = anchor }
         } else {
-            owner.bubbleAnchor = anchor
+            owner.chromiumUI.anchor = anchor
         }
         registeredWindow = owner
     }
@@ -136,11 +140,11 @@ private final class BubbleAnchorView: NSView {
         guard let owner = registeredWindow else { return }
         registeredWindow = nil
         if let kinds {
-            for kind in kinds where owner.bubbleAnchors[kind]?.isAnchored(to: self) == true {
-                owner.bubbleAnchors[kind] = nil
+            for kind in kinds where owner.chromiumUI.anchors[kind]?.isAnchored(to: self) == true {
+                owner.chromiumUI.anchors[kind] = nil
             }
-        } else if owner.bubbleAnchor?.isAnchored(to: self) == true {
-            owner.bubbleAnchor = nil
+        } else if owner.chromiumUI.anchor?.isAnchored(to: self) == true {
+            owner.chromiumUI.anchor = nil
         }
     }
 }

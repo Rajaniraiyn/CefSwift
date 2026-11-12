@@ -25,7 +25,7 @@ are `@MainActor`.
   - [Tabs](#tabs)
   - [Popups](#popups)
   - [Chrome commands](#chrome-commands)
-  - [Chromium's bubbles](#chromiums-bubbles)
+  - [Chromium's own interface](#chromiums-own-interface)
   - [Tabs Chromium opens itself](#tabs-chromium-opens-itself)
 - [Customizing Chromium's own pages](#customizing-chromiums-own-pages)
 - [Profiles](#profiles)
@@ -728,48 +728,93 @@ calls the delegate's `browser(_:handleChromeCommand:disposition:)`. Return
 `hiddenAppMenuCommands`, `disabledAppMenuCommands`, `showsToolbarButtons`
 and `showsPageActionIcons`.
 
-### Chromium's bubbles
+### Chromium's own interface
 
-Chromium shows some of its UI in bubbles over a `CefBrowserWindow`: the QR
-code generator (`.createQRCode`), Cast, share, translate, password and
-bookmark bubbles, the HTTP sign-in dialog and the find bar. Without Chrome's
-toolbar, it places the toolbar's bubbles at the top right of the page. An
-anchor puts them under your own controls instead:
+Chromium shows some of its interface over a `CefBrowserWindow` in windows
+of its own: bubbles such as the QR code generator and Cast, the HTTP
+sign-in dialog, the find bar, the status bubble with a hovered link's
+address. These are surfaces, `CefChromiumSurface`, of a `Kind`. Without
+Chrome's toolbar, Chromium hangs the toolbar's bubbles from the top right
+of the page. `window.chromiumUI` decides, per kind, how each is presented:
+
+| Presentation | Effect |
+|---|---|
+| `.native` (default) | Chromium draws it, under its anchor if it has one. |
+| `.custom` | Chromium's is kept off screen; your interface shows instead. |
+| `.hidden` | Nothing shows; a dialog that asks something is cancelled. |
+
+Anchors put Chromium's surfaces under your controls:
 
 ```swift
-window.bubbleAnchor = .view(addressField, alignment: .trailing)   // every toolbar bubble
-window.bubbleAnchors[.qrCode] = .view(qrButton, alignment: .trailing)
+window.chromiumUI.anchor = .view(addressField, alignment: .trailing)  // every toolbar surface
+window.chromiumUI.anchors[.qrCode] = .view(qrButton, alignment: .trailing)
+window.chromiumUI[.statusBubble] = .hidden
 ```
 
-In SwiftUI, mark the view in your toolbar:
+In SwiftUI, mark the views in your toolbar:
 
 ```swift
 AddressField(browser: browser)
-    .chromiumBubbleAnchor(alignment: .trailing)
+    .chromiumSurfaceAnchor(alignment: .trailing)
 Button("QR Code", systemImage: "qrcode") { browser.execute(.createQRCode) }
-    .chromiumBubbleAnchor(for: [.qrCode])
+    .chromiumSurfaceAnchor([.qrCode])
 ```
 
-- `CefBubbleAnchor` is `.view(_:alignment:spacing:)` or
+- `CefSurfaceAnchor` is `.view(_:alignment:spacing:)` or
   `.rect(_:alignment:spacing:)`, a rectangle in window coordinates. The
-  bubble hangs below it, `spacing` points away, lined up with its leading
-  or trailing edge or centered, and kept inside the window.
-- Bubbles follow their anchor as the window moves or resizes, and when
-  Chromium lays them out again.
-- `bubbleAnchor` applies to the bubbles Chromium attaches to its toolbar.
-  The sign-in dialog and the find bar belong to the page and move only
-  with an anchor of their own kind in `bubbleAnchors`. Untitled bubbles
-  attached to the page, such as autofill suggestions, never move.
+  surface hangs below it, `spacing` points away, lined up with its leading
+  or trailing edge or centered, and kept inside the window. Surfaces follow
+  their anchor as the window moves or resizes, and when Chromium lays them
+  out again.
+- `anchor` applies to the kinds that hang from Chrome's toolbar
+  (`kind.hangsFromToolbar`). The find bar and the sign-in dialog belong to
+  the page and move only with an anchor of their own in `anchors`.
+  Untitled widgets attached to the page, such as autofill suggestions,
+  never move.
 
-`window.chromiumBubbles` lists the bubbles on screen as `CefChromiumBubble`
-values, and `onChromiumBubble` is called as each appears. A bubble has a
-`kind` (`.qrCode`, `.cast`, `.share`, `.signIn`, `.findBar`, `.permission`,
-`.translate`, `.savePassword`, `.bookmark`, `.other`), its `title`, its
-`window`, and `dismiss()`, which cancels it as Esc would. Kinds are
-recognized from Chromium's own localized titles, so they work in every UI
-language. Permission prompts reach your delegate's
-`browser(_:decidePermissionFor:)` instead of appearing as bubbles.
+Your own interface replaces a kind with `setCustomPresentation(for:_:)`.
+The presenter receives the surface whenever Chromium would show it: from
+its command (`.find`, `.createQRCode`, `.castMedia`, `.showSharingHub`),
+its keyboard shortcut or menu item, or anything else, in which case
+Chromium's window is hidden before it is seen. In SwiftUI:
 
+```swift
+window.setFindBar { session in FindBar(session: session) }      // under the toolbar, as in Safari
+window.setStatusBubble { text in StatusBubble(text: text) }      // over the page
+window.setCustomPresentation(for: .qrCode) { surface in         // in a panel at the kind's anchor
+    CefQRCodeView(url: surface.url).frame(width: 200, height: 200).padding()
+}
+```
+
+A surface carries what a replacement needs: `kind`, `title`, `browser`,
+`url` (the address a QR code encodes, or the page's), `anchorRect`,
+`position(_:)` to place a window of yours as Chromium would, and
+`dismiss()`. A panel from the SwiftUI method closes on Esc, on a click
+elsewhere, and when the surface is dismissed. `presentationForSurface`
+decides per surface as it appears, `chromiumSurfaces` lists those on
+screen, and `onChromiumSurface` hears about each one, custom ones without
+a presenter included.
+
+| Surface | Kind | Native | Custom: what you get | Notes |
+|---|---|---|---|---|
+| Find bar | `.findBar` | Yes | `browser.findSession`: `text`, `isCaseSensitive`, `matchCount`, `activeMatch`, `next()`, `previous()`, `end()` | |
+| QR code | `.qrCode` | Yes | `url`; draw it with `CefQRCodeView` or `CefQRCode.image(for:size:)` | |
+| Cast | `.cast` | Yes | `url`; `CefMediaRouter.shared` lists `sinks` and `routes` and casts Cast apps and presentation URLs | Mirroring a tab needs Chromium's dialog. |
+| Share | `.share` | No: Chromium's share menu needs its toolbar | `url`, `title` | By default the command opens macOS's share menu at the anchor. |
+| HTTP sign-in | `.signIn` | Yes | No: the credentials go to Chromium's dialog | Dismissing cancels the sign-in. |
+| Status bubble | `.statusBubble` | Yes | `browser.statusText` | `setStatusBubble(_:)` or `statusBubbleView`. Not anchorable. |
+| Fullscreen notice | `.fullscreenNotice` | Yes | `browser.isFullscreen` | |
+| Downloads | `.downloads` | Yes | `browser.downloads` and the delegate's download decisions | |
+| Permission prompt | `.permissionPrompt` | No | `browser(_:decidePermissionFor:)` | CefSwift answers every request through the delegate. |
+| Translate, save password, bookmark, page info, zoom | `.translate`, `.savePassword`, `.bookmark`, `.pageInfo`, `.zoom` | Recognized if shown | No | CEF 156 does not show these without Chrome's toolbar. |
+| Other bubbles (install app, …) | `.other(title)` | Yes | No | Identifiers are Chromium's. |
+| Autofill and password suggestions | `.other(…)` | Yes | No | Attached to the page; left as Chromium places them. |
+
+Other interface Chromium shows lives elsewhere: JavaScript dialogs, the
+`beforeunload` question, HTTP authentication answers and certificate errors
+go through the [delegate](#decisions); tooltips, `<select>` menus, date
+pickers and the color panel are AppKit or page popups Chromium places at
+the page element; crash pages and Safe Browsing warnings are pages.
 ### Tabs Chromium opens itself
 
 Chromium sometimes opens a tab on its own, without an opener: following a
@@ -1021,8 +1066,11 @@ secure, CORS-enabled and fetchable; pass `options:` to change them.
   popup windows.
 - `CefAutocomplete` is experimental, and `CefBookmarks`, `CefHistory` and
   `CefAutocomplete` depend on Chromium-internal pages.
-- Bubble anchors and swipe navigation in `CefBrowserWindow` depend on
-  Chromium's AppKit classes ([architecture](architecture.md#chromiums-appkit-classes)).
-  If a CEF update renames them, bubbles stay where Chromium puts them and
-  browser windows swipe as Chrome does, with its arrow, whatever the
-  options say. SelfTest fails on such an update.
+- `chromiumUI` and swipe navigation in `CefBrowserWindow` depend on
+  Chromium's AppKit classes and the view class names its accessibility
+  reports ([architecture](architecture.md#chromiums-appkit-classes)). If a
+  CEF update renames them, surfaces show as Chromium draws them, where it
+  puts them, with unknown ones reported as `.other`, and browser windows
+  swipe as Chrome does, with its arrow, whatever the options say. Commands
+  that open surfaces (`.find`, `.createQRCode`, …) still reach custom
+  presenters. SelfTest fails on such an update.

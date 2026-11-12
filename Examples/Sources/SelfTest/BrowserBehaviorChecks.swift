@@ -204,13 +204,13 @@ extension SelfTest {
         // style shows Chromium's own sign-in dialog, as a child window.
         check("authentication: Chromium's sign-in dialog appears",
               await waitUntil { window.window?.childWindows?.isEmpty == false })
-        check("bubbles: sign-in dialog recognized",
-              await waitUntil { window.chromiumBubbles.contains { $0.kind == .signIn } },
-              detail: "\(window.chromiumBubbles.map { "\($0.kind) '\($0.title)'" })")
-        if let signIn = window.chromiumBubbles.first(where: { $0.kind == .signIn }) {
+        check("surfaces: sign-in dialog recognized",
+              await waitUntil { window.chromiumSurfaces.contains { $0.kind == .signIn } },
+              detail: "\(window.chromiumSurfaces.map { "\($0.kind) '\($0.title)'" })")
+        if let signIn = window.chromiumSurfaces.first(where: { $0.kind == .signIn }) {
             signIn.dismiss()
-            check("bubbles: dismissing the sign-in dialog cancels it",
-                  await waitUntil { !signIn.isVisible && window.chromiumBubbles.isEmpty && browser.title == "denied" },
+            check("surfaces: dismissing the sign-in dialog cancels it",
+                  await waitUntil { signIn.window?.isVisible != true && window.chromiumSurfaces.isEmpty && browser.title == "denied" },
                   detail: browser.title)
         }
         if recorder.challenges.isEmpty {
@@ -451,7 +451,7 @@ final class LocalServer: @unchecked Sendable {
                     body = String(repeating: "CefSwift\n", count: 2048)
                 } else if path == "/page" {
                     head = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n"
-                    body = "<title>page</title><p>A page on http, which Chrome's QR code generator accepts.</p>"
+                    body = "<title>page</title><p>A page on http, which Chrome's QR code generator accepts.</p><p><a id=link href=/page>A link</a></p>"
                 } else if request.contains("Authorization: Basic \(Data("ada:lovelace".utf8).base64EncodedString())") {
                     head = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n"
                     body = "<title>authorized</title>ok"

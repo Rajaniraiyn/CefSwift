@@ -79,6 +79,7 @@ final class BrowserController: CefBrowserDelegate {
             TrailingButtons(browser: browser, controller: self)
         }
         window.setTabAccessory { TabIcon(browser: browser) }
+        ChromiumPanels.configure(window)
         window.window?.contentMinSize = NSSize(width: 560, height: 320)
         // Frame the page as a rounded card inset from the window edges.
         window.contentInsets = NSEdgeInsets(top: 0, left: 6, bottom: 6, right: 6)

@@ -107,19 +107,38 @@ out, and listed by SelfTest's "runtime hooks" check, and the feature that
 needs it falls back to Chromium's own behavior. An override added to a
 class that inherits the method stays on that class alone.
 
-**Bubbles.** Chromium's bubbles and dialogs are Views widgets, each in a
-`NativeWidgetMacNSWindow` that Chromium attaches to the browser window as a
-child window. Every CEF Views window is a `CefNSWindow`, a subclass;
-`CefBubbleTracker` overrides its `-addChildWindow:ordered:` and
-`-removeChildWindow:` to see bubbles come and go before they are on screen.
-A bubble's kind comes from its title, compared with Chromium's localized
-strings for each kind, read by identifier from the resource bundle
-(`cef_resource_bundle_t`); the find bar, which has no title, names itself
-through its accessibility title. `CefBrowserWindow` moves each bubble under
-its anchor with `setFrameOrigin(_:)`, and again when the bubble or the
-window moves or resizes.
+**Surfaces.** Chromium's bubbles, dialogs, find bar and status bubble are
+Views widgets, each in a `NativeWidgetMacNSWindow` that Chromium attaches to
+the browser window as a child window. Every CEF Views window is a
+`CefNSWindow`, a subclass; `CefSurfaceTracker` overrides its
+`-addChildWindow:ordered:` and `-removeChildWindow:`. As Chromium attaches a
+widget, `CefBrowserWindow` makes it transparent; once attached, it reads
+what the widget shows and applies the kind's presentation: it restores the
+widget and moves it under its anchor with `setFrameOrigin(_:)` (and again
+when the widget or the window moves or resizes), or keeps it transparent,
+ignoring the mouse, and closes it as Esc would, or for the find bar with
+`IDC_CLOSE_FIND_OR_STOP`. Status bubbles and fullscreen notices are only
+kept transparent, since Chromium reuses their windows.
 
-CEF's own hooks do not cover this: `cef_window_delegate_t` and
+A widget's kind comes from the class of the view inside it. Views reports
+each view's class name to accessibility as `AXDOMClassList`, so the tracker
+walks the widget's accessibility tree (`QRCodeGeneratorBubble`,
+`CastDialogView`, `FindBarView`, `LoginView`, `StatusView`,
+`SubtleNotificationView`, `DownloadBubbleContentsView`, …). When no class
+matches, the title is compared with Chromium's localized strings for each
+kind, read by identifier from the resource bundle
+(`cef_resource_bundle_t`); anything else is `.other`, with the title or the
+first specific class name. The QR code bubble's address comes from its text
+field's accessibility value.
+
+Commands that open a surface the window replaces or hides never reach
+Chromium: `CefBrowser.execute(_:)` and the command handler's
+`on_chrome_command` hand them to the window's presenter first. The custom
+find bar drives CEF's `find`/`stop_finding` and reads `on_find_result`; the
+custom status bubble reads `on_status_message`; the Cast picker uses CEF's
+`cef_media_router_t`.
+
+CEF's own hooks do not cover placement: `cef_window_delegate_t` and
 `cef_browser_view_delegate_t` have no say in where bubbles go, and Chromium
 anchors them to its toolbar's buttons. `CEF_CTT_NORMAL` and
 `CEF_CTT_LOCATION` do not change where they appear in a `CefBrowserWindow`,

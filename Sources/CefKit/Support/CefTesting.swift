@@ -7,9 +7,9 @@ import AppKit
 public enum CefTesting {
     /// The overrides of Chromium's AppKit classes that could not be
     /// installed in this CEF build, as `Class -selector` strings. Empty
-    /// when bubble anchoring and Chrome-style swipe integration work.
+    /// when Chromium surface handling and Chrome-style swipe integration work.
     public static var missingRuntimeHooks: [String] {
-        CefBubbleTracker.install()
+        CefSurfaceTracker.install()
         CefHistorySwipeHooks.install()
         return CefObjCHook.missingHooks
     }

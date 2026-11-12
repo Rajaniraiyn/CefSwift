@@ -26,9 +26,13 @@ struct TrailingButtons: View {
             if !browser.downloads.isEmpty {
                 DownloadsButton(browser: browser)
             }
-            // Chromium's QR code bubble opens under this button.
+            // The QR code bubble (Chromium's or the app's) opens under this
+            // button, and the share menu under the next.
             Button("QR Code", systemImage: "qrcode") { browser.execute(.createQRCode) }
-                .chromiumBubbleAnchor(for: [.qrCode], alignment: .trailing)
+                .help("Create QR Code for This Page")
+                .chromiumSurfaceAnchor([.qrCode], alignment: .trailing)
+            Button("Share", systemImage: "square.and.arrow.up") { browser.execute(.showSharingHub) }
+                .chromiumSurfaceAnchor([.share])
             Button("New Tab", systemImage: "plus") { controller.openTab() }
         }
         .buttonStyle(ToolbarIconButtonStyle())
@@ -162,7 +166,7 @@ struct AddressBar: View {
         .background(ViewAnchor { suggestions.anchor = $0 })
         // Chromium's bubbles (Cast, translate, passwords, …) open under the
         // field's trailing end, where Chrome's would hang from its omnibox.
-        .chromiumBubbleAnchor(alignment: .trailing)
+        .chromiumSurfaceAnchor(alignment: .trailing)
         .contentShape(.rect)
         .onTapGesture { isFocused = true }
         .animation(.easeOut(duration: 0.15), value: isFocused)
