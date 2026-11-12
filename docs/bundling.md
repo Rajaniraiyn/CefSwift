@@ -98,7 +98,7 @@ a misspelled key does not go unnoticed.
 
   "signingIdentity": "Developer ID Application: Example Corp (A1B2C3D4E5)",
   "provisioningProfile": "Browser_Developer_ID.provisionprofile",
-  "notarization": { "keychainProfile": "notary", "format": "dmg" }
+  "notarization": { "keychainProfile": "notary", "format": "zip" }
 }
 ```
 
@@ -370,17 +370,37 @@ bundle identifier with the capabilities enabled.
   ```sh
   swift package --allow-writing-to-package-directory --allow-network-connections all \
       cef bundle --product MyApp --sign "Developer ID Application: Example Corp (A1B2C3D4E5)" \
-      --notarize --keychain-profile notary --package dmg
+      --notarize --keychain-profile notary
   ```
 
-  This signs with the hardened runtime and a secure timestamp, wraps the app
-  in a signed disk image, submits it with `xcrun notarytool submit --wait`,
-  prints the notary log when Apple rejects it, and staples the ticket with
-  `xcrun stapler staple`. A zip cannot hold a stapled ticket of its own, so
-  with `zip` the plugin staples the app and zips it again.
+  This signs with the hardened runtime and a secure timestamp, zips the app
+  with `ditto`, submits it with `xcrun notarytool submit --wait`, prints the
+  notary log when Apple rejects it, staples the ticket to the app with
+  `xcrun stapler staple`, and zips the stapled app again (a zip cannot carry
+  a ticket of its own). With `--package dmg` it wraps the app in a disk
+  image signed with the same identity and staples the disk image instead;
+  see [SwiftPM's plugin sandbox](#swiftpms-plugin-sandbox) for where that
+  runs. This path follows Apple's notarization documentation and has not
+  been run against Apple's service.
 - [ ] `swift package … cef doctor dist/MyApp.app` reports no errors, and
   `spctl --assess --type execute -vv dist/MyApp.app` prints
   `source=Notarized Developer ID`.
+
+### SwiftPM's plugin sandbox
+
+`swift package` runs the plugin in a sandbox. Inside it:
+
+- `codesign` and `security` see the keychains of the search list (the
+  login keychain), not other keychain files: `--keychain` with a file
+  outside the search list fails with "no identity found".
+- `hdiutil` cannot create disk images, so `--format dmg` fails; `zip` works.
+- `spctl` cannot assess apps (see [cef doctor](#cef-doctor)).
+- Whether `notarytool` reaches its keychain profile and Apple's service from
+  inside the sandbox has not been tested.
+
+Where a step fails for this reason, the plugin's message says so; run the
+command it prints in Terminal, or pass `--disable-sandbox` to
+`swift package`, which turns the sandbox off for the whole run.
 
 ## Features
 
@@ -453,9 +473,9 @@ It exits non-zero when it finds an error, something that stops the app from
 launching, from loading a part, or from passing notarization. `--json`
 prints the same report as JSON, with `errors` and `warnings` counts.
 
-The plugin runs in SwiftPM's sandbox, where `spctl` cannot assess apps; the
-report says so and the Gatekeeper line is informational. Run `spctl
---assess --type execute -vv <App.app>` in Terminal for that verdict.
+In SwiftPM's plugin sandbox `spctl` cannot assess apps; the report says so
+and the Gatekeeper line is informational. Run `spctl --assess --type execute
+-vv <App.app>` in Terminal for that verdict.
 
 For an ad hoc bundle with the hardened runtime, the summary reads:
 
