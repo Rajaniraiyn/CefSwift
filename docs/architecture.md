@@ -101,6 +101,124 @@ whole content area in one layer, so `contentInsets` and
 `contentCornerRadius` are drawn by a native view laid over the page that
 paints everything except the page's rectangle and passes events through.
 
+## Chromium's AppKit classes
+
+The framework exports only CEF's C API, but Chromium's macOS UI is AppKit,
+and its Objective-C classes are visible to the Objective-C runtime.
+`CefObjCHook` overrides a few of their methods. Each override is looked up
+by class name, selector and type encoding; a missing one is logged, left
+out, and listed by SelfTest's "runtime hooks" check, and the feature that
+needs it falls back to Chromium's own behavior. An override added to a
+class that inherits the method stays on that class alone.
+
+**Surfaces.** Chromium's bubbles, dialogs, find bar and status bubble are
+Views widgets, each in a `NativeWidgetMacNSWindow` that Chromium attaches to
+the browser window as a child window. Every CEF Views window is a
+`CefNSWindow`, a subclass; `CefSurfaceTracker` overrides its
+`-addChildWindow:ordered:` and `-removeChildWindow:`. As Chromium attaches a
+widget, `CefBrowserWindow` makes it transparent; once attached, it reads
+what the widget shows and applies the kind's presentation: it restores the
+widget and moves it under its anchor with `setFrameOrigin(_:)` (and again
+when the widget or the window moves or resizes), or keeps it transparent,
+ignoring the mouse, and closes it as Esc would, or for the find bar with
+`IDC_CLOSE_FIND_OR_STOP`. Status bubbles and fullscreen notices are only
+kept transparent, since Chromium reuses their windows.
+
+A widget's kind comes from the class of the view inside it. Views reports
+each view's class name to accessibility as `AXDOMClassList`, so the tracker
+walks the widget's accessibility tree (`QRCodeGeneratorBubble`,
+`CastDialogView`, `FindBarView`, `LoginView`, `StatusView`,
+`SubtleNotificationView`, `DownloadBubbleContentsView`, …). When no class
+matches, the title is compared with Chromium's localized strings for each
+kind, read by identifier from the resource bundle
+(`cef_resource_bundle_t`); anything else is `.other`, with the title or the
+first specific class name. The QR code bubble's address comes from its text
+field's accessibility value.
+
+Commands that open a surface the window replaces or hides never reach
+Chromium: `CefBrowser.execute(_:)` and the command handler's
+`on_chrome_command` hand them to the window's presenter first. The custom
+find bar drives CEF's `find`/`stop_finding` and reads `on_find_result`; the
+custom status bubble reads `on_status_message`; the Cast picker uses CEF's
+`cef_media_router_t`.
+
+CEF's own hooks do not cover placement: `cef_window_delegate_t` and
+`cef_browser_view_delegate_t` have no say in where bubbles go, and Chromium
+anchors them to its toolbar's buttons. `CEF_CTT_NORMAL` and
+`CEF_CTT_LOCATION` do not change where they appear in a `CefBrowserWindow`,
+which does not add Chrome's toolbar view (`get_chrome_toolbar`) to its
+window; adding it would draw Chrome's toolbar.
+
+**Swipes.** For Chrome-style browsers, Chromium sets a
+`ChromeRenderWidgetHostViewMacDelegate` on each page's
+`RenderWidgetHostViewCocoa`; its `HistorySwiper` turns overscrolling
+two-finger swipes into navigation and draws progress with a
+`HistoryOverlayController`. CefSwift overrides the delegate's
+`-shouldAllowHistorySwiping`, to follow
+`allowsBackForwardNavigationGestures`, and the controller's
+`-initForMode:`, `-showPanelForView:`, `-setProgress:finished:` and
+`-dismiss`, to report progress to `navigationGestureProgress` and to skip
+Chrome's overlay unless `.chromium` is chosen. Alloy-style browsers have no
+such delegate; views track swipes themselves with
+`NSEvent.trackSwipeEvent`, the offscreen view from its own scroll events
+and the windowed view from a local event monitor, since Chromium's view
+receives the events. The built-in indicator is a layer-backed view over the
+page that never takes events.
+
+## Offscreen accessibility
+
+Windowed browsers expose Chromium's own `NSAccessibility` objects. For
+offscreen browsers Chromium only computes the tree ("tree only" mode) and
+hands it to CEF's accessibility handler, which the render handler returns
+from `get_accessibility_handler`:
+
+- `set_accessibility_state(STATE_ENABLED)` starts the tree. With
+  `CefOffscreenAccessibility.automatic`, `CefOffscreenBrowserView` calls it
+  on the first sign of an assistive app: VoiceOver running, the first
+  children, hit-test or focus query on the view, or `CefApplication`
+  receiving `AXEnhancedUserInterface` or `AXManualAccessibility`, which
+  arrive through the informal accessibility protocol.
+- `on_accessibility_tree_change` delivers serialized `AXTreeUpdate`s, one
+  tree per frame, with node data, child lists, relative bounds, tree data
+  (focus, selection, load state) and events.
+  `on_accessibility_location_change` delivers moved nodes. Both arrive as
+  `cef_value_t` trees. Reading a large page's tree value by value takes
+  hundreds of milliseconds, so `cef_write_json` turns each into text in one
+  call, a serial background queue parses it into `CefJSON`, and the main
+  thread applies the results in the order Chromium sent them.
+- `CefAccessibilityTree` applies the updates as Chromium's `AXTree` does
+  (clearing, reparenting, removing orphaned subtrees) and joins the frames'
+  trees through each `<iframe>` node's `childTreeId`. A tree without a
+  parent is the main document; a new one replaces the old one and its
+  frames. Frames are resolved on demand: relative bounds plus each offset
+  container's origin, less its scroll offset, with transforms applied,
+  then offset by the hosting `<iframe>`, and divided by the device scale
+  factor, since Chromium reports physical pixels.
+- Chromium's scroll updates travel separately from location updates and
+  CEF does not forward them, so the document's scroll position, which the
+  render handler's `on_scroll_offset_changed` reports, is written into the
+  root node.
+- `CefOffscreenBrowserView` keeps one `NSAccessibilityElement` per node.
+  Elements hold only a node identifier and read the tree on every query;
+  the role table follows Chromium's macOS mapping. Ignored nodes are
+  skipped, and leaves (text, images, buttons, plain text fields) hide
+  their insides. Each change becomes the matching `NSAccessibility`
+  notification; layout notifications are coalesced to one per 100 ms.
+
+CEF's C API has no way to perform accessibility actions, so actions go
+through input: clicks at the node's centre, arrow keys, and
+`Input.insertText`. Focus and scrolling use `DOM.focus` and
+`DOM.scrollIntoViewIfNeeded`. Those need a DOM node, which the serialized
+tree does not carry; the DevTools `Accessibility` domain shares Chromium's
+node identifiers with it, so `Accessibility.getChildAXNodes` on the node's
+parent yields the node's `backendDOMNodeId`. Only the main frame's nodes
+are looked up this way: a frame in another renderer process numbers its
+nodes independently, so a number from it could name a different node in
+the main frame's process. Nodes in frames are clicked instead.
+
+When the browser closes or the tree is turned off, the tree is emptied
+and the view posts `AXUIElementDestroyed` for every element it handed out.
+
 ## DevTools, JavaScript and the bridge
 
 `CefDevTools` attaches a DevTools message observer to the browser and speaks
@@ -209,6 +327,61 @@ profile keeps no history, so `CefHistory` throws there instead of starting
 a host. An incognito profile's bookmarks are the default profile's
 `CefBookmarks`, since Chromium shares the original profile's bookmarks
 with its incognito profile.
+
+## Passkeys
+
+With `CefBrowserOptions.passkeys` set to `.app` or `.disabled`,
+`CefPasskeyAuthenticator` takes a browser's WebAuthn calls over through
+its DevTools connection, before the browser loads its first page:
+
+- `WebAuthn.enable`, without Chromium's UI, puts the browser's pages in a
+  virtual authenticator environment. Chromium's dialog and its real
+  authenticators (security keys, iCloud Keychain, phones) are not used
+  there, and a call waits for an authenticator until its timeout.
+- Each document's main-world context gets a function-call breakpoint
+  (`Debugger.setBreakpointOnFunctionCall`) on its
+  `CredentialsContainer.prototype.create` and `.get` before any of its
+  scripts runs. `Page.addScriptToEvaluateOnNewDocument` runs a script of
+  one statement, `debugger`, at the start of every document in an
+  isolated world named `cefswift-passkeys`, which the page cannot see or
+  reach. The renderer stops there. The document's main-world context has
+  been reported by then, and `Runtime.evaluate` in that context works
+  while the renderer is stopped, so the breakpoints are set before the
+  page's first script. (Setting them when `Runtime.executionContextCreated`
+  arrives, without the stop, loses to a script that calls at once.)
+- A call stops the page before the call runs, in the caller's frame; the
+  frame's script gives the execution context, which gives the origin and
+  frame. `navigator.userActivation.isActive` is read in that frame with
+  `throwOnSideEffect`, so the read cannot change the page. Nothing in the
+  page is changed. Any other pause, such as a `debugger` statement in the
+  page, is resumed at once.
+- While the page is stopped, the delegate decides, and CefKit adds a
+  virtual authenticator (CTAP 2.1, internal transport, resident keys,
+  user verification) for that one call: empty for a registration, holding
+  only the chosen passkey (its PKCS #8 key from the store) for an
+  assertion, or with failing user verification for a refusal, which
+  rejects the call at once. The page then resumes and makes its call.
+  `WebAuthn.credentialAdded` or `credentialAsserted` reports the result,
+  which goes to the store, and the authenticator is removed. An
+  authenticator left over from an earlier call is removed before the next
+  decision, so no call is answered unasked.
+
+An Alloy browser discarded by closing it gets a new DevTools session when
+it is created again, so the environment and the breakpoints are set up
+again then; a Chrome-style tab discarded in place keeps them.
+
+The private key of a passkey lives in the store, and in Chromium's browser
+process only while an authenticator answers one call. A page learns only
+what WebAuthn gives it: the credential ID, the public key, the user handle
+and signatures.
+
+Chromium's own WebAuthn dialog (`.chromium`) is a views widget: a child
+window of a `CefBrowserWindow`, or a free-standing window for a browser in
+a view. CefKit leaves it alone; closing it from AppKit crashes Chromium.
+The iCloud Keychain authenticator in Chromium (`device/fido/mac`) calls
+AuthenticationServices itself and checks for the
+`com.apple.developer.web-browser.public-key-credential` entitlement;
+without it, Chromium does not offer it.
 
 ## Discarding
 

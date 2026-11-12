@@ -85,6 +85,14 @@ public protocol CefBrowserDelegate: AnyObject {
     func browser(_ browser: CefBrowser, shouldProceedDespite error: CefCertificateError) async -> Bool
     /// Decide where a download goes. The default saves to `~/Downloads`.
     func browser(_ browser: CefBrowser, decideDestinationFor download: CefDownload, suggestedName: String) async -> CefDownloadDecision
+    /// Answer a page's request to register or use a passkey, for browsers
+    /// whose ``CefBrowserOptions/passkeys`` is ``CefPasskeyMode/app(_:)``.
+    /// The default asks the user with ``CefPasskeyPresenter``.
+    ///
+    /// The page stays stopped at its `navigator.credentials` call until you
+    /// answer, as it does for `alert()`; JavaScript you evaluate in it
+    /// meanwhile waits too.
+    func browser(_ browser: CefBrowser, decidePasskeyRequest request: CefPasskeyRequest) async -> CefPasskeyDecision
 
     // MARK: Downloads
 
@@ -137,6 +145,10 @@ extension CefBrowserDelegate {
     public func browser(_ browser: CefBrowser, shouldProceedDespite error: CefCertificateError) async -> Bool { false }
     public func browser(_ browser: CefBrowser, decideDestinationFor download: CefDownload, suggestedName: String) async -> CefDownloadDecision {
         .allow(destination: nil)
+    }
+
+    public func browser(_ browser: CefBrowser, decidePasskeyRequest request: CefPasskeyRequest) async -> CefPasskeyDecision {
+        await CefPasskeyPresenter.present(request, in: browser.hostWindow)
     }
 
     public func browser(_ browser: CefBrowser, downloadDidUpdate download: CefDownload) {}

@@ -80,22 +80,46 @@ enum SelfTest {
 
     // MARK: Checks
 
-    static func runChecks() async {
-        await windowedBrowserChecks()
-        await offscreenBrowserChecks()
-        await profileChecks()
-        await browserWindowChecks()
-        await browserBehaviorChecks()
-        await faviconChecks()
-        await toolbarAndZoomChecks()
-        await bridgeScopeChecks()
-        await internalPageDataChecks()
-        await serviceLifetimeChecks()
-        await serviceHostChecks()
-        await relaunchChecks()
-        await chromeWindowChecks()
+    /// Every group of checks, in the order they run.
+    /// `SELFTEST_ONLY=<name>[,<name>…]` runs only the named groups, such as
+    /// `SELFTEST_ONLY=passkeys`; `accessibility-external` is a session for an
+    /// outside accessibility client instead of checks.
+    static let checkGroups: [(name: String, run: @MainActor () async -> Void)] = [
+        ("windowed", windowedBrowserChecks),
+        ("offscreen", offscreenBrowserChecks),
+        ("profile", profileChecks),
+        ("browserWindow", browserWindowChecks),
+        ("behavior", browserBehaviorChecks),
+        ("favicon", faviconChecks),
+        ("toolbarAndZoom", toolbarAndZoomChecks),
+        ("bridgeScope", bridgeScopeChecks),
+        ("internalPages", internalPageDataChecks),
+        ("serviceLifetime", serviceLifetimeChecks),
+        ("serviceHosts", serviceHostChecks),
+        // After the history checks: the pages these visit would crowd the
+        // probe out of the most-visited tiles.
+        ("nativeUI", nativeUIChecks),
+        ("relaunch", relaunchChecks),
+        ("passkeys", passkeyChecks),
+        ("chromeWindow", chromeWindowChecks),
+        // After the history checks: discarding an offscreen browser once the
+        // DevTools protocol has been used makes Chromium's most-visited
+        // sites miss later visits.
+        ("accessibility", offscreenAccessibilityChecks),
         // Last: it leaves discarded browsers open for the quit.
-        await discardChecks()
+        ("discard", discardChecks),
+    ]
+
+    static func runChecks() async {
+        let only = ProcessInfo.processInfo.environment["SELFTEST_ONLY"]
+            .map { Set($0.split(separator: ",").map(String.init)) }
+        if only?.contains("accessibility-external") == true {
+            await accessibilityExternalClientSession()
+            return
+        }
+        for group in checkGroups where only?.contains(group.name) ?? true {
+            await group.run()
+        }
     }
 
     static func windowedBrowserChecks() async {
