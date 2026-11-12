@@ -208,6 +208,9 @@ public final class CefBrowser: Identifiable {
     @ObservationIgnored public private(set) var identifier: Int32 = -1
     /// The browser that opened this one, for popups.
     @ObservationIgnored public private(set) weak var opener: CefBrowser?
+    /// For a popup, the window features its page asked for — the size to
+    /// give the popup's window, for instance.
+    @ObservationIgnored public internal(set) var popupFeatures: CefPopupFeatures?
 
     /// Chrome DevTools Protocol access to this browser.
     @ObservationIgnored public private(set) lazy var devTools = CefDevTools(browser: self)
@@ -348,10 +351,10 @@ public final class CefBrowser: Identifiable {
     }
 
     /// Ends the find session.
-    public func stopFinding(clearSelection: Bool = true) {
+    public func stopFinding(clearingSelection: Bool = true) {
         lastFindText = nil
         findResult = nil
-        withHost { $0.pointee.stop_finding($0, clearSelection ? 1 : 0) }
+        withHost { $0.pointee.stop_finding($0, clearingSelection ? 1 : 0) }
     }
 
     @ObservationIgnored private var lastFindText: String?

@@ -28,16 +28,17 @@ thing in `main`, before anything touches `NSApp`.
 
 `preferences` sets Chromium preferences — the settings behind
 `chrome://settings` — by dotted name, for every profile when it is first
-used:
+used, or for the whole app when Chromium keeps the setting application-wide:
 
 ```swift
-configuration.preferences["browser.confirm_to_quit"] = false      // no "Hold ⌘Q to Quit"
 configuration.preferences["credentials_enable_service"] = false   // no password manager
 configuration.preferences["webkit.webprefs.default_font_size"] = 18
+configuration.preferences["browser.confirm_to_quit"] = false      // application-wide
 ```
 
-Change them later, per profile, with `CefProfile.setPreference(_:to:)`
-([Profiles](#profiles)).
+Change them later per profile with `CefProfile.setPreference(_:to:)`
+([Profiles](#profiles)), or application-wide with
+`CefRuntime.shared.setPreference(_:to:)`.
 
 ## Browsers and views
 
@@ -113,9 +114,11 @@ instead of interpreting gestures.
 To host offscreen frames in a view of your own, implement
 `CefOffscreenHost` and call `browser.host(offscreenIn:size:)`. The view
 drives the browser as AppKit drives a view: `hostViewDidResize()`,
-`hostViewDidHide()` and `hostViewDidUnhide()` as those happen, and
-`displayIfNeeded()` on every display refresh. Input goes in through
+`hostViewDidHide()`, `hostViewDidUnhide()`, `hostViewDidBecomeKey()` and
+`hostViewDidResignKey()` as those happen, and `displayIfNeeded()` on every
+display refresh. Input goes in through
 `sendMouseDown(at:button:clickCount:modifiers:)`, `sendMouseExit(at:modifiers:)`,
+`sendScrollWheel(at:delta:modifiers:)`,
 `sendKeyEvent(_:)`, `sendTouchEvent(_:)`,
 `setMarkedText(_:selectedRange:replacementRange:)`,
 `insertText(_:replacementRange:)`, and `draggingEntered`, `draggingUpdated`,
@@ -211,7 +214,9 @@ window.show()
 ```
 
 The toolbar is a unified `NSToolbar` of SwiftUI views bound to the browser
-as usual; `setToolbar(principal:)` sets only the centered view.
+as usual, with the window buttons centered beside it;
+`setToolbar(principal:)` sets only the centered view. Installing it keeps the
+window's frame.
 
 Around the page:
 
@@ -223,14 +228,23 @@ window.contentCornerRadius = 10                            // page as an inset, 
 
 Popups a page opens (`window.open` with features, sign-in flows) arrive
 through `onPopup` as hidden windows of their own, still connected to their
-opener. Without `onPopup`, Chromium shows them in a window of its design.
+opener. `popup.browser.popupFeatures` holds the size and position the page
+asked for. Without `onPopup`, Chromium shows them in a window of its design.
 
 ```swift
 window.onPopup = { popup in
-    popup.nsWindow?.tabbingMode = .disallowed
+    guard let panel = popup.window, let parent = window.window else { return }
+    if let size = popup.browser.popupFeatures?.size {
+        panel.setContentSize(size)
+    }
+    panel.tabbingMode = .disallowed
+    parent.addChildWindow(panel, ordered: .above)   // layered over its opener
     popup.show()
 }
 ```
+
+A popup closes itself when its page calls `window.close()`; it stays open
+when its opener closes unless you close it.
 
 - Give windows the same `configuration.tabbingIdentifier` and macOS groups
   them as native tabs.
@@ -242,28 +256,22 @@ window.onPopup = { popup in
 - `CefRuntime.shared.openChromeWindow(url:)` opens a window drawn entirely by
   Chrome, tab strip included.
 
-### Windows Chromium opens itself
+### Tabs Chromium opens itself
 
-Chromium sometimes creates a browser on its own: a tab or window opened from
-Chrome's UI, or a link from `chrome://settings` to the password manager.
-Each is reported to `CefRuntime.shared.onBrowserCreated` and listed in
-`CefRuntime.shared.browsers`. Popups and DevTools have an `opener`; the rest
-arrive in a window with Chrome's own tab strip, which a browser with its own
-toolbar can close and reopen as one of its tabs:
+Chromium sometimes opens a tab on its own: following a link from
+`chrome://settings` to the password manager, or restoring the previous
+session after a crash. It would show it in a window with Chrome's own tab
+strip and toolbar. A browser with its own tabs takes these over instead —
+Chromium's window is closed before it is seen, and you get the URL:
 
 ```swift
-CefRuntime.shared.onBrowserCreated = { browser in
-    guard browser.opener == nil else { return }   // popups and DevTools keep their windows
-    Task {
-        while browser.url == nil { try? await Task.sleep(for: .milliseconds(25)) }
-        let url = browser.url
-        browser.close(force: true)
-        openTab(url)
-    }
-}
+CefRuntime.shared.onChromiumOpensTab = { url in openTab(url) }
 ```
 
-The Browser example does this in `adoptWindowsOpenedByChromium()`.
+Every browser Chromium creates, popups and DevTools included, is also
+reported to `CefRuntime.shared.onBrowserCreated` and listed in
+`CefRuntime.shared.browsers`. Leave `onChromiumOpensTab` unset when you use
+`openChromeWindow`, whose new tabs Chromium also opens itself.
 
 ## Customizing Chromium's own pages
 
@@ -366,3 +374,6 @@ CefRuntime.shared.registerSchemeHandler(
 - Offscreen pages are exposed to VoiceOver as a single element.
 - CEF does not expose Chromium's history, bookmarks or omnibox ranking to
   embedders; keep those in your app.
+- CEF 156 does not ask `browser(_:credentialFor:)` about HTTP authentication:
+  Chrome-style browsers show Chromium's own sign-in dialog, and in
+  `CefWebView` the request fails with `ERR_INVALID_AUTH_CREDENTIALS`.

@@ -82,7 +82,7 @@ public final class CefBrowserWindow: Identifiable {
     /// Every open browser window, in creation order.
     public private(set) static var all: [CefBrowserWindow] = []
 
-    @ObservationIgnored private var window: CefRef<cef_window_t>?
+    @ObservationIgnored private var cefWindow: CefRef<cef_window_t>?
     @ObservationIgnored private var browserView: CefRef<cef_browser_view_t>?
     @ObservationIgnored private var accessoryController: NSTitlebarAccessoryViewController?
 
@@ -115,7 +115,7 @@ public final class CefBrowserWindow: Identifiable {
     private func createWindow() {
         // Creation is synchronous: windowCreated(_:) has run by the time
         // this returns.
-        window = CefRef(adopting: cef_window_create_top_level(WindowDelegate(owner: self).makeDelegate()))
+        cefWindow = CefRef(adopting: cef_window_create_top_level(WindowDelegate(owner: self).makeDelegate()))
         if configuration.titleFollowsPage {
             mirrorPageTitle()
         }
@@ -142,30 +142,30 @@ public final class CefBrowserWindow: Identifiable {
         } onChange: { [weak self] in
             Task { @MainActor in self?.mirrorPageTitle() }
         }
-        nsWindow?.title = title.isEmpty ? (browser.url?.host() ?? "") : title
+        window?.title = title.isEmpty ? (browser.url?.host() ?? "") : title
     }
 
     // MARK: Window
 
     /// The AppKit window. Chromium owns its lifetime — close it with
     /// ``close()`` — but ordering, frames, titles and tabbing are yours.
-    public var nsWindow: NSWindow? {
-        guard let window = window?.pointer, let handle = window.pointee.get_window_handle(window) else { return nil }
+    public var window: NSWindow? {
+        guard let window = cefWindow?.pointer, let handle = window.pointee.get_window_handle(window) else { return nil }
         return Unmanaged<NSView>.fromOpaque(handle).takeUnretainedValue().window
     }
 
     public func show() {
-        window.map { $0.pointer.pointee.show($0.pointer) }
+        cefWindow.map { $0.pointer.pointee.show($0.pointer) }
     }
 
     public func hide() {
-        window.map { $0.pointer.pointee.hide($0.pointer) }
+        cefWindow.map { $0.pointer.pointee.hide($0.pointer) }
     }
 
     /// Closes the window and its browser. The page's `beforeunload` handler
     /// may keep it open.
     public func close() {
-        window.map { $0.pointer.pointee.close($0.pointer) }
+        cefWindow.map { $0.pointer.pointee.close($0.pointer) }
     }
 
     // MARK: Native chrome
@@ -181,11 +181,11 @@ public final class CefBrowserWindow: Identifiable {
                 accessoryController.removeFromParent()
                 self.accessoryController = nil
             }
-            guard let newValue, let nsWindow else { return }
+            guard let newValue, let window else { return }
             let controller = NSTitlebarAccessoryViewController()
             controller.view = newValue
             controller.layoutAttribute = .bottom
-            nsWindow.addTitlebarAccessoryViewController(controller)
+            window.addTitlebarAccessoryViewController(controller)
             accessoryController = controller
         }
     }
@@ -210,7 +210,7 @@ public final class CefBrowserWindow: Identifiable {
     private func updateContentFrame() {
         let isFramed = contentCornerRadius > 0
             || contentInsets.top + contentInsets.left + contentInsets.bottom + contentInsets.right > 0
-        guard isFramed, let contentView = nsWindow?.contentView else {
+        guard isFramed, let contentView = window?.contentView else {
             contentFrame?.removeFromSuperview()
             contentFrame = nil
             return
@@ -228,7 +228,7 @@ public final class CefBrowserWindow: Identifiable {
 
     private func applyLayout() {
         updateContentFrame()
-        guard let window = window?.pointer else { return }
+        guard let window = cefWindow?.pointer else { return }
         var settings = cef_box_layout_settings_t()
         settings.size = MemoryLayout<cef_box_layout_settings_t>.stride
         settings.inside_border_insets = cef_insets_t(
@@ -256,13 +256,13 @@ public final class CefBrowserWindow: Identifiable {
                 }
             }
         }
-        self.window = CefRef(retaining: window)
+        cefWindow = CefRef(retaining: window)
         applyLayout()
         if configuration.frame == nil, !isPopup {
             var size = cef_size_t(width: 1200, height: 800)
             window.pointee.center_window(window, &size)
         }
-        if let nsWindow {
+        if let nsWindow = self.window {
             // Chromium disables native tabbing on its windows; opt back in
             // when asked to.
             nsWindow.tabbingMode = configuration.tabbingIdentifier == nil ? .disallowed : .preferred
@@ -274,11 +274,12 @@ public final class CefBrowserWindow: Identifiable {
 
     fileprivate func windowDestroyed() {
         accessoryController = nil
-        window = nil
+        cefWindow = nil
         browserView = nil
         isClosed = true
         Self.all.removeAll { $0 === self }
         onClose?()
+        CefRuntime.shared.continueTerminationIfReady()
     }
 }
 

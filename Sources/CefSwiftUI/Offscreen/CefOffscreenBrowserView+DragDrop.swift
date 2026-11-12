@@ -62,7 +62,7 @@ extension CefOffscreenBrowserView: NSDraggingSource {
 
     // MARK: Drags out of the page
 
-    public func offscreenStartDragging(_ data: CefDragData, allowedOperations: CefDragOperation, at point: CGPoint) -> Bool {
+    public func offscreenBeginDraggingSession(_ data: CefDragData, allowedOperations: CefDragOperation, at point: CGPoint) -> Bool {
         guard let event = NSApp.currentEvent ?? syntheticDragEvent(at: point) else { return false }
         let item = NSDraggingItem(pasteboardWriter: data.pasteboardItem)
         item.setDraggingFrame(NSRect(x: point.x - 16, y: point.y - 16, width: 32, height: 32), contents: nil)
@@ -71,7 +71,7 @@ extension CefOffscreenBrowserView: NSDraggingSource {
         return true
     }
 
-    public func offscreenUpdateDragCursor(_ operation: CefDragOperation) {
+    public func offscreenDragOperationDidChange(_ operation: CefDragOperation) {
         // AppKit draws the drag cursor; keep the page's operation for the
         // session's operation mask.
         if operation != .none {

@@ -14,7 +14,9 @@ final class CefMessagePump {
 
     private var timer: Timer?
     private var isRunning = false
-    private var isPerformingWork = false
+    /// Whether Chromium is running work right now: code called from here is
+    /// inside a CEF callback.
+    private(set) var isPerformingWork = false
     private var wasReentered = false
 
     func start() {

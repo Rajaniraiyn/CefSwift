@@ -48,7 +48,7 @@ extension CefOffscreenBrowserView {
         // `makeFirstResponder` does nothing when this view already is first
         // responder, so the browser is focused explicitly as well.
         window?.makeFirstResponder(self)
-        browser?.setFocus(true)
+        browser?.hostViewDidBecomeKey()
         browser?.sendMouseDown(at: viewPoint(for: event), button: .left, clickCount: event.clickCount, modifiers: modifiers)
     }
 
@@ -114,7 +114,7 @@ extension CefOffscreenBrowserView {
         let sendY = totalY.rounded(.towardZero)
         scrollResidual = CGPoint(x: totalX - sendX, y: totalY - sendY)
         if sendX == 0 && sendY == 0 { return }
-        browser?.sendMouseWheel(at: viewPoint(for: event), deltaX: sendX, deltaY: sendY, modifiers: modifiers)
+        browser?.sendScrollWheel(at: viewPoint(for: event), delta: CGVector(dx: sendX, dy: sendY), modifiers: modifiers)
     }
 
     // MARK: Keyboard
@@ -234,12 +234,12 @@ extension CefOffscreenBrowserView {
     // MARK: Focus
 
     public override func becomeFirstResponder() -> Bool {
-        browser?.setFocus(true)
+        browser?.hostViewDidBecomeKey()
         return super.becomeFirstResponder()
     }
 
     public override func resignFirstResponder() -> Bool {
-        browser?.setFocus(false)
+        browser?.hostViewDidResignKey()
         return super.resignFirstResponder()
     }
 }

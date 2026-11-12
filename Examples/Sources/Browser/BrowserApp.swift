@@ -28,6 +28,8 @@ struct BrowserApp: CefSwiftApp {
         // Browser windows are created by BrowserController, not by a scene.
         Settings { SettingsView() }
             .commands { BrowserCommands(controller: appDelegate.controller) }
+            // SwiftUI would open Settings at launch, it being the only scene.
+            .defaultLaunchBehavior(.suppressed)
     }
 }
 
@@ -37,8 +39,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         CefRuntime.shared.registerSchemeHandler(scheme: BrowserPages.scheme, handler: BrowserPages())
-        controller.adoptWindowsOpenedByChromium()
-        controller.openTab()
+        Appearance.current.apply()
+        controller.adoptTabsOpenedByChromium()
+
+        let launch = LaunchOptions()
+        let urls = launch.urls.isEmpty ? [nil] : launch.urls.map(Optional.some)
+        let browsers = urls.map { controller.openTab(url: $0) }
+        if let browser = browsers.last, launch.script != nil || launch.focusesAddressBar {
+            Task {
+                await controller.waitUntilLoaded(browser)
+                if let script = launch.script { _ = try? await browser.evaluateJavaScript(script) }
+                if launch.focusesAddressBar {
+                    // Focus goes to the key window, so wait for the app to be active.
+                    // Chromium focuses the page as the window becomes key.
+                    while !NSApp.isActive { try? await Task.sleep(for: .milliseconds(100)) }
+                    try? await Task.sleep(for: .milliseconds(500))
+                    controller.focusAddressBar()
+                }
+            }
+        }
     }
 
     /// Lets the native tab bar show its "+" button.
@@ -49,6 +68,53 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
         if !hasVisibleWindows { controller.openTab() }
         return true
+    }
+}
+
+/// Launch arguments, for opening the browser in a given state — handy for
+/// trying things out and for automated screenshots:
+///
+/// - `-urls "https://a.example browser://playground/"` opens each as a tab.
+/// - `-evaluate "openPopup()"` runs JavaScript in the last tab once loaded
+///   (a script starting with `(` would be read as a list; prefix `void `).
+/// - `-focusAddressBar YES` starts with the address field editing.
+/// - `-appearance dark` (or `light`, `system`) overrides the setting.
+@MainActor
+struct LaunchOptions {
+    var urls: [URL] = []
+    var script: String?
+    var focusesAddressBar = false
+
+    init(defaults: UserDefaults = .standard) {
+        urls = (defaults.string(forKey: "urls") ?? "")
+            .split(separator: " ")
+            .compactMap { AddressBar.destination(for: String($0)) }
+        script = defaults.string(forKey: "evaluate")
+        focusesAddressBar = defaults.bool(forKey: "focusAddressBar")
+    }
+}
+
+/// The appearance setting, applied to the app's windows and to the pages'
+/// `prefers-color-scheme`.
+enum Appearance: String, CaseIterable {
+    case system, light, dark
+
+    static var current: Appearance {
+        Appearance(rawValue: UserDefaults.standard.string(forKey: "appearance") ?? "") ?? .system
+    }
+
+    @MainActor func apply() {
+        switch self {
+        case .system:
+            NSApp.appearance = nil
+            CefProfile.default.setColorScheme(.system)
+        case .light:
+            NSApp.appearance = NSAppearance(named: .aqua)
+            CefProfile.default.setColorScheme(.light)
+        case .dark:
+            NSApp.appearance = NSAppearance(named: .darkAqua)
+            CefProfile.default.setColorScheme(.dark)
+        }
     }
 }
 
@@ -92,27 +158,28 @@ struct BrowserCommands: Commands {
             Button("Chromium Settings") { controller.openTab(url: URL(string: "chrome://settings")!) }
             Button("Flags") { controller.openTab(url: URL(string: "chrome://flags")!) }
             Button("Version Details") { controller.openTab(url: URL(string: "chrome://version")!) }
+            Divider()
+            Button("Playground") { controller.openTab(url: BrowserPages.playground) }
         }
     }
 }
 
 struct SettingsView: View {
     @AppStorage("homePage") private var homePage = BrowserController.defaultHomePage
-    @AppStorage("appearance") private var appearance = "system"
+    @AppStorage("appearance") private var appearance = Appearance.system.rawValue
 
     var body: some View {
         Form {
             TextField("Home page", text: $homePage)
             Picker("Appearance", selection: $appearance) {
-                Text("System").tag("system")
-                Text("Light").tag("light")
-                Text("Dark").tag("dark")
+                Text("System").tag(Appearance.system.rawValue)
+                Text("Light").tag(Appearance.light.rawValue)
+                Text("Dark").tag(Appearance.dark.rawValue)
             }
-            .onChange(of: appearance) { _, value in
-                CefProfile.default.setColorScheme(value == "dark" ? .dark : value == "light" ? .light : .system)
-            }
+            .onChange(of: appearance) { Appearance.current.apply() }
         }
         .formStyle(.grouped)
         .frame(width: 420)
+        .fixedSize()
     }
 }

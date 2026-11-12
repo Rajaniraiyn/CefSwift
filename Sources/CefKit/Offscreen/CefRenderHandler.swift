@@ -85,14 +85,14 @@ public protocol CefOffscreenHost: AnyObject {
     /// a system drag session and, when it ends, call
     /// ``CefBrowser/draggingSessionEnded(at:operation:)``. Return `false` to
     /// cancel the drag. The default returns `false`.
-    func offscreenStartDragging(_ data: CefDragData, allowedOperations: CefDragOperation, at point: CGPoint) -> Bool
+    func offscreenBeginDraggingSession(_ data: CefDragData, allowedOperations: CefDragOperation, at point: CGPoint) -> Bool
     /// The drag cursor should show `operation`. The default does nothing.
-    func offscreenUpdateDragCursor(_ operation: CefDragOperation)
+    func offscreenDragOperationDidChange(_ operation: CefDragOperation)
 }
 
 extension CefOffscreenHost {
-    public func offscreenStartDragging(_ data: CefDragData, allowedOperations: CefDragOperation, at point: CGPoint) -> Bool { false }
-    public func offscreenUpdateDragCursor(_ operation: CefDragOperation) {}
+    public func offscreenBeginDraggingSession(_ data: CefDragData, allowedOperations: CefDragOperation, at point: CGPoint) -> Bool { false }
+    public func offscreenDragOperationDidChange(_ operation: CefDragOperation) {}
 }
 
 extension CefBrowserClient {
@@ -160,14 +160,14 @@ extension CefBrowserClient {
             guard let client = cefOwner(CefBrowserClient.self, s) else { return 0 }
             return MainActor.assumeIsolated {
                 guard let host = client.offscreenHost else { return 0 }
-                return host.offscreenStartDragging(data, allowedOperations: operations, at: point) ? 1 : 0
+                return host.offscreenBeginDraggingSession(data, allowedOperations: operations, at: point) ? 1 : 0
             }
         }
 
         handler.pointee.update_drag_cursor = { s, browser, operation in
             cefRelease(browser)
             let operation = CefDragOperation(rawValue: UInt32(operation.rawValue))
-            CefBrowserClient.withOffscreenHost(s) { $0.offscreenUpdateDragCursor(operation) }
+            CefBrowserClient.withOffscreenHost(s) { $0.offscreenDragOperationDidChange(operation) }
         }
 
         handler.pointee.on_popup_show = { s, browser, show in

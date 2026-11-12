@@ -64,6 +64,8 @@ public protocol CefBrowserDelegate: AnyObject {
     /// Resolve a permission request. The default denies.
     func browser(_ browser: CefBrowser, decidePermissionFor request: CefPermissionRequest) async -> CefPermissionDecision
     /// Supply credentials for HTTP/proxy authentication, or `nil` to cancel.
+    /// CEF 156 does not call this: Chrome-style browsers show Chromium's own
+    /// sign-in dialog instead.
     /// The default shows a native sign-in sheet.
     func browser(_ browser: CefBrowser, credentialFor challenge: CefAuthenticationChallenge) async -> CefCredential?
     /// Return `true` to proceed despite a certificate error. The default

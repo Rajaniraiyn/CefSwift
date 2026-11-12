@@ -98,8 +98,8 @@ final class CefAppContext: @unchecked Sendable {
             // Chromium is phasing out --load-extension behind this feature.
             disabledFeatures.insert("DisableLoadExtensionCommandLineSwitch")
         }
-        commandLine.mergeList("enable-features", adding: configuration.enabledFeatures)
-        commandLine.mergeList("disable-features", adding: disabledFeatures)
+        commandLine.appendValues(configuration.enabledFeatures, toListSwitch: "enable-features")
+        commandLine.appendValues(disabledFeatures, toListSwitch: "disable-features")
 
         configuration.onBeforeCommandLineProcessing?(commandLine)
     }

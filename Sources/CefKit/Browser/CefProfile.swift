@@ -211,7 +211,8 @@ public final class CefProfile {
     }
 
     private func applyConfigured(_ preferences: [String: CefJSON]) {
-        for (name, value) in preferences {
+        // Application-wide ones are CefRuntime's to apply.
+        for (name, value) in preferences where preference(name) != nil {
             do {
                 try setPreference(name, to: value)
             } catch {
