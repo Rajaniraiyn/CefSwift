@@ -268,6 +268,7 @@ struct SettingsView: View {
                 Text("Dark").tag(Appearance.dark.rawValue)
             }
             .onChange(of: appearance) { Appearance.current.apply() }
+            PasskeySettings()
         }
         .formStyle(.grouped)
         .frame(width: 420)

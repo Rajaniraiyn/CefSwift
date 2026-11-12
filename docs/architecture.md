@@ -146,6 +146,49 @@ throws there instead of starting a service. An incognito profile's
 bookmarks are the default profile's `CefBookmarks`, since Chromium shares
 the original profile's bookmarks with its incognito profile.
 
+## Passkeys
+
+With `CefBrowserOptions.passkeys` set to `.app` or `.disabled`,
+`CefPasskeyAuthenticator` takes a browser's WebAuthn calls over through
+its DevTools connection, before the browser loads its first page:
+
+- `WebAuthn.enable`, without Chromium's UI, puts the browser's pages in a
+  virtual authenticator environment. Chromium's dialog and its real
+  authenticators (security keys, iCloud Keychain, phones) are not used
+  there, and a call waits for an authenticator until its timeout.
+- As each document's main-world execution context appears, a
+  function-call breakpoint (`Debugger.setBreakpointOnFunctionCall`) is
+  set on that context's `CredentialsContainer.prototype.create` and
+  `.get`. A call stops the page before the call runs, in the caller's
+  frame; the frame's script gives the execution context, which gives the
+  origin and frame. `navigator.userActivation.isActive` is read in that
+  frame with `throwOnSideEffect`, so the read cannot change the page.
+  Nothing is added to the page. Any other pause, such as a `debugger`
+  statement, is resumed at once.
+- While the page is stopped, the delegate decides, and CefKit adds a
+  virtual authenticator (CTAP 2.1, internal transport, resident keys,
+  user verification) for that one call: empty for a registration, holding
+  only the chosen passkey (its PKCS #8 key from the store) for an
+  assertion, or with failing user verification for a refusal, which
+  rejects the call at once. The page then resumes and makes its call.
+  `WebAuthn.credentialAdded` or `credentialAsserted` reports the result,
+  which goes to the store, and the authenticator is removed. An
+  authenticator left over from an earlier call is removed before the next
+  decision, so no call is answered unasked.
+
+The private key of a passkey lives in the store, and in Chromium's browser
+process only while an authenticator answers one call. A page learns only
+what WebAuthn gives it: the credential ID, the public key, the user handle
+and signatures.
+
+Chromium's own WebAuthn dialog (`.chromium`) is a views widget: a child
+window of a `CefBrowserWindow`, or a free-standing window for a browser in
+a view. CefKit leaves it alone; closing it from AppKit crashes Chromium.
+The iCloud Keychain authenticator in Chromium (`device/fido/mac`) calls
+AuthenticationServices itself and checks for the
+`com.apple.developer.web-browser.public-key-credential` entitlement;
+without it, Chromium does not offer it.
+
 ## Quitting
 
 `CefApplication.terminate(_:)` asks `CefRuntime` first. The runtime closes

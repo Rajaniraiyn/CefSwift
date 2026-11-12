@@ -88,6 +88,7 @@ enum SelfTest {
         await internalPageDataChecks()
         await serviceLifetimeChecks()
         await relaunchChecks()
+        await passkeyChecks()
         await chromeWindowChecks()
     }
 

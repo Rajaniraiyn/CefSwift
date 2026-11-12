@@ -49,6 +49,9 @@ final class BrowserController: CefBrowserDelegate {
         let profile = source?.options.profile ?? (isPrivate ? .incognito() : .default)
         let isPrivate = profile !== CefProfile.default
         options.profile = profile
+        if BrowserPasskeys.isEnabled {
+            options.passkeys = .app(isPrivate ? BrowserPasskeys.shared.privateStore : BrowserPasskeys.shared)
+        }
         options.userScripts = Self.internalPageStyles
         options.bridges = [library.startPageBridge]
         options.contextMenu.showsInspectElement = true
