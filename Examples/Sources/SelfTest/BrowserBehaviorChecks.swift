@@ -76,7 +76,9 @@ extension SelfTest {
         await expect("popup: page calling window.close() closes it") {
             guard let popup = popups.first else { return false }
             _ = await waitUntil { popup.browser.title == "popup" }
-            try await popup.browser.evaluateJavaScript("setTimeout(() => window.close(), 10); 0")
+            // Run without awaiting a result: the close may come before an
+            // evaluation's reply, which the closing browser then fails.
+            popup.browser.executeJavaScript("window.close()")
             return await waitUntil { popup.isClosed }
         }
         check("popup: leaves its opener's child windows", opener.window?.childWindows?.isEmpty != false)

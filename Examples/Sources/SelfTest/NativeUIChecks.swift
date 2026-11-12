@@ -197,17 +197,33 @@ extension SelfTest {
                 "type": "mouseMoved", "x": .number(point?[0].doubleValue ?? 0), "y": .number(point?[1].doubleValue ?? 0),
             ])
         }
-        await hoverLink()
-        check("surfaces: status bubble recognized",
-              await waitUntil(timeout: .seconds(5)) { window.chromiumSurfaces.contains { $0.kind == .statusBubble } },
-              detail: "\(browser.statusText) \(window.chromiumSurfaces.map { "\($0.kind)" })")
+        // A hover lasts until the next pointer event: a real pointer that
+        // moves over the window, or a window ordered over it, ends it
+        // before Chromium shows its bubble. Hover again until it holds.
+        nsWindow.orderFrontRegardless()
+        var bubbleShown = false
+        for _ in 0..<5 where !bubbleShown {
+            await hoverLink()
+            bubbleShown = await waitUntil(timeout: .seconds(2)) { window.chromiumSurfaces.contains { $0.kind == .statusBubble } }
+        }
+        if !bubbleShown, browser.statusText.isEmpty, !nsWindow.occlusionState.contains(.visible) {
+            skip("surfaces: status bubble recognized",
+                 because: "the test window is covered, so Chromium does not hover the page", .environment)
+        } else {
+            check("surfaces: status bubble recognized", bubbleShown,
+                  detail: "\(browser.statusText) \(window.chromiumSurfaces.map { "\($0.kind)" }), "
+                      + "occlusion \(nsWindow.occlusionState.rawValue)")
+        }
         window.statusBubbleView = NSView()
         _ = try? await browser.devTools.send("Input.dispatchMouseEvent", ["type": "mouseMoved", "x": 1, "y": 1])
         try? await Task.sleep(for: .milliseconds(600))
-        await hoverLink()
         // Chromium fades its bubble in by raising its window's alpha, so
         // sample across the fade rather than once.
-        let shown = await waitUntil(timeout: .seconds(3)) { !browser.statusText.isEmpty }
+        var shown = false
+        for _ in 0..<5 where !shown {
+            await hoverLink()
+            shown = await waitUntil(timeout: .seconds(2)) { !browser.statusText.isEmpty }
+        }
         var leaks: [String] = []
         for _ in 0..<25 {
             leaks += visibleSurfaceWindows().map { "alpha \($0.alphaValue) \(NSStringFromRect($0.frame))" }
