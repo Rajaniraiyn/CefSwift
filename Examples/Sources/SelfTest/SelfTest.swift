@@ -439,9 +439,11 @@ enum SelfTest {
             }
             check("bookmarks: change events", await waitUntil(timeout: .seconds(5)) { bookmarkChanges >= 4 },
                   detail: "\(bookmarkChanges) events")
-            // Chromium saves its Bookmarks file about 2.5 s after a change.
+            check("bookmarks: a change not yet saved keeps reads on the service", bookmarks.hasUnsavedChanges)
+            // Chromium saves its Bookmarks file about 2.5 s after a change,
+            // while the app shows a page.
             var difference = ""
-            check("bookmarks: Chromium's file reads as the service answers", await waitUntilAsync(timeout: .seconds(8)) {
+            check("bookmarks: Chromium's file reads as the service answers", await withVisiblePage { await waitUntilAsync(timeout: .seconds(8)) {
                 bookmarks.readSource = .service
                 let served = (try? await bookmarks.tree()) ?? []
                 bookmarks.readSource = .file
@@ -453,7 +455,8 @@ enum SelfTest {
                 difference = "\(bookmarkSummary(served)) vs \(bookmarkSummary(stored))"
                 return !served.isEmpty && bookmarkSummary(served) == bookmarkSummary(stored)
                     && contents?.map(\.id) == [added.id] && recent?.map(\.id) == [added.id]
-            }, detail: difference)
+            } }, detail: difference)
+            check("bookmarks: reads return to the file once Chromium has saved", !bookmarks.hasUnsavedChanges)
         }
 
         // Visit a page in a Chrome-style browser so Chromium records it.
@@ -521,6 +524,19 @@ enum SelfTest {
                 + ":\(String(describing: node.permanentFolder)):\(node.isEditable):"
                 + "\(node.dateAdded.map { Int($0.timeIntervalSince1970) } ?? 0)[\(bookmarkSummary(node.children ?? []))]"
         }.joined(separator: ",")
+    }
+
+    /// Runs `body` while a page shows in a visible window, then closes it.
+    /// Chromium's profile file saves (`Bookmarks` among them) wait while
+    /// the app shows no page, as a group run on its own may not.
+    static func withVisiblePage<T>(_ body: () async -> T) async -> T {
+        let window = CefBrowserWindow(browser: CefBrowser(url: URL(string: "selftest://app/second.html")!))
+        window.show()
+        _ = await waitUntil(timeout: .seconds(15)) { window.browser.title == "second" && !window.browser.isLoading }
+        let result = await body()
+        window.close()
+        _ = await waitUntil { window.isClosed && window.browser.state == .closed }
+        return result
     }
 
     static func chromeWindowChecks() async {

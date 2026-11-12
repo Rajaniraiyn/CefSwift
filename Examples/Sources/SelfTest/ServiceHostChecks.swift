@@ -11,15 +11,23 @@ extension SelfTest {
         CefProfile.serviceIdleTimeout = .seconds(3)
         defer { CefProfile.serviceIdleTimeout = idleTimeout }
 
+        // File reads need a saved Bookmarks file, which a new profile does
+        // not have: make a change and wait for Chromium to save it, which
+        // it does while the app shows a page.
+        let saved = await withVisiblePage {
+            if let made = try? await profile.bookmarks.addFolder("CefSwift Service Host Probe") {
+                try? await profile.bookmarks.remove(made.id)
+            }
+            return await waitUntil(timeout: .seconds(10)) { !profile.bookmarks.hasUnsavedChanges }
+        }
+        if !saved { print("     Chromium did not save the Bookmarks file") }
+
         profile.stopServiceHosts()
         _ = await waitUntil { profile.runningServiceHosts.isEmpty }
         // Closed renderers take a moment to exit.
         _ = await waitUntil(timeout: .seconds(5)) { rendererCount() == 0 }
         let before = rendererCount()
 
-        // Reads go to the host for 5 s after a change made through it, until
-        // Chromium has saved the change.
-        try? await Task.sleep(for: .seconds(5))
         var hostsAfterReading: [String] = []
         await expect("service hosts: bookmark reads need no host while it is closed") {
             let tree = try await profile.bookmarks.tree()

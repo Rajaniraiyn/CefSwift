@@ -107,7 +107,9 @@ final class CefInternalServices {
 
     /// The profile's bookmark state that outlives one ``CefBookmarks``.
     var bookmarkReadSource = CefBookmarks.ReadSource.automatic
-    var lastBookmarkWrite: ContinuousClock.Instant?
+    /// When the last change made through ``CefBookmarks`` finished, until
+    /// Chromium's `Bookmarks` file is seen saved after it.
+    var unsavedBookmarkWrite: Date?
     private var subscribers: [String: [UUID: AsyncStream<CefJSON>.Continuation]] = [:]
 
     init(profile: CefProfile) {

@@ -159,9 +159,14 @@ public final class CefProfile {
         else { return nil }
         let url = URL(fileURLWithPath: path, isDirectory: true)
         // The global context's cache path is Chromium's user data directory
-        // when it equals the root cache path; its profile is "Default".
-        let user = url.appendingPathComponent("Default", isDirectory: true)
-        return FileManager.default.fileExists(atPath: user.appendingPathComponent("Preferences").path) ? user : url
+        // when it equals the root cache path; its profile is "Default". The
+        // paths are compared, not the files: a new profile has no
+        // Preferences until Chromium first saves them, seconds after start.
+        let root = (CefRuntime.shared.configuration ?? CefConfiguration()).resolvedRootCacheDirectory
+        guard url.resolvingSymlinksInPath().standardizedFileURL.path
+                == root.resolvingSymlinksInPath().standardizedFileURL.path
+        else { return url }
+        return url.appendingPathComponent("Default", isDirectory: true)
     }
 
     // MARK: Preferences

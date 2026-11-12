@@ -492,8 +492,12 @@ these hosts, so a service host has to be a Chrome-style window.
 
 **Reads without a renderer.** Chromium saves a profile's bookmarks to the
 JSON file `Bookmarks` about 2.5 seconds after each change, replacing it
-atomically. While the bookmarks host is not running, and nothing was
-changed through it in the last 5 seconds, `CefBookmarks` reads the tree,
+atomically. It holds the save back while the app shows no page in a
+visible window (measured with SelfTest's groups run alone: over a minute
+with only hidden service hosts open, 2.5 seconds once a window shows a
+page), and a new profile has no file until its first save. While the bookmarks host is not running, and
+the file has been written since the last change made through it,
+`CefBookmarks` reads the tree,
 a folder's contents, a bookmark and the recent bookmarks from that file,
 and `changes` watches it with a `DispatchSource`. A file in another
 format version, or a profile with managed or account bookmarks, which the

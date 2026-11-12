@@ -55,9 +55,12 @@ public struct CefBookmark: Sendable, Identifiable, Hashable {
 /// ``recent(limit:)`` read Chromium's `Bookmarks` file instead, and
 /// ``changes`` watches it; neither needs a renderer. Chromium writes the
 /// file about 2.5 seconds after a change, so an edit made in Chrome's own
-/// UI can take that long to show in those reads. Both paths rely on
-/// Chromium internals, so this API is more likely than the rest of CefKit
-/// to need attention when Chromium updates.
+/// UI can take that long to show in those reads. While the app shows no
+/// page in a visible window, Chromium holds the save back, and a new
+/// profile has no file until its first save. Reads go to the host while the file is
+/// missing or a change made through this API is not saved yet. Both paths
+/// rely on Chromium internals, so this API is more likely than the rest of
+/// CefKit to need attention when Chromium updates.
 ///
 /// Incognito profiles have no bookmarks of their own; their
 /// ``CefProfile/bookmarks`` are the default profile's.
@@ -84,11 +87,18 @@ public final class CefBookmarks {
         set { services.bookmarkReadSource = newValue }
     }
 
-    /// The last change made through this API, for the profile: reads go to
-    /// the host until Chromium has saved it.
-    private var lastWrite: ContinuousClock.Instant? {
-        get { services.lastBookmarkWrite }
-        set { services.lastBookmarkWrite = newValue }
+    /// When the last change made through this API, for the profile,
+    /// finished; reads go to the host until Chromium has saved it.
+    private var unsavedWrite: Date? {
+        get { services.unsavedBookmarkWrite }
+        set { services.unsavedBookmarkWrite = newValue }
+    }
+
+    /// Whether a change made through this API is not yet in Chromium's
+    /// `Bookmarks` file, so reads still go to the service host.
+    @_spi(Testing) public var hasUnsavedChanges: Bool {
+        refreshSaveState()
+        return unsavedWrite != nil
     }
 
     // MARK: Reading
@@ -174,7 +184,7 @@ public final class CefBookmarks {
 
     /// Removes a bookmark, or a folder with everything in it.
     public func remove(_ id: CefBookmark.ID) async throws {
-        lastWrite = .now
+        defer { unsavedWrite = Date() }
         _ = try await services.call(
             Self.module,
             "async (b, a) => { const [n] = await b.get(a.id); await (n.url ? b.remove(a.id) : b.removeTree(a.id)); return true; }",
@@ -260,8 +270,8 @@ public final class CefBookmarks {
     }
 
     /// Chromium's `Bookmarks` file, when it can stand in for the service:
-    /// the service host is not running and nothing was changed through it
-    /// in the last seconds (so Chromium has saved every change), the file
+    /// the service host is not running, Chromium has saved every change
+    /// made through it, the file
     /// is in the format CefKit reads, and the profile has no
     /// enterprise-managed or account bookmarks, which the file does not
     /// hold.
@@ -274,9 +284,21 @@ public final class CefBookmarks {
             return file
         case .automatic:
             guard !services.isRunning(.bookmarks) else { return nil }
-            if let lastWrite, ContinuousClock.now - lastWrite < .seconds(5) { return nil }
+            refreshSaveState()
+            guard unsavedWrite == nil else { return nil }
             return loadFile()
         }
+    }
+
+    /// Forgets the unsaved change once Chromium has written the file after
+    /// it. Chromium saves about 2.5 seconds after a change, but holds the
+    /// save back while the app shows no page in a visible window.
+    private func refreshSaveState() {
+        guard let written = unsavedWrite, let url = bookmarksFileURL,
+              let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+              let saved = attributes[.modificationDate] as? Date, saved > written
+        else { return }
+        unsavedWrite = nil
     }
 
     private func loadFile() -> CefBookmarkFile? {
@@ -301,7 +323,9 @@ public final class CefBookmarks {
     }
 
     private func write(_ function: String, _ arguments: CefJSON) async throws -> CefBookmark {
-        lastWrite = .now
+        // Set when the call ends, failed or not: a call that timed out may
+        // still have changed the bookmarks.
+        defer { unsavedWrite = Date() }
         return CefBookmark(try await services.call(Self.module, function, arguments, as: BookmarkNode.self))
     }
 }

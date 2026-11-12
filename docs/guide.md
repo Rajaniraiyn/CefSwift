@@ -1364,7 +1364,9 @@ Chromium brings its windows forward. While the bookmarks host is closed,
 `tree()`, `children(of:)`, `bookmark(_:)` and `recent(limit:)` read
 Chromium's `Bookmarks` file, and `changes` watches it, so following
 bookmarks costs no process; an edit made in Chrome's own UI reaches them
-about 2.5 seconds later, when Chromium saves the file
+about 2.5 seconds later, when Chromium saves the file. Chromium does not
+save while the app shows no page in a visible window; until it has, and
+in a new profile that has no file yet, those reads start the host
 ([architecture](architecture.md#internal-page-services)).
 
 These interfaces are internal to Chromium and more likely than the rest of
