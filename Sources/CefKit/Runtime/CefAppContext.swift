@@ -53,13 +53,15 @@ final class CefAppContext: @unchecked Sendable {
             else { return }
             // CEF does not tell subprocesses about app-registered schemes;
             // pass them along so the helper registers the same list.
-            CefCommandLine(raw: commandLine).appendSwitch(
-                CefCustomScheme.childProcessSwitchName,
-                value: CefCustomScheme.serialize(owner.customSchemes))
+            CefCommandLine.borrowing(commandLine) {
+                $0.appendSwitch(
+                    CefCustomScheme.childProcessSwitchName,
+                    value: CefCustomScheme.serialize(owner.customSchemes))
+            }
         }
         process.pointee.on_already_running_app_relaunch = { s, commandLine, currentDirectory in
             defer { cefRelease(commandLine) }
-            let arguments = commandLine.map { Array(CefCommandLine(raw: $0).argv.dropFirst()) } ?? []
+            let arguments = commandLine.map { CefCommandLine.borrowing($0) { Array($0.argv.dropFirst()) } } ?? []
             let path = CefStringUtil.string(from: currentDirectory)
             let directory = path.isEmpty ? nil : URL(fileURLWithPath: path, isDirectory: true)
             // Handled either way: Chromium's default would open a window of
@@ -99,7 +101,7 @@ final class CefAppContext: @unchecked Sendable {
             guard let commandLine, let owner = cefOwner(CefAppContext.self, s),
                   CefStringUtil.string(from: processType).isEmpty  // browser process only
             else { return }
-            owner.configureCommandLine(CefCommandLine(raw: commandLine))
+            CefCommandLine.borrowing(commandLine) { owner.configureCommandLine($0) }
         }
         return app
     }

@@ -1,4 +1,6 @@
 import Foundation
+import Observation
+import os
 import Testing
 
 @testable import CefKit
@@ -35,6 +37,15 @@ import Testing
         let script = CefSystemBrowser.webKitScript(for: CefUserScript(source: "x()", matching: "https://*.example.com/*"))
         #expect(script.source.hasPrefix("if (new RegExp("))
         #expect(script.source.contains(".*") && script.source.contains("x()"))
+    }
+
+    @Test func pageZoomIsObservable() {
+        let browser = CefSystemBrowser()
+        let changed = OSAllocatedUnfairLock(initialState: false)
+        withObservationTracking { _ = browser.pageZoom } onChange: { changed.withLock { $0 = true } }
+        browser.pageZoom = 1.5
+        #expect(changed.withLock { $0 })
+        #expect(browser.pageZoom == 1.5 && browser.nativeView.pageZoom == 1.5)
     }
 
     @Test func safariApplicationNameNamesSafari() {

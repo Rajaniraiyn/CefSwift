@@ -8,7 +8,7 @@ import CefSwiftUI
 extension SelfTest {
     static func passkeyChecks() async {
         guard let server = try? await LocalServer.start() else {
-            print("SKIP passkeys: could not start a local HTTP server")
+            print("SKIP [environment] passkeys: could not start a local HTTP server")
             return
         }
         defer { server.stop() }

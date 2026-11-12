@@ -1,10 +1,16 @@
 import Foundation
 
-/// Assembles a runnable .app: the main executable and its Info.plist, the CEF
-/// framework, the helpers' startup library, and five helper apps sharing
-/// one binary; then signs them inside out: the framework's libraries, the
-/// framework, the startup library, each helper, the app. See
+/// Assembles a runnable .app: the main executable, its resource bundles and
+/// libraries, its Info.plist, the CEF framework, the helpers' startup
+/// library, and five helper apps sharing one binary; then signs them inside
+/// out: the framework's libraries, the framework, the startup library, the
+/// app's libraries and resource bundles, each helper, the app. See
 /// docs/bundling.md.
+///
+/// The bundle is built in a staging directory beside the destination,
+/// which it replaces only once every part is in place, runs on the
+/// product's architectures and is signed. A failure leaves the previous
+/// app as it was.
 struct AppBundler {
     let appName: String              // bundle + executable name, e.g. "Browser"
     let displayName: String
@@ -12,7 +18,7 @@ struct AppBundler {
     let minimumSystemVersion: String
     let version: String              // CFBundleShortVersionString
     let build: String                // CFBundleVersion
-    let mainExecutable: URL          // built product binary
+    let product: BuiltProduct        // the built executable, resources and libraries
     let helperExecutable: URL        // compiled helper binary (HelperBuilder)
     let helperStartupLibrary: URL    // the helper's startup library (HelperBuilder)
     let frameworkSource: URL         // converted framework inside .cef/dist
@@ -30,20 +36,39 @@ struct AppBundler {
     var appURL: URL { outputDirectory.appendingPathComponent("\(appName).app") }
 
     func assemble() throws -> URL {
-        let fm = FileManager.default
         try FrameworkLayout.validate(framework: frameworkSource)
+        try StagedDirectory.replace(appURL) { try assemble(at: $0) }
+        return appURL
+    }
 
-        if fm.fileExists(atPath: appURL.path) {
-            try fm.removeItem(at: appURL)
-        }
-
-        let contents = appURL.appendingPathComponent("Contents")
+    private func assemble(at app: URL) throws {
+        let fm = FileManager.default
+        let contents = app.appendingPathComponent("Contents")
         let macOS = contents.appendingPathComponent("MacOS")
         let frameworks = contents.appendingPathComponent("Frameworks")
+        let resources = contents.appendingPathComponent("Resources")
         try fm.createDirectory(at: macOS, withIntermediateDirectories: true)
         try fm.createDirectory(at: frameworks, withIntermediateDirectories: true)
 
-        try fm.copyItem(at: mainExecutable, to: macOS.appendingPathComponent(appName))
+        let executable = macOS.appendingPathComponent(appName)
+        try fm.copyItem(at: product.executable, to: executable)
+        // SwiftPM's generated Bundle.module looks in Bundle.main.resourceURL
+        // first.
+        var resourceBundles: [URL] = []
+        if !product.resourceBundles.isEmpty {
+            try fm.createDirectory(at: resources, withIntermediateDirectories: true)
+        }
+        for bundle in product.resourceBundles {
+            let destination = resources.appendingPathComponent(bundle.lastPathComponent)
+            try copyPreservingLinks(bundle, to: destination)
+            resourceBundles.append(destination)
+        }
+        var libraries: [URL] = []
+        for library in product.libraries {
+            let destination = frameworks.appendingPathComponent(library.lastPathComponent)
+            try copyPreservingLinks(library, to: destination)
+            libraries.append(destination)
+        }
 
         try Plist.write(mainInfoPlist(), to: contents.appendingPathComponent("Info.plist"))
         try Data("APPL????".utf8).write(to: contents.appendingPathComponent("PkgInfo"))
@@ -51,16 +76,29 @@ struct AppBundler {
             try fm.copyItem(at: provisioningProfile, to: contents.appendingPathComponent("embedded.provisionprofile"))
         }
 
-        // `cp -R` keeps the framework's symlinks.
         let frameworkDest = frameworks.appendingPathComponent(frameworkSource.lastPathComponent)
-        try Shell.runChecked(
-            "/bin/cp", ["-R", frameworkSource.path, frameworkDest.path],
-            hint: "Could not copy the CEF framework into the app bundle. Check disk space and permissions."
-        )
+        try copyPreservingLinks(frameworkSource, to: frameworkDest)
 
         let startupLibrary = frameworks.appendingPathComponent(HelperBuilder.startupLibraryName)
         try fm.copyItem(at: helperStartupLibrary, to: startupLibrary)
         let helperApps = try HelperKind.allCases.map { ($0, try makeHelperApp(in: frameworks, kind: $0)) }
+
+        // Find libraries in the bundle, never in the build directory.
+        try fixRunPaths(of: executable, adding: libraries.isEmpty ? nil : "@executable_path/../Frameworks")
+        for library in libraries {
+            if library.pathExtension == "framework" {
+                let binary = library.appendingPathComponent(library.deletingPathExtension().lastPathComponent)
+                try fixRunPaths(of: binary.resolvingSymlinksInPath(), adding: "@loader_path/../../..")
+            } else {
+                try fixRunPaths(of: library, adding: "@loader_path")
+            }
+        }
+        try fixRunPaths(of: startupLibrary, adding: nil)
+        for (kind, helperApp) in helperApps {
+            try fixRunPaths(of: helperApp.appendingPathComponent("Contents/MacOS/\(kind.appName(for: appName))"),
+                            adding: nil)
+        }
+        try checkArchitectures(in: contents)
 
         // Inside out, each item before what contains it, and without
         // --deep. Every library a helper loads carries the app's identity,
@@ -72,12 +110,19 @@ struct AppBundler {
         }
         try codesign(frameworkDest, entitlements: [:], isLibrary: true)
         try codesign(startupLibrary, entitlements: [:], isLibrary: true)
+        for library in libraries {
+            try codesign(library, entitlements: [:], isLibrary: true)
+        }
+        // A resource bundle with an Info.plist is signed like code; a flat
+        // one is sealed as resources by the app's signature.
+        for bundle in resourceBundles
+        where fm.fileExists(atPath: bundle.appendingPathComponent("Contents/Info.plist").path) {
+            try codesign(bundle, entitlements: [:], isLibrary: true)
+        }
         for (kind, helperApp) in helperApps {
             try codesign(helperApp, entitlements: plan.helperEntitlements[kind] ?? [:], name: kind.rawValue)
         }
-        try codesign(appURL, entitlements: plan.appEntitlements, name: "app")
-
-        return appURL
+        try codesign(app, entitlements: plan.appEntitlements, name: "app")
     }
 
     // MARK: - Helpers
@@ -140,6 +185,53 @@ struct AppBundler {
         return Plist.merge(Plist.merge(base, kind.infoPlist), plan.helperInfoPlist)
     }
 
+    /// `cp -R`, which keeps a framework's symlinks.
+    private func copyPreservingLinks(_ source: URL, to destination: URL) throws {
+        try Shell.runChecked(
+            "/bin/cp", ["-R", source.path, destination.path],
+            hint: "Could not copy \(source.lastPathComponent) into the app bundle. Check disk space and permissions."
+        )
+    }
+
+    /// Removes the run paths that point into the build machine's build
+    /// directory or toolchain, and adds `runPath` when the binary lacks it.
+    private func fixRunPaths(of binary: URL, adding runPath: String?) throws {
+        guard let file = MachOFile(contentsOf: binary) else {
+            throw CefPluginError("\(binary.path) is not a Mach-O file.")
+        }
+        var arguments = BuiltProduct.buildMachineRunPaths(of: file).flatMap { ["-delete_rpath", $0] }
+        if let runPath, file.slices.first?.runPaths.contains(runPath) != true {
+            arguments += ["-add_rpath", runPath]
+        }
+        guard !arguments.isEmpty else { return }
+        try Shell.runChecked(
+            "/usr/bin/xcrun", ["install_name_tool"] + arguments + [binary.path],
+            hint: "Could not change the run paths of \(binary.lastPathComponent); link it with " +
+                "-headerpad_max_install_names to leave room for them.")
+    }
+
+    /// Every Mach-O file in the bundle must have the product's
+    /// architectures.
+    private func checkArchitectures(in contents: URL) throws {
+        let root = contents.deletingLastPathComponent().path + "/"
+        var mismatched: [String] = []
+        for file in try Self.machOFiles(in: contents) {
+            guard let architectures = MachOFile(contentsOf: file)?.architectures else { continue }
+            if product.architectures.contains(where: { !architectures.contains($0) }) {
+                mismatched.append("\(file.path.replacingOccurrences(of: root, with: "")) " +
+                                  "(\(architectures.joined(separator: ", ")))")
+            }
+        }
+        guard mismatched.isEmpty else {
+            throw CefPluginError(
+                "\(product.executable.lastPathComponent) is built for " +
+                "\(product.architectures.joined(separator: ", ")), but these parts of the bundle are not:\n  " +
+                mismatched.joined(separator: "\n  ") +
+                "\n  Build every part for the same architecture, and bundle the CEF distribution for it " +
+                "(--platform). The previous app, if any, is unchanged.")
+        }
+    }
+
     /// The Mach-O files under `directory`, found by their magic number.
     static func machOFiles(in directory: URL) throws -> [URL] {
         let keys: [URLResourceKey] = [.isRegularFileKey, .isSymbolicLinkKey]
@@ -187,46 +279,5 @@ struct AppBundler {
                       "the search list; add it with 'security list-keychains -d user -s …'.") +
                   (plan.secureTimestamp ? " A secure timestamp needs a network connection; --no-timestamp skips it." : "")
         )
-    }
-}
-
-/// Reads a Mach-O executable's deployment target — the `minos` of its
-/// `LC_BUILD_VERSION` (or `LC_VERSION_MIN_MACOSX`) load command, which
-/// SwiftPM sets from the package's `platforms`.
-enum MachOVersion {
-    static func minimumSystemVersion(of executable: URL) -> String? {
-        guard let data = try? Data(contentsOf: executable, options: .mappedIfSafe), data.count >= 32 else { return nil }
-        func uint32(_ offset: Int, bigEndian: Bool = false) -> UInt32? {
-            guard offset >= 0, offset + 4 <= data.count else { return nil }
-            let value = data[data.startIndex + offset ..< data.startIndex + offset + 4]
-                .withUnsafeBytes { $0.loadUnaligned(as: UInt32.self) }
-            return bigEndian ? UInt32(bigEndian: value) : UInt32(littleEndian: value)
-        }
-        var base = 0
-        // A universal binary: read the first architecture's slice.
-        if uint32(0, bigEndian: true) == 0xCAFE_BABE {
-            guard let offset = uint32(16, bigEndian: true) else { return nil }
-            base = Int(offset)
-        }
-        guard uint32(base) == 0xFEED_FACF, let commandCount = uint32(base + 16) else { return nil }
-        var offset = base + 32  // sizeof(mach_header_64)
-        for _ in 0..<commandCount {
-            guard let command = uint32(offset), let size = uint32(offset + 4), size > 0 else { return nil }
-            switch command {
-            case 0x32:  // LC_BUILD_VERSION: cmd, cmdsize, platform, minos
-                return uint32(offset + 12).map(format)
-            case 0x24:  // LC_VERSION_MIN_MACOSX: cmd, cmdsize, version
-                return uint32(offset + 8).map(format)
-            default:
-                offset += Int(size)
-            }
-        }
-        return nil
-    }
-
-    /// `xxxx.yy.zz` nibbles as "major.minor[.patch]".
-    private static func format(_ version: UInt32) -> String {
-        let major = version >> 16, minor = (version >> 8) & 0xFF, patch = version & 0xFF
-        return patch == 0 ? "\(major).\(minor)" : "\(major).\(minor).\(patch)"
     }
 }

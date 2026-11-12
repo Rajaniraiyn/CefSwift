@@ -37,6 +37,27 @@ import Testing
         #expect(try CefJSON.null.decode(Int?.self) == nil)
     }
 
+    @Test func nonFiniteNumbersBecomeNullWhereTheyAre() throws {
+        let tree: CefJSON = ["ok": 1, "nan": .number(.nan), "list": [.number(.infinity), 2]]
+        #expect(try CefJSON(data: tree.data) == ["ok": 1, "nan": nil, "list": [nil, 2]])
+        #expect(CefJSON.number(-.infinity).text == "null")
+    }
+
+    @MainActor @Test func devToolsRepliesMustBeObjects() throws {
+        func reply(_ text: String, succeeded: Bool = true) -> CefDevTools.Reply {
+            CefDevTools.Reply(succeeded: succeeded, result: Data(text.utf8))
+        }
+        #expect(try CefDevTools.result(of: reply(#"{"value":1}"#), for: "M.x") == ["value": 1])
+        #expect(try CefDevTools.result(of: reply("{}"), for: "M.x") == [:])
+        for malformed in ["", "null", "[1]", "3", "{", "\"text\""] {
+            #expect(throws: CefError.self) { try CefDevTools.result(of: reply(malformed), for: "M.x") }
+            #expect(throws: CefError.self) { try CefDevTools.result(of: reply(malformed, succeeded: false), for: "M.x") }
+        }
+        #expect(throws: CefDevToolsError(method: "M.x", code: -32000, message: "nope")) {
+            try CefDevTools.result(of: reply(#"{"code":-32000,"message":"nope"}"#, succeeded: false), for: "M.x")
+        }
+    }
+
     @Test func textIsSafeToSpliceIntoJavaScript() {
         let text = CefJSON.string("line\u{2028}break\u{2029}\"quoted\"").text
         #expect(!text.contains("\u{2028}") && !text.contains("\u{2029}"))

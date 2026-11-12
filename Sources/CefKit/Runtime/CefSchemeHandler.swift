@@ -158,7 +158,9 @@ public protocol CefSchemeHandler: Sendable {
 /// ```
 ///
 /// Request paths map to files under ``directory``; directory paths serve
-/// ``indexFile``. Paths that lead outside ``directory`` are not found. The
+/// ``indexFile``. Paths that lead outside ``directory`` are not found,
+/// whether through `..`, ``indexFile`` or a symbolic link whose target
+/// lies outside it; links within ``directory`` are followed. The
 /// MIME type comes from the file extension. Files are read on
 /// ``CefFileActor`` as the page consumes them, and range requests read only
 /// the range, so large media files play and seek without being loaded.
@@ -186,26 +188,38 @@ public struct CefDirectorySchemeHandler: CefSchemeHandler {
     }
 
     /// The file under ``directory`` for a request path, or `nil`.
+    ///
+    /// The path is resolved completely, symbolic links and ``indexFile``
+    /// included, before it is checked: a symbolic link may point anywhere
+    /// inside ``directory``, and one whose target lies outside it is not
+    /// found.
     func resolveFile(forRequestPath path: String) -> URL? {
         var relative = path
         while relative.hasPrefix("/") { relative.removeFirst() }
         if relative.isEmpty { relative = indexFile }
 
-        let root = directory.standardizedFileURL
-        var candidate = root.appendingPathComponent(relative).standardizedFileURL
-        // The resolved file must stay under the root.
-        guard candidate.path == root.path || candidate.path.hasPrefix(root.path + "/") else {
-            return nil
-        }
+        let root = directory.standardizedFileURL.resolvingSymlinksInPath()
+        guard var candidate = Self.resolve(root.appendingPathComponent(relative), within: root) else { return nil }
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: candidate.path, isDirectory: &isDirectory) else {
             return nil
         }
         if isDirectory.boolValue {
-            candidate = candidate.appendingPathComponent(indexFile)
-            guard FileManager.default.fileExists(atPath: candidate.path) else { return nil }
+            guard let index = Self.resolve(candidate.appendingPathComponent(indexFile), within: root) else { return nil }
+            candidate = index
+            guard FileManager.default.fileExists(atPath: candidate.path, isDirectory: &isDirectory),
+                  !isDirectory.boolValue
+            else { return nil }
         }
         return candidate
+    }
+
+    /// `url` with `.`, `..` and symbolic links resolved, when that is
+    /// `root` or lies under it.
+    private static func resolve(_ url: URL, within root: URL) -> URL? {
+        let resolved = url.standardizedFileURL.resolvingSymlinksInPath()
+        guard resolved.path == root.path || resolved.path.hasPrefix(root.path + "/") else { return nil }
+        return resolved
     }
 
     /// The MIME type for a file extension.
@@ -622,9 +636,11 @@ final class SchemeResourceHandler: Sendable {
         }
 
         resource.pointee.read = { handlerSelf, dataOut, bytesToRead, bytesRead, callback in
+            // Adopted before anything can return early.
+            let callback = CefRef(adopting: callback)
             guard
                 let me = cefOwner(SchemeResourceHandler.self, handlerSelf),
-                let dataOut, let bytesRead, let callback = CefRef(adopting: callback)
+                let dataOut, let bytesRead, let callback
             else { return 0 }
             let (handled, count) = me.read(into: dataOut, capacity: Int(bytesToRead), callback: callback)
             bytesRead.pointee = count
@@ -719,25 +735,51 @@ enum SchemeByteRange: Equatable {
             self = .whole
             return
         }
-        let first = Int(parts[0].trimmingCharacters(in: .whitespaces))
-        let last = Int(parts[1].trimmingCharacters(in: .whitespaces))
+        let first = Self.position(parts[0]), last = Self.position(parts[1])
+        let range: ClosedRange<Int>
         switch (first, last, totalLength) {
         case let (first?, last?, total) where first <= last:
             guard let total else {
-                self = .partial(first...last)
+                range = first...last
+                break
+            }
+            guard first < total else {
+                self = .unsatisfiable
                 return
             }
-            self = first < total ? .partial(first...min(last, total - 1)) : .unsatisfiable
+            range = first...min(last, total - 1)
         case let (first?, nil, total?) where parts[1].allSatisfy(\.isWhitespace):
-            self = first < total ? .partial(first...(total - 1)) : .unsatisfiable
+            guard first < total else {
+                self = .unsatisfiable
+                return
+            }
+            range = first...(total - 1)
         case let (nil, suffix?, total?) where parts[0].allSatisfy(\.isWhitespace):
             guard suffix > 0, total > 0 else {
                 self = .unsatisfiable
                 return
             }
-            self = .partial(max(total - suffix, 0)...(total - 1))
+            range = max(total - min(suffix, total), 0)...(total - 1)
         default:
             self = .whole
+            return
         }
+        // A range whose length does not fit in an `Int`, such as
+        // `bytes=0-9223372036854775807` of a body of unknown length, is
+        // ignored.
+        let (span, overflow) = range.upperBound.subtractingReportingOverflow(range.lowerBound)
+        guard !overflow, span < Int.max else {
+            self = .whole
+            return
+        }
+        self = .partial(range)
+    }
+
+    /// A byte position: ASCII digits only, as RFC 9110 has it, that fit in
+    /// an `Int`. `nil` for anything else, signs included.
+    private static func position(_ text: Substring) -> Int? {
+        let digits = text.trimmingCharacters(in: .whitespaces)
+        guard !digits.isEmpty, digits.utf8.allSatisfy({ $0 >= 0x30 && $0 <= 0x39 }) else { return nil }
+        return Int(digits)
     }
 }

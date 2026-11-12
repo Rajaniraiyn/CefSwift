@@ -18,8 +18,10 @@ final class CefPageScripting {
     private weak var browser: CefBrowser?
     /// Counts configuration changes; the renderer keeps the newest.
     private(set) var generation = 0
-    private var nextRequest = 0
-    private var pendingEvaluations: [Int: CheckedContinuation<CefJSON, Error>] = [:]
+    /// Evaluations waiting for the renderer, by request. A request number
+    /// is unique for the browser's lifetime; the renderer tells requests of
+    /// different browsers apart by the browser's identifier.
+    let pendingEvaluations = CefPendingOperations<CefJSON>()
 
     init(browser: CefBrowser) {
         self.browser = browser
@@ -66,21 +68,18 @@ final class CefPageScripting {
     // MARK: Evaluation
 
     /// Runs `script` in the main frame's main world and returns its value.
+    /// Cancelling the calling task ends the wait with `CancellationError`;
+    /// the script itself runs on.
     func evaluate(_ script: String) async throws -> CefJSON {
         guard let browser else { throw CefError.browserClosed }
         try await browser.ready()
-        nextRequest += 1
-        let request = nextRequest
-        return try await withCheckedThrowingContinuation { continuation in
-            pendingEvaluations[request] = continuation
+        return try await pendingEvaluations.wait { request in
             var sent = false
             browser.withMainFrame { frame in
                 sent = CefProcessMessage(CefPageScriptingMessage.evaluate, [.int(Int32(request)), .string(script)])
                     .send(from: frame, to: PID_RENDERER)
             }
-            if !sent, let continuation = pendingEvaluations.removeValue(forKey: request) {
-                continuation.resume(throwing: CefError.browserClosed)
-            }
+            if !sent { pendingEvaluations.complete(request, .failure(CefError.browserClosed)) }
         }
     }
 
@@ -94,9 +93,7 @@ final class CefPageScripting {
 
     /// Fails every evaluation still waiting: the renderer went away.
     func failPendingEvaluations(_ error: Error = CefError.browserClosed) {
-        let pending = pendingEvaluations
-        pendingEvaluations = [:]
-        pending.values.forEach { $0.resume(throwing: error) }
+        pendingEvaluations.completeAll(.failure(error))
     }
 
     // MARK: Messages
@@ -111,12 +108,12 @@ final class CefPageScripting {
                     .send(from: frame.pointer, to: PID_RENDERER)
             }
         case CefPageScriptingMessage.evaluated:
-            guard let continuation = pendingEvaluations.removeValue(forKey: message.int(0)) else { return true }
+            let request = message.int(0)
             if message.bool(1) {
-                continuation.resume(returning: (try? CefJSON(data: Data(message.string(2).utf8))) ?? .null)
+                pendingEvaluations.complete(request, Result { try CefJSON(data: Data(message.string(2).utf8)) })
             } else {
-                continuation.resume(throwing: CefJavaScriptError(
-                    message: message.string(2), line: message.int(3), column: message.int(4)))
+                pendingEvaluations.complete(request, .failure(CefJavaScriptError(
+                    message: message.string(2), line: message.int(3), column: message.int(4))))
             }
         case CefPageScriptingMessage.call:
             guard let browser, let bridge = browser.options.bridges.first(where: { $0.name == message.string(0) }) else {

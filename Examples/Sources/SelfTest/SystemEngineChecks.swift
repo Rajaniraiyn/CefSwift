@@ -29,6 +29,47 @@ extension SelfTest {
                 return error.message.contains("boom")
             }
         }
+        // The same inputs as Chromium's evaluateJavaScript: classic scripts.
+        await expect("system engine: evaluateJavaScript value") {
+            try await browser.evaluateJavaScript("1 + 2").intValue == 3
+        }
+        await expect("system engine: evaluateJavaScript statements give the last value") {
+            try await browser.evaluateJavaScript("var a = 2; function twice(x) { return 2 * x }; twice(a) + 1").intValue == 5
+        }
+        await expect("system engine: evaluateJavaScript declarations stay local to the call") {
+            let first = try await browser.evaluateJavaScript("let local = 7; local").intValue
+            let second = try await browser.evaluateJavaScript("let local = 8; local").intValue
+            return first == 7 && second == 8
+        }
+        await expect("system engine: evaluateJavaScript typed") {
+            struct Person: Decodable { var name: String }
+            return try await browser.evaluateJavaScript("({name: 'Grace'})", as: Person.self).name == "Grace"
+        }
+        await expect("system engine: evaluateJavaScript top-level throw throws") {
+            do {
+                try await browser.evaluateJavaScript("throw new Error('boom')")
+                return false
+            } catch let error as CefJavaScriptError {
+                return error.message.contains("boom")
+            }
+        }
+        await expect("system engine: evaluateJavaScript rejected promise throws") {
+            do {
+                try await browser.evaluateJavaScript("Promise.reject(new Error('later boom'))")
+                return false
+            } catch let error as CefJavaScriptError {
+                return error.message.contains("later boom")
+            }
+        }
+        await expect("system engine: evaluateJavaScript runs on a page whose CSP forbids eval") {
+            browser.loadHTML(
+                "<meta http-equiv=\"Content-Security-Policy\" content=\"script-src 'none'\"><title>strict</title>",
+                baseURL: URL(string: "https://strict.selftest.invalid/")!)
+            guard await waitUntil({ browser.title == "strict" && !browser.isLoading }) else { return false }
+            return try await browser.evaluateJavaScript("var b = 20; b + 1").intValue == 21
+        }
+        browser.loadHTML("<title>system one</title><p>needle</p>", baseURL: base)
+        _ = await waitUntil { browser.title == "system one" && !browser.isLoading }
         await expect("system engine: user script ran before the page") {
             try await browser.evaluateJavaScript("window.__injected").intValue == 42
         }
@@ -90,7 +131,7 @@ extension SelfTest {
     static func fairPlayPlaybackCheck(in browser: CefSystemBrowser) async {
         browser.load(URL(string: "https://example.com/")!)
         guard await waitUntil(timeout: .seconds(10), { browser.url?.host == "example.com" && !browser.isLoading }) else {
-            print("SKIP system engine: FairPlay playback — example.com did not load (offline?)")
+            print("SKIP [environment] system engine: FairPlay playback — example.com did not load (offline?)")
             return
         }
         _ = try? await browser.evaluateJavaScript("location.hash = 'second'")
@@ -107,7 +148,7 @@ extension SelfTest {
         let license = result?["license"].intValue ?? 0
         let advanced = result?["advanced"].doubleValue ?? 0
         if result == nil || result?["error"].stringValue == "offline" {
-            print("SKIP system engine: FairPlay playback — the player or test stream did not load " +
+            print("SKIP [environment] system engine: FairPlay playback — the player or test stream did not load " +
                   "(\(result?["detail"].stringValue ?? failure))")
             return
         }

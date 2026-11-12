@@ -26,7 +26,7 @@ struct LoaderTests {
     static var frameworkAvailable: Bool { frameworkBinaryPath() != nil }
 
     @Test(.enabled(if: LoaderTests.frameworkAvailable, "CEF framework not present; set CEF_FRAMEWORK_PATH to run loader tests."))
-    func loadVerifyAndUnloadRealFramework() throws {
+    func loadsAndVerifiesRealFramework() throws {
         let path = try #require(Self.frameworkBinaryPath())
 
         #expect(ccef_load_framework(path) == 1, "\(String(cString: ccef_loader_error()))")

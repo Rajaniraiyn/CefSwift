@@ -108,12 +108,18 @@ public actor CefFileActor {
 /// before start-up at once, and after shutdown once Chromium's threads have
 /// stopped. Start-up waits for that queue to empty before jobs go to
 /// Chromium, so the executor never runs two jobs at the same time.
+///
+/// Every submission and every phase change happens under one lock,
+/// `submission`, so a job is always routed by the phase in force when it
+/// is submitted. Chromium can destroy a task it rejects inside
+/// `cef_post_task`; that path (`jobWasDropped`) never takes `submission`,
+/// so it cannot deadlock against the post that triggered it.
 final class CefThreadExecutor: SerialExecutor, Sendable {
     static let io = CefThreadExecutor(thread: TID_IO, label: "io")
     static let file = CefThreadExecutor(thread: TID_FILE_USER_VISIBLE, label: "file")
     static let all = [io, file]
 
-    private enum Phase {
+    enum Phase {
         /// Before Chromium's context is initialized: jobs run on the queue.
         case notStarted
         /// Waiting for the queue to empty; jobs are held.
@@ -126,21 +132,29 @@ final class CefThreadExecutor: SerialExecutor, Sendable {
         case stopped
     }
 
-    private struct State {
-        var phase = Phase.notStarted
-        /// Jobs waiting for a phase change, in order.
-        var held: [UnownedJob] = []
-    }
+    /// Hands a job to Chromium's thread, which either runs it there or
+    /// releases it unrun; a released job comes back through
+    /// `jobWasDropped`.
+    typealias Sender = @Sendable (PostedJob) -> Void
 
     let thread: cef_thread_id_t
-    private let state = OSAllocatedUnfairLock(initialState: State())
+    /// Read under `submission` to route a job; read alone by `isCurrent`.
+    private let phase = OSAllocatedUnfairLock(initialState: Phase.notStarted)
+    /// Orders submissions against phase changes. Held while posting.
+    private let submission = OSAllocatedUnfairLock()
+    /// Jobs waiting for a phase change, in order. Lock order: `held`, then
+    /// `phase`.
+    private let held = OSAllocatedUnfairLock<[UnownedJob]>(initialState: [])
     private let queue: DispatchQueue
     private let queueKey = DispatchSpecificKey<UInt8>()
+    private let send: Sender
 
-    init(thread: cef_thread_id_t, label: String) {
+    /// `send` replaces `cef_post_task`, for tests.
+    init(thread: cef_thread_id_t, label: String, send: Sender? = nil) {
         self.thread = thread
         queue = DispatchQueue(label: "CefSwift.\(label)-fallback")
         queue.setSpecific(key: queueKey, value: 1)
+        self.send = send ?? { job in Self.postToChromium(job, thread: thread) }
     }
 
     // MARK: Lifecycle
@@ -148,48 +162,44 @@ final class CefThreadExecutor: SerialExecutor, Sendable {
     /// Chromium's context is initialized: from now on jobs go to Chromium.
     /// Called on the main thread.
     func start() {
-        state.withLock { $0.phase = .starting }
-        // Jobs already on the queue finish first.
+        submission.withLock { setPhase(.starting) }
+        // Every job routed to the queue was submitted before `.starting`,
+        // so this waits for all of them.
         queue.sync {}
-        state.withLock { state in
-            state.phase = .running
-            for job in state.held { post(job) }
-            state.held = []
+        submission.withLock {
+            setPhase(.running)
+            for job in takeHeld() { send(PostedJob(job, executor: self)) }
         }
     }
 
     /// Chromium is about to shut down. Jobs sent from now on wait until
     /// ``didStop()``.
     func willStop() {
-        state.withLock { $0.phase = .stopping }
+        submission.withLock { setPhase(.stopping) }
     }
 
     /// `cef_shutdown()` has returned and Chromium's threads are gone.
     func didStop() {
-        let held = state.withLock { state in
-            state.phase = .stopped
-            defer { state.held = [] }
-            return state.held
+        submission.withLock {
+            setPhase(.stopped)
+            for job in takeHeld() { runOnQueue(job) }
         }
-        for job in held { runOnQueue(job) }
     }
 
     // MARK: SerialExecutor
 
     func enqueue(_ job: consuming ExecutorJob) {
         let job = UnownedJob(job)
-        let runsOnQueue = state.withLock { state -> Bool in
-            switch state.phase {
+        submission.withLock {
+            switch phase.withLock({ $0 }) {
             case .notStarted, .stopped:
-                return true
+                runOnQueue(job)
             case .starting, .stopping:
-                state.held.append(job)
+                held.withLock { $0.append(job) }
             case .running:
-                post(job)
+                send(PostedJob(job, executor: self))
             }
-            return false
         }
-        if runsOnQueue { runOnQueue(job) }
     }
 
     func asUnownedSerialExecutor() -> UnownedSerialExecutor {
@@ -211,7 +221,7 @@ final class CefThreadExecutor: SerialExecutor, Sendable {
     /// thread or sequence while it runs, the private queue otherwise.
     var isCurrent: Bool {
         if DispatchQueue.getSpecific(key: queueKey) != nil { return true }
-        let phase = state.withLock { $0.phase }
+        let phase = phase.withLock { $0 }
         guard phase == .running || phase == .stopping || phase == .starting, ccef_is_framework_loaded() != 0
         else { return false }
         return cef_currently_on(thread) != 0
@@ -219,15 +229,24 @@ final class CefThreadExecutor: SerialExecutor, Sendable {
 
     // MARK: Running jobs
 
-    /// Posts `job` to Chromium. Called with the state locked, so a post
-    /// never races `willStop()`.
-    private func post(_ job: UnownedJob) {
-        let task = cefAllocate(cef_task_t.self, owner: PostedJob(job, executor: self))
+    private func setPhase(_ new: Phase) {
+        phase.withLock { $0 = new }
+    }
+
+    private func takeHeld() -> [UnownedJob] {
+        held.withLock { held in
+            defer { held = [] }
+            return held
+        }
+    }
+
+    private static func postToChromium(_ job: PostedJob, thread: cef_thread_id_t) {
+        let task = cefAllocate(cef_task_t.self, owner: job)
         task.pointee.execute = { s in
             cefOwner(PostedJob.self, s)?.run()
         }
         // Consumes the task. A task Chromium drops without running is
-        // handed back by PostedJob's deinit.
+        // handed back by PostedJob's deinit, possibly before this returns.
         _ = cef_post_task(thread, task)
     }
 
@@ -237,10 +256,14 @@ final class CefThreadExecutor: SerialExecutor, Sendable {
 
     /// A job Chromium destroyed without running it, which only happens
     /// while it shuts down. It runs on the queue once Chromium has stopped.
+    /// May be called inside a post, with `submission` held, so it takes
+    /// only `held` and `phase`.
     fileprivate func jobWasDropped(_ job: UnownedJob) {
-        let runsNow = state.withLock { state -> Bool in
-            guard state.phase == .stopped else {
-                state.held.append(job)
+        // `didStop()` sets `.stopped` before draining `held`, so a job
+        // either lands in `held` before the drain or sees `.stopped`.
+        let runsNow = held.withLock { held -> Bool in
+            guard phase.withLock({ $0 }) == .stopped else {
+                held.append(job)
                 return false
             }
             return true
@@ -249,8 +272,8 @@ final class CefThreadExecutor: SerialExecutor, Sendable {
     }
 }
 
-/// One job posted to Chromium.
-private final class PostedJob: Sendable {
+/// One job handed to Chromium.
+final class PostedJob: Sendable {
     private let job: OSAllocatedUnfairLock<UnownedJob?>
     private let executor: CefThreadExecutor
 

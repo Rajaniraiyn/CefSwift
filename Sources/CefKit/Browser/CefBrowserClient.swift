@@ -32,6 +32,10 @@ final class CefBrowserClient {
     private var liveBrowserCount = 0
     private let isDefaultClient: Bool
 
+    /// A browser Chromium finished creating after its ``CefBrowser`` had
+    /// closed. It is closed at once, and forgotten when it has.
+    private var abandoned: CefRef<cef_browser_t>?
+
     /// Features of the popup Chromium is about to create, from
     /// `on_before_popup` until the popup's browser is wrapped.
     private var pendingPopupFeatures: CefPopupFeatures?
@@ -88,6 +92,15 @@ final class CefBrowserClient {
         liveBrowserCount += 1
         if let pending {
             self.pending = nil
+            guard pending.state != .closed else {
+                // Closed while Chromium was creating it.
+                abandoned = CefRef(adopting: browser)
+                if let host = browser.pointee.get_host(browser) {
+                    host.pointee.close_browser(host, 1)
+                    cefRelease(host)
+                }
+                return pending
+            }
             pending.adopt(CefRef(adopting: browser))
             return pending
         }
@@ -114,10 +127,32 @@ final class CefBrowserClient {
 
     private func browserClosed(_ wrapper: CefBrowser) {
         wrapper.handleClosed()
+        lastBrowserMayHaveClosed()
+    }
+
+    private func lastBrowserMayHaveClosed() {
         liveBrowserCount -= 1
         if liveBrowserCount == 0, pending == nil, !isDefaultClient {
             handlers.releaseAll()
         }
+    }
+
+    /// `on_before_close` for the ``abandoned`` browser. Returns whether
+    /// `identifier` was it.
+    private func abandonedBrowserClosed(_ identifier: Int32) -> Bool {
+        guard let abandoned, abandoned.pointer.pointee.get_identifier(abandoned.pointer) == identifier else {
+            return false
+        }
+        self.abandoned = nil
+        lastBrowserMayHaveClosed()
+        return true
+    }
+
+    /// Browser creation failed: Chromium never calls back, so let go of
+    /// the browser and of the handlers, whose structs retain this client.
+    func cancelCreation() {
+        pending = nil
+        if liveBrowserCount == 0, !isDefaultClient { handlers.releaseAll() }
     }
 
     // MARK: Struct construction
@@ -160,7 +195,9 @@ final class CefBrowserClient {
         client.pointee.on_process_message_received = { s, browser, frame, _, message in
             let received = message.map(CefProcessMessage.init(reading:))
             cefRelease(message)
-            guard let received, let frame = CefRef(adopting: frame) else {
+            // Adopted before anything can return early.
+            let frame = CefRef(adopting: frame)
+            guard let received, let frame else {
                 cefRelease(browser)
                 return 0
             }
@@ -198,6 +235,13 @@ final class CefBrowserClient {
             CefBrowserClient.run(s, browser, default: 0) { _, b in b.detachEmbeddedView() ? 1 : 0 }
         }
         h.pointee.on_before_close = { s, browser in
+            if let browser, let client = cefOwner(CefBrowserClient.self, s) {
+                let identifier = browser.pointee.get_identifier(browser)
+                if MainActor.assumeIsolated({ client.abandonedBrowserClosed(identifier) }) {
+                    cefRelease(browser)
+                    return
+                }
+            }
             CefBrowserClient.run(s, browser, default: ()) { client, b in client.browserClosed(b) }
         }
         h.pointee.on_before_popup = {
@@ -342,12 +386,13 @@ final class CefBrowserClient {
             let download = item.map { CefDownload(item: $0) }
             cefRelease(item)
             let name = CefStringUtil.string(from: suggestedName)
-            guard let download, let callback = CefRef(adopting: callback) else {
+            let callback = CefRef(adopting: callback)
+            guard let download, let callback else {
                 cefRelease(browser)
                 return 0
             }
             return CefBrowserClient.run(s, browser, default: 0) { _, b in
-                b.decide { await $0.browser(b, decideDestinationFor: download, suggestedName: name) } then: { decision in
+                b.decide(.browser) { await $0.browser(b, decideDestinationFor: download, suggestedName: name) } then: { decision in
                     // Dropping the callback without continuing cancels the download.
                     guard let destination = CefDownloadDestination.resolve(decision: decision, suggestedName: name)
                     else { return }
@@ -386,7 +431,7 @@ final class CefBrowserClient {
                 return 0
             }
             return CefBrowserClient.run(s, browser, default: 0) { _, b in
-                b.decide { await $0.browser(b, runJavaScriptDialog: dialog) } then: { response in
+                b.decide(.dialog) { await $0.browser(b, runJavaScriptDialog: dialog) } then: { response in
                     switch response {
                     case .accept(let text):
                         CefStringUtil.withCefString(text) { callback.pointer.pointee.cont(callback.pointer, 1, $0) }
@@ -403,13 +448,18 @@ final class CefBrowserClient {
                 return 0
             }
             return CefBrowserClient.run(s, browser, default: 0) { _, b in
-                b.decide { await $0.browser(b, confirmLeavingPage: isReload != 0) } then: { leave in
+                b.decide(.dialog) { await $0.browser(b, confirmLeavingPage: isReload != 0) } then: { leave in
                     // Staying on the page also stays a quit in progress.
                     if !leave { CefRuntime.shared.cancelTermination() }
                     callback.pointer.pointee.cont(callback.pointer, leave ? 1 : 0, nil)
                 }
                 return 1
             }
+        }
+        // Navigation and the like: dialogs still open are moot, and CEF
+        // has dropped their callbacks.
+        h.pointee.on_reset_dialog_state = { s, browser in
+            CefBrowserClient.run(s, browser, default: ()) { _, b in b.cancelDecisions { $0 == .dialog } }
         }
         return h
     }
@@ -429,11 +479,13 @@ final class CefBrowserClient {
                 return
             }
             let target = CefContextMenuTarget(raw: params)
-            let menu = CefMenuModel(raw: model)
+            nonisolated(unsafe) let borrowedModel = model
             CefBrowserClient.run(s, browser, default: ()) { client, b in
                 client.contextMenuTarget = target
-                b.options.contextMenu.apply(to: menu, for: target)
-                b.delegate?.browser(b, configureContextMenu: menu, for: target)
+                CefMenuModel.borrowing(borrowedModel) { menu in
+                    b.options.contextMenu.apply(to: menu, for: target)
+                    b.delegate?.browser(b, configureContextMenu: menu, for: target)
+                }
             }
         }
         h.pointee.run_context_menu = { s, browser, frame, params, model, callback in
@@ -450,11 +502,14 @@ final class CefBrowserClient {
             // the callback untouched — cancelling it would suppress the menu).
             // Offscreen browsers have no window to show it in, so the host
             // presents a native menu from a snapshot of the model.
+            nonisolated(unsafe) let borrowedModel = model
             let handled = CefBrowserClient.run(s, browser, default: false) { client, _ in
                 guard let host = client.offscreenHost else { return false }
-                host.offscreenShowContextMenu(
-                    CefMenuModel(raw: model), at: point ?? .zero,
-                    completion: CefContextMenuCompletion(raw: callback))
+                // The host reads the model before it returns.
+                CefMenuModel.borrowing(borrowedModel) { menu in
+                    host.offscreenShowContextMenu(
+                        menu, at: point ?? .zero, completion: CefContextMenuCompletion(raw: callback))
+                }
                 return true
             }
             if !handled { cefRelease(callback) }
@@ -486,7 +541,7 @@ final class CefBrowserClient {
                 return 0
             }
             return CefBrowserClient.run(s, browser, default: 0) { _, b in
-                b.decide { await $0.browser(b, decidePermissionFor: request) } then: { decision in
+                b.decide(.page) { await $0.browser(b, decidePermissionFor: request) } then: { decision in
                     if decision == .allow {
                         callback.pointer.pointee.cont(callback.pointer, kinds.mediaMask(within: requested))
                     } else {
@@ -496,7 +551,7 @@ final class CefBrowserClient {
                 return 1
             }
         }
-        h.pointee.on_show_permission_prompt = { s, browser, _, origin, requested, callback in
+        h.pointee.on_show_permission_prompt = { s, browser, promptID, origin, requested, callback in
             let request = CefPermissionRequest(
                 kinds: CefPermissionKind.fromRequestTypes(requested),
                 origin: CefStringUtil.string(from: origin)
@@ -506,11 +561,16 @@ final class CefBrowserClient {
                 return 0
             }
             return CefBrowserClient.run(s, browser, default: 0) { _, b in
-                b.decide { await $0.browser(b, decidePermissionFor: request) } then: { decision in
+                b.decide(.permissionPrompt(promptID)) { await $0.browser(b, decidePermissionFor: request) } then: { decision in
                     callback.pointer.pointee.cont(callback.pointer, decision.cefResult)
                 }
                 return 1
             }
+        }
+        // Chromium dismissed the prompt itself (navigation, closing), or
+        // after our answer, which has then been delivered already.
+        h.pointee.on_dismiss_permission_prompt = { s, browser, promptID, _ in
+            CefBrowserClient.run(s, browser, default: ()) { _, b in b.cancelDecisions { $0 == .permissionPrompt(promptID) } }
         }
         return h
     }
@@ -561,7 +621,7 @@ final class CefBrowserClient {
                 return 0
             }
             return CefBrowserClient.run(s, browser, default: 0) { _, b in
-                b.decide { await $0.browser(b, shouldProceedDespite: error) } then: { proceed in
+                b.decide(.page) { await $0.browser(b, shouldProceedDespite: error) } then: { proceed in
                     if proceed {
                         callback.pointer.pointee.cont(callback.pointer)
                     } else {
@@ -584,7 +644,8 @@ final class CefBrowserClient {
             )
             let identifier = browser.map { $0.pointee.get_identifier($0) }
             cefRelease(browser)
-            guard let identifier, let callback = CefRef(adopting: callback) else { return 0 }
+            let callback = CefRef(adopting: callback)
+            guard let identifier, let callback else { return 0 }
             Task { @MainActor in
                 guard let b = CefRuntime.shared.browser(withIdentifier: identifier) else {
                     callback.pointer.pointee.cancel(callback.pointer)

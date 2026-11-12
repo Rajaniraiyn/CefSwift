@@ -20,8 +20,18 @@ struct BundleFacts: Sendable {
 
     var app: Part
     var helpers: [HelperKind: Part] = [:]
-    /// The framework, its libraries and the helpers' startup library.
+    /// The framework, its libraries, the helpers' startup library, and the
+    /// app's own libraries, frameworks and signed resource bundles.
     var libraries: [Part] = []
+    /// The app's own libraries and frameworks in `Contents/Frameworks`.
+    var appLibraries: [String] = []
+    /// SwiftPM resource bundles in `Contents/Resources`.
+    var resourceBundles: [String] = []
+    /// The main executable's architectures.
+    var architectures: [String] = []
+    /// What `Linkage.problems` finds: code that lacks the app's
+    /// architectures, or loads or searches for libraries outside the bundle.
+    var linkageProblems: [String] = []
     /// `codesign --verify --strict` on the app, nested code included.
     var verifyError: String?
     var profile: ProvisioningProfile?
@@ -252,6 +262,21 @@ enum Doctor {
                 detail: "signed differently from the app: \(names.joined(separator: ", ")). Library " +
                     "validation refuses to load them" + (runtime ? "" : " once the hardened runtime is on") + ".",
                 fix: "bundle again with cef bundle, which signs each library with the app's identity."))
+        }
+        let contents = "app libraries: " + (facts.appLibraries.isEmpty ? "none" : facts.appLibraries.joined(separator: ", ")) +
+            "; resource bundles: " + (facts.resourceBundles.isEmpty ? "none" : facts.resourceBundles.joined(separator: ", "))
+        if facts.linkageProblems.isEmpty {
+            nested.append(.init(
+                status: .ok, title: "linking",
+                detail: "\(facts.architectures.joined(separator: ", ")) throughout; every library loads from the " +
+                    "bundle or macOS. \(contents)."))
+        } else {
+            nested.append(.init(
+                status: .error, title: "linking",
+                detail: facts.linkageProblems.joined(separator: "; ") + ". It may run on this Mac and fail on " +
+                    "others. \(contents).",
+                fix: "bundle again with cef bundle, which copies the product's libraries and resource bundles " +
+                    "into the app and removes run paths into the build directory."))
         }
 
         // Provisioning profile.

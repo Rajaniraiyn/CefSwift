@@ -9,10 +9,17 @@ swift test
 
 The Command Line Tools are enough; Xcode is not required. `CefKitTests`
 covers CefKit, `CefSwiftUITests` the views, and `CefPluginTests` the
-plugin's signing and distribution logic; none of them starts Chromium.
+plugin's signing, distribution and bundle-assembly logic; none of them
+starts Chromium.
+
 `CefPluginTests` compiles `Plugins/CefPlugin/Distribution` through a
-directory symlink, since a test target cannot depend on a plugin, so keep
-that directory free of `PackagePlugin` and of running tools.
+directory symlink (`Tests/CefPluginTests/Distribution`). SwiftPM lets a
+command plugin depend only on executable and binary targets, which it runs
+as tools, not on a library target, and a test target cannot depend on a
+plugin; so the plugin and its tests cannot share that code through a
+regular target. Keep `Distribution` free of `PackagePlugin` and of running
+tools: it is the plugin's pure logic, and the rest of the plugin runs
+`swift build`, `codesign` and the other tools around it.
 
 The loader tests run only when `CEF_FRAMEWORK_PATH` names a CEF framework,
 either the `.framework` directory or the binary inside it. Download one with
@@ -62,14 +69,29 @@ swift package --package-path Examples \
 Examples/dist/SelfTest.app/Contents/MacOS/SelfTest
 ```
 
-It prints one `PASS`, `FAIL` or `SKIP` line per check and exits with the
-number of failures, or 124 if it does not finish within 360 seconds. Keep the
-screen unlocked while it runs; the offscreen painting check is skipped when
-its window cannot be seen. CI runs it on every pull request. Add a check in
+It prints one `PASS`, `FAIL` or `SKIP` line per check, a `SUMMARY` line,
+and exits with the number of failures. Keep the screen unlocked while it
+runs; the offscreen painting check is skipped when its window cannot be
+seen. CI runs it on every pull request. Add a check in
 `Examples/Sources/SelfTest` for new behavior that crosses into CEF.
-`SELFTEST_ONLY=passkeys,discard` runs only the named groups of checks
-(`SelfTest.checkGroups` lists them), which is quicker while you work on one
-area.
+
+- `SELFTEST_ONLY=passkeys,discard` runs only the named groups of checks
+  (`SelfTest.checkGroups` lists them), which is quicker while you work on
+  one area.
+- Each group has a deadline (`SelfTest.groupDeadlines`, 60 seconds unless
+  listed). A group that outlives it fails with its name, and the next
+  group runs. A last-resort watchdog exits with 124.
+- A check that cannot run reports `SelfTest.skip(_:because:_:)` with a
+  category: `.environment` when this machine could not run it (offline, an
+  occluded window, an assistive app running), `.limitation` when CEF cannot
+  do what it needs. `SELFTEST_STRICT=1`, which CI sets, counts environment
+  skips, and SKIP lines without a category, as failures.
+- `SELFTEST_ISOLATED=1` runs each group in a process of its own, with its
+  own cache directory, and kills one that outlives its deadline; no group
+  then depends on what an earlier one left behind. It takes longer, and CI
+  uses it.
+- `SELFTEST_JSON=<path>` writes every result, each group's time and the
+  skip counts as JSON.
 
 ## Measure threads, lifecycle and frames
 
@@ -93,6 +115,15 @@ CEF update and after changing anything a page can observe; the guide's
 records what it shows. SelfTest's `compatibility` group checks the same
 readings on a local page. Load public pages a handful of times, not in a
 loop.
+
+## Check the documentation samples
+
+`Scripts/check-doc-samples.py` compiles every Swift block in `README.md`
+and `docs/` against this checkout, for macOS 14; CI runs it. Run it after
+changing public API or a sample. Names an app would define (`browser`,
+`openTab`, …) come from stubs in the script; add one there when a sample
+needs it, never a stub of CefSwift API. A sample that needs a later macOS
+says so in a comment (`// macOS 15`).
 
 ## Regenerate the C bridge
 

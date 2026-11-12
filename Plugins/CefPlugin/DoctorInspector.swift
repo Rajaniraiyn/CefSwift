@@ -23,11 +23,55 @@ enum DoctorInspector {
             let helperInfo = (try? Plist.read(url.appendingPathComponent("Contents/Info.plist"))) ?? [:]
             facts.helpers[helper] = part(named: url.lastPathComponent, at: url, info: helperInfo)
         }
-        let framework = frameworks.appendingPathComponent("Chromium Embedded Framework.framework")
-        var libraries = [framework, frameworks.appendingPathComponent(HelperBuilder.startupLibraryName)]
-        libraries += (try? AppBundler.machOFiles(in: framework.appendingPathComponent("Versions/A/Libraries"))) ?? []
+        let framework = frameworks.appendingPathComponent(BuiltProduct.cefFrameworkName)
+        let startupLibrary = frameworks.appendingPathComponent(HelperBuilder.startupLibraryName)
+        let cefLibraries = (try? AppBundler.machOFiles(in: framework.appendingPathComponent("Versions/A/Libraries"))) ?? []
+
+        // The app's own libraries and SwiftPM resource bundles, beside CEF's.
+        let frameworkItems = (try? fm.contentsOfDirectory(at: frameworks, includingPropertiesForKeys: nil)) ?? []
+        let appLibraries = frameworkItems.filter {
+            ($0.pathExtension == "dylib" && $0.lastPathComponent != HelperBuilder.startupLibraryName)
+                || ($0.pathExtension == "framework" && $0.lastPathComponent != BuiltProduct.cefFrameworkName)
+        }.sorted { $0.path < $1.path }
+        let resourceItems = (try? fm.contentsOfDirectory(
+            at: contents.appendingPathComponent("Resources"), includingPropertiesForKeys: nil)) ?? []
+        let resourceBundles = resourceItems.filter { $0.pathExtension == "bundle" }.sorted { $0.path < $1.path }
+        facts.appLibraries = appLibraries.map(\.lastPathComponent)
+        facts.resourceBundles = resourceBundles.map(\.lastPathComponent)
+
+        let signedBundles = resourceBundles.filter {
+            fm.fileExists(atPath: $0.appendingPathComponent("Contents/Info.plist").path)
+        }
+        let libraries = [framework, startupLibrary] + cefLibraries + appLibraries + signedBundles
         facts.libraries = libraries.filter { fm.fileExists(atPath: $0.path) }
             .map { part(named: $0.lastPathComponent, at: $0, info: [:]) }
+
+        // Every binary must run on the app's architectures and find its
+        // libraries in the bundle.
+        let mainExecutable = contents.appendingPathComponent("MacOS/\(executable)")
+        facts.architectures = MachOFile(contentsOf: mainExecutable)?.architectures ?? []
+        let helperExecutables = facts.helpers.keys.sorted { $0.rawValue < $1.rawValue }.map {
+            frameworks.appendingPathComponent("\($0.appName(for: executable)).app/Contents/MacOS/\($0.appName(for: executable))")
+        }
+        let appBinaries = appLibraries.map { library in
+            library.pathExtension == "framework"
+                ? library.appendingPathComponent(library.deletingPathExtension().lastPathComponent).resolvingSymlinksInPath()
+                : library
+        }
+        facts.linkageProblems = Linkage.problems(
+            binaries: [mainExecutable] + helperExecutables + [startupLibrary] + appBinaries,
+            executable: mainExecutable, app: app)
+        // CEF's own binaries: only their architectures.
+        let cefBinaries = [framework.appendingPathComponent("Versions/A/Chromium Embedded Framework")] + cefLibraries
+        for binary in cefBinaries {
+            guard let architectures = MachOFile(contentsOf: binary)?.architectures else { continue }
+            let missing = facts.architectures.filter { !architectures.contains($0) }
+            if !missing.isEmpty {
+                facts.linkageProblems.append(
+                    "\(binary.lastPathComponent) has \(architectures.joined(separator: ", ")), not " +
+                    missing.joined(separator: ", ") + " like the app")
+            }
+        }
 
         if let verify = try? Shell.run("/usr/bin/codesign", ["--verify", "--deep", "--strict", app.path]),
            verify.exitCode != 0 {

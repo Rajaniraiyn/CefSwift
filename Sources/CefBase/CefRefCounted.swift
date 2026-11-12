@@ -93,9 +93,9 @@ package final class CefRef<T>: @unchecked Sendable {
 }
 
 extension CefRef {
-    /// Gives up ownership: returns the pointer with an extra reference for
-    /// the caller, typically to hand to CEF.
-    package func detach() -> UnsafeMutablePointer<T> {
+    /// The pointer with a reference added for the caller, typically to hand
+    /// to a CEF function that consumes it. The box keeps its own reference.
+    package func retainedPointer() -> UnsafeMutablePointer<T> {
         cefAddRef(pointer)
         return pointer
     }

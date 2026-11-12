@@ -412,6 +412,8 @@ public final class CefRuntime {
 
     func register(_ browser: CefBrowser) {
         lifecycleCoordinator.setNeedsUpdate()
+        // A DevTools window's browser comes and goes like any other.
+        defer { CefBrowser.refreshDevToolsStates() }
         browsersByIdentifier[browser.identifier] = browser
         // Internal-page service browsers stay out of the public list. A
         // browser restored after a discard is listed already.
@@ -439,6 +441,7 @@ public final class CefRuntime {
     }
 
     func unregister(_ browser: CefBrowser) {
+        defer { CefBrowser.refreshDevToolsStates() }
         browsersByIdentifier[browser.identifier] = nil
         browser.lifecycle = .hidden
         if browsers.contains(where: { $0 === browser }) {
@@ -565,7 +568,7 @@ public final class CefRuntime {
     /// ```swift
     /// // Discard tabs hidden for 30 minutes, and hidden tabs whenever
     /// // macOS runs low on memory.
-    /// CefRuntime.shared.memorySaver = .after(.minutes(30))
+    /// CefRuntime.shared.memorySaver = .after(.seconds(30 * 60))
     /// ```
     ///
     /// Only hidden browsers are discarded, and only those

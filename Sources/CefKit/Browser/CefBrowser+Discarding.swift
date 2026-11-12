@@ -211,7 +211,7 @@ extension CefBrowser {
         }
         if isOnScreen { blockers.insert(.visible) }
         if isShowingDevTools { blockers.insert(.devToolsOpen) }
-        if downloads.contains(where: { !$0.isComplete && !$0.isCancelled }) { blockers.insert(.downloading) }
+        if downloads.contains(where: { !$0.state.isFinished }) { blockers.insert(.downloading) }
         if isCapturingMedia { blockers.insert(.capturingMedia) }
         return blockers
     }
@@ -293,6 +293,7 @@ extension CefBrowser {
         findResult = nil
         isCapturingMedia = false
         downloadControls = [:]
+        cancelDecisions { _ in true }
         devTools.prepareForNewSession()
         pageScripting.failPendingEvaluations()
         CefRuntime.shared.forgetIdentifier(of: self)
@@ -316,9 +317,7 @@ extension CefBrowser {
         guard isDiscarded, discardPhase == .discarded || discardPhase == .restoring else { return }
         isDiscarded = false
         discardPhase = .restoring
-        let waiters = restoreWaiters
-        restoreWaiters = []
-        waiters.forEach { $0.resume() }
+        restoreWaiters.completeAll(.success(()))
         reassertAccessibilityState()
         delegate?.browserDidRestore(self)
     }
@@ -397,26 +396,19 @@ extension CefBrowser {
     }
 }
 
-/// Runs `body`, giving up after `timeout`.
+/// Runs `body`, giving up after `timeout`: `nil` when it throws or takes
+/// longer, in which case it is cancelled. Returns once `body` has ended,
+/// which CefKit's own suspensions (``CefBrowser/ready()``, scripts,
+/// DevTools calls) do as soon as they are cancelled.
 @MainActor
 func withTimeout<T: Sendable>(_ timeout: Duration, _ body: @escaping @MainActor () async throws -> T) async -> T? {
-    let once = Once<T?>()
-    return await withCheckedContinuation { continuation in
-        once.continuation = continuation
-        Task { once.resume(try? await body()) }
-        Task {
+    await withTaskGroup(of: T?.self) { group in
+        group.addTask { try? await body() }
+        group.addTask {
             try? await Task.sleep(for: timeout)
-            once.resume(nil)
+            return nil
         }
-    }
-}
-
-@MainActor
-private final class Once<T: Sendable> {
-    var continuation: CheckedContinuation<T, Never>?
-
-    func resume(_ value: T) {
-        continuation?.resume(returning: value)
-        continuation = nil
+        defer { group.cancelAll() }
+        return await group.next() ?? nil
     }
 }

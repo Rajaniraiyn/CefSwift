@@ -117,8 +117,17 @@ final class PageScripting: CefRendererExtension {
 
     private var documents: [Int: Document] = [:]
     private var nextDocumentID = 0
-    /// Evaluations whose result is a promise that has not settled, by request.
-    private var pendingEvaluations: [Int: PendingEvaluation] = [:]
+    /// Evaluations whose result is a promise that has not settled.
+    private var pendingEvaluations: [EvaluationID: PendingEvaluation] = [:]
+
+    /// One evaluation. Each browser numbers its requests on its own, and
+    /// browsers of one profile may share this process, so a request
+    /// number alone is ambiguous; with the browser it is unique, since a
+    /// browser never reuses one.
+    struct EvaluationID: Hashable {
+        var browserID: Int32
+        var request: Int
+    }
 
     struct PendingEvaluation {
         var context: V8Context
@@ -185,10 +194,10 @@ final class PageScripting: CefRendererExtension {
         for (id, document) in documents where document.context.isSame(context) {
             documents[id] = nil
         }
-        for (request, pending) in pendingEvaluations where pending.context.isSame(context) {
-            pendingEvaluations[request] = nil
+        for (id, pending) in pendingEvaluations where pending.context.isSame(context) {
+            pendingEvaluations[id] = nil
             frame.send(CefProcessMessage(CefPageScriptingMessage.evaluated, [
-                .int(Int32(request)), .bool(false), .string("The document went away before the result was ready."),
+                .int(Int32(id.request)), .bool(false), .string("The document went away before the result was ready."),
                 .int(0), .int(0),
             ]))
         }
@@ -395,9 +404,10 @@ final class PageScripting: CefRendererExtension {
     }
 
     private func awaitPromise(_ promise: V8Value, request: Int, context: V8Context, frame: CefRendererFrame) {
+        let id = EvaluationID(browserID: frame.browserID, request: request)
         let settle: (Bool) -> V8Value? = { [weak self] succeeded in
             context.durableFunction { [weak self] _, arguments in
-                guard let self, self.pendingEvaluations.removeValue(forKey: request) != nil else { return .success(nil) }
+                guard let self, self.pendingEvaluations.removeValue(forKey: id) != nil else { return .success(nil) }
                 let value = arguments.first ?? .undefined
                 let text = succeeded ? JSONValue(value).text : Self.describe(rejection: value)
                 frame.send(CefProcessMessage(CefPageScriptingMessage.evaluated, [
@@ -414,7 +424,7 @@ final class PageScripting: CefRendererExtension {
             ]))
             return
         }
-        pendingEvaluations[request] = PendingEvaluation(context: context, frame: frame)
+        pendingEvaluations[id] = PendingEvaluation(context: context, frame: frame)
     }
 
     /// `Uncaught (in promise) Error: message`, as Chromium's console words a

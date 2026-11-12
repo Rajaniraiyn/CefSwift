@@ -20,7 +20,7 @@ extension SelfTest {
             CefRuntime.shared.onBrowserCreated = nil
         }
         var options = CefBrowserOptions()
-        options.profile = .persistent(name: "SelfTest Tabs")
+        options.profile = .persistent(id: "selftest-tabs", displayName: "SelfTest Tabs")
         let page = "data:text/html,<title>links</title><a href='selftest://app/second.html' "
             + "style='display:block;width:300px;height:100px'>second</a>"
         let browser = CefBrowser(url: URL(string: page)!, options: options)

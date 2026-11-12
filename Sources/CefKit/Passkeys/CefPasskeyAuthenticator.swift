@@ -183,7 +183,15 @@ final class CefPasskeyAuthenticator {
         let frame = event["callFrames"][0]
         let kind = (event["hitBreakpoints"].arrayValue ?? []).compactMap { $0.stringValue.flatMap { breakpointKinds[$0] } }.first
         let contextID = scriptContexts[frame["location"]["scriptId"].stringValue ?? ""]
-        if kind == nil, holdScripts.contains(frame["location"]["scriptId"].stringValue ?? "") {
+        let isHold = kind == nil && holdScripts.contains(frame["location"]["scriptId"].stringValue ?? "")
+        // A pause of someone else's, such as a breakpoint or a `debugger`
+        // statement, belongs to whoever else debugs the page: the app,
+        // holding its own lease on the Debugger domain, or the DevTools
+        // window. Only when nobody does would it stop the page for good.
+        if kind == nil, !isHold, devTools.leaseCount("Debugger") > 1 || browser?.isShowingDevTools == true {
+            return
+        }
+        if isHold {
             // A document is starting. Its main-world context was reported
             // before this pause; arm it, and any other not armed yet, while
             // nothing in the page has run.
@@ -201,8 +209,6 @@ final class CefPasskeyAuthenticator {
                 hasUserGesture: gesture?["result"]["value"].boolValue ?? false)
             await prepare(for: request)
         }
-        // Anything else that stops the page, such as a `debugger`
-        // statement, is not CefKit's to hold.
         _ = try? await devTools.send("Debugger.resume")
     }
 

@@ -119,7 +119,7 @@ extension SelfTest {
         // Chromium downloads only from network schemes, so these come from a
         // local server.
         guard let server = try? await LocalServer.start() else {
-            print("SKIP download: could not start a local HTTP server")
+            print("SKIP [environment] download: could not start a local HTTP server")
             return
         }
         defer { server.stop() }
@@ -135,14 +135,14 @@ extension SelfTest {
 
         browser.load(URL(string: "http://127.0.0.1:\(server.port)/report.txt")!)
         check("download: attachment is saved where the delegate says", await waitUntil {
-            browser.downloads.contains { $0.isComplete && $0.destinationURL?.deletingLastPathComponent().lastPathComponent == directory.lastPathComponent }
+            browser.downloads.contains { $0.state == .completed && $0.destinationURL?.deletingLastPathComponent().lastPathComponent == directory.lastPathComponent }
         }, detail: "\(browser.downloads)")
         check("download: page stays put", browser.title == "tab")
 
         recorder.downloadDestination = nil
         browser.load(URL(string: "http://127.0.0.1:\(server.port)/denied.txt")!)
         check("download: denied download is cancelled", await waitUntil {
-            browser.downloads.contains { $0.url?.lastPathComponent == "denied.txt" && $0.isCancelled }
+            browser.downloads.contains { $0.url?.lastPathComponent == "denied.txt" && $0.state == .cancelled }
         }, detail: "\(browser.downloads)")
 
         window.close()
@@ -189,7 +189,7 @@ extension SelfTest {
 
     static func authenticationChecks() async {
         guard let server = try? await LocalServer.start() else {
-            print("SKIP authentication: could not start a local HTTP server")
+            print("SKIP [environment] authentication: could not start a local HTTP server")
             return
         }
         defer { server.stop() }
@@ -214,7 +214,7 @@ extension SelfTest {
                   detail: browser.title)
         }
         if recorder.challenges.isEmpty {
-            print("SKIP authentication: CEF does not call credentialFor (Chromium's dialog asks instead)")
+            print("SKIP [limitation] authentication: CEF does not call credentialFor (Chromium's dialog asks instead)")
         } else {
             check("authentication: delegate answers the challenge", await waitUntil { browser.title == "authorized" })
         }

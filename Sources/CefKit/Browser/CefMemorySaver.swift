@@ -5,7 +5,7 @@ import Foundation
 /// as ``CefRuntime/memorySaver``.
 ///
 /// ```swift
-/// CefRuntime.shared.memorySaver = .after(.minutes(30))     // and under memory pressure
+/// CefRuntime.shared.memorySaver = .after(.seconds(30 * 60))     // and under memory pressure
 /// CefRuntime.shared.memorySaver = .underMemoryPressure     // only when macOS runs low
 /// CefRuntime.shared.memorySaver = .off                     // the default
 /// ```

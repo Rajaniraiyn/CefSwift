@@ -325,7 +325,11 @@ public final class CefBrowser: Identifiable {
     @ObservationIgnored var initialURL: URL?
     @ObservationIgnored private(set) var isBootstrapping = false
     @ObservationIgnored private var passkeyAuthenticator: CefPasskeyAuthenticator?
-    @ObservationIgnored private var readyWaiters: [CheckedContinuation<Void, Error>] = []
+    /// Calls waiting for ``ready()``.
+    @ObservationIgnored private let readyWaiters = CefPendingOperations<Void>()
+    /// Delegate decisions waiting for an answer; see ``decide(_:_:then:)``.
+    @ObservationIgnored private var pendingDecisions: [Int: PendingDecision] = [:]
+    @ObservationIgnored private var nextDecisionID = 0
     @ObservationIgnored var downloadControls: [UInt32: CefRef<cef_download_item_callback_t>] = [:]
     @ObservationIgnored private(set) var isChromeStyle = false
     @ObservationIgnored private(set) var isEmbeddedView = false
@@ -335,7 +339,7 @@ public final class CefBrowser: Identifiable {
     /// moved on since its checks ran.
     @ObservationIgnored var navigationGeneration = 0
     /// Calls waiting for a discarded browser to load its page again.
-    @ObservationIgnored var restoreWaiters: [CheckedContinuation<Void, Error>] = []
+    @ObservationIgnored let restoreWaiters = CefPendingOperations<Void>()
     /// Commands that arrived while the browser was discarded, run once its
     /// page has loaded again.
     @ObservationIgnored var commandsAfterRestore: [@MainActor () -> Void] = []
@@ -550,9 +554,27 @@ public final class CefBrowser: Identifiable {
         }
     }
 
+    /// Whether the browser's audio is muted.
+    ///
+    /// The value is observable. CEF reports no mute changes, so CefKit
+    /// reads the state back after setting it, when the browser is created
+    /// and at each loading-state change; a change made elsewhere, such as
+    /// with the speaker icon of a Chrome-style tab, shows up then.
+    /// Setting it before the browser is live has no effect.
     public var isAudioMuted: Bool {
-        get { withHost { $0.pointee.is_audio_muted($0) != 0 } ?? false }
-        set { withHost { $0.pointee.set_audio_muted($0, newValue ? 1 : 0) } }
+        get { observedAudioMuted }
+        set {
+            withHost { $0.pointee.set_audio_muted($0, newValue ? 1 : 0) }
+            refreshAudioMuted()
+        }
+    }
+
+    private var observedAudioMuted = false
+
+    /// Reads the mute state back from Chromium.
+    func refreshAudioMuted() {
+        let muted = withHost { $0.pointee.is_audio_muted($0) != 0 } ?? false
+        if muted != observedAudioMuted { observedAudioMuted = muted }
     }
 
     /// Searches the page, or advances to the next match when `text` repeats
@@ -645,15 +667,39 @@ public final class CefBrowser: Identifiable {
                 host.pointee.show_dev_tools(host, &windowInfo, nil, &settings, nil)
             }
         }
+        CefBrowser.refreshDevToolsStates()
     }
 
     public func closeDevTools() {
         withHost { $0.pointee.close_dev_tools($0) }
+        CefBrowser.refreshDevToolsStates()
     }
 
     /// Whether this browser's DevTools window is open.
-    public var isShowingDevTools: Bool {
-        withHost { $0.pointee.has_dev_tools($0) != 0 } ?? false
+    ///
+    /// The value is observable. CEF reports no change, so CefKit reads the
+    /// state back after ``showDevTools(inspecting:)`` and
+    /// ``closeDevTools()``, and whenever any browser, a DevTools window's
+    /// included, is created or closes.
+    public private(set) var isShowingDevTools = false
+
+    /// Reads whether DevTools is open back from Chromium.
+    func refreshDevToolsState() {
+        let showing = withHost { $0.pointee.has_dev_tools($0) != 0 } ?? false
+        if showing != isShowingDevTools { isShowingDevTools = showing }
+    }
+
+    /// Reads every browser's DevTools state back, now and once Chromium
+    /// has finished opening or closing a DevTools window.
+    static func refreshDevToolsStates() {
+        let refresh = { CefRuntime.shared.browsers.forEach { $0.refreshDevToolsState() } }
+        refresh()
+        Task {
+            await Task.yield()
+            refresh()
+            try? await Task.sleep(for: .milliseconds(250))
+            refresh()
+        }
     }
 
     // MARK: Chrome commands
@@ -711,7 +757,10 @@ public final class CefBrowser: Identifiable {
     /// handler may ask the user to stay.
     public func close(force: Bool = false) {
         guard raw != nil else {
-            if state == .pending { state = .closed }
+            // Not created yet, or Chromium is still creating it: it closes
+            // now, and a browser Chromium finishes creating after this
+            // closes at once (`CefBrowserClient.wrapper(adopting:)`).
+            if state == .pending { handleClosed() }
             // Discarded by closing its Chromium browser: nothing is left
             // to close.
             if state == .live, isDiscarded { handleClosed() }
@@ -747,23 +796,36 @@ public final class CefBrowser: Identifiable {
     /// may be showing its own sign-in window for it.
     @ObservationIgnored private var signInPromptURL: URL?
 
-    /// Suspends until the browser exists in Chromium, restoring it first if
-    /// it is discarded. Throws if it closes first.
+    /// Suspends until the browser exists in Chromium and has set up what
+    /// its page relies on (passkeys, and after a discard the DevTools
+    /// domains enabled before), restoring it first if it is discarded.
+    ///
+    /// Throws ``CefError/browserClosed`` if the browser closes first, and
+    /// `CancellationError` if the calling task is cancelled.
     public func ready() async throws {
-        // A browser created again after a discard sets itself up through
-        // the DevTools protocol before its page loads; only that waits for
-        // nothing more.
-        if isDiscarded, !(isBootstrapping && raw != nil) {
+        // The set-up itself runs while the browser is not ready yet, and
+        // needs only the native browser.
+        if Self.settingUp == id {
+            guard state == .live, raw != nil else { throw CefError.browserClosed }
+            return
+        }
+        if isDiscarded {
             restore()
-            try await withCheckedThrowingContinuation { restoreWaiters.append($0) }
+            try await restoreWaiters.wait()
         }
         switch state {
-        case .live: return
+        case .live where !isBootstrapping: return
         case .closed: throw CefError.browserClosed
-        case .pending:
-            try await withCheckedThrowingContinuation { readyWaiters.append($0) }
+        case .pending, .live:
+            try await readyWaiters.wait()
         }
     }
+
+    /// Whether the browser is setting itself up before its first page.
+    @_spi(Testing) public var isSettingUp: Bool { isBootstrapping }
+
+    /// The browser whose set-up (`bootstrap()`) the current task runs.
+    @TaskLocal static var settingUp: ObjectIdentifier?
 
     /// The NSView Chromium created for a windowed browser.
     public var nativeView: NSView? {
@@ -954,7 +1016,8 @@ extension CefBrowser {
         if started == 0 { creationFailed() }
     }
 
-    private func creationFailed() {
+    func creationFailed() {
+        client?.cancelCreation()
         client = nil
         discardPhase = .none
         handleClosed()
@@ -975,9 +1038,9 @@ extension CefBrowser {
         let isRestoring = isDiscarded
         state = .live
         CefRuntime.shared.register(self)
-        readyWaiters.forEach { $0.resume() }
-        readyWaiters = []
+        if !isBootstrapping { readyWaiters.completeAll(.success(())) }
         refreshZoomLevel()
+        refreshAudioMuted()
         applyInitialAccessibilityState()
         // A host that could not be seen when it asked for the browser told
         // nobody: Chromium creates offscreen browsers visible.
@@ -1023,15 +1086,17 @@ extension CefBrowser {
     /// accessibility state and passkeys. Bridges and user scripts travel
     /// with the browser's creation instead.
     private func bootstrap() async {
-        if isDiscarded {
-            await devTools.enableDomainsAgain()
-            reassertAccessibilityState()
+        await Self.$settingUp.withValue(id) {
+            if isDiscarded {
+                await devTools.enableDomainsAgain()
+                reassertAccessibilityState()
+            }
+            if !options.passkeys.isChromium { await startPasskeys() }
         }
-        if !options.passkeys.isChromium { await startPasskeys() }
         isBootstrapping = false
-        if let initialURL, state == .live {
-            load(initialURL)
-        }
+        guard state == .live else { return }
+        if let initialURL { load(initialURL) }
+        readyWaiters.completeAll(.success(()))
     }
 }
 
@@ -1040,6 +1105,7 @@ extension CefBrowser {
 extension CefBrowser {
     func mainFrameDidStartLoading(_ url: URL?) {
         guard !isBootstrapping else { return }
+        cancelDecisions { $0 == .page }
         pageScripting.mainFrameDidStartLoading()
         let wasDiscarded = isDiscarded
         pageDidStartLoading()
@@ -1069,6 +1135,7 @@ extension CefBrowser {
         if !isLoading { estimatedProgress = 1 }
         // Chromium restores each site's own zoom level as it navigates.
         refreshZoomLevel()
+        refreshAudioMuted()
         if !isLoading { pageDidFinishLoading() }
     }
 
@@ -1121,7 +1188,8 @@ extension CefBrowser {
         } else {
             downloads.append(download)
         }
-        downloadControls[download.id] = (download.isComplete || download.isCancelled) ? nil : control
+        // Kept while the download can go on, paused or interrupted included.
+        downloadControls[download.id] = download.state.isFinished ? nil : control
         delegate?.browser(self, downloadDidUpdate: download)
     }
 
@@ -1149,14 +1217,59 @@ extension CefBrowser {
         return true
     }
 
+    /// What a pending delegate decision belongs to, which decides when it
+    /// stops mattering.
+    enum DecisionScope: Equatable {
+        /// The current page: ends when the main frame starts loading
+        /// another document.
+        case page
+        /// A JavaScript dialog: ends when Chromium resets dialog state.
+        case dialog
+        /// A permission prompt: ends when Chromium dismisses the prompt.
+        case permissionPrompt(UInt64)
+        /// The browser: ends when it closes.
+        case browser
+    }
+
+    struct PendingDecision {
+        var scope: DecisionScope
+        var task: Task<Void, Never>
+    }
+
     /// Asks the delegate an asynchronous question and applies the answer.
+    ///
+    /// Every decision also ends when the browser closes. A decision that
+    /// ends first has its task cancelled (so the default sheets dismiss
+    /// themselves) and its answer is never applied; `apply` and what it
+    /// holds, such as CEF's callback, are released when the delegate
+    /// returns, which tells CEF the request was not answered.
     func decide<Decision: Sendable>(
+        _ scope: DecisionScope,
         _ ask: @escaping @MainActor (CefBrowserDelegate) async -> Decision,
         then apply: @escaping @MainActor (Decision) -> Void
     ) {
         let delegate = delegate ?? CefDefaultBrowserDelegate.shared
-        Task { apply(await ask(delegate)) }
+        nextDecisionID += 1
+        let id = nextDecisionID
+        // Runs after this returns, so the decision is registered first.
+        let task = Task {
+            let decision = await ask(delegate)
+            guard pendingDecisions.removeValue(forKey: id) != nil else { return }
+            apply(decision)
+        }
+        pendingDecisions[id] = PendingDecision(scope: scope, task: task)
     }
+
+    /// Ends the pending decisions whose scope matches.
+    func cancelDecisions(where matches: (DecisionScope) -> Bool) {
+        for (id, decision) in pendingDecisions where matches(decision.scope) {
+            pendingDecisions[id] = nil
+            decision.task.cancel()
+        }
+    }
+
+    /// How many delegate decisions are waiting for an answer.
+    @_spi(Testing) public var pendingDecisionCount: Int { pendingDecisions.count }
 
     func handleClosed() {
         guard state != .closed else { return }
@@ -1168,20 +1281,20 @@ extension CefBrowser {
         isDiscarded = false
         discardSnapshot = nil
         commandsAfterRestore = []
-        restoreWaiters.forEach { $0.resume(throwing: CefError.browserClosed) }
-        restoreWaiters = []
+        restoreWaiters.completeAll(.failure(CefError.browserClosed))
         state = .closed
         isLoading = false
         canGoBack = false
         canGoForward = false
+        isShowingDevTools = false
         downloadControls = [:]
         passkeyAuthenticator?.stop()
         passkeyAuthenticator = nil
         accessibilityDidClose()
+        cancelDecisions { _ in true }
         devTools.invalidate()
         pageScripting.failPendingEvaluations()
-        readyWaiters.forEach { $0.resume(throwing: CefError.browserClosed) }
-        readyWaiters = []
+        readyWaiters.completeAll(.failure(CefError.browserClosed))
         delegate?.browserDidClose(self)
         raw = nil
         client = nil

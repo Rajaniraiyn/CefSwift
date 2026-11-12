@@ -597,7 +597,7 @@ private final class PageOverlayView: NSView {
 
 /// Owner of a `cef_browser_view_delegate_t`. Popups opened from the view get
 /// a delegate of their own showing Chrome's location bar.
-private final class BrowserViewDelegate: @unchecked Sendable {
+final class BrowserViewDelegate: @unchecked Sendable {
     let toolbar: CefBrowserWindow.Toolbar
     /// The window whose page may open popups; UI thread only.
     private weak var window: CefBrowserWindow?
@@ -630,12 +630,13 @@ private final class BrowserViewDelegate: @unchecked Sendable {
                 let hosted = owner.window?.onPopup != nil
                 return CefRef(adopting: BrowserViewDelegate(
                     toolbar: hosted ? owner.toolbar : .location, window: nil).makeDelegate())
-            }.detach()
+            }.retainedPointer()
         }
         d.pointee.on_popup_browser_view_created = { s, view, popupView, isDevTools in
             cefRelease(view)
-            guard isDevTools == 0, let popupView = CefRef(adopting: popupView),
-                  let owner = cefOwner(BrowserViewDelegate.self, s)
+            // Adopted before anything can return early.
+            let popupView = CefRef(adopting: popupView)
+            guard isDevTools == 0, let popupView, let owner = cefOwner(BrowserViewDelegate.self, s)
             else { return 0 }
             // Non-zero tells CEF the app is giving the popup a window.
             return MainActor.assumeIsolated { owner.window?.adoptPopup(popupView) == true ? 1 : 0 }
