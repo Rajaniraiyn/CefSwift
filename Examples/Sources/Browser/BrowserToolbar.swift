@@ -85,26 +85,30 @@ struct PageSymbol: View {
     let url: URL?
 
     var body: some View {
-        Image(systemName: BrowserPages.isInternal(url) ? "gearshape" : "globe")
+        Image(systemName: BrowserPages.isStartPage(url) ? "square.grid.2x2" : BrowserPages.isInternal(url) ? "gearshape" : "globe")
             .font(.system(size: 12))
             .foregroundStyle(.secondary)
     }
 }
 
 /// The address field. Shows where you are — the site, its security, load
-/// progress — and becomes an editable location field when clicked.
+/// progress — and becomes an editable location field when clicked, with
+/// suggestions as you type.
 struct AddressBar: View {
     let browser: CefBrowser
     let controller: BrowserController
     let isPrivate: Bool
 
     @State private var text = ""
+    @State private var suggestions = AddressSuggestions()
     @FocusState private var isFocused: Bool
 
     var body: some View {
         HStack(spacing: 6) {
             if isPrivate {
                 Label("Private", systemImage: "hand.raised.fill")
+                    .labelStyle(.titleAndIcon)
+                    .fixedSize()
                     .font(.caption.weight(.semibold))
                     .padding(.horizontal, 7)
                     .padding(.vertical, 2)
@@ -132,6 +136,11 @@ struct AddressBar: View {
                     .allowsHitTesting(false)
                 }
             }
+            if !isFocused, BrowserLibrary.canBookmark(browser.url) {
+                BookmarkButton(isBookmarked: controller.library.isBookmarked(browser.url)) {
+                    controller.library.toggleBookmark(for: browser)
+                }
+            }
             if !isFocused, browser.url != nil {
                 Button(browser.isLoading ? "Stop" : "Reload", systemImage: browser.isLoading ? "xmark" : "arrow.clockwise") {
                     if browser.isLoading { browser.stopLoading() } else { browser.reload() }
@@ -151,17 +160,32 @@ struct AddressBar: View {
                 .padding(-2)
         }
         .overlay(alignment: .bottomLeading) { progress }
+        .background(ViewAnchor { suggestions.anchor = $0 })
         .contentShape(.rect)
         .onTapGesture { isFocused = true }
         .animation(.easeOut(duration: 0.15), value: isFocused)
+        .onAppear {
+            suggestions.setFieldText = { [$text] in $text.wrappedValue = $0 }
+            suggestions.choose = { [browser, controller, $isFocused] suggestion in
+                $isFocused.wrappedValue = false
+                Self.open(suggestion, in: browser, controller: controller)
+            }
+        }
         .onChange(of: browser.url, initial: true) {
             if !isFocused { text = Self.editableText(for: browser.url) }
         }
+        .onChange(of: text) {
+            guard isFocused else { return }
+            suggestions.fieldTextChanged(
+                to: text, profile: browser.options.profile ?? .default, currentURL: browser.url)
+        }
         .onChange(of: isFocused) { _, focused in
             guard focused else {
+                suggestions.endEditing()
                 text = Self.editableText(for: browser.url)
                 return
             }
+            suggestions.beginEditing(profile: browser.options.profile ?? .default)
             // Select the whole address so typing replaces it, as Safari does.
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                 NSApp.sendAction(#selector(NSText.selectAll(_:)), to: nil, from: nil)
@@ -192,10 +216,20 @@ struct AddressBar: View {
         browser.load(destination)
     }
 
+    /// Goes where a suggestion leads: an open tab is brought forward, a
+    /// search runs on the browser's search engine, a page opens.
+    static func open(_ suggestion: CefAutocompleteSuggestion, in browser: CefBrowser, controller: BrowserController) {
+        if suggestion.kind == .openTab, let url = suggestion.url, controller.switchToTab(showing: url) { return }
+        let destination = suggestion.isSearch ? searchURL(for: suggestion.text) : suggestion.url
+        if let destination = destination ?? Self.destination(for: suggestion.replacementText) {
+            browser.load(destination)
+        }
+    }
+
     /// What the field shows when not editing: the site's host, or the
     /// title of an internal page.
     static func summary(of browser: CefBrowser) -> String {
-        guard let url = browser.url, url.absoluteString != "about:blank" else { return "" }
+        guard let url = browser.url, url.absoluteString != "about:blank", !BrowserPages.isStartPage(url) else { return "" }
         if BrowserPages.isInternal(url) { return browser.title.isEmpty ? url.absoluteString : browser.title }
         guard let host = url.host(), url.scheme == "https" || url.scheme == "http" else { return url.absoluteString }
         return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
@@ -203,7 +237,7 @@ struct AddressBar: View {
 
     /// What the field shows while editing: the full address.
     static func editableText(for url: URL?) -> String {
-        guard let url, url.absoluteString != "about:blank" else { return "" }
+        guard let url, url.absoluteString != "about:blank", !BrowserPages.isStartPage(url) else { return "" }
         return url.absoluteString
     }
 
@@ -219,10 +253,45 @@ struct AddressBar: View {
            let url = URL(string: "https://\(trimmed)") {
             return url
         }
+        return searchURL(for: trimmed)
+    }
+
+    /// A web search for `query`. Suggested searches use it too, so every
+    /// search goes to the same engine whatever Chromium's own default is.
+    static func searchURL(for query: String) -> URL? {
         var search = URLComponents(string: "https://duckduckgo.com/")!
-        search.queryItems = [URLQueryItem(name: "q", value: trimmed)]
+        search.queryItems = [URLQueryItem(name: "q", value: query)]
         return search.url
     }
+}
+
+/// The star in the address field: filled when the page is bookmarked.
+private struct BookmarkButton: View {
+    let isBookmarked: Bool
+    let toggle: () -> Void
+
+    var body: some View {
+        Button(isBookmarked ? "Remove Bookmark" : "Add Bookmark", systemImage: isBookmarked ? "star.fill" : "star", action: toggle)
+            .labelStyle(.iconOnly)
+            .buttonStyle(.borderless)
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(isBookmarked ? AnyShapeStyle(.yellow) : AnyShapeStyle(.secondary))
+            .help(isBookmarked ? "Remove Bookmark (⌘D)" : "Add Bookmark (⌘D)")
+    }
+}
+
+/// Hands over the AppKit view behind a SwiftUI view, for positioning
+/// windows against it.
+private struct ViewAnchor: NSViewRepresentable {
+    let found: (NSView) -> Void
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async { found(view) }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {}
 }
 
 /// The connection's security, as the address field shows it.
@@ -233,6 +302,7 @@ enum SiteSecurity {
         switch url?.scheme {
         case "https": self = .secure
         case "http": self = .notSecure
+        case _ where BrowserPages.isStartPage(url): return nil
         case _ where BrowserPages.isInternal(url): self = .app
         default: return nil
         }

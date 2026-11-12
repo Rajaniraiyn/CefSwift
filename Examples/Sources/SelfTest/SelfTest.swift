@@ -222,6 +222,16 @@ enum SelfTest {
         check("profile: configured preference reaches new profiles", await waitUntil {
             isolated.preference("webkit.webprefs.default_font_size")?.intValue == 21
         })
+
+        // Scheme handlers registered with CefRuntime serve every profile.
+        var options = CefBrowserOptions()
+        options.profile = isolated
+        let privateWindow = CefBrowserWindow(
+            browser: CefBrowser(url: URL(string: "selftest://app/second.html")!, options: options))
+        check("profile: custom scheme serves an incognito profile",
+              await waitUntil { privateWindow.browser.title == "second" }, detail: privateWindow.browser.title)
+        privateWindow.close()
+        _ = await waitUntil { privateWindow.isClosed }
     }
 
     static func browserWindowChecks() async {
@@ -328,6 +338,7 @@ enum SelfTest {
             (try? await history.mostVisited().contains { $0.url == visitedURL }) == true
         })
 
+        await profile.autocomplete.prepare()
         await expect("autocomplete: bookmark ranked for a title prefix") {
             let suggestions = try await profile.autocomplete.suggestions(for: "CefSwift Zanzib")
             return suggestions.contains { $0.kind == .bookmark && $0.url == bookmarkURL && $0.isBookmarked }

@@ -94,6 +94,13 @@ public final class CefAutocomplete {
         ).decode([MatchRecord]?.self)?.map(CefAutocompleteSuggestion.init) ?? []
     }
 
+    /// Starts the service behind ``suggestions(for:currentURL:allowsInlineCompletion:)``
+    /// ahead of the first query, which otherwise waits for it — call it
+    /// when an address bar begins editing.
+    public func prepare() async {
+        try? await service.start()
+    }
+
     /// Binds an own `mojom.OmniboxPageHandler` and collects the debug
     /// controller's final response for the latest query.
     private static let setup = """

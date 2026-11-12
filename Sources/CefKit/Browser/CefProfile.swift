@@ -219,8 +219,40 @@ public final class CefProfile {
                 ? nil
                 : ContextHandler { [weak self] in self?.applyConfigured(preferences) }.makeHandler()
             context = CefRef(adopting: cef_request_context_create_context(&settings, handler))
+            // Scheme handlers registered with CefRuntime reach only the
+            // global context by themselves.
+            Self.profilesWithOwnContext.append(WeakProfile(profile: self))
+            for handler in CefRuntime.shared.schemeHandlers { register(handler) }
         }
         return context
+    }
+
+    private struct WeakProfile {
+        weak var profile: CefProfile?
+    }
+
+    private static var profilesWithOwnContext: [WeakProfile] = []
+
+    /// Adds a scheme handler registered with ``CefRuntime`` to every
+    /// profile that has a request context of its own.
+    static func registerSchemeHandler(_ handler: CefRuntime.RegisteredSchemeHandler) {
+        profilesWithOwnContext.removeAll { $0.profile == nil }
+        for entry in profilesWithOwnContext { entry.profile?.register(handler) }
+    }
+
+    private func register(_ handler: CefRuntime.RegisteredSchemeHandler) {
+        guard let context = context?.pointer, let register = context.pointee.register_scheme_handler_factory else { return }
+        // Registration consumes the factory reference.
+        let factory = handler.factory.makeFactory()
+        let registered = CefStringUtil.withCefString(handler.scheme) { scheme in
+            if let domain = handler.domain {
+                return CefStringUtil.withCefString(domain) { register(context, scheme, $0, factory) }
+            }
+            return register(context, scheme, nil, factory)
+        }
+        if registered == 0 {
+            CefLog.error("register_scheme_handler_factory failed for scheme '\(handler.scheme)'")
+        }
     }
 
     private func applyConfigured(_ preferences: [String: CefJSON]) {

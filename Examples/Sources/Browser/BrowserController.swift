@@ -7,19 +7,37 @@ import SwiftUI
 @MainActor
 @Observable
 final class BrowserController: CefBrowserDelegate {
-    static let defaultHomePage = "https://duckduckgo.com"
+    static let defaultNewTabPage = BrowserPages.start.absoluteString
     static let tabbingIdentifier = "browser"
 
     private(set) var windows: [CefBrowserWindow] = []
 
     /// The browser in the frontmost tab.
-    var current: CefBrowser? {
-        windows.first { $0.window?.isKeyWindow == true }?.browser ?? windows.last?.browser
+    var current: CefBrowser? { keyBrowser ?? windows.last?.browser }
+
+    /// The browser whose window is key, tracked so that views and menus
+    /// depending on the frontmost tab update when it changes.
+    private var keyBrowser: CefBrowser?
+
+    /// Where new tabs open: the start page unless the Settings say otherwise.
+    private var newTabPage: URL {
+        URL(string: UserDefaults.standard.string(forKey: "newTabPage") ?? Self.defaultNewTabPage)
+            ?? BrowserPages.start
     }
 
-    private var homePage: URL {
-        URL(string: UserDefaults.standard.string(forKey: "homePage") ?? Self.defaultHomePage)
-            ?? URL(string: Self.defaultHomePage)!
+    /// Bookmarks and history, shared by every tab, menu and the start page.
+    let library = BrowserLibrary()
+
+    init() {
+        NotificationCenter.default.addObserver(
+            forName: NSWindow.didBecomeKeyNotification, object: nil, queue: .main
+        ) { [weak self] notification in
+            let window = notification.object as? NSWindow
+            MainActor.assumeIsolated {
+                guard let self, let match = self.windows.first(where: { $0.window === window }) else { return }
+                self.keyBrowser = match.browser
+            }
+        }
     }
 
     @discardableResult
@@ -32,6 +50,7 @@ final class BrowserController: CefBrowserDelegate {
         let isPrivate = profile !== CefProfile.default
         options.profile = profile
         options.userScripts = Self.internalPageStyles
+        options.bridges = [library.startPageBridge]
         options.contextMenu.showsInspectElement = true
         options.contextMenu.hiddenCommands = [.viewSource]
         options.contextMenu.items = [
@@ -42,10 +61,12 @@ final class BrowserController: CefBrowserDelegate {
                 browser.execute(.createQRCode)
             },
         ]
-        let browser = CefBrowser(url: url ?? homePage, options: options, delegate: self)
+        let browser = CefBrowser(url: url ?? newTabPage, options: options, delegate: self)
 
         var configuration = CefBrowserWindow.Configuration()
         configuration.tabbingIdentifier = Self.tabbingIdentifier
+        // Titled by mirrorTabTitle(of:), which names blank tabs "New Tab".
+        configuration.titleFollowsPage = false
         configuration.frame = windows.last?.window?.frame
         let window = CefBrowserWindow(browser: browser, configuration: configuration)
         window.setToolbar {
@@ -63,8 +84,10 @@ final class BrowserController: CefBrowserDelegate {
         PopupPresenter.hostPopups(of: window)
         window.onClose = { [weak self, weak window] in
             self?.windows.removeAll { $0 === window }
+            if self?.keyBrowser === browser { self?.keyBrowser = nil }
         }
         windows.append(window)
+        mirrorTabTitle(of: window)
 
         // Join the frontmost browser window's tab group.
         let group = NSApp.keyWindow?.tabbingIdentifier == Self.tabbingIdentifier
@@ -78,10 +101,49 @@ final class BrowserController: CefBrowserDelegate {
         return browser
     }
 
+    /// Opens `url` in the frontmost tab, as Safari's menus do.
+    func openInFrontmostTab(_ url: URL) {
+        if let current { current.load(url) } else { openTab(url: url) }
+    }
+
+    /// Brings the tab showing `url` to the front, if there is one.
+    @discardableResult
+    func switchToTab(showing url: URL) -> Bool {
+        guard let match = windows.first(where: { $0.browser.url == url })?.window else { return false }
+        match.makeKeyAndOrderFront(nil)
+        return true
+    }
+
+    /// Keeps a tab's title in step with its page. Blank pages — a new tab,
+    /// a link opened with `window.open()` — are titled "New Tab" rather than
+    /// Chromium's "about:blank".
+    private func mirrorTabTitle(of window: CefBrowserWindow) {
+        guard !window.isClosed else { return }
+        let title = withObservationTracking {
+            Self.tabTitle(for: window.browser)
+        } onChange: { [weak self, weak window] in
+            Task { @MainActor in if let window { self?.mirrorTabTitle(of: window) } }
+        }
+        window.window?.title = title
+    }
+
+    static func tabTitle(for browser: CefBrowser) -> String {
+        guard let url = browser.url, url.absoluteString != "about:blank" else { return "New Tab" }
+        let title = browser.title
+        guard !title.isEmpty, title != url.absoluteString else { return url.host() ?? url.absoluteString }
+        return title
+    }
+
     /// Trims Chromium's settings to what this browser supports. Its About
     /// entry is replaced by the app's own page; sign-in, sync, "default
-    /// browser" and the updater do not exist in an embedded Chromium. The
-    /// rules apply inside the settings components' shadow roots.
+    /// browser" and the updater do not exist in an embedded Chromium; and
+    /// the Appearance options for Chrome's own toolbar, tab strip, bookmarks
+    /// bar and side panel have nothing to act on under the SwiftUI toolbar.
+    /// The rules apply inside each settings component's shadow root, so a
+    /// selector cannot reach from a component into another's (write
+    /// `#themeRow`, not `settings-appearance-page #themeRow`). Rows are
+    /// matched by their id or by the preference they edit (`pref-key`),
+    /// which are stabler than their position.
     private static let internalPageStyles: [CefUserScript] = [
         .styleSheet(
             """
@@ -90,7 +152,22 @@ final class BrowserController: CefBrowserDelegate {
             /* Their pages: Google sign-in and sync; making this the default browser. */
             settings-people-page-index, settings-default-browser-page,
             /* About page leftovers, should it be reached directly. */
-            settings-about-page #updateStatusMessage, settings-about-page #relaunch
+            settings-about-page #updateStatusMessage, settings-about-page #relaunch,
+            /* Appearance: Chrome themes and toolbar customization. */
+            #themeRow, #toolbarRow,
+            /* Home button, bookmarks bar, tab position, and their separators. */
+            settings-toggle-button[pref-key="browser.show_home_button"],
+            div.hr:has(+ settings-toggle-button[pref-key="browser.show_home_button"]),
+            div.hr:has(+ .cr-row > #bookmarksBarVisibilityDropdown),
+            .cr-row:has(> #bookmarksBarVisibilityDropdown), .cr-row:has(> #tabStripPosition),
+            /* Tab strip buttons and tab groups. */
+            #showEverythingMenuButton, #showTabSearchButton, #showSavedTabGroups, #autoPinNewTabGroups,
+            /* Side panel position: its heading row and its list. */
+            .cr-row:has(+ .list-frame #sidePanelPosition), .list-frame:has(#sidePanelPosition),
+            /* Tab hover cards and split view belong to Chrome's tab strip. */
+            div.hr:has(+ #hoverCardMemoryUsageToggle), #hoverCardMemoryUsageToggle, #splitViewDragAndDrop,
+            /* The app turns the ⌘Q warning off at every launch. */
+            settings-toggle-button[pref-key="browser.confirm_to_quit"]
             { display: none !important }
             """,
             matching: "chrome://settings/*"),
@@ -128,6 +205,7 @@ final class BrowserController: CefBrowserDelegate {
     // MARK: CefBrowserDelegate
 
     func browser(_ browser: CefBrowser, decidePolicyFor navigation: CefNavigationAction) -> CefNavigationDecision {
+        library.historyMayHaveChanged()
         // Show this app's pages in place of some of Chromium's.
         guard let replacement = BrowserPages.replacement(for: navigation.url) else { return .allow }
         browser.load(replacement)
