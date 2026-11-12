@@ -338,7 +338,7 @@ public final class CefBrowserWindow: Identifiable {
     /// `chromiumSurfaceAnchor(_:alignment:)` modifier sets anchors from
     /// SwiftUI views in your toolbar.
     public var chromiumUI = CefChromiumUI() {
-        didSet { chromiumSurfaces.forEach(place) }
+        didSet { applyChromiumUI() }
     }
 
     /// Decides a surface's presentation as it appears, taking precedence

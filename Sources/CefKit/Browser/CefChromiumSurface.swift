@@ -535,5 +535,28 @@ enum CefSurfaceTracker {
             removeOriginal = unsafeBitCast(imp, to: RemoveChild.self)
         }
         CefObjCHook.require("NativeWidgetMacNSWindow", #selector(NSWindow.sendEvent(_:)))
+
+        // Chromium fades some widgets in by setting their window's alpha
+        // (the status bubble does on every hover), which would undo hiding
+        // them. A hidden surface's window keeps an alpha of 0.
+        let alphaSelector = #selector(setter: NSWindow.alphaValue)
+        var alphaOriginal: SetAlpha?
+        let setAlpha: @convention(block) (NSWindow, CGFloat) -> Void = { window, alpha in
+            let hidden = objc_getAssociatedObject(window, &hiddenKey) != nil
+            alphaOriginal?(window, alphaSelector, hidden ? 0 : alpha)
+        }
+        if let imp = CefObjCHook.override("NativeWidgetMacNSWindow", alphaSelector, expectedTypes: "v@:d", with: setAlpha) {
+            alphaOriginal = unsafeBitCast(imp, to: SetAlpha.self)
+        }
+    }
+
+    private typealias SetAlpha = @convention(c) (NSWindow, Selector, CGFloat) -> Void
+    private nonisolated(unsafe) static var hiddenKey = 0
+
+    /// Keeps `window` transparent, whatever alpha Chromium gives it, or lets
+    /// it be shown again.
+    static func setHidden(_ window: NSWindow, _ hidden: Bool) {
+        objc_setAssociatedObject(window, &hiddenKey, hidden ? NSNumber(value: true) : nil, .OBJC_ASSOCIATION_RETAIN)
+        if hidden { window.alphaValue = 0 }
     }
 }
