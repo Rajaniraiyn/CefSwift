@@ -7,12 +7,16 @@ import CefBase
 /// A frame painted by an offscreen browser.
 ///
 /// A frame is only valid during
-/// ``CefOffscreenHost/offscreenDidPaint(_:element:)``: Chromium reuses the
-/// surface or buffer once the call returns, so display it there and do not
-/// keep it.
+/// ``CefOffscreenHost/offscreenDidPaint(_:element:)``: Chromium paints
+/// later frames into the same surface or buffer once the call returns, so
+/// copy it there and do not keep it.
 public enum CefOffscreenFrame {
-    /// A shared `IOSurface` Chromium rendered into; `size` is in pixels. Set
-    /// it as a layer's `contents`.
+    /// A shared `IOSurface` Chromium rendered into; `size` is in pixels.
+    /// Chromium takes the surface back to its pool when the call returns and
+    /// may render the next frame into it, even while a layer still shows
+    /// it, so copy it into a surface or texture of your own before
+    /// returning (on the GPU, for example with a Metal blit, waiting for the
+    /// copy to complete) and display the copy.
     case accelerated(surface: IOSurfaceRef, size: CGSize)
     /// BGRA pixels, `width * height * 4` bytes with an upper-left origin.
     /// Used only when shared textures are unavailable.

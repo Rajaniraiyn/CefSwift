@@ -368,8 +368,12 @@ open one loads in the same browser instead (see
 
 To draw offscreen frames in a view of your own, adopt `CefOffscreenHost` and
 call `browser.host(offscreenIn:size:)`. The host receives frames, cursors,
-IME ranges, context menus and drags. In return it drives the browser as
-AppKit drives a view:
+IME ranges, context menus and drags. A frame's `IOSurface` comes from
+Chromium's pool and is valid only during the call: Chromium renders later
+frames into it, even while a layer still shows it, so copy it into a
+surface of your own before returning, as `CefOffscreenBrowserView` does
+with a Metal blit (see [Frame ownership](architecture.md#frame-ownership)).
+In return the host drives the browser as AppKit drives a view:
 
 - Lifecycle: `hostViewDidResize()`, `hostViewDidHide()`,
   `hostViewDidUnhide()`, `hostViewDidBecomeKey()`, `hostViewDidResignKey()`,

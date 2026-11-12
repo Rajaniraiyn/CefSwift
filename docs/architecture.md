@@ -158,7 +158,7 @@ in every browser, since Chromium keeps one level per site.
 | Host | Style | How it draws |
 |---|---|---|
 | `CefWebView`, `.windowed` | Alloy | Chromium's native `NSView` as a subview of `CefWindowedBrowserView` |
-| `CefWebView`, `.offscreen` | Alloy | Frames in a shared `IOSurface`, set as layer contents by `CefOffscreenBrowserView`, which forwards input |
+| `CefWebView`, `.offscreen` | Alloy | Frames in a shared `IOSurface`, copied into a surface of its own and set as layer contents by `CefOffscreenBrowserView`, which forwards input |
 | `CefBrowserWindow` | Chrome | A CEF Views window; your toolbar is an `NSToolbar` and your accessory a title-bar accessory view |
 | `CefRuntime.openChromeWindow` | Chrome | Chrome's own window and UI |
 
@@ -270,6 +270,61 @@ The display link matches the timer's rate and pacing and adds latency: a
 mouse move waits for the next refresh, then for the main thread to send
 the request. CefKit keeps Chromium's timer. `Benchmarks.frames()` in
 SelfTest (`-benchmark frames`) measures both on another display.
+
+## Frame ownership
+
+CEF's header says an accelerated frame's `IOSurface` may only be used
+during `on_accelerated_paint` and must be copied into a texture the client
+owns. The Chromium 156 source shows why. CEF's video consumer
+(`libcef/browser/osr/video_consumer_osr.cc`) calls the capturer's `Done()`
+when the callback returns, and viz's `FrameSinkVideoCapturerImpl` keeps
+only the latest frame for resurrection. Its frame pool
+(`RenderableMappableSharedImageVideoFramePool`) keeps up to two returned
+surfaces and hands them out again first-in, first-out, without asking
+whether a window server still shows them. `Stop()`, which runs whenever
+the browser is hidden, releases even the latest one. Chromium therefore
+renders new frames into surfaces it has already delivered.
+
+`CefOffscreenBrowserView` copies each frame on the GPU with a Metal blit
+into an `IOSurface` of its own (`CefOffscreenCompositor`) and waits for
+the copy before the callback returns. That surface becomes the layer's
+contents. A surface is written again only when it is not the layer's
+contents and `IOSurfaceIsInUse` is false: the window server holds a
+replaced surface until it has composited the next refresh, about 11 ms on
+a 60 Hz display, as long as the contents change has no implicit
+animation. The pool holds up to four surfaces of the frame's size. A frame
+that finds none free is dropped, and the view asks Chromium for a new one
+a refresh later. When the view stops being seen, only the surface on
+screen stays. A pixel format Metal cannot wrap is copied on the CPU under
+the surfaces' locks.
+
+`SelfTest`'s `compositor` checks read the frame number a page paints into
+its background from each surface as it becomes the layer's contents, and
+again every 2 ms while it stays there. Presenting Chromium's surfaces
+directly, one surface changed while it was the layer's contents in a
+2-second resize run (1 of 237 frames); with the copies, none did in any
+run. `-benchmark compositor` measures the cost on an M3 MacBook Air
+(60 Hz display, offscreen frame rate 120, 3 s of animation, at least two
+runs each). Surfaces of 1280×800 pixels are a 1280×800 view at 1× (a
+640×400 view on this 2× display); 2560×1600 pixels are a 1280×800 view at
+2× or a 2560×1600 view at 1×; 5120×3200 pixels are a 2560×1600 view at
+2×:
+
+| Surface | Presenting | Frames presented a second | App CPU | Mouse move to presented frame, median / 90th percentile | App memory while animating |
+|---|---|---|---|---|---|
+| 1280×800 | Chromium's surface | 119.4–119.7 | 8–19% | 15–18 / 22–24 ms | +1–6 MB |
+| 1280×800 | Copy | 57–120 | 12–25% | 17–26 / 26–31 ms | +13–64 MB |
+| 2560×1600 | Chromium's surface | 119.4–119.9 | 7–20% | 12–15 / 24–36 ms | +0–1 MB |
+| 2560×1600 | Copy | 58–102 | 13–16% | 20–28 / 31–41 ms | +49–89 MB |
+| 5120×3200 | Chromium's surface | 119.7–120.0 | 6–17% | 15–20 / 20–26 ms | +0 MB |
+| 5120×3200 | Copy | 31–93 | 12–18% | 15–29 / 24–41 ms | +220–297 MB |
+
+The display shows at most 60 of those frames a second. A 5120×3200 copy
+takes 1.5–2.4 ms of GPU time and holds the main thread for 2.6–4.2 ms;
+smaller copies hold it for 1.6–3.4 ms, mostly waiting for completion.
+That wait slows CEF's message loop, so Chromium delivers fewer frames.
+Chromium's surfaces count toward the GPU process, the copies toward the
+app.
 
 ## Offscreen accessibility
 
