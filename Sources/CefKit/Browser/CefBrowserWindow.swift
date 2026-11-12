@@ -655,8 +655,8 @@ final class BrowserViewDelegate: @unchecked Sendable {
 }
 
 /// Owner of a `cef_window_delegate_t`. Callbacks arrive on the UI thread.
-private final class WindowDelegate: @unchecked Sendable {
-    private weak var owner: CefBrowserWindow?
+private final class WindowDelegate: Sendable {
+    private weak let owner: CefBrowserWindow?
 
     @MainActor
     init(owner: CefBrowserWindow) {

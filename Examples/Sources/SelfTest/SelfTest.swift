@@ -19,6 +19,7 @@ enum SelfTest {
     static func main() {
         setvbuf(stdout, nil, _IONBF, 0)
         _ = started
+        SelfTestCleanup.install()
         if isIsolatedParent {
             exit(runIsolated())
         }
@@ -49,6 +50,7 @@ enum SelfTest {
             unsetenv("SELFTEST_STRICT")
         }
         sendJobBeforeStartUp()
+        CefDiagnostics.enableCensus()
         do {
             try CefRuntime.shared.initialize(configuration: configuration)
             if relaunchDirectory != nil {
@@ -176,8 +178,10 @@ enum SelfTest {
             await accessibilityExternalClientSession()
             return
         }
+        let baseline = CefDiagnostics.census()
         for group in selectedGroups {
             await run(group: group.name, group.run)
+            await reportCensus(after: group.name, baseline: baseline)
         }
     }
 

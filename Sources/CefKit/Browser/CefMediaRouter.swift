@@ -188,8 +188,8 @@ public final class CefMediaRouter {
 }
 
 /// Owner of a `cef_media_observer_t`. Callbacks arrive on the UI thread.
-private final class MediaObserver: @unchecked Sendable {
-    private weak var router: CefMediaRouter?
+private final class MediaObserver: Sendable {
+    private weak let router: CefMediaRouter?
 
     @MainActor
     init(router: CefMediaRouter) {
@@ -229,8 +229,8 @@ private final class MediaObserver: @unchecked Sendable {
 }
 
 /// Owner of a `cef_media_route_create_callback_t`.
-private final class RouteCreated: @unchecked Sendable {
-    typealias Completion = @MainActor (cef_media_route_create_result_t, String, CefRef<cef_media_route_t>?) -> Void
+private final class RouteCreated: Sendable {
+    typealias Completion = @MainActor @Sendable (cef_media_route_create_result_t, String, CefRef<cef_media_route_t>?) -> Void
     private let completion: Completion
 
     init(_ completion: @escaping Completion) {

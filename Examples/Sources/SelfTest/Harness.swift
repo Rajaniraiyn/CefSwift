@@ -295,6 +295,8 @@ extension SelfTest {
                 }
             }
             reader.finish()
+            // The child has exited, its helpers with it: its cache goes.
+            SelfTestCleanup.remove(ownedBy: child.processIdentifier)
             failures += reader.failures
             let status = child.terminationStatus
             if outcome == .timedOut {
