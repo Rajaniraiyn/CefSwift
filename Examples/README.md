@@ -1,31 +1,69 @@
 # Examples
 
-Three apps built on CefSwift. Bundle and run one from the repository root:
+Three apps built on CefSwift, in a package of their own that depends on the
+checkout above it. They need macOS 15. Bundle and run one from the
+repository root:
 
 ```sh
 swift package --package-path Examples \
     --allow-writing-to-package-directory --allow-network-connections all \
-    cef bundle --product Browser --output dist
+    cef bundle --product Browser
 open Examples/dist/Browser.app
 ```
 
-| App | Shows |
-|---|---|
-| **Browser** | A tabbed browser: Chrome-style `CefBrowserWindow`s grouped as native tabs, a three-part SwiftUI toolbar with an address field that shows the site and its security and edits the full address, with Chromium-ranked suggestions as you type (↑/↓ to choose, Return to open, Esc to close), a bookmark star (⌘D), Bookmarks and History menus, a start page of frequently visited sites and bookmarks served from `browser://start/` with its data passed through a `CefBridge`, tab icons, the page as an inset card, popups as panels layered over their opener, private tabs, downloads, a customized context menu, `chrome://settings` trimmed of what does nothing in an embedded Chromium (sign-in, default browser, and the Appearance options for Chrome's own toolbar, tab strip and bookmarks bar), an About page of its own in place of Chromium's, and tabs Chromium opens itself shown as its own tabs. `browser://playground/` has popups, a download, a page that asks before leaving and an unreachable site to try. |
-| **Showcase** | Embedding in SwiftUI with the lean `.embedded` configuration: observable browser state, native UI over an offscreen page with a swipe-to-navigate indicator, and a typed JavaScript bridge to a page served from a custom scheme. |
-| **SelfTest** | End-to-end checks against the real Chromium runtime. Prints one line per check, quits through `cef_shutdown()` and exits with the number of failures; CI runs it. |
+## Browser
+
+A tabbed browser (`Sources/Browser`). Each tab is a Chrome-style
+`CefBrowserWindow`, and the tabs are grouped as native macOS tabs.
+
+- A SwiftUI toolbar in three parts. The address field shows the site and its
+  security, edits the full address, and offers Chromium-ranked suggestions
+  as you type: ↑ and ↓ choose, Return opens, Esc closes.
+- A bookmark star (⌘D), Bookmarks and History menus, and a start page at
+  `browser://start/` with frequently visited sites and recent bookmarks,
+  whose data comes through a `CefBridge`.
+- Tab icons, the page as an inset card, and popups as panels layered over
+  the window that opened them.
+- Private tabs, downloads, and a customized context menu.
+- `chrome://settings` without what does nothing in an embedded Chromium
+  (sign-in, default browser, and the Appearance options for Chrome's own
+  toolbar, tab strip and bookmarks bar), and an About page of its own in
+  place of Chromium's.
+- Tabs that Chromium opens itself, shown as the app's own tabs.
+
+`browser://playground/` has popups, a download, a page that asks before
+leaving, and an unreachable site to try.
+
+## Showcase
+
+Embedding web content in SwiftUI with the `.embedded` configuration
+(`Sources/Showcase`). Its sidebar has three demos:
+
+- **Web View**: a windowed browser with observable state.
+- **Native Overlay**: SwiftUI content over an offscreen page, with a
+  swipe-to-navigate indicator.
+- **JavaScript Bridge**: a typed bridge to a page served from a custom
+  scheme.
+
+## SelfTest
+
+End-to-end checks against the real Chromium runtime (`Sources/SelfTest`).
+It prints one line per check, quits through `cef_shutdown()`, and exits with
+the number of failures. CI runs it; [CONTRIBUTING](../CONTRIBUTING.md#verify-with-selftest)
+describes running it locally.
 
 ## Launch arguments
 
-Both apps can start in a given state, for trying things out and for
-automated screenshots:
+Browser and Showcase can start in a given state, for trying things out and
+for automated screenshots. Arguments are read as user defaults
+(`-key value`).
 
 ```sh
-# Showcase: open a demo ("Web View", "Native Overlay", "JavaScript Bridge").
+# Showcase: open a demo ("Web View", "Native Overlay" or "JavaScript Bridge").
 Examples/dist/Showcase.app/Contents/MacOS/Showcase -demo "JavaScript Bridge"
 
 # Browser: open tabs, run JavaScript in the last one once it has loaded,
-# start editing the address, force an appearance.
+# start editing the address, and force an appearance.
 Examples/dist/Browser.app/Contents/MacOS/Browser \
     -urls "https://swift.org browser://playground/" \
     -evaluate "openPopup()" -focusAddressBar YES -appearance dark
@@ -35,5 +73,14 @@ Examples/dist/Browser.app/Contents/MacOS/Browser \
 Examples/dist/Browser.app/Contents/MacOS/Browser -private YES -addressBarText swift
 ```
 
-`-evaluate` takes a script that does not start with `(` (Cocoa would read
-that as a list); prefix such a script with `void `.
+| Browser argument | Effect |
+|---|---|
+| `-urls "<url> <url> …"` | Opens each as a tab. |
+| `-evaluate "<script>"` | Runs JavaScript in the last tab once it has loaded. |
+| `-focusAddressBar YES` | Starts with the address field editing. |
+| `-addressBarText <text>` | Starts editing with that text typed. |
+| `-private YES` | Opens the tabs as private tabs. |
+| `-appearance light\|dark\|system` | Overrides the appearance setting. |
+
+Cocoa reads a value that starts with `(` as a list, so prefix such a script
+with `void `.

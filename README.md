@@ -1,10 +1,39 @@
 # CefSwift
 
-Chromium for Swift apps on macOS, built on the [Chromium Embedded Framework](https://github.com/chromiumembedded/cef).
-Embed a web view in SwiftUI, or build a complete browser — with an API that
-reads like the rest of your Swift code.
+CefSwift brings Chromium to Swift apps on macOS, built on the
+[Chromium Embedded Framework](https://github.com/chromiumembedded/cef) (CEF).
+Use it to show web content in a SwiftUI or AppKit app, or to build a tabbed
+browser with Chrome's own settings, extensions, history and password manager
+under a toolbar you write in SwiftUI.
 
 ![The Browser example](docs/images/browser.png)
+
+CefSwift is pre-1.0; its API can change between releases.
+
+## Quick start
+
+### Add the package
+
+```swift
+// Package.swift
+let package = Package(
+    name: "MyApp",
+    platforms: [.macOS(.v14)],
+    dependencies: [
+        .package(url: "https://github.com/Rajaniraiyn/CefSwift", branch: "main"),
+    ],
+    targets: [
+        .executableTarget(name: "MyApp", dependencies: [
+            .product(name: "CefSwiftUI", package: "CefSwift"),
+        ]),
+    ]
+)
+```
+
+`CefSwiftUI` re-exports `CefKit`, the core library. Depend on `CefKit` alone
+only if you host browsers without the views `CefSwiftUI` provides.
+
+### Show a web page
 
 ```swift
 import CefSwiftUI
@@ -20,89 +49,144 @@ struct MyApp: CefSwiftApp {
 }
 ```
 
-## What you get
+`CefSwiftApp` takes the place of `App`: it starts Chromium before SwiftUI
+runs.
 
-- **`CefBrowser`** — an `@Observable` model of one browser. Bind SwiftUI to
-  `title`, `url`, `isLoading`, `estimatedProgress`, `downloads`; call
-  `load`, `goBack`, `find`, `printToPDF`, `snapshot`.
-- **`CefWebView`** — shows a browser in SwiftUI. Render *windowed* (Chromium's
-  native view) or *offscreen* (a layer that SwiftUI content can overlap).
-- **`CefBrowserWindow`** — a Chrome-style window: the full Chrome runtime with
-  `chrome://settings`, extensions, history, passwords and PDF viewing, under a
-  toolbar you write in SwiftUI.
-- **`CefBridge`** — typed, promise-based calls between JavaScript and Swift:
-  `await app.greet({ name: "Ada" })`.
-- **Async JavaScript** — `try await browser.evaluateJavaScript("document.title")`.
-- **`CefDevTools`** — the Chrome DevTools Protocol, in-process: emulation,
-  network events, screenshots, anything Puppeteer can do.
-- **`CefBrowserDelegate`** — `async` policy decisions (permissions, dialogs,
-  authentication, downloads, certificate errors) with native defaults.
-- **`CefProfile`** — isolated or persistent profiles with cookies, Chromium
-  preferences and theming.
-- **Customization** — context-menu entries, request filtering, user scripts
-  and stylesheets, Chromium preferences, Chrome commands, extensions, feature
-  flags, and your product name in place of "Chromium" — on Chromium's own
-  `chrome://` pages as well as yours.
+### Build a tabbed browser
 
-See the [guide](docs/guide.md) for each of these in use.
-
-## Getting started
-
-Add the package and depend on `CefSwiftUI` (or `CefKit` for AppKit-only code):
+Each tab is a `CefBrowserWindow`, a Chrome-style window that macOS groups
+with others under a native tab bar. The toolbar is SwiftUI. This app uses
+`defaultLaunchBehavior(_:)`, so set `platforms: [.macOS(.v15)]`.
 
 ```swift
-dependencies: [
-    .package(url: "https://github.com/Rajaniraiyn/CefSwift", branch: "main"),
-],
-targets: [
-    .executableTarget(name: "MyApp", dependencies: [
-        .product(name: "CefSwiftUI", package: "CefSwift"),
-    ]),
-]
+import AppKit
+import CefSwiftUI
+import SwiftUI
+
+@main
+struct MyBrowser: CefSwiftApp {
+    static var cefConfiguration: CefConfiguration { .browser }
+    @NSApplicationDelegateAdaptor private var appDelegate: AppDelegate
+
+    var body: some Scene {
+        // Browser windows are not SwiftUI scenes. Settings is the only
+        // scene, so keep SwiftUI from opening it at launch.
+        Settings { EmptyView() }
+            .defaultLaunchBehavior(.suppressed)
+    }
+}
+
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        openTab()
+    }
+
+    /// Called by the "+" button in the native tab bar.
+    @objc func newWindowForTab(_ sender: Any?) {
+        openTab()
+    }
+
+    func openTab() {
+        let browser = CefBrowser(url: URL(string: "https://www.swift.org")!)
+        var configuration = CefBrowserWindow.Configuration()
+        configuration.tabbingIdentifier = "tabs"
+        let window = CefBrowserWindow(browser: browser, configuration: configuration)
+        window.setToolbar {
+            BackButton(browser: browser)
+        } principal: {
+            PageTitle(browser: browser)
+        } trailing: {
+            Button("New Tab", systemImage: "plus") { self.openTab() }
+        }
+        window.show()
+    }
+}
+
+struct BackButton: View {
+    let browser: CefBrowser
+    var body: some View {
+        Button("Back", systemImage: "chevron.left", action: browser.goBack)
+            .disabled(!browser.canGoBack)
+    }
+}
+
+struct PageTitle: View {
+    let browser: CefBrowser
+    var body: some View { Text(browser.title).lineLimit(1) }
+}
 ```
 
-Chromium needs an app bundle with helper processes, so build with the bundled
-command plugin instead of `swift run`:
+The toolbar views are separate `View` types so that they read the
+browser's state in their `body` and update when it changes.
+
+### Build and run
+
+Chromium runs only from an app bundle that contains its framework and five
+helper apps. The package's `cef` command plugin builds one:
 
 ```sh
 swift package --allow-writing-to-package-directory --allow-network-connections all \
     cef bundle --product MyApp
-open MyApp.app
+open dist/MyApp.app
 ```
 
-The first run downloads the pinned CEF build (about 135 MB). See
-[bundling](docs/bundling.md) for signing, identifiers and Xcode.
+The first run downloads the pinned CEF build (about 135 MB) into `.cef/`.
+Add `.cef/` and `dist/` to `.gitignore`. [Bundling](docs/bundling.md)
+covers identifiers, signing and the bundle layout.
 
 ## Two kinds of app
 
-| | Embedding web content | Building a browser |
+| | Showing web content | Building a browser |
 |---|---|---|
 | Configuration | `CefConfiguration.embedded` | `CefConfiguration.browser` |
-| Host | `CefWebView` in your own windows | `CefBrowserWindow`, or `CefRuntime.openChromeWindow` for Chrome's full UI |
-| Chrome runtime (`chrome://` pages, extensions) | no | yes |
-| Idle cost | background services off | everything a browser needs |
+| Host | `CefWebView` in your own windows | `CefBrowserWindow`, or `CefRuntime.shared.openChromeWindow(url:)` for Chrome's complete UI |
+| Chrome runtime (`chrome://` pages, extensions, history) | No | Yes |
+| Background services | Off | On |
+
+## Features
+
+| Feature | API | Guide |
+|---|---|---|
+| Observable browser model | `CefBrowser` | [Browsers](docs/guide.md#browsers) |
+| SwiftUI and AppKit views, windowed or offscreen | `CefWebView`, `CefWindowedBrowserView`, `CefOffscreenBrowserView` | [Showing a browser](docs/guide.md#showing-a-browser) |
+| JavaScript evaluation, user scripts and style sheets | `evaluateJavaScript(_:)`, `CefUserScript` | [JavaScript](docs/guide.md#javascript) |
+| Typed calls between JavaScript and Swift | `CefBridge` | [Bridge](docs/guide.md#bridge) |
+| Asynchronous decisions: permissions, dialogs, downloads, certificate errors | `CefBrowserDelegate` | [Decisions](docs/guide.md#decisions) |
+| Context menu | `CefContextMenuConfiguration` | [Context menu](docs/guide.md#context-menu) |
+| Chrome-style windows, SwiftUI toolbars, popups, native tabs | `CefBrowserWindow` | [Building a browser](docs/guide.md#building-a-browser) |
+| Chrome commands and Chrome UI trimming | `CefChromeCommand`, `CefChromeUIConfiguration` | [Chrome commands](docs/guide.md#chrome-commands) |
+| Rebranded and restyled `chrome://` pages | `productName`, `stringOverrides`, `CefUserScript.styleSheet(_:matching:includingShadowRoots:)` | [Chromium's own pages](docs/guide.md#customizing-chromiums-own-pages) |
+| Profiles, cookies, Chromium preferences | `CefProfile` | [Profiles](docs/guide.md#profiles) |
+| Bookmarks, history, address-bar suggestions | `CefBookmarks`, `CefHistory`, `CefAutocomplete` | [Bookmarks, history and suggestions](docs/guide.md#bookmarks-history-and-suggestions) |
+| Chrome DevTools Protocol, in-process | `CefDevTools` | [DevTools](docs/guide.md#devtools) |
+| Content served from your own URL scheme | `CefSchemeHandler` | [Serving your own content](docs/guide.md#serving-your-own-content) |
 
 ## Examples
 
-`Examples/` contains three apps — bundle any of them with
-`swift package --package-path Examples … cef bundle --product <Name>`:
+[`Examples/`](Examples/README.md) is a separate package with three apps:
 
-- **Browser** — a tabbed browser with a Safari-style toolbar, private tabs,
-  downloads, custom context menu and Chromium's internal pages.
-- **Showcase** — SwiftUI embedding: observable state, native overlays over an
-  offscreen page, the JavaScript bridge, app content from a custom scheme.
-- **SelfTest** — end-to-end checks against the real Chromium runtime; CI runs it.
+- **Browser**: a tabbed browser with a SwiftUI toolbar, address-bar
+  suggestions, bookmarks, history, private tabs, downloads and popups.
+- **Showcase**: three demos of embedding web content in SwiftUI.
+- **SelfTest**: end-to-end checks against the real Chromium runtime, run by CI.
 
 ## Requirements
 
-macOS 14+, Swift 6, Apple silicon or Intel. CEF is pinned in `CEF_VERSION.json`
-and kept current automatically ([automation](docs/automation.md)).
+- macOS 14 or later (the examples need macOS 15), Apple silicon or Intel.
+- Swift 6 toolchain. The Command Line Tools are enough; Xcode is optional.
+
+The CEF version is pinned in `CEF_VERSION.json` and updated by
+[automation](docs/automation.md).
 
 ## Documentation
 
-[Guide](docs/guide.md) · [Architecture](docs/architecture.md) ·
-[Bundling](docs/bundling.md) · [Sandbox](docs/sandbox.md) ·
-[Automation](docs/automation.md)
+- [Guide](docs/guide.md): how to do each task.
+- [Architecture](docs/architecture.md): how CefSwift works inside.
+- [Bundling](docs/bundling.md): the app bundle, identifiers and signing.
+- [Sandbox](docs/sandbox.md): Chromium's macOS sandbox.
+- [Automation](docs/automation.md): CEF updates, CI and releases.
+- [Contributing](CONTRIBUTING.md): building, testing and regenerating the C bridge.
 
 ## License
 
