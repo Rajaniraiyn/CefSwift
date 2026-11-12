@@ -125,7 +125,10 @@ change the numbers.
 SelfTest removes its own cache directories in `$TMPDIR` when it exits, and
 those of earlier runs whose process is gone. With the live-object census
 on, it prints a `CENSUS` line after each group and checks before quitting
-that nothing but process-lifetime objects is alive.
+that nothing but process-lifetime objects is alive. A group's line waits
+for its browsers to finish closing only when something other than the
+process-lifetime objects and an open service host is left. The browsers
+left discarded for the quit open after the final check.
 
 ## Measure web compatibility
 

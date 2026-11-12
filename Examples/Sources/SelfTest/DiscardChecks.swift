@@ -33,9 +33,6 @@ extension SelfTest {
 
     // MARK: Chrome-style windows
 
-    /// A window kept for the quit check, discarded.
-    static var discardedWindow: CefBrowserWindow?
-
     static func windowDiscardChecks() async {
         let recorder = DiscardRecorder()
         let browser = CefBrowser(url: URL(string: "selftest://edge/heavy.html?1")!, options: discardOptions(), delegate: recorder)
@@ -121,10 +118,11 @@ extension SelfTest {
             return href == "selftest://edge/heavy.html?1" && !browser.isDiscarded
         }
 
-        // Left discarded for the quit check.
         await waitUntilDiscardable(browser)
-        check("discard: discarded again for quitting", (try? await browser.discard()) != nil && browser.isDiscarded)
-        discardedWindow = browserWindow
+        check("discard: a restored tab is discarded again", (try? await browser.discard()) != nil && browser.isDiscarded)
+        browserWindow.close()
+        check("discard: a discarded tab's window closes",
+              await waitUntil { browserWindow.isClosed && browser.state == .closed })
     }
 
     // MARK: Blockers
@@ -258,9 +256,6 @@ extension SelfTest {
 
     // MARK: Views
 
-    /// A view-hosted browser kept discarded for the quit check.
-    static var discardedViewBrowser: CefBrowser?
-
     static func viewDiscardChecks() async {
         let recorder = DiscardRecorder()
         let browser = CefBrowser(url: URL(string: "selftest://edge/heavy.html?view")!, options: discardOptions(), delegate: recorder)
@@ -311,10 +306,41 @@ extension SelfTest {
         check("discard (view): delegate hears will, did and restore",
               recorder.events == ["will", "did", "restore"], detail: "\(recorder.events)")
 
-        // Left discarded for the quit check.
         view.isHidden = true
-        check("discard (view): discarded again for quitting", (try? await browser.discard()) != nil && browser.isDiscarded)
-        discardedViewBrowser = browser
+        check("discard (view): a restored browser is discarded again", (try? await browser.discard()) != nil && browser.isDiscarded)
+        browser.close()
+        view.removeFromSuperview()
+        check("discard (view): a discarded browser closes", await waitUntil { browser.state == .closed })
+    }
+
+    // MARK: Quitting
+
+    /// Browsers left discarded for the quit, opened after the census check
+    /// so that it sees only what CefKit leaked.
+    static var browsersDiscardedForQuitting: [AnyObject] = []
+
+    /// Leaves a discarded Chrome-style window and a discarded view-hosted
+    /// browser open, so that quitting runs with both.
+    static func discardBrowsersForQuitting() async {
+        SelfTestResults.shared.group = "quit"
+        let tab = CefBrowser(url: URL(string: "selftest://edge/tab.html?quit")!)
+        let tabWindow = CefBrowserWindow(browser: tab)
+        tabWindow.show()
+        let viewed = CefBrowser(url: URL(string: "selftest://edge/tab.html?quit-view")!)
+        let view = CefWindowedBrowserView()
+        view.frame = window.contentView!.bounds
+        view.autoresizingMask = [.width, .height]
+        window.contentView!.addSubview(view)
+        view.browser = viewed
+        _ = await waitUntil { [tab, viewed].allSatisfy { $0.title == "tab" && !$0.isLoading } }
+        tabWindow.hide()
+        view.isHidden = true
+        await waitUntilDiscardable(tab)
+        let discarded = (try? await tab.discard()) != nil && tab.isDiscarded
+        let viewDiscarded = (try? await viewed.discard()) != nil && viewed.isDiscarded
+        check("quit: a Chrome-style tab and a view's browser are discarded for quitting", discarded && viewDiscarded,
+              detail: "tab \(discarded), view \(viewDiscarded)")
+        browsersDiscardedForQuitting = [tabWindow, view]
     }
 
     /// Waits until nothing keeps `browser` loaded but what `allowed`

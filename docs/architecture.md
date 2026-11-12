@@ -58,6 +58,11 @@ CEF objects are intrusively reference-counted.
 - An object passed to a CEF function is consumed. An object returned by
   CEF, or passed into a CefSwift callback, arrives with a reference the
   receiver must release.
+- An in-out object parameter, such as `cef_client_t** client` in
+  `on_before_popup`, also arrives with a reference for the callback. CEF
+  takes a reference back only for an object the callback puts in its
+  place, so the callback releases the one it received either way. Missing
+  this kept the opener's client alive after every popup Chromium opened.
 - A callback that keeps such a reference across early returns holds it in
   a `CefOwned`, a non-copyable struct that releases it at the end of the
   scope unless a consuming method passed it to CEF, adopted it into a

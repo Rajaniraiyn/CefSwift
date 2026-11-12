@@ -185,7 +185,6 @@ enum SelfTest {
         ("processes", processChecks),
         ("pdf", pdfChecks),
         ("security", securityChecks),
-        // Last: it leaves discarded browsers open for the quit.
         ("discard", discardChecks),
     ]
 
@@ -201,6 +200,10 @@ enum SelfTest {
             await reportCensus(after: group.name, baseline: baseline)
         }
         await censusChecks(baseline: baseline)
+        // After the census: these stay open for the quit.
+        if selectedGroups.contains(where: { $0.name == "discard" }) {
+            await discardBrowsersForQuitting()
+        }
     }
 
     /// What the bundle's signature allows, as CefKit reads it.

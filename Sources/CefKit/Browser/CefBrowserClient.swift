@@ -263,8 +263,13 @@ final class CefBrowserClient {
             CefBrowserClient.run(s, browser, default: ()) { client, b in client.browserClosed(b) }
         }
         h.pointee.on_before_popup = {
-            s, browser, frame, _, targetURL, targetFrameName, disposition, userGesture, features, _, _, _, extraInfo, _ in
+            s, browser, frame, _, targetURL, targetFrameName, disposition, userGesture, features, _, client, _, extraInfo, _ in
             cefRelease(frame)
+            // `*client` (the opener's client) arrives with a reference for
+            // this callback. CEF takes a reference back only for a client
+            // put in its place, so the one it gave must be released here or
+            // the opener's client outlives every browser.
+            cefRelease(client?.pointee)
             let url = URL(string: CefStringUtil.string(from: targetURL))
             let frameName = CefStringUtil.string(from: targetFrameName)
             let popupFeatures = features.map { CefPopupFeatures(raw: $0.pointee) } ?? CefPopupFeatures()
