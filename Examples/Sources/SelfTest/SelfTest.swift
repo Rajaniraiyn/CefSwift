@@ -35,6 +35,7 @@ enum SelfTest {
             configuration.rootCacheDirectory = URL(fileURLWithPath: widevineProbeDirectory)
             configuration.protectedMedia = .automatic
         }
+        sendJobBeforeStartUp()
         do {
             try CefRuntime.shared.initialize(configuration: configuration)
             if relaunchDirectory != nil {
@@ -58,12 +59,14 @@ enum SelfTest {
         window.makeKeyAndOrderFront(nil)
         NSApp.activate()
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + (ServiceBenchmark.isRequested ? 900 : 240)) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + (ServiceBenchmark.isRequested || Benchmarks.requested != nil ? 900 : 240)) {
             print("FAIL watchdog: checks did not finish in 240s")
             exit(124)
         }
         Task {
-            if ServiceBenchmark.isRequested {
+            if let benchmark = Benchmarks.requested {
+                await Benchmarks.run(benchmark)
+            } else if ServiceBenchmark.isRequested {
                 await ServiceBenchmark.run()
             } else if widevineProbeDirectory != nil {
                 await widevineProbeChecks()
@@ -77,6 +80,7 @@ enum SelfTest {
             ) { _ in
                 MainActor.assumeIsolated {
                     check("quit: Chromium shuts down cleanly", !CefRuntime.shared.isInitialized)
+                    check("quit: a job sent to CefIOActor after shutdown runs", jobAfterShutdownRuns())
                     print(failures == 0 ? "ALL CHECKS PASSED" : "\(failures) CHECK(S) FAILED")
                     exit(Int32(failures))
                 }
@@ -96,6 +100,7 @@ enum SelfTest {
         ("capabilities", { capabilityChecks() }),
         ("windowed", windowedBrowserChecks),
         ("offscreen", offscreenBrowserChecks),
+        ("threads", threadChecks),
         ("accessibility", offscreenAccessibilityChecks),
         ("profile", profileChecks),
         ("browserWindow", browserWindowChecks),

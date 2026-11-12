@@ -39,6 +39,11 @@ final class CefAppContext: @unchecked Sendable {
     /// reference, consumed by `cef_initialize`.
     func makeApp() -> UnsafeMutablePointer<cef_app_t> {
         let process = cefAllocate(cef_browser_process_handler_t.self, owner: self)
+        // UI thread. Chromium's task runners exist from here on, so the
+        // thread actors start sending their jobs to Chromium.
+        process.pointee.on_context_initialized = { _ in
+            CefThreadExecutor.all.forEach { $0.start() }
+        }
         process.pointee.on_schedule_message_pump_work = { s, delayMS in
             cefOwner(CefAppContext.self, s)?.pump.scheduleWork(delayMilliseconds: delayMS)
         }

@@ -749,9 +749,26 @@ public enum CefResourceRequestAction: Sendable, Equatable {
 }
 
 /// Inspects every network request a browser makes — the hook for content
-/// blocking, header injection and redirects. Called on Chromium's IO thread,
-/// so it must be fast and thread-safe.
-public typealias CefRequestFilter = @Sendable (CefResourceRequest) -> CefResourceRequestAction
+/// blocking, header injection and redirects.
+///
+/// Chromium asks on its IO thread and waits for the answer, so a filter
+/// runs there synchronously, isolated to ``CefIOActor``: state it keeps on
+/// that actor needs no lock, and no decision waits for the main thread.
+/// It must be fast and must not block. A filter that needs the app's
+/// model reads a copy kept on ``CefIOActor`` and updated from the main
+/// actor:
+///
+/// ```swift
+/// @CefIOActor var blockedHosts: Set<String> = []
+///
+/// options.requestFilter = { @CefIOActor request in
+///     blockedHosts.contains(request.url?.host() ?? "") ? .block : .allow
+/// }
+///
+/// // On the main actor, when the list changes:
+/// Task { @CefIOActor in blockedHosts = newList }
+/// ```
+public typealias CefRequestFilter = @CefIOActor @Sendable (CefResourceRequest) -> CefResourceRequestAction
 
 /// Owner of the `cef_resource_request_handler_t` that applies a filter.
 final class ResourceRequestFilter: Sendable {
@@ -776,7 +793,9 @@ final class ResourceRequestFilter: Sendable {
                 referrer: CefStringUtil.takingUserFree(request.pointee.get_referrer_url(request)).flatMap(URL.init(string:)),
                 isNavigation: resourceType == RT_MAIN_FRAME || resourceType == RT_SUB_FRAME
             )
-            switch owner.filter(snapshot) {
+            // CEF calls this on the IO thread, which the filter is isolated to.
+            let filter = owner.filter
+            switch CefIOActor.assumeIsolated({ filter(snapshot) }) {
             case .allow:
                 break
             case .block:

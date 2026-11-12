@@ -279,7 +279,11 @@ public final class CefRuntime {
         guard isInitialized else { return }
         messagePump?.stop()
         messagePump = nil
+        // Jobs for the thread actors wait out the shutdown, then run on
+        // their fallback queues.
+        CefThreadExecutor.all.forEach { $0.willStop() }
         cef_shutdown()
+        CefThreadExecutor.all.forEach { $0.didStop() }
         appContext = nil
         settings = nil
         configuration = nil
