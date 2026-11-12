@@ -1,4 +1,5 @@
 import Foundation
+import LocalAuthentication
 import Testing
 
 @testable import CefKit
@@ -86,5 +87,98 @@ struct PasskeyTests {
     @Test func requestHostComesFromTheOrigin() {
         #expect(CefPasskeyRequest(kind: .assertion, origin: "https://login.example.com").host == "login.example.com")
         #expect(CefPasskeyRequest(kind: .registration, origin: "http://localhost:8080").host == "localhost")
+    }
+
+    // MARK: Failing closed
+
+    @Test func unavailableVerificationIsNotSuccess() async {
+        let none = FakeAuthenticationContext(canEvaluate: false)
+        #expect(await CefPasskeyPresenter.verifyUser(reason: "test", with: none) == .unavailable("no biometry"))
+        #expect(none.evaluated == 0)
+        #expect(await CefPasskeyPresenter.verifyUser(reason: "test", with: FakeAuthenticationContext(result: .success(true))) == .verified)
+        #expect(await CefPasskeyPresenter.verifyUser(reason: "test", with: FakeAuthenticationContext(result: .success(false))) == .failed)
+        #expect(await CefPasskeyPresenter.verifyUser(
+            reason: "test", with: FakeAuthenticationContext(result: .failure(CefError.operationFailed("cancelled")))) == .failed)
+    }
+
+    @Test func thePresenterAnswersOnlyAVerifiedUser() {
+        let registration = CefPasskeyRequest(kind: .registration, origin: "https://example.com")
+        let assertion = CefPasskeyRequest(kind: .assertion, origin: "https://example.com", passkeys: [Self.sample])
+        for verification in [CefUserVerification.failed, .unavailable("none")] {
+            #expect(CefPasskeyPresenter.decision(for: registration, choosing: 0, after: verification) == .deny)
+            #expect(CefPasskeyPresenter.decision(for: assertion, choosing: 0, after: verification) == .deny)
+        }
+        #expect(CefPasskeyPresenter.decision(for: registration, choosing: 0, after: .verified) == .createPasskey)
+        #expect(CefPasskeyPresenter.decision(for: assertion, choosing: 0, after: .verified) == .signIn(with: Self.sample))
+        #expect(CefPasskeyPresenter.decision(for: assertion, choosing: 3, after: .verified) == .deny)
+    }
+
+    @Test func anUnavailableStoreRefusesARegistrationUnasked() async {
+        let request = CefPasskeyRequest(kind: .registration, origin: "https://example.com")
+        var asked = false
+        var failures: [CefPasskeyStoreError] = []
+        let decision = await CefPasskeyAuthenticator.decide(request, mode: .app(FailingPasskeyStore())) { _ in
+            asked = true
+            return .createPasskey
+        } failed: { failures.append($0) }
+        #expect(decision == .deny)
+        #expect(!asked)
+        #expect(failures.map(\.operation) == [.checkAvailability])
+    }
+
+    @Test func anUnreadableStoreRefusesAnAssertion() async {
+        let request = CefPasskeyRequest(kind: .assertion, origin: "https://example.com")
+        var failures: [CefPasskeyStoreError] = []
+        let decision = await CefPasskeyAuthenticator.decide(request, mode: .app(FailingPasskeyStore())) { _ in
+            .signIn(with: Self.sample)
+        } failed: { failures.append($0) }
+        #expect(decision == .deny)
+        #expect(failures.map(\.operation) == [.read])
+    }
+
+    @Test func aWorkingStoreReachesTheDelegateWithItsPasskeys() async {
+        let request = CefPasskeyRequest(kind: .assertion, origin: "https://www.example.com")
+        var seen: [CefPasskey] = []
+        let decision = await CefPasskeyAuthenticator.decide(
+            request, mode: .app(CefInMemoryPasskeyStore(passkeys: [Self.sample]))
+        ) { request in
+            seen = request.passkeys
+            return .signIn(with: request.passkeys[0])
+        } failed: { _ in Issue.record("no failure expected") }
+        #expect(decision == .signIn(with: Self.sample))
+        #expect(seen == [Self.sample])
+        #expect(await CefPasskeyAuthenticator.decide(request, mode: .disabled) { _ in .createPasskey } failed: { _ in } == .deny)
+    }
+}
+
+/// A store whose every call fails, as a keychain without its entitlement does.
+@MainActor
+final class FailingPasskeyStore: CefPasskeyStore {
+    func passkeys() async throws -> [CefPasskey] { throw CefError.operationFailed("errSecMissingEntitlement") }
+    func save(_ passkey: CefPasskey) async throws { throw CefError.operationFailed("errSecMissingEntitlement") }
+    func remove(_ passkey: CefPasskey) async throws { throw CefError.operationFailed("errSecMissingEntitlement") }
+}
+
+/// `LAContext` without the system prompt.
+final class FakeAuthenticationContext: CefLocalAuthenticationContext, @unchecked Sendable {
+    let canEvaluate: Bool
+    let result: Result<Bool, any Error>
+    private(set) var evaluated = 0
+
+    init(canEvaluate: Bool = true, result: Result<Bool, any Error> = .success(true)) {
+        self.canEvaluate = canEvaluate
+        self.result = result
+    }
+
+    func canEvaluatePolicy(_ policy: LAPolicy, error: NSErrorPointer) -> Bool {
+        if !canEvaluate {
+            error?.pointee = NSError(domain: "test", code: -7, userInfo: [NSLocalizedDescriptionKey: "no biometry"])
+        }
+        return canEvaluate
+    }
+
+    func evaluatePolicy(_ policy: LAPolicy, localizedReason: String) async throws -> Bool {
+        evaluated += 1
+        return try result.get()
     }
 }

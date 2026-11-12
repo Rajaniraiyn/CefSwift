@@ -19,6 +19,7 @@ extension SelfTest {
         await passkeyRoundTrip(style: "Chrome style", url: url, watcher: watcher)
         _ = await waitUntil { CefRuntime.shared.browsers.isEmpty }
         await disabledPasskeyChecks(url: url)
+        await passkeyStoreFailureChecks(url: url)
         check("passkeys: Chromium's WebAuthn dialog never appears", !watcher.sawDialog, detail: watcher.titles.joined(separator: ", "))
         watcher.stop()
         await passkeySettingsChecks()
@@ -161,6 +162,45 @@ extension SelfTest {
         _ = await waitUntil { window.isClosed }
     }
 
+    /// A store that cannot be read refuses the call before the delegate is
+    /// asked; a save that fails after the page has its answer reaches the
+    /// delegate with the passkey that was not saved.
+    private static func passkeyStoreFailureChecks(url: URL) async {
+        let store = UnreliablePasskeyStore()
+        let policy = PasskeyPolicy()
+        policy.answer = { request in request.passkeys.first.map { .signIn(with: $0) } ?? .createPasskey }
+        var options = CefBrowserOptions()
+        options.passkeys = .app(store)
+        let browser = CefBrowser(url: url, options: options, delegate: policy)
+        let window = CefBrowserWindow(browser: browser)
+        window.show()
+        defer { window.close() }
+        guard await waitUntil(timeout: .seconds(20), { browser.title == "passkeys" && !browser.isLoading }) else {
+            check("passkeys (failing store): page loads", false, detail: browser.title)
+            return
+        }
+        store.failsReads = true
+        let unavailable = await PasskeyCall.run(browser, "register()")
+        check("passkeys (failing store): an unavailable store refuses a registration unasked",
+              !unavailable.ok && unavailable.error == "NotAllowedError" && policy.requests.isEmpty
+                  && policy.storeFailures.map(\.operation) == [.checkAvailability],
+              detail: "\(unavailable), \(policy.requests.count) asked, \(policy.storeFailures)")
+        let unreadable = await PasskeyCall.run(browser, "signIn()")
+        check("passkeys (failing store): an unreadable store refuses a sign-in unasked",
+              !unreadable.ok && unreadable.error == "NotAllowedError" && policy.requests.isEmpty
+                  && policy.storeFailures.last?.operation == .read,
+              detail: "\(unreadable), \(policy.storeFailures)")
+
+        store.failsReads = false
+        store.failsSaves = true
+        let created = await PasskeyCall.run(browser, "register()")
+        _ = await waitUntil(timeout: .seconds(3)) { policy.storeFailures.last?.operation == .save }
+        let failure = policy.storeFailures.last
+        check("passkeys (failing store): a failed save reaches the delegate with the passkey",
+              created.ok && failure?.operation == .save && failure?.passkey?.id.base64URLString == created.id,
+              detail: "\(created), \(String(describing: failure))")
+    }
+
     /// The Passkeys button in Chrome's autofill settings opens a tab of
     /// Chromium's own; it must reach `onChromiumOpensTab`, not a window.
     private static func passkeySettingsChecks() async {
@@ -246,11 +286,37 @@ enum PasskeyChecks {
 final class PasskeyPolicy: CefBrowserDelegate {
     var answer: (CefPasskeyRequest) -> CefPasskeyDecision = { _ in .deny }
     private(set) var requests: [CefPasskeyRequest] = []
+    private(set) var storeFailures: [CefPasskeyStoreError] = []
 
     func browser(_ browser: CefBrowser, decidePasskeyRequest request: CefPasskeyRequest) async -> CefPasskeyDecision {
         requests.append(request)
         return answer(request)
     }
+
+    func browser(_ browser: CefBrowser, passkeyStoreDidFail error: CefPasskeyStoreError) {
+        storeFailures.append(error)
+    }
+}
+
+/// An in-memory store whose reads or saves fail on request, as a keychain
+/// without its entitlement, or a locked one, does.
+@MainActor
+final class UnreliablePasskeyStore: CefPasskeyStore {
+    var failsReads = false
+    var failsSaves = false
+    private let stored = CefInMemoryPasskeyStore()
+
+    func passkeys() async throws -> [CefPasskey] {
+        if failsReads { throw CefError.operationFailed("the store is unavailable") }
+        return try await stored.passkeys()
+    }
+
+    func save(_ passkey: CefPasskey) async throws {
+        if failsSaves { throw CefError.operationFailed("the store is read-only") }
+        try await stored.save(passkey)
+    }
+
+    func remove(_ passkey: CefPasskey) async throws { try await stored.remove(passkey) }
 }
 
 /// The outcome of a WebAuthn call on the test page.

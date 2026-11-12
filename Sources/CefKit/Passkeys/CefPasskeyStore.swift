@@ -20,9 +20,19 @@ public protocol CefPasskeyStore: AnyObject {
     func save(_ passkey: CefPasskey) async throws
     /// Removes `passkey`. Removing one that is not stored does nothing.
     func remove(_ passkey: CefPasskey) async throws
+    /// Throws if the store cannot save a passkey now. CefKit calls it
+    /// before it asks the delegate about a registration, and refuses the
+    /// registration when it throws: once the page has its new credential,
+    /// a failed save cannot be taken back. The default reads
+    /// ``passkeys()``.
+    func checkAvailability() async throws
 }
 
 extension CefPasskeyStore {
+    public func checkAvailability() async throws {
+        _ = try await passkeys()
+    }
+
     /// The passkeys a page on `host` may use, most recently used first.
     public func passkeys(usableOnHost host: String) async throws -> [CefPasskey] {
         try await passkeys()

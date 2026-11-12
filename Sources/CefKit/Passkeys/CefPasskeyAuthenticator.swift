@@ -213,17 +213,11 @@ final class CefPasskeyAuthenticator {
         // one unasked.
         await removeAuthenticator()
         guard let browser, browser.state == .live else { return }
-        var request = request
-        let decision: CefPasskeyDecision
-        switch mode {
-        case .app(let store):
-            if request.kind == .assertion {
-                request.passkeys = (try? await store.passkeys(usableOnHost: request.host)) ?? []
-            }
-            decision = await (browser.delegate ?? CefDefaultBrowserDelegate.shared)
-                .browser(browser, decidePasskeyRequest: request)
-        case .disabled, .chromium:
-            decision = .deny
+        let delegate = browser.delegate ?? CefDefaultBrowserDelegate.shared
+        let decision = await Self.decide(request, mode: mode) { request in
+            await delegate.browser(browser, decidePasskeyRequest: request)
+        } failed: { error in
+            delegate.browser(browser, passkeyStoreDidFail: error)
         }
         guard browser.state == .live else { return }
 
@@ -233,9 +227,12 @@ final class CefPasskeyAuthenticator {
         case (.createPasskey, .registration):
             guard let id = await addAuthenticator() else { return }
             Task { await finish(id) { created in
-                guard var passkey = CefPasskey(devToolsCredential: created) else { return }
+                guard var passkey = CefPasskey(devToolsCredential: created) else {
+                    self.storeFailed(.save, request, nil, "Chromium reported a credential CefKit cannot read")
+                    return
+                }
                 passkey.creationDate = .now
-                try? await self.mode.store?.save(passkey)
+                await self.save(passkey, for: request)
             } }
         case (.signIn(let passkey), .assertion):
             guard let id = await addAuthenticator(holding: passkey) else { return }
@@ -243,7 +240,7 @@ final class CefPasskeyAuthenticator {
                 var used = passkey
                 used.signCount = UInt32(clamping: asserted["signCount"].intValue ?? Int(passkey.signCount) + 1)
                 used.lastUsedDate = .now
-                try? await self.mode.store?.save(used)
+                await self.save(used, for: request)
             } }
         default:
             // A refusal: user verification fails, which ends the call with
@@ -254,6 +251,48 @@ final class CefPasskeyAuthenticator {
             else { return }
             Task { await finish(id, timeout: .seconds(1)) { _ in } }
         }
+    }
+
+    /// The decision for `request`. Store failures refuse the call before
+    /// the delegate is asked: a registration's store must be available, as
+    /// a key the page receives cannot be withdrawn once its save fails, and
+    /// an assertion needs the store's passkeys.
+    static func decide(
+        _ request: CefPasskeyRequest, mode: CefPasskeyMode,
+        ask: (CefPasskeyRequest) async -> CefPasskeyDecision,
+        failed: (CefPasskeyStoreError) -> Void
+    ) async -> CefPasskeyDecision {
+        guard case .app(let store) = mode else { return .deny }
+        var request = request
+        do {
+            switch request.kind {
+            case .registration:
+                try await store.checkAvailability()
+            case .assertion:
+                request.passkeys = try await store.passkeys(usableOnHost: request.host)
+            }
+        } catch {
+            failed(CefPasskeyStoreError(
+                operation: request.kind == .registration ? .checkAvailability : .read,
+                origin: request.origin, message: "\(error)"))
+            return .deny
+        }
+        return await ask(request)
+    }
+
+    private func save(_ passkey: CefPasskey, for request: CefPasskeyRequest) async {
+        guard let store = mode.store else { return }
+        do {
+            try await store.save(passkey)
+        } catch {
+            storeFailed(.save, request, passkey, "\(error)")
+        }
+    }
+
+    private func storeFailed(_ operation: CefPasskeyStoreError.Operation, _ request: CefPasskeyRequest, _ passkey: CefPasskey?, _ message: String) {
+        let error = CefPasskeyStoreError(operation: operation, origin: request.origin, passkey: passkey, message: message)
+        guard let browser else { return CefLog.error("passkeys: \(error)") }
+        (browser.delegate ?? CefDefaultBrowserDelegate.shared).browser(browser, passkeyStoreDidFail: error)
     }
 
     private func addAuthenticator(holding passkey: CefPasskey? = nil) async -> String? {

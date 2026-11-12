@@ -93,6 +93,11 @@ public protocol CefBrowserDelegate: AnyObject {
     /// answer, as it does for `alert()`; JavaScript you evaluate in it
     /// meanwhile waits too.
     func browser(_ browser: CefBrowser, decidePasskeyRequest request: CefPasskeyRequest) async -> CefPasskeyDecision
+    /// The passkey store failed while a WebAuthn request was answered. A
+    /// failed availability check or read refuses the page's call; a failed
+    /// save happens after the page has its answer and carries the passkey
+    /// that was not saved. The default logs the error.
+    func browser(_ browser: CefBrowser, passkeyStoreDidFail error: CefPasskeyStoreError)
 
     // MARK: Downloads
 
@@ -149,6 +154,9 @@ extension CefBrowserDelegate {
 
     public func browser(_ browser: CefBrowser, decidePasskeyRequest request: CefPasskeyRequest) async -> CefPasskeyDecision {
         await CefPasskeyPresenter.present(request, in: browser.hostWindow)
+    }
+    public func browser(_ browser: CefBrowser, passkeyStoreDidFail error: CefPasskeyStoreError) {
+        CefLog.error("passkeys: \(error)")
     }
 
     public func browser(_ browser: CefBrowser, downloadDidUpdate download: CefDownload) {}

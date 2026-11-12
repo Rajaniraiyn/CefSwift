@@ -115,6 +115,39 @@ public enum CefPasskeyDecision: Sendable, Equatable {
     case ignore
 }
 
+/// A ``CefPasskeyStore`` call that failed while CefKit answered a WebAuthn
+/// request, delivered to
+/// ``CefBrowserDelegate/browser(_:passkeyStoreDidFail:)``.
+public struct CefPasskeyStoreError: Error, Sendable, CustomStringConvertible {
+    /// What CefKit asked the store to do.
+    public enum Operation: Sendable, Equatable {
+        /// ``CefPasskeyStore/checkAvailability()`` before a registration.
+        /// The page's call was refused with `NotAllowedError`.
+        case checkAvailability
+        /// Reading the passkeys for an assertion. The page's call was
+        /// refused with `NotAllowedError`.
+        case read
+        /// Saving the passkey a registration created, or the new sign count
+        /// after a sign-in. The page already has its answer; ``passkey``
+        /// holds what was not saved, so the app can keep it another way or
+        /// tell the user.
+        case save
+    }
+
+    /// What failed.
+    public var operation: Operation
+    /// The request's origin.
+    public var origin: String
+    /// The passkey that was not saved, for ``Operation/save``.
+    public var passkey: CefPasskey?
+    /// The store's error, described.
+    public var message: String
+
+    public var description: String {
+        "passkey store \(operation) failed for \(origin): \(message)"
+    }
+}
+
 /// Who answers a browser's WebAuthn requests.
 public enum CefPasskeyMode {
     /// Chromium, with its own dialog and authenticators: security keys, and
