@@ -1,12 +1,14 @@
-# Builds, tests, audits the C bridge, bundles SelfTest and runs it against the
-# real Chromium. Also the gate for the auto-merged CEF update pull requests,
-# which start it with workflow_dispatch (docs/automation.md).
+# Builds, tests, audits the C bridge and the CEF XCFramework, bundles
+# SelfTest and runs it against the real Chromium. Also the gate for the
+# auto-merged CEF update pull requests, which start it with
+# workflow_dispatch (docs/automation.md).
 #
 # Cost notes (keep this cheap):
 #   - One macos-15 (arm64) job. The runner is pinned so an image change never
-#     arrives unannounced; macos-latest moves.
-#   - Only the minimal arm64 CEF flavor is downloaded, and `.cef/downloads`
-#     (~135 MB) is cached keyed on the pinned CEF version.
+#     arrives unannounced; macos-latest moves, and the XCFramework's checksum
+#     is reproduced with the runner's zlib.
+#   - The two minimal CEF distributions (~280 MB) are cached in
+#     `.cef/downloads`, keyed on the pinned CEF version.
 name: CI
 
 on:
@@ -28,44 +30,75 @@ jobs:
     # Keep the job name "ci": it is the required status check that gates the
     # auto-merged CEF update pull requests.
     runs-on: macos-15
-    timeout-minutes: 45
+    timeout-minutes: 60
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Read the pinned CEF version
+      - name: Read the pins
         id: cef
-        run: echo "version=$(jq -r .cef CEF_VERSION.json)" >> "$GITHUB_OUTPUT"
+        run: |
+          {
+            echo "version=$(jq -r .cef CEF_VERSION.json)"
+            echo "tag=$(jq -r .xcframework.tag CEF_VERSION.json)"
+          } >> "$GITHUB_OUTPUT"
 
-      # Offline checks of the update logic (release selection, manifest,
-      # archive extraction, API-version handling).
-      - name: Update script self-test
-        run: Scripts/update-cef.py --self-test
+      # Offline checks of the update and packaging logic (release selection,
+      # manifest, archive extraction, API-version handling, the universal
+      # merge and the deterministic zip).
+      - name: Script self-tests
+        run: |
+          Scripts/update-cef.py --self-test
+          Scripts/package-cef.py --self-test
 
       # Same key as the update workflow saves, so an update branch restores
-      # the archive that workflow already downloaded.
+      # the archives that workflow already downloaded.
       - name: Cache CEF downloads
         uses: actions/cache@v4
         with:
           path: .cef/downloads
-          key: cef-${{ steps.cef.outputs.version }}-macosarm64-minimal
+          key: cef-${{ steps.cef.outputs.version }}-minimal
 
-      - name: Download CEF (minimal, arm64)
+      # Repackages the official distributions and requires the zip to have the
+      # checksum Package.swift pins: the hosted framework is the official
+      # one, file for file.
+      - name: Rebuild the XCFramework
+        run: Scripts/package-cef.py --check
+
+      # SwiftPM resolves the binary target from the release asset Package.swift
+      # pins, and checks its checksum. On main and the update branches the
+      # asset must be published (the update workflow does that before it
+      # starts CI). Other branches that pin an unpublished asset build against
+      # the rebuilt framework instead, with a warning: publish it before
+      # merging.
+      - name: The pinned release asset
+        env:
+          TAG: ${{ steps.cef.outputs.tag }}
+          REF: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
         run: |
-          swift package \
-            --allow-writing-to-package-directory \
-            --allow-network-connections all \
-            cef download
+          if gh release view "$TAG" --json assets --jq '.assets[].name' 2>/dev/null |
+             grep -qx ChromiumEmbeddedFramework.xcframework.zip; then
+            exit 0
+          fi
+          echo "The release $TAG has no ChromiumEmbeddedFramework.xcframework.zip."
+          case "$REF" in
+            main|cef-update|cef-api-update) exit 1 ;;
+          esac
+          echo "::warning::The $TAG release asset that Package.swift pins is not published; building against the rebuilt framework. Publish it before merging (docs/automation.md)."
+          echo "CEFSWIFT_LOCAL_FRAMEWORK=1" >> "$GITHUB_ENV"
 
       # The generated bridge must match the vendored headers, and every
-      # function it binds must be exported by the framework it will load —
-      # a mismatch would otherwise abort at first call.
+      # function it binds must be exported by both architectures of the
+      # framework — a mismatch would otherwise abort at first call.
       - name: C bridge matches the headers and the framework
         env:
-          FRAMEWORK: .cef/dist/${{ steps.cef.outputs.version }}_macosarm64_minimal/Release/Chromium Embedded Framework.framework
+          FRAMEWORK: .cef/xcframework/ChromiumEmbeddedFramework.xcframework/macos-arm64_x86_64/Chromium Embedded Framework.framework
         run: Scripts/generate-bindings.py --check --framework "$FRAMEWORK"
 
       - name: Build
-        run: swift build
+        run: swift build --build-tests
 
       - name: Test
         run: swift test
@@ -73,13 +106,8 @@ jobs:
       - name: Build examples
         run: swift build --package-path Examples
 
-      # The plugin keeps its cache in the invoking package's .cef/, so the
-      # Examples package would download the same archive again; give it a
-      # copy-on-write clone of the one already here.
       - name: Bundle SelfTest
         run: |
-          mkdir -p Examples/.cef
-          cp -Rc .cef/downloads Examples/.cef/
           swift package --package-path Examples \
             --allow-writing-to-package-directory \
             --allow-network-connections all \

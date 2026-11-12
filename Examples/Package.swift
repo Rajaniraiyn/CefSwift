@@ -11,33 +11,48 @@ let package = Package(
         // A complete tabbed browser: Chrome-style windows, SwiftUI toolbar.
         .executableTarget(
             name: "Browser",
-            dependencies: [.product(name: "CefSwiftUI", package: "CefSwift")],
+            dependencies: [
+                .product(name: "CefSwiftUI", package: "CefSwift"),
+                .product(name: "ChromiumEmbeddedFramework", package: "CefSwift"),
+            ],
             exclude: ["cefapp.json", "Browser.entitlements", "Browser-Distribution.entitlements"]
         ),
         // Embedding web content in a SwiftUI app.
         .executableTarget(
             name: "Showcase",
-            dependencies: [.product(name: "CefSwiftUI", package: "CefSwift")],
+            dependencies: [
+                .product(name: "CefSwiftUI", package: "CefSwift"),
+                .product(name: "ChromiumEmbeddedFramework", package: "CefSwift"),
+            ],
             exclude: ["cefapp.json"]
         ),
         // One CefWebView on the `.embedded` configuration; the footprint
         // benchmark's lean case (Scripts/measure-footprint.py).
         .executableTarget(
             name: "Minimal",
-            dependencies: [.product(name: "CefSwiftUI", package: "CefSwift")],
+            dependencies: [
+                .product(name: "CefSwiftUI", package: "CefSwift"),
+                .product(name: "ChromiumEmbeddedFramework", package: "CefSwift"),
+            ],
             exclude: ["cefapp.json"]
         ),
         // One page in one host with chosen CefSwift features: the
         // web-compatibility matrix (Scripts/compat-matrix.py).
         .executableTarget(
             name: "Compat",
-            dependencies: [.product(name: "CefSwiftUI", package: "CefSwift")],
+            dependencies: [
+                .product(name: "CefSwiftUI", package: "CefSwift"),
+                .product(name: "ChromiumEmbeddedFramework", package: "CefSwift"),
+            ],
             exclude: ["cefapp.json"]
         ),
         // End-to-end checks against the real Chromium runtime; CI runs it.
         .executableTarget(
             name: "SelfTest",
-            dependencies: [.product(name: "CefSwiftUI", package: "CefSwift")],
+            dependencies: [
+                .product(name: "CefSwiftUI", package: "CefSwift"),
+                .product(name: "ChromiumEmbeddedFramework", package: "CefSwift"),
+            ],
             exclude: ["cefapp.json"]
         ),
     ]

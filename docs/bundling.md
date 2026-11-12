@@ -15,18 +15,21 @@ swift package --allow-writing-to-package-directory --allow-network-connections a
 ```
 
 The two `--allow-…` options pre-approve the plugin's permissions: it writes
-`.cef/` and the bundle into the package directory and downloads CEF from
-`cef-builds.spotifycdn.com`. Every subcommand needs them.
+the bundle into the package directory, and `codesign --timestamp` and
+`notarytool` reach Apple's servers. Every subcommand needs them.
+
+The plugin does not download CEF. The framework is CefSwift's
+`ChromiumEmbeddedFramework` product, a binary target that SwiftPM fetches
+and verifies when it resolves the package (see [The framework](#the-framework)).
 
 | Subcommand | Does |
 |---|---|
-| `download` | Downloads the pinned CEF distribution into `.cef/`, verifies its size and SHA-1, extracts it and converts the framework to the versioned layout. Does nothing if it is already prepared. |
-| `bundle` | Builds the product, compiles the helper, then assembles and signs `<Name>.app`. Downloads CEF first if needed. |
+| `bundle` | Builds the product, compiles the helper, then assembles and signs `<Name>.app`. |
+| `embed <App.app>` | Adds the framework, the helpers' startup library and the helper apps to an app another tool built, and signs them. See [Xcode](#xcode). |
 | `doctor <App.app>` | Inspects a built bundle and reports, per feature, whether it works and what is missing. See [cef doctor](#cef-doctor). |
 | `package <App.app>` | Wraps the app in a zip (`ditto`) or a disk image (`hdiutil`). |
 | `notarize <App.app>` | Packages the app, submits it with `xcrun notarytool submit --wait`, and staples the ticket. |
-| `info` | Prints the pinned CEF and Chromium versions and the state of the `.cef/` cache. |
-| `clean` | Removes `.cef/`. |
+| `info` | Prints the CEF and Chromium versions, where SwiftPM got the framework, and its architectures. |
 
 `doctor`, `package` and `notarize` take the app's path, or `--product
 <Name>` for `dist/<Name>.app`. `swift package cef help` prints the usage.
@@ -54,22 +57,55 @@ Options of `bundle`:
 | `--[no-]timestamp` | `timestamp`, else on for Developer ID and App Store identities | A secure timestamp from Apple's server. |
 | `--package zip\|dmg` | None | Packages the result, as `cef package` does. |
 | `--notarize` | Off | Packages and notarizes the result; needs `--keychain-profile <name>` or `notarization.keychainProfile`. |
-| `--flavor minimal\|standard` | `minimal` | Which CEF distribution to download. See [Flavors](#flavors). |
-| `--platform macosarm64\|macosx64` | The build machine's | Which architecture's CEF to bundle. |
-| `--manifest <path>` | `CEF_VERSION.json` | A different CEF manifest. |
 
-`download` takes `--platform`, `--flavor` and `--manifest` as well, and
-`info` takes `--manifest`.
+The bundle gets the framework that the package graph resolved, so an app
+uses the CEF version its CefSwift version pins. Add `dist/` to
+`.gitignore`.
 
-The plugin finds `CEF_VERSION.json` in the invoking package or in any of its
-dependencies, so an app that depends on CefSwift uses the CEF version that
-CefSwift pins. To bundle a different CEF version, pass `--manifest` with a
-`CEF_VERSION.json` pinned to it. That CEF build must still provide the
-`CEF_API_VERSION` the vendored headers pin, with the same API hash, or the
-app fails to start with `CefError.apiHashMismatch` or `CefError.loadFailed`.
+## The framework
 
-The cache lives in the invoking package's `.cef/`. Add `.cef/` and `dist/`
-to `.gitignore`.
+`ChromiumEmbeddedFramework` is the official CEF framework of the version
+`CEF_VERSION.json` pins: the minimal distributions for arm64 and x86_64,
+merged into one universal framework and packaged as an XCFramework by
+`Scripts/package-cef.py`, which neither rebuilds nor edits CEF's files.
+`Package.swift` declares it with `.binaryTarget(url:checksum:)` pointing at
+the `ChromiumEmbeddedFramework.xcframework.zip` asset of the `cef-<version>`
+release of this repository, so SwiftPM downloads it once (about 265 MB),
+checks its SHA-256 and caches it for every package on the machine.
+
+| Part | Contents |
+|---|---|
+| `Chromium Embedded Framework`, `Libraries/*.dylib` | Universal files whose two slices are CEF's arm64 and x86_64 files, byte for byte (`lipo -create`). |
+| `Resources/` | The files both distributions share, which are identical, and both V8 snapshots, which CEF names by architecture (`v8_context_snapshot.arm64.bin`, `v8_context_snapshot.x86_64.bin`). |
+| Layout | The versioned bundle layout (`Versions/A` and top-level symlinks) that CEF's README.txt asks for and Xcode 26 and `codesign` require. |
+| Top level of the XCFramework | CEF's `LICENSE.txt` and `CREDITS.html`. |
+
+Depend on the product from the app's executable target:
+
+```swift
+.executableTarget(name: "MyApp", dependencies: [
+    .product(name: "CefSwiftUI", package: "CefSwift"),
+    .product(name: "ChromiumEmbeddedFramework", package: "CefSwift"),
+]),
+```
+
+That target then links the framework, so dyld loads it at launch, which
+keeps 12 MB of the framework's pointers as clean memory that every process
+shares ([architecture](architecture.md#loading-the-framework-at-launch)).
+`CefKit` and `CefSwiftUI` do not link it, so library and test targets build
+and run without it; `CefKit` loads the framework with `dlopen` when the
+process has not linked it. `cef bundle` warns when the app does not link
+it.
+
+The framework's install name is `@executable_path/../Frameworks/…`, its
+path from an app's executable. So an executable that links it runs from an
+app bundle only, not from `.build` with `swift run`, and a test target
+that links it cannot load under `swift test`.
+
+`cef bundle` and `cef embed` thin the framework to the app's architectures:
+an arm64 app gets CEF's arm64 files back, byte for byte, and a 335 MB bundle
+instead of one of 590 MB. Then they re-sign everything with the app's
+identity.
 
 ## Per-product settings
 
@@ -164,16 +200,15 @@ That binary is CefSwift's `cefswift-helper` product, a Swift executable
 (`Sources/CefHelper`), which `cef bundle` builds with SwiftPM alongside the
 app, together with the `cefswift_helper_startup` library. The helper links
 `libcefswift_helper_startup.dylib` and then the framework, so dyld loads
-both at launch, and the app product is built with a weak link to the
-framework (`-weak_framework`). Libraries loaded at launch
-keep the framework's 12 MB of fixed-up pointers as shared, clean memory in
-every process; see [architecture](architecture.md#loading-the-framework-at-launch).
-An app bundled another way, for example by an Xcode project, builds the
-same two products with the same link order (see `HelperBuilder.swift` in
-the plugin for the exact linker flags). Its app
-executable runs without the link to the framework, since CefKit loads the
-framework with `dlopen` if dyld has not, but that process then holds the
-12 MB privately.
+both at launch, and the startup library seals the sandbox before the
+framework's initializers run ([sandbox](sandbox.md)). These are the
+plugin's only linker flags: SwiftPM puts a binary target's framework ahead
+of any flag a plugin adds, which would reverse that order, and the
+framework's install name is the app's path to it, not a helper's. So
+`cefswift-helper` does not depend on the binary target, and the plugin
+links it and points it at `@executable_path/../../../` (see
+`HelperBuilder.swift`). The helper has no app-specific code; only its file
+name, `Info.plist` and signature differ from app to app.
 
 The names matter. Chromium derives helper paths from the main executable's
 name, so each helper executable is named `<executable> Helper` or
@@ -188,12 +223,41 @@ name, so each helper executable is named `<executable> Helper` or
 | `MyApp Helper (Plugin).app` | `<bundle ID>.helper.plugin` |
 | `MyApp Helper (Renderer).app` | `<bundle ID>.helper.renderer` |
 
-### Versioned framework layout
+## Xcode
 
-CEF distributions ship the framework in a flat layout. Code signing and the
-Xcode 26 toolchain expect the versioned layout: `Versions/A/` with
-top-level symlinks. `cef download` converts the framework in place, so every
-later step sees a well-formed framework.
+An Xcode app target that depends on the package gets the framework the way
+SwiftPM does, and Xcode embeds and signs it. Xcode does not create the five
+helper apps, so a Run Script phase adds them with `cef embed`:
+
+1. File > Add Package Dependencies, enter
+   `https://github.com/Rajaniraiyn/CefSwift`, and add the `CefSwiftUI` and
+   `ChromiumEmbeddedFramework` products to the app target. Xcode copies
+   `Chromium Embedded Framework.framework` into the app's
+   `Contents/Frameworks` and signs it.
+2. In the target's Build Settings, set User Script Sandboxing
+   (`ENABLE_USER_SCRIPT_SANDBOXING`) to No: the phase runs SwiftPM, which
+   reads the package checkout and writes the app.
+3. In Build Phases, add a Run Script phase as the last phase, turn off
+   Based on dependency analysis, and run:
+
+   ```sh
+   "$BUILD_DIR/../../SourcePackages/checkouts/CefSwift/Scripts/xcode-embed.sh"
+   ```
+
+   For a local package reference, use the script in that checkout instead.
+   Arguments after the script go to `cef embed`, for example
+   `--capability camera` or `--config "$SRCROOT/cefapp.json"`.
+4. Build. The phase builds `cefswift-helper` and its startup library with
+   SwiftPM (into the build's intermediates), copies the framework thinned
+   to the app's architectures, the startup library and the helper apps into
+   `Contents/Frameworks`, and signs them with the identity, team and
+   hardened-runtime setting of the build. Xcode then signs the app.
+
+`cef embed` merges `LSEnvironment` (`MallocNanoZone = 0`) and the
+capabilities' keys into the app's `Info.plist`. The app's own entitlements
+stay Xcode's (`CODE_SIGN_ENTITLEMENTS`); the phase prints the ones the
+capabilities need. The helper is built for the build machine's
+architecture, and the phase warns when the app has others.
 
 ## Info.plist
 
@@ -249,7 +313,7 @@ with `--deep`:
 1. Each Mach-O file in the framework's `Libraries/`. CEF ships them
    linker-signed ad hoc; re-signing them with the app's identity is what lets
    library validation load them.
-2. The framework.
+2. The framework, thinned to the app's architectures first.
 3. `libcefswift_helper_startup.dylib`.
 4. Each helper app, with its entitlements.
 5. The app, with its entitlements and the embedded profile.
@@ -519,13 +583,10 @@ line at start-up naming what the signature leaves out. See
 | Notarization `Invalid` | Missing hardened runtime or timestamp, `get-task-allow`, or an unsigned nested binary | `cef notarize` prints the notary log; `cef doctor` names the part. |
 | Camera, microphone or location requests fail without a prompt | A missing usage description or, under the hardened runtime, entitlement | Add the capability. |
 | Phones are not offered as passkeys | No `NSBluetoothAlwaysUsageDescription`, or the app was started from a terminal, which becomes the responsible process | Add `bluetooth`; launch with `open`. |
+| `Library not loaded: @executable_path/../Frameworks/Chromium Embedded Framework.framework/…` | An executable that links the framework ran outside an app bundle (`swift run`, `.build/…`), or a test target links it | Run the bundle; keep `ChromiumEmbeddedFramework` out of library and test targets. |
+| `failed downloading '…/releases/download/cef-…/ChromiumEmbeddedFramework.xcframework.zip' … 404` | The pinned release asset is not published, as on a branch that moves CEF | Publish it ([automation](automation.md#publishing-the-framework)), or build it with `Scripts/package-cef.py` and set `CEFSWIFT_LOCAL_FRAMEWORK=1`. |
+| `cef bundle` warns that the app does not link the framework | The executable target lacks the `ChromiumEmbeddedFramework` product | Add it; the app runs either way, with 12 MB more private memory without it. |
 
-## Flavors
-
-| Flavor | Contents | Download (arm64 / x86_64) |
-|---|---|---|
-| `minimal` | The Release framework | About 135 MB / 142 MB |
-| `standard` | Release and Debug builds | About 312 MB / 361 MB |
-
-Bundles always contain the Release framework. `standard` is useful only when
-you need CEF's Debug build from `.cef/dist/`.
+The Release framework of CEF's minimal distribution is the only one
+packaged. For CEF's Debug build, download the standard distribution from
+[cef-builds.spotifycdn.com](https://cef-builds.spotifycdn.com/index.html).

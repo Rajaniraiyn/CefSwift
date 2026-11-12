@@ -5,6 +5,12 @@
 # the CEF_API_VERSION pin on a `cef-api-update` pull request that a person
 # merges, because that changes the C API the Swift code sees.
 #
+# A CEF update also repackages the framework as the XCFramework that
+# Package.swift's binary target pins, and publishes it as the prerelease
+# `cef-<version>` before it pushes the branch, so CI on the pull request
+# resolves it. Each run promotes the release the default branch pins and
+# deletes the ones nothing pins (Scripts/cef-release.sh).
+#
 # Repository setup, once:
 #   - Settings → General → enable "Allow auto-merge".
 #   - Protect `main` with the `ci` job as a required status check (without
@@ -38,7 +44,7 @@ concurrency:
 jobs:
   update:
     runs-on: macos-15   # the C bridge is generated with Apple clang
-    timeout-minutes: 30
+    timeout-minutes: 45
     permissions:
       actions: write        # start CI for the update branch
       contents: write       # push the update branch
@@ -61,18 +67,40 @@ jobs:
         with:
           ref: ${{ github.event.repository.default_branch }}
 
+      # The default branch pins this release, so it is no longer a candidate:
+      # mark it as a full release. (A merge by auto-merge starts no workflow,
+      # so this happens on the next run.)
+      - name: Promote the framework release the default branch pins
+        run: |
+          tag="$(jq -r '.xcframework.tag // empty' CEF_VERSION.json)"
+          if [ -n "$tag" ]; then Scripts/cef-release.sh promote "$tag"; fi
+
+      # Downloads both architectures' distributions, moves the headers and
+      # the bridge, and repackages the framework (Scripts/package-cef.py).
       - name: Update the pin
         id: cef
         run: Scripts/update-cef.py ${API_VERSION:+--api-version "$API_VERSION"}
 
       # Saved from the default branch, so CI on the update branch can restore
-      # it instead of downloading the same 135 MB again.
-      - name: Share the download with CI
+      # them instead of downloading the same 280 MB again.
+      - name: Share the downloads with CI
         if: steps.cef.outputs.updated == 'true' && steps.cef.outputs.cef_old != steps.cef.outputs.cef_new
         uses: actions/cache/save@v4
         with:
           path: .cef/downloads
-          key: cef-${{ steps.cef.outputs.cef_new }}-macosarm64-minimal
+          key: cef-${{ steps.cef.outputs.cef_new }}-minimal
+
+      # Package.swift on the update branch names this asset, so it must exist
+      # before CI resolves the branch. It is a prerelease until the update
+      # merges. Rerunning with the same bytes does nothing.
+      - name: Publish the framework as a prerelease
+        if: steps.cef.outputs.updated == 'true' && steps.cef.outputs.cef_old != steps.cef.outputs.cef_new
+        env:
+          TAG: ${{ steps.cef.outputs.xcframework_tag }}
+          CHECKSUM: ${{ steps.cef.outputs.xcframework_checksum }}
+        run: |
+          Scripts/cef-release.sh publish "$TAG" .cef/xcframework/ChromiumEmbeddedFramework.xcframework.zip \
+            "$CHECKSUM" "$BASE"
 
       - name: Commit and open or refresh the pull request
         if: steps.cef.outputs.updated == 'true'
@@ -87,7 +115,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git switch --force-create "$BRANCH"
-          git add CEF_VERSION.json Sources/CCef
+          git add CEF_VERSION.json Package.swift Sources/CCef
           git commit --quiet --file "$RUNNER_TEMP/message.txt"
 
           # An open pull request from an earlier run is refreshed in place
@@ -131,6 +159,12 @@ jobs:
           if [ "$(gh pr view "$BRANCH" --json state --jq .state 2>/dev/null)" = OPEN ]; then
             gh pr close "$BRANCH" --delete-branch --comment "$BASE already has CEF $CURRENT."
           fi
+
+      # Keeps every framework release the default branch, a version tag or an
+      # open update branch pins; deletes superseded prereleases and all but
+      # the newest three other releases (Scripts/cef-release.sh).
+      - name: Delete framework releases nothing pins
+        run: Scripts/cef-release.sh prune "$BASE"
 
       # A failed scheduled run otherwise only shows as a red run in the
       # Actions tab. Keep one open issue and add each failure to it.

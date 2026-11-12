@@ -11,6 +11,14 @@ import PackagePlugin
 /// about 12 MB of private memory in every helper process. The startup
 /// library comes first in the helper's link order, so it seals the sandbox
 /// before any of the framework's code runs. See docs/architecture.md.
+///
+/// These are the plugin's only linker flags. A target that depends on the
+/// framework's binary target gets the framework ahead of every flag the
+/// plugin can add, which would let the framework's initializers run before
+/// the sandbox is sealed; and the framework's install name,
+/// `@executable_path/../Frameworks/…`, is the app's path to it, not a
+/// helper's. So `CefHelper` does not depend on the binary target, and the
+/// plugin links and points it at the framework itself.
 struct HelperBuilder {
     /// The startup library's file name in the app's `Contents/Frameworks/`.
     static let startupLibraryName = "libcefswift_helper_startup.dylib"
@@ -27,7 +35,7 @@ struct HelperBuilder {
         name == helperProduct || name == startupProduct
     }
 
-    /// The converted `Chromium Embedded Framework.framework` in `.cef/dist`.
+    /// `Chromium Embedded Framework.framework` in the XCFramework.
     let framework: URL
     let workDirectory: URL
 
