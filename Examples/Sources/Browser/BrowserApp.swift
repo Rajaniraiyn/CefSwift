@@ -88,8 +88,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             controller.onPageLoad = nil
         }
         Thread.detachNewThread {
-            while readLine() != nil {}
+            while let line = readLine() {
+                if line == "use" { DispatchQueue.main.async { MainActor.assumeIsolated { self.useLikeAPerson() } } }
+            }
             DispatchQueue.main.async { NSApp.terminate(nil) }
+        }
+    }
+
+    /// The `use` benchmark command: types into the address field, bookmarks
+    /// the page and opens the menu bar, as a person trying the browser
+    /// would, then prints `cefswift-benchmark used`.
+    private func useLikeAPerson() {
+        Task {
+            NSApp.activate()
+            controller.focusAddressBar()
+            try? await Task.sleep(for: .milliseconds(300))
+            for character in "swi" {
+                (NSApp.keyWindow?.firstResponder as? NSTextView)?.insertText(String(character), replacementRange: NSRange(location: NSNotFound, length: 0))
+                try? await Task.sleep(for: .milliseconds(150))
+            }
+            if let browser = controller.current { controller.library.toggleBookmark(for: browser) }
+            NotificationCenter.default.post(name: NSMenu.didBeginTrackingNotification, object: NSApp.mainMenu)
+            try? await Task.sleep(for: .seconds(1))
+            print("cefswift-benchmark used")
+            fflush(stdout)
         }
     }
 

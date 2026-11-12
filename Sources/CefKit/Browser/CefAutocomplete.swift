@@ -56,7 +56,7 @@ public struct CefAutocompleteSuggestion: Sendable, Identifiable, Hashable {
 ///
 /// - Important: Experimental. Chromium has no public interface for omnibox
 ///   ranking; this drives the Mojo interface of the `chrome://omnibox`
-///   debugging page in a hidden service browser. Of the internal-page APIs
+///   debugging page from a hidden service host. Of the internal-page APIs
 ///   it is the most likely to change when Chromium updates.
 ///
 /// Search-engine suggestions are fetched over the network like Chrome's
@@ -64,10 +64,10 @@ public struct CefAutocompleteSuggestion: Sendable, Identifiable, Hashable {
 /// local results.
 @MainActor
 public final class CefAutocomplete {
-    private let service: CefInternalPageService
+    private unowned let profile: CefProfile
 
     init(profile: CefProfile) {
-        service = CefInternalPageService(profile: profile, page: "chrome://omnibox/", setup: Self.setup)
+        self.profile = profile
     }
 
     /// Ranked suggestions for `text`, as typed with the caret at its end.
@@ -84,7 +84,8 @@ public final class CefAutocomplete {
         for text: String, currentURL: URL? = nil, allowsInlineCompletion: Bool = true
     ) async throws -> [CefAutocompleteSuggestion] {
         guard !text.trimmingCharacters(in: .whitespaces).isEmpty else { return [] }
-        return try await service.call(
+        return try await profile.services.call(
+            Self.module,
             "(s, a) => s.query(a.text, a.url, a.preventInline)",
             [
                 "text": .string(text),
@@ -94,16 +95,11 @@ public final class CefAutocomplete {
         ).decode([MatchRecord]?.self)?.map(CefAutocompleteSuggestion.init) ?? []
     }
 
-    /// Starts the service behind ``suggestions(for:currentURL:allowsInlineCompletion:)``
-    /// ahead of the first query, which otherwise waits for it — call it
-    /// when an address bar begins editing.
-    public func prepare() async {
-        try? await service.start()
-    }
-
     /// Binds an own `mojom.OmniboxPageHandler` and collects the debug
     /// controller's final response for the latest query.
-    private static let setup = """
+    static let module = CefServiceModule(
+        name: "omnibox", hosts: [.omnibox],
+        setup: """
         async () => {
           const m = await import('chrome://omnibox/omnibox_internals.mojom-webui.js');
           const router = new m.OmniboxPageCallbackRouter();
@@ -142,7 +138,7 @@ public final class CefAutocomplete {
           });
           return service;
         }
-        """
+        """)
 }
 
 private struct MatchRecord: Decodable {

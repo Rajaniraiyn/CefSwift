@@ -50,28 +50,31 @@ public struct CefMostVisitedSite: Sendable, Identifiable, Hashable {
 /// methods throw.
 ///
 /// CEF exposes no history API, so this one talks to the Mojo interfaces
-/// behind Chromium's own `chrome://history` and new tab pages, through
-/// hidden service browsers parked on them. Those interfaces are internal to
-/// Chromium: this API is more likely than the rest of CefKit to need
-/// attention when Chromium updates.
+/// behind Chromium's own `chrome://history` and new tab pages, from hidden
+/// service hosts that start on first use and close when idle. Those
+/// interfaces are internal to Chromium: this API is more likely than the
+/// rest of CefKit to need attention when Chromium updates.
 @MainActor
 public final class CefHistory {
-    private let history: CefInternalPageService
-    private let newTabPage: CefInternalPageService
+    private unowned let profile: CefProfile
 
     init(profile: CefProfile) {
+        self.profile = profile
+    }
+
+    private func call(_ module: CefServiceModule, _ function: String, _ arguments: CefJSON = [:]) async throws -> CefJSON {
         // Incognito profiles keep no history.
-        history = CefInternalPageService(
-            profile: profile, page: "chrome://history/", setup: Self.historySetup, isAvailableInIncognito: false)
-        newTabPage = CefInternalPageService(
-            profile: profile, page: "chrome://new-tab-page-third-party/", setup: Self.mostVisitedSetup,
-            isAvailableInIncognito: false)
+        guard profile.kind != .incognito else {
+            throw CefError.operationFailed("an incognito profile keeps no history")
+        }
+        return try await profile.services.call(module, function, arguments)
     }
 
     /// Visited pages whose title or address matches `text` (everything
     /// when empty), newest first.
     public func search(_ text: String = "", limit: Int = 100) async throws -> [CefHistoryEntry] {
-        try await history.call(
+        try await call(
+            Self.historyModule,
             """
             (s, a) => s.run(async () => {
               let page = (await s.handler.queryHistory(a.text, a.limit, null, true, false)).results;
@@ -97,8 +100,8 @@ public final class CefHistory {
         let items = CefJSON.array(entries.map { entry in
             ["url": .string(entry.url.absoluteString), "timestamps": .array(entry.visitTimes.map(CefJSON.number))]
         })
-        _ = try await history.call(
-            "(s, a) => s.run(() => s.handler.removeVisits(a.items)).then(() => true)", ["items": items])
+        _ = try await call(
+            Self.historyModule, "(s, a) => s.run(() => s.handler.removeVisits(a.items)).then(() => true)", ["items": items])
     }
 
     /// Removes every visit to `url` from history.
@@ -111,7 +114,8 @@ public final class CefHistory {
     /// new tab page shows as tiles, including visits made just before the
     /// call.
     public func mostVisited() async throws -> [CefMostVisitedSite] {
-        try await newTabPage.call(
+        try await call(
+            Self.mostVisitedModule,
             "s => s.tiles().then(tiles => tiles.map(t => ({ url: t.url, title: t.title })))"
         ).decode([TileRecord].self).compactMap { tile in
             URL(string: tile.url).map { CefMostVisitedSite(url: $0, title: tile.title) }
@@ -125,7 +129,8 @@ public final class CefHistory {
     /// most-visited sites. An open page's icon is ``CefBrowser/favicon``.
     public func favicon(for pageURL: URL, size: Int = 16) async throws -> NSImage? {
         let scale = Int(NSScreen.main?.backingScaleFactor ?? 2)
-        let dataURL = try await history.call(
+        let dataURL = try await call(
+            Self.faviconModule,
             """
             async (s, a) => {
               const load = page => new Promise(resolve => {
@@ -160,26 +165,21 @@ public final class CefHistory {
         return image
     }
 
-    // MARK: Page setup
+    // MARK: Service modules
 
-    /// Binds an own `history.mojom.PageHandler`. Its generated remote class
-    /// is not exported by name, so it is found by its methods. Calls are
-    /// queued because result paging is stateful per handler.
-    private static let historySetup = """
-        async () => {
-          const m = await import('chrome://history/history.js');
-          const isHandler = v => typeof v === 'function'
-            && typeof v.prototype?.queryHistory === 'function'
-            && typeof v.prototype?.removeVisits === 'function';
-          const Remote = Object.values(m).find(isHandler) ?? m.BrowserProxyImpl?.getInstance().handler?.constructor;
-          if (!isHandler(Remote)) throw new Error('history.mojom.PageHandler not found');
-          const handler = new Remote();
-          handler.$.bindNewPipeAndPassReceiver().bindInBrowser();
-          let queue = Promise.resolve();
-          const run = body => (queue = queue.then(body, body));
-          return { handler, run };
-        }
-        """
+    /// An own `history.mojom.PageHandler`. Calls are queued because result
+    /// paging is stateful per handler.
+    static let historyModule = CefServiceModule(
+        name: "history", hosts: [.history],
+        setup: """
+            async () => {
+              const m = await import('chrome://resources/cr_components/history/history.mojom-webui.js');
+              const handler = m.PageHandler.getRemote();
+              let queue = Promise.resolve();
+              const run = body => (queue = queue.then(body, body));
+              return { handler, run };
+            }
+            """)
 
     /// Reads the tiles through a `most_visited.mojom.MostVisitedPageHandler`
     /// of its own, created for each call.
@@ -192,33 +192,40 @@ public final class CefHistory {
     /// The new handler first reports the cached tiles, and reports again once
     /// the fresh list differs; without a second report within a moment, the
     /// cached tiles were current.
-    private static let mostVisitedSetup = """
-        async () => {
-          const m = await import('chrome://resources/cr_components/most_visited/most_visited.mojom-webui.js');
-          const factory = m.MostVisitedPageHandlerFactory.getRemote();
-          const tiles = () => new Promise((resolve, reject) => {
-            const router = new m.MostVisitedPageCallbackRouter();
-            const handler = new m.MostVisitedPageHandlerRemote();
-            let latest = null, settle = null;
-            const finish = () => {
-              clearTimeout(settle);
-              clearTimeout(giveUp);
-              handler.$.close();
-              router.$.close?.();
-              latest ? resolve(latest) : reject(new Error('the new tab page sent no tiles'));
-            };
-            const giveUp = setTimeout(finish, 10000);
-            router.setMostVisitedInfo.addListener(info => {
-              const isFirst = latest === null;
-              latest = info.tiles;
-              if (isFirst) { settle = setTimeout(finish, 750); } else { finish(); }
-            });
-            factory.createPageHandler(router.$.bindNewPipeAndPassRemote(), handler.$.bindNewPipeAndPassReceiver());
-            handler.updateMostVisitedInfo();
-          });
-          return { tiles };
-        }
-        """
+    static let mostVisitedModule = CefServiceModule(
+        name: "most-visited", hosts: [.mostVisited],
+        setup: """
+            async () => {
+              const m = await import('chrome://resources/cr_components/most_visited/most_visited.mojom-webui.js');
+              const factory = m.MostVisitedPageHandlerFactory.getRemote();
+              const tiles = () => new Promise((resolve, reject) => {
+                const router = new m.MostVisitedPageCallbackRouter();
+                const handler = new m.MostVisitedPageHandlerRemote();
+                let latest = null, settle = null;
+                const finish = () => {
+                  clearTimeout(settle);
+                  clearTimeout(giveUp);
+                  handler.$.close();
+                  router.$.close?.();
+                  latest ? resolve(latest) : reject(new Error('the new tab page sent no tiles'));
+                };
+                const giveUp = setTimeout(finish, 10000);
+                router.setMostVisitedInfo.addListener(info => {
+                  const isFirst = latest === null;
+                  latest = info.tiles;
+                  if (isFirst) { settle = setTimeout(finish, 750); } else { finish(); }
+                });
+                factory.createPageHandler(router.$.bindNewPipeAndPassRemote(), handler.$.bindNewPipeAndPassReceiver());
+                handler.updateMostVisitedInfo();
+              });
+              return { tiles };
+            }
+            """)
+
+    /// `chrome://favicon2` images, which the bookmarks and history hosts may
+    /// load; whichever of them runs answers.
+    static let faviconModule = CefServiceModule(
+        name: "favicons", hosts: [.bookmarks, .history], setup: "async () => ({})")
 }
 
 private struct HistoryRecord: Decodable {

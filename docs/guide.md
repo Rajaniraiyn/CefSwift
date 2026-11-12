@@ -1194,29 +1194,53 @@ let suggestions = try await profile.autocomplete.suggestions(for: "cef")
   what Chrome's address bar would show, ranked, each with a `kind` (history,
   bookmark, open tab, search, …), `detail` (a page's title), `relevance`,
   `inlineCompletion` and `isBookmarked`. Call it on every keystroke: a newer
-  query supersedes one still running, which then returns no suggestions. The
-  first query waits for the service to start; call
-  `await autocomplete.prepare()` when your address field begins editing to
-  start it early. Search-engine suggestions come from the network; filter on
-  `kind` to keep only local results.
+  query supersedes one still running, which then returns no suggestions.
+  Search-engine suggestions come from the network; filter on `kind` to keep
+  only local results.
 
 CEF has no API for any of this. CefKit uses the services Chromium's own
-pages use, from hidden browsers that it opens on first use:
-`chrome.bookmarks` on the bookmarks page, and the Mojo handlers of the
-history, new tab and `chrome://omnibox` pages. Their windows stay
-invisible, even when Chromium brings its windows forward. The default
-profile's hidden browsers stay open until the app quits. Those of any other
-profile close when the profile's last browser closes, which lets an
-incognito profile and its data go, and start again on the next call. These interfaces are internal
-to Chromium and more likely than the rest of CefKit to change with a
-Chromium update; `chrome://omnibox` is a debugging page, so `autocomplete`
-is experimental. SelfTest exercises all three, so a CEF update that breaks
-one fails CI.
+pages use — `chrome.bookmarks`, and the Mojo handlers of the history, new
+tab and `chrome://omnibox` pages — from hidden service hosts, one renderer
+process each. A host starts on the first call that needs it, in about a
+tenth of a second, and closes 30 seconds after its last call, when macOS
+runs low on memory, and when its profile's last browser closes, which lets
+an incognito profile and its data go. Its window stays invisible, even when
+Chromium brings its windows forward. While the bookmarks host is closed,
+`tree()`, `children(of:)`, `bookmark(_:)` and `recent(limit:)` read
+Chromium's `Bookmarks` file, and `changes` watches it, so following
+bookmarks costs no process; an edit made in Chrome's own UI reaches them
+about 2.5 seconds later, when Chromium saves the file
+([architecture](architecture.md#internal-page-services)).
+
+These interfaces are internal to Chromium and more likely than the rest of
+CefKit to change with a Chromium update; `chrome://omnibox` is a debugging
+page, so `autocomplete` is experimental. SelfTest exercises all of them, so
+a CEF update that breaks one fails CI.
+
+What each host costs while it runs, measured with
+[`Scripts/measure-services.py`](../Scripts/measure-services.py) on the
+machine described under [Footprint](#footprint-and-launch-time): memory is
+the growth of the whole app's physical footprint when the host starts,
+latency the median of five calls.
+
+| Service | Host | Memory | First call | Later calls |
+|---|---|---|---|---|
+| `bookmarks` reads, `changes` while the host is closed | none (Chromium's file) | 0 | – | – |
+| `bookmarks` changes and searches | `chrome://bookmarks` | 21 MB | 137 ms | 1 ms |
+| `history.search`, `remove` | `chrome://history` | 27 MB | 175 ms | 2 ms |
+| `history.mostVisited()` | `chrome://new-tab-page-third-party` | 21 MB | 127 ms | 1 ms |
+| `history.favicon(for:size:)` | `chrome://bookmarks` or `chrome://history`, whichever runs | 0 when one runs | 16 ms | 2 ms |
+| `autocomplete` | `chrome://omnibox` | 23 MB | 234 ms | 9 ms |
+| Discarding | `chrome://discards` | 22 MB | 122 ms | 1 ms |
+
+Hosts that open the WebUI app instead, as CefKit did before, cost 38 to
+83 MB each and their first call took as long.
 
 The Browser example uses them for address-field suggestions
 (`AddressSuggestions.swift`), a bookmark star, Bookmarks and History menus,
 and a start page whose tiles come from `mostVisited()` and
-`bookmarks.recent()` through a `CefBridge` (`BrowserLibrary.swift`).
+`bookmarks.recent()` through a `CefBridge` (`BrowserLibrary.swift`). It
+reads history when the menu bar opens, so at launch it starts no host.
 
 ## DevTools
 
@@ -1304,7 +1328,7 @@ executable to the page's `didFinishLoad`.
 | `CefWebView` with `.embedded` (the Minimal example) | 5 | 88 MB | 306 ms |
 | The same, before the changes below | 6 | 185 MB | 276 ms |
 | The same with `memoryPolicy = .minimal` | 4 | 82 MB | 284 ms |
-| Browser example, one tab, `.browser` | 8 | 260 MB | 527 ms |
+| Browser example, one tab, `.browser` | 7 | 166 MB | 551 ms |
 | The same, before the changes below | 8 | 371 MB | 559 ms |
 | For comparison: a `WKWebView` app | 4 | 60 MB | 284 ms |
 | For comparison: Chrome 157, empty profile, one tab | 12 | 286 MB | – |
@@ -1313,9 +1337,19 @@ Launch times vary by about 30 ms from run to run, so none of the changes
 measurably changes them. The first launch after a bundle is built or signed
 takes 2 to 3 s longer while macOS checks its signature. A first launch on
 an empty profile measures within the same ranges, with up to 4 MB more
-memory. The Browser example has four renderers: the tab, the spare
-renderer, and the hidden pages behind `profile.bookmarks` and
-`profile.history`, which the example reads at launch for its menus.
+memory. The Browser example starts no service host at launch: its
+bookmarks come from Chromium's `Bookmarks` file, and its history is read
+when the menu bar opens. Measured on a build without the passkey and
+Chromium-panel code, it uses:
+
+| Browser example (`measure-services.py browser`, median of 3) | Processes | Memory |
+|---|---|---|
+| At launch | 6 | 143 MB |
+| The same, with a host per internal page opening the page's app | 8 | 264 MB |
+| After typing in the address field, bookmarking the page and opening the menu bar | 9 | 217 MB |
+| The same, with a host per internal page opening the page's app | 10 | 305 MB |
+| 40 s later, once the hosts have closed | 6 | 157 MB |
+| The same, with a host per internal page opening the page's app | 10 | 290 MB |
 
 In the Minimal example, the 88 MB divide into the app process (39 MB), the
 GPU process (21 MB), the page's renderer (16 MB), and Chromium's network
@@ -1406,7 +1440,8 @@ driver crash cannot end the app.
 - Offscreen browsers always use the Alloy style and cannot open native
   popup windows.
 - `CefAutocomplete` is experimental, and `CefBookmarks`, `CefHistory` and
-  `CefAutocomplete` depend on Chromium-internal pages.
+  `CefAutocomplete` depend on Chromium-internal WebUI hosts, and `CefBookmarks`
+  on the format of Chromium's `Bookmarks` file.
 - `chromiumUI` and swipe navigation in `CefBrowserWindow` depend on
   Chromium's AppKit classes and the view class names its accessibility
   reports ([architecture](architecture.md#chromiums-appkit-classes)). If a

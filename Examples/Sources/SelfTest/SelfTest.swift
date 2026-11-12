@@ -1,5 +1,5 @@
 import AppKit
-import CefKit
+@_spi(Testing) import CefKit
 import CefSwiftUI
 
 /// End-to-end checks of CefSwift against the real Chromium runtime.
@@ -52,12 +52,16 @@ enum SelfTest {
         window.makeKeyAndOrderFront(nil)
         NSApp.activate()
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 240) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + (ServiceBenchmark.isRequested ? 900 : 240)) {
             print("FAIL watchdog: checks did not finish in 240s")
             exit(124)
         }
         Task {
-            await runChecks()
+            if ServiceBenchmark.isRequested {
+                await ServiceBenchmark.run()
+            } else {
+                await runChecks()
+            }
             // Quit as an app does, through terminate: and cef_shutdown(). A
             // crash there ends the process with a signal instead.
             NotificationCenter.default.addObserver(
@@ -93,6 +97,7 @@ enum SelfTest {
         ("bridgeScope", bridgeScopeChecks),
         ("internalPages", internalPageDataChecks),
         ("serviceLifetime", serviceLifetimeChecks),
+        ("serviceHosts", serviceHostChecks),
         // After the history checks: the pages these visit would crowd the
         // probe out of the most-visited tiles.
         ("nativeUI", nativeUIChecks),
@@ -369,6 +374,21 @@ enum SelfTest {
             }
             check("bookmarks: change events", await waitUntil(timeout: .seconds(5)) { bookmarkChanges >= 4 },
                   detail: "\(bookmarkChanges) events")
+            // Chromium saves its Bookmarks file about 2.5 s after a change.
+            var difference = ""
+            check("bookmarks: Chromium's file reads as the service answers", await waitUntilAsync(timeout: .seconds(8)) {
+                bookmarks.readSource = .service
+                let served = (try? await bookmarks.tree()) ?? []
+                bookmarks.readSource = .file
+                let stored = (try? await bookmarks.tree()) ?? []
+                var contents: [CefBookmark]?
+                if let folder { contents = try? await bookmarks.children(of: folder.id) }
+                let recent = try? await bookmarks.recent(limit: 1)
+                bookmarks.readSource = .automatic
+                difference = "\(bookmarkSummary(served)) vs \(bookmarkSummary(stored))"
+                return !served.isEmpty && bookmarkSummary(served) == bookmarkSummary(stored)
+                    && contents?.map(\.id) == [added.id] && recent?.map(\.id) == [added.id]
+            }, detail: difference)
         }
 
         // Visit a page in a Chrome-style browser so Chromium records it.
@@ -402,7 +422,6 @@ enum SelfTest {
             return tiles.contains(visitedURL)
         }, detail: "\(tiles.count) tiles: \(tiles.map(\.absoluteString))")
 
-        await profile.autocomplete.prepare()
         await expect("autocomplete: bookmark ranked for a title prefix") {
             let suggestions = try await profile.autocomplete.suggestions(for: "CefSwift Zanzib")
             return suggestions.contains { $0.kind == .bookmark && $0.url == bookmarkURL && $0.isBookmarked }
@@ -428,6 +447,15 @@ enum SelfTest {
                 return try await bookmarks.search("CefSwift Zanzibar").isEmpty
             }
         }
+    }
+
+    /// What two reads of the bookmark tree are compared by.
+    static func bookmarkSummary(_ nodes: [CefBookmark]) -> String {
+        nodes.map { node in
+            "\(node.id):\(node.parentID?.description ?? "-"):\(node.index):\(node.title):\(node.url?.absoluteString ?? "")"
+                + ":\(String(describing: node.permanentFolder)):\(node.isEditable):"
+                + "\(node.dateAdded.map { Int($0.timeIntervalSince1970) } ?? 0)[\(bookmarkSummary(node.children ?? []))]"
+        }.joined(separator: ",")
     }
 
     static func chromeWindowChecks() async {
