@@ -101,6 +101,60 @@ whole content area in one layer, so `contentInsets` and
 `contentCornerRadius` are drawn by a native view laid over the page that
 paints everything except the page's rectangle and passes events through.
 
+## Offscreen accessibility
+
+Windowed browsers expose Chromium's own `NSAccessibility` objects. For
+offscreen browsers Chromium only computes the tree ("tree only" mode) and
+hands it to CEF's accessibility handler, which the render handler returns
+from `get_accessibility_handler`:
+
+- `set_accessibility_state(STATE_ENABLED)` starts the tree. With
+  `CefOffscreenAccessibility.automatic`, `CefOffscreenBrowserView` calls it
+  on the first sign of an assistive app: VoiceOver running, the first
+  children, hit-test or focus query on the view, or `CefApplication`
+  receiving `AXEnhancedUserInterface` or `AXManualAccessibility`, which
+  arrive through the informal accessibility protocol.
+- `on_accessibility_tree_change` delivers serialized `AXTreeUpdate`s, one
+  tree per frame, with node data, child lists, relative bounds, tree data
+  (focus, selection, load state) and events.
+  `on_accessibility_location_change` delivers moved nodes. Both arrive as
+  `cef_value_t` trees. Reading a large page's tree value by value takes
+  hundreds of milliseconds, so `cef_write_json` turns each into text in one
+  call, a serial background queue parses it into `CefJSON`, and the main
+  thread applies the results in the order Chromium sent them.
+- `CefAccessibilityTree` applies the updates as Chromium's `AXTree` does
+  (clearing, reparenting, removing orphaned subtrees) and joins the frames'
+  trees through each `<iframe>` node's `childTreeId`. A tree without a
+  parent is the main document; a new one replaces the old one and its
+  frames. Frames are resolved on demand: relative bounds plus each offset
+  container's origin, less its scroll offset, with transforms applied,
+  then offset by the hosting `<iframe>`, and divided by the device scale
+  factor, since Chromium reports physical pixels.
+- Chromium's scroll updates travel separately from location updates and
+  CEF does not forward them, so the document's scroll position, which the
+  render handler's `on_scroll_offset_changed` reports, is written into the
+  root node.
+- `CefOffscreenBrowserView` keeps one `NSAccessibilityElement` per node.
+  Elements hold only a node identifier and read the tree on every query;
+  the role table follows Chromium's macOS mapping. Ignored nodes are
+  skipped, and leaves (text, images, buttons, plain text fields) hide
+  their insides. Each change becomes the matching `NSAccessibility`
+  notification; layout notifications are coalesced to one per 100 ms.
+
+CEF's C API has no way to perform accessibility actions, so actions go
+through input: clicks at the node's centre, arrow keys, and
+`Input.insertText`. Focus and scrolling use `DOM.focus` and
+`DOM.scrollIntoViewIfNeeded`. Those need a DOM node, which the serialized
+tree does not carry; the DevTools `Accessibility` domain shares Chromium's
+node identifiers with it, so `Accessibility.getChildAXNodes` on the node's
+parent yields the node's `backendDOMNodeId`. Only the main frame's nodes
+are looked up this way: a frame in another renderer process numbers its
+nodes independently, so a number from it could name a different node in
+the main frame's process. Nodes in frames are clicked instead.
+
+When the browser closes or the tree is turned off, the tree is emptied
+and the view posts `AXUIElementDestroyed` for every element it handed out.
+
 ## DevTools, JavaScript and the bridge
 
 `CefDevTools` attaches a DevTools message observer to the browser and speaks

@@ -234,6 +234,7 @@ extension CefBrowser {
     /// `on_before_close` for a browser being discarded by closing it.
     func browserDidCloseForDiscard() {
         initialURL = url
+        accessibilityDidCloseForDiscard()
         raw = nil
         client = nil
         isLoading = false
@@ -268,6 +269,7 @@ extension CefBrowser {
         let waiters = restoreWaiters
         restoreWaiters = []
         waiters.forEach { $0.resume() }
+        reassertAccessibilityState()
         delegate?.browserDidRestore(self)
     }
 
