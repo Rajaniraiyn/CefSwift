@@ -77,8 +77,8 @@ public struct CefSchemeResponse: Sendable {
             Body(source: .data(data))
         }
 
-        /// The contents of a file, read in chunks on ``CefFileActor`` as the
-        /// page consumes them.
+        /// The contents of a file, read as the page consumes them, straight
+        /// into Chromium's buffer.
         public static func file(_ url: URL) -> Body {
             Body(source: .file(url))
         }
@@ -280,8 +280,6 @@ struct SchemeBodyWriter: Sendable {
 final class SchemeResourceHandler: Sendable {
     /// How far a producer may run ahead of the page.
     static let bufferLimit = 1 << 20
-    /// The size of the chunks a file is read in.
-    static let fileChunkSize = 256 << 10
 
     /// A read CEF is waiting on.
     private struct PendingRead {
@@ -320,6 +318,8 @@ final class SchemeResourceHandler: Sendable {
         var pendingRead: PendingRead?
         /// Writers waiting for the page to catch up.
         var writers: [CheckedContinuation<Void, any Error>] = []
+        /// A file body's reader, once the first read opened it.
+        var file: SchemeFileReader?
     }
 
     private let handler: any CefSchemeHandler
@@ -388,26 +388,9 @@ final class SchemeResourceHandler: Sendable {
         state.isProducerStarted = true
         let writer = SchemeBodyWriter(handler: self)
         switch response.body.source {
-        case .data:
+        case .data, .file:
+            // Data is buffered whole by `install`; files are read by `read`.
             break
-        case .file(let url):
-            // Bytes skipped for a range request are never read.
-            let start = state.bytesToSkip
-            state.bytesToSkip = 0
-            state.producer = Task { @CefFileActor [weak self] in
-                do {
-                    let file = try FileHandle(forReadingFrom: url)
-                    defer { try? file.close() }
-                    try file.seek(toOffset: UInt64(start))
-                    while let chunk = try file.read(upToCount: Self.fileChunkSize), !chunk.isEmpty {
-                        try await writer.write(chunk)
-                    }
-                    self?.finish(failureCode: nil)
-                } catch is CancellationError {
-                } catch {
-                    self?.finish(failureCode: -2)  // ERR_FAILED
-                }
-            }
         case .stream(_, let pump):
             state.producer = Task { [weak self] in
                 do {
@@ -521,6 +504,13 @@ final class SchemeResourceHandler: Sendable {
     // MARK: CEF callbacks
 
     private func read(into buffer: UnsafeMutableRawPointer, capacity: Int, callback: CefRef<cef_resource_read_callback_t>) -> (handled: Bool, count: Int32) {
+        if let file = fileReader() {
+            // CEF calls `read` on its thread pool, where blocking file reads
+            // are what Chromium does for its own files: the bytes go from
+            // the file straight into CEF's buffer.
+            let count = file.read(into: buffer, capacity: capacity)
+            return count > 0 ? (true, Int32(count)) : (false, Int32(count))
+        }
         // CEF keeps the buffer valid until the callback runs.
         nonisolated(unsafe) let buffer = buffer
         return state.withLock { state in
@@ -533,6 +523,18 @@ final class SchemeResourceHandler: Sendable {
             state.pendingRead = PendingRead(buffer: buffer, capacity: capacity, callback: callback)
             startProducerIfNeeded(&state)
             return (true, 0)
+        }
+    }
+
+    /// The reader of a file body, opened on the first read.
+    private func fileReader() -> SchemeFileReader? {
+        state.withLock { state in
+            if let file = state.file { return file }
+            guard !state.isCancelled, case .file(let url)? = state.response?.body.source else { return nil }
+            let file = SchemeFileReader(url: url, offset: state.bytesToSkip, remaining: state.remaining)
+            state.bytesToSkip = 0
+            state.file = file
+            return file
         }
     }
 
@@ -711,6 +713,44 @@ final class SchemeResourceHandler: Sendable {
             headers: headers,
             body: body
         )
+    }
+}
+
+/// Reads a file body for ``SchemeResourceHandler``: `pread(2)` into the
+/// buffer CEF passes to `read`, with no intermediate copy. CEF calls
+/// `read` in sequence, so the lock is never contended; it only makes the
+/// position safe to move between Chromium's pool threads.
+final class SchemeFileReader: Sendable {
+    private let descriptor: Int32
+    private let position: OSAllocatedUnfairLock<(offset: Int, remaining: Int?)>
+
+    init(url: URL, offset: Int, remaining: Int?) {
+        descriptor = open(url.path, O_RDONLY | O_CLOEXEC)
+        position = OSAllocatedUnfairLock(initialState: (offset, remaining))
+    }
+
+    deinit {
+        if descriptor >= 0 { close(descriptor) }
+    }
+
+    /// Reads up to `capacity` bytes into `buffer`. Returns the count, 0 at
+    /// the end, or -2 (`ERR_FAILED`) when the file cannot be read.
+    func read(into buffer: UnsafeMutableRawPointer, capacity: Int) -> Int {
+        guard descriptor >= 0 else { return -2 }
+        // CEF keeps the buffer valid for the call.
+        nonisolated(unsafe) let buffer = buffer
+        return position.withLock { position in
+            let wanted = min(capacity, position.remaining ?? .max)
+            guard wanted > 0 else { return 0 }
+            var count: Int
+            repeat {
+                count = pread(descriptor, buffer, wanted, off_t(position.offset))
+            } while count < 0 && errno == EINTR
+            guard count >= 0 else { return -2 }
+            position.offset += count
+            position.remaining = position.remaining.map { $0 - count }
+            return count
+        }
     }
 }
 

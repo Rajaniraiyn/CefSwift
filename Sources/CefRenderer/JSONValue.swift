@@ -165,65 +165,34 @@ enum JSONValue: Equatable {
     }
 }
 
-// MARK: - JavaScript values
+// MARK: - Wire values
 
 extension JSONValue {
-    /// A JavaScript value as `JSON.stringify` would write it, read through
-    /// the V8 API: own enumerable properties, `undefined` and functions
-    /// left out of objects and `null` in arrays, Dates as ISO strings, and
-    /// `null` for a value that refers back to one of its containers.
-    @MainActor
-    init(_ value: V8Value) {
-        var ancestors: [V8Value] = []
-        self = JSONValue.read(value, ancestors: &ancestors) ?? .null
+    /// The JSON text of a wire value, for messages.
+    static func text(wire bytes: UnsafeRawBufferPointer) -> String {
+        var reader = CefWireReader(bytes)
+        return ((try? JSONValue(wire: &reader)) ?? .null).text
     }
 
-    @MainActor
-    private static func read(_ value: V8Value, ancestors: inout [V8Value]) -> JSONValue? {
-        if value.isUndefined || value.isFunction { return nil }
-        if value.isNull { return .null }
-        if value.isBool { return .bool(value.boolValue) }
-        if value.isInt { return .number(Double(value.intValue)) }
-        if value.isUInt { return .number(Double(value.uintValue)) }
-        if value.isDouble { return .number(value.doubleValue) }
-        if value.isString { return .string(value.stringValue) }
-        if value.isDate { return .string(isoDate(milliseconds: value.dateMilliseconds)) }
-        guard value.isObject, !value.isArrayBuffer, !value.isPromise else { return .object([]) }
-        guard ancestors.count < 64, !ancestors.contains(where: { $0.isSame(value) }) else { return .null }
-        ancestors.append(value)
-        defer { ancestors.removeLast() }
-        if value.isArray {
-            return .array((0..<value.arrayLength).map { index in
-                value[index].flatMap { read($0, ancestors: &ancestors) } ?? .null
+    init(wire reader: inout CefWireReader) throws {
+        switch try reader.readTag() {
+        case .null: self = .null
+        case .false: self = .bool(false)
+        case .true: self = .bool(true)
+        case .int32: self = .number(Double(try reader.readInt32Body()))
+        case .float64: self = .number(try reader.readDoubleBody())
+        case .string: self = .string(String(decoding: try reader.readRun(), as: UTF8.self))
+        case .bytes:
+            _ = try reader.readRun()
+            self = .object([])
+        case .array:
+            let (_, count) = try reader.readContainer()
+            self = .array(try (0..<count).map { _ in try JSONValue(wire: &reader) })
+        case .object:
+            let (_, count) = try reader.readContainer()
+            self = .object(try (0..<count).map { _ in
+                (String(decoding: try reader.readRun(), as: UTF8.self), try JSONValue(wire: &reader))
             })
-        }
-        return .object(value.keys.compactMap { key in
-            guard let item = value[key], let json = read(item, ancestors: &ancestors) else { return nil }
-            return (key, json)
-        })
-    }
-
-    /// A JavaScript value for this JSON, created in the entered context.
-    @MainActor
-    func v8Value() -> V8Value {
-        switch self {
-        case .null:
-            return .null
-        case .bool(let value):
-            return .bool(value)
-        case .number(let value):
-            if value == value.rounded(), let int = Int32(exactly: value) { return .int(int) }
-            return .double(value)
-        case .string(let value):
-            return .string(value)
-        case .array(let items):
-            let array = V8Value.array(count: items.count)
-            for (index, item) in items.enumerated() { array.set(index, item.v8Value()) }
-            return array
-        case .object(let members):
-            let object = V8Value.object()
-            for (key, item) in members { object.set(key, item.v8Value()) }
-            return object
         }
     }
 

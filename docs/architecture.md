@@ -58,6 +58,14 @@ CEF objects are intrusively reference-counted.
 - An object passed to a CEF function is consumed. An object returned by
   CEF, or passed into a CefSwift callback, arrives with a reference the
   receiver must release.
+- A callback that keeps such a reference across early returns holds it in
+  a `CefOwned`, a non-copyable struct that releases it at the end of the
+  scope unless a consuming method passed it to CEF, adopted it into a
+  `CefRef` or released it. It costs no allocation.
+- `CefCensus` counts live `CefRef`s by CEF type, implemented structs by
+  owner type, received payloads and their shared memory mappings, and
+  pending operations. It is off unless enabled (`CefDiagnostics`, SPI);
+  SelfTest enables it and prints it after each group of checks.
 
 ## Threads
 
@@ -74,7 +82,7 @@ names at run time:
 | `cef_resource_request_handler_t.on_before_resource_load`, `get_resource_request_handler` | IO (`Chrome_IOThread`) | The request filter runs there, isolated to `CefIOActor`. |
 | `cef_scheme_handler_factory_t.create` | IO | Creates the resource handler. |
 | `cef_resource_handler_t.get_response_headers`, `cancel` | IO | Read and change the handler's locked state. |
-| `cef_resource_handler_t.open`, `skip`, `read` | Chromium's thread pool (`ThreadPoolForegroundWorker`), in sequence | `open` starts the `CefSchemeHandler` in a task; `read` copies buffered bytes or waits for them. |
+| `cef_resource_handler_t.open`, `skip`, `read` | Chromium's thread pool (`ThreadPoolForegroundWorker`), in sequence | `open` starts the `CefSchemeHandler` in a task; `read` reads a file, copies buffered bytes or waits for them. |
 | `cef_request_handler_t.get_auth_credentials` | IO | Hops to the main actor for the delegate. CEF calls it only with `--disable-chrome-login-prompt` (`CefAuthenticationPrompt.delegate`, the default); without the switch Chromium shows its own dialog. |
 | `cef_cookie_visitor_t.visit`, `cef_download_handler_t` | UI | No hop needed. |
 | `cef_render_handler_t`, `cef_accessibility_handler_t`, everything else | UI | `MainActor.assumeIsolated`. |
@@ -106,11 +114,13 @@ or runs at the same time as another, and quitting waits for nothing.
 **Scheme handlers.** A `CefSchemeHandler` runs with its own isolation:
 nonisolated on Swift's concurrent executor, or on `CefIOActor` or the
 main actor if its type is isolated to one. Its body is data, a file or an
-async sequence of `Data`. A file is read in 256 KB chunks on
-`CefFileActor`; a sequence is iterated in a task. Either runs at most
-1 MB ahead of the page: a write waits until `read` drains the buffer.
-`read` copies what is buffered, or, with nothing buffered, keeps CEF's
-buffer and callback until the next chunk arrives. Chromium skips to the
+async sequence of `Data`. `read` reads a file with `pread(2)` straight
+into the buffer CEF passes it, on the thread pool where CEF calls it and
+where Chromium reads its own files. A sequence is iterated in a task, at
+most 1 MB ahead of the page: a write waits until `read` drains the
+buffer. `read` copies what is buffered, once, or, with nothing buffered,
+keeps CEF's buffer and callback until the next chunk arrives. A data
+body is copied from the `Data` into CEF's buffer, once per read. Chromium skips to the
 start of a requested range itself, then serves the rest of the body with
 the handler's status, so CefKit answers single byte ranges completely
 (206 with `Content-Range` and only the range's bytes, or 416) and reports
@@ -288,16 +298,41 @@ SelfTest (`-benchmark frames`) measures both on another display.
 
 CEF's header says an accelerated frame's `IOSurface` may only be used
 during `on_accelerated_paint` and must be copied into a texture the client
-owns. The Chromium 156 source shows why. CEF's video consumer
-(`libcef/browser/osr/video_consumer_osr.cc`) calls the capturer's `Done()`
-when the callback returns, and viz's `FrameSinkVideoCapturerImpl` keeps
-only the latest frame for resurrection. Its frame pool
-(`RenderableMappableSharedImageVideoFramePool`) keeps up to two returned
-surfaces and hands them out again first-in, first-out, without asking
-whether a window server still shows them. `Stop()`, which runs whenever
-the browser is hidden, releases even the latest one. Chromium therefore
-renders new frames into surfaces it has already delivered.
+owns. The Chromium 156.0.8078.88 source, with CEF 156.0.28 (`57389f0`),
+shows that nothing the browser process can do keeps Chromium from
+rendering into a delivered surface:
 
+- CEF's video consumer (`libcef/browser/osr/video_consumer_osr.cc`,
+  `OnFrameCaptured`) holds the capturer's callbacks in a
+  `ScopedVideoFrameDone`, whose destructor calls `Done()`, and calls
+  `OnAcceleratedPaint` synchronously in between. `Done()` goes out as the
+  callback returns; the C API exposes no way to delay it.
+- viz's `FrameSinkVideoCapturerImpl` returns the frame to its pool on
+  `Done()` (`NotifyFrameReleased`) and keeps only the latest frame
+  (`marked_frame_`) for resurrection. The pool for ARGB frames on macOS is
+  `MappableSharedImageVideoFramePool`, over
+  `media::RenderableMappableSharedImageVideoFramePool`: its
+  `OnVideoFrameDestroyed` keeps at most two idle buffers
+  (`kMaxAvailableFrames = 2`) and `MaybeCreateVideoFrame` hands out the
+  oldest first (`front()`, `pop_front()`), checking only size and colour
+  space.
+- No code on that path reads `IOSurfaceIsInUse` or a use count. The one
+  reader, the shared-image overlay check
+  (`IOSurfaceImageBacking::OverlayRepresentation::IsInUseByWindowServer`
+  in `iosurface_image_backing.mm`), returns false for images with
+  `SHARED_IMAGE_USAGE_MACOS_VIDEO_TOOLBOX`, which the capture pool sets
+  on every image. Holding the `IOSurfaceRef`, `IOSurfaceIncrementUseCount`
+  or showing it as a layer's contents keeps the kernel object alive but
+  not out of the pool.
+- The browser's `IOSurfaceRef` is the GPU process's surface
+  (`IOSurfaceLookupFromMachPort` on the receiving side of the mojo
+  handle), and `DidCopyFrame` blits each capture straight into the pooled
+  image. A delivered surface is rendered into again by the capture two or
+  three frames later, or the next one when the frame was not marked:
+  8 to 25 ms at 120 frames a second. `Stop()`, which runs whenever the
+  browser is hidden, and `Start()` replace the pool.
+
+So the surface is copied, and the copy is limited to what changed.
 `CefOffscreenBrowserView` copies each frame on the GPU with a Metal blit
 into an `IOSurface` of its own (`CefOffscreenCompositor`) and waits for
 the copy before the callback returns. That surface becomes the layer's
@@ -305,18 +340,34 @@ contents. A surface is written again only when it is not the layer's
 contents and `IOSurfaceIsInUse` is false: the window server holds a
 replaced surface until it has composited the next refresh, about 11 ms on
 a 60 Hz display, as long as the contents change has no implicit
-animation. The pool holds up to four surfaces of the frame's size. A frame
-that finds none free is dropped, and the view asks Chromium for a new one
-a refresh later. When the view stops being seen, only the surface on
-screen stays. A pixel format Metal cannot wrap is copied on the CPU under
-the surfaces' locks.
+animation.
+
+Each frame comes with its damage, viz's `capture_update_rect`
+accumulated since the previous capture, which CEF passes as the one
+dirty rectangle, and `capture_counter`, its number. Each owned surface
+keeps the part of it that is out of date: the union of the damage of
+every frame since the surface was written. The blit copies only that.
+A gap in the frame numbers, a new size or a first frame copies the whole
+surface. The pool holds up to four surfaces of the frame's size, and
+three when a surface is larger than 32 MB (a 5120×3200 frame is 64 MB).
+A frame that finds none free is dropped, and the view asks Chromium for a
+new one a refresh later. When the view stops being seen, only the surface
+on screen stays. A pixel format Metal cannot wrap is copied on the CPU
+under the surfaces' locks.
 
 `SelfTest`'s `compositor` checks read the frame number a page paints into
 its background from each surface as it becomes the layer's contents, and
 again every 2 ms while it stays there. Presenting Chromium's surfaces
 directly, one surface changed while it was the layer's contents in a
 2-second resize run (1 of 237 frames); with the copies, none did in any
-run. `-benchmark compositor` measures the cost on an M3 MacBook Air
+run. A second page changes one block of a 4×4 grid per frame, block
+`f % 16` showing `f % 64`, so a presented surface is whole only if its
+blocks hold 16 consecutive frame numbers; the checks read every block of
+each surface the same way, at 1× and 2× and while resizing, and found no
+surface that was not whole with damage-limited copies. The table below
+measures whole-frame copies; [design notes](design-notes.md#offscreen-frames-copied-and-only-where-they-changed)
+compare them with damage-limited ones. `-benchmark compositor` measures
+the cost on an M3 MacBook Air
 (60 Hz display, offscreen frame rate 120, 3 s of animation, at least two
 runs each). Surfaces of 1280×800 pixels are a 1280×800 view at 1× (a
 640×400 view on this 2× display); 2560×1600 pixels are a 1280×800 view at
@@ -356,10 +407,14 @@ from `get_accessibility_handler`:
   tree per frame, with node data, child lists, relative bounds, tree data
   (focus, selection, load state) and events.
   `on_accessibility_location_change` delivers moved nodes. Both arrive as
-  `cef_value_t` trees. Reading a large page's tree value by value takes
-  hundreds of milliseconds, so `cef_write_json` turns each into text in one
-  call, a serial background queue parses it into `CefJSON`, and the main
-  thread applies the results in the order Chromium sent them.
+  `cef_value_t` trees, which CEF lets any thread use. Reading a large
+  page's tree value by value takes hundreds of milliseconds, so the main
+  thread only copies it (`cef_value_t.copy`, one call), a serial
+  background queue reads the copy into `CefJSON`, and the main thread
+  applies the results in the order Chromium sent them. The copy takes
+  about a quarter of the main thread's time that writing the tree as JSON
+  text and decoding the text took
+  ([design notes](design-notes.md#offscreen-accessibility-updates)).
 - `CefAccessibilityTree` applies the updates as Chromium's `AXTree` does
   (clearing, reparenting, removing orphaned subtrees) and joins the frames'
   trees through each `<iframe>` node's `childTreeId`. A tree without a
@@ -430,17 +485,18 @@ A later renderer-side feature is one more extension type.
   for document end run from a `DOMContentLoaded` listener added first.
 - A bridge is a global object whose named-property interceptor answers
   `invoke`, `on`, `off` and any other name with a native function. A call
-  creates a promise, sends `cefswift.page.call` with the arguments as JSON
-  and the document's origin, and the reply resolves or rejects it. V8 values
-  are converted to JSON through the V8 API, so no page script, `JSON`
-  object or prototype takes part. The browser process checks the caller's
+  creates a promise, sends `cefswift.page.call` with the argument and the
+  document's origin, and the reply resolves or rejects it. V8 values are
+  read and made through the V8 API, straight into and out of the message
+  ([Data paths](#data-paths)), so no page script, `JSON` object or
+  prototype takes part. The browser process checks the caller's
   frame and origin against `access`, and the origin against the frame's
   address, before a handler runs. Cross-site frames run in other renderer
   processes, which get the configuration with the browser, so `access`
   decides for them as for any frame.
 - `evaluateJavaScript` sends `cefswift.page.evaluate` to the main frame,
   whose renderer runs the script in the main world and sends the value
-  back as JSON. A returned promise is awaited through its `then`.
+  back the same way. A returned promise is awaited through its `then`.
 - Changes after creation (`addUserScript`, `CefBridge.access`) go as a
   `cefswift.page.configure` message to every frame of the browser. A
   renderer process reports its configuration generation the first time it
@@ -474,6 +530,96 @@ protection"). These use it:
 A browser created again after a discard enables the domains its session
 had enabled before, before its page loads; a session that was never used
 stays unattached.
+
+## Data paths
+
+What crosses between Chromium and Swift, and what is copied on the way.
+Fixed-size values pass as raw values or as structs both sides read in
+place; only strings and collections are encoded.
+
+**Strings.** CEF's strings are UTF-16, Swift's UTF-8, so each crossing
+transcodes once. A string going into CEF is transcoded into a stack
+buffer (up to 1 KB, else one allocation) that CEF reads for the call;
+CEF copies what it keeps. A string coming out is decoded straight from
+CEF's buffer. Names CefSwift sends again and again, such as process
+message names, are `CefStaticString`s, transcoded once for the process,
+and received message names are compared with them without making Swift
+strings.
+
+**Page-scripting messages.** Bridge calls, replies, events and
+evaluations carry one payload each: a `cef_binary_value_t` as the
+message's first argument, or, above 64 KB, a shared memory region
+(`cef_shared_process_message_builder_t`). The payload starts with a
+24-byte header of six `Int32`s that both processes read in place
+(`CefWireHeader`: the target document or request, the call, whether it
+succeeded, a line and a column), followed by values:
+
+| Tag | Value | Body |
+|---|---|---|
+| 0, 1, 2 | `null`, `false`, `true` | none |
+| 3 | integer | `Int32` |
+| 4 | number | `Float64` |
+| 5 | string | `UInt32` length, UTF-8 |
+| 6 | array | `UInt32` byte length, `UInt32` count, values |
+| 7 | object | `UInt32` byte length, `UInt32` count, then `UInt32` key length, UTF-8 key and value for each member |
+| 8 | bytes | `UInt32` length, bytes |
+
+Numbers are little-endian. A container's byte length counts what follows
+its own nine bytes, so a reader skips any value without reading it.
+
+| Message | Header | Values |
+|---|---|---|
+| `cefswift.page.call` | document, call | bridge, method, origin, argument |
+| `cefswift.page.reply` | document, call, succeeded | bridge, result or error message |
+| `cefswift.page.emit` | none | bridge, event, payload |
+| `cefswift.page.evaluate` | request | script |
+| `cefswift.page.evaluated` | request, succeeded, line, column | value or error message |
+
+The renderer writes a V8 value into a payload through the V8 C API as it
+walks it (`V8Wire`), transcoding strings from V8's UTF-16 into the
+payload, and builds V8 values straight from one. The browser process
+decodes a call's argument into the handler's `Decodable` type in place
+(`CefWireDecoder`) and encodes the result straight into the reply
+(`CefWireEncoder`); `evaluateJavaScript(_:as:)` decodes into `T` the
+same way, and `evaluateJavaScript(_:)` builds its `CefJSON` from the
+payload. Primitives cost no allocation; `Codable` costs one container
+per struct, array or dictionary.
+
+Bytes (`ArrayBuffer` in the page, `Data` in Swift) are copied as few
+times as the processes allow:
+
+| Direction | Copies |
+|---|---|
+| `ArrayBuffer` argument → Swift `Data` | One: from the `ArrayBuffer` into shared memory as the message is built. The handler's `Data` is the mapping itself. |
+| Swift `Data` result → page `ArrayBuffer` | Two: into shared memory as the reply is built, then into a V8 backing store the `ArrayBuffer` owns. |
+
+V8 cannot use the shared memory itself: Chromium enables V8's sandbox,
+under which an `ArrayBuffer` must live in the sandbox's memory
+(`cef_v8_value_create_array_buffer` over other memory returns NULL).
+Bytes under 64 KB are copied into the payload and travel with it.
+
+**Who unmaps shared memory.** A received payload (`CefWirePayload`)
+holds the region, or the binary value and the message that own its
+bytes, and releases them when its last reference goes. In the browser
+process, a call's payload lives until its argument is decoded, unless a
+`Data` of at least 64 KB was decoded from it: that `Data` holds the
+payload, and the region is unmapped when the `Data` and its copies are
+gone, on whatever thread that happens. In the renderer, a reply's payload
+lives until the promise is settled, inside the message handler; if the
+document went away first, no value is made and the region is unmapped
+as the handler returns. A sending process unmaps its side once CEF has
+sent the message.
+
+**Scheme handler bodies.** A `.data` body is copied from the `Data` into
+CEF's buffer, once per `read`. A `.file` body is read with `pread(2)`
+into CEF's buffer, with no copy in between. A `.stream` body's chunks
+are copied into CEF's buffer once, and the producer waits while more
+than 1 MB is buffered.
+
+**DevTools messages.** CEF splits each message into a method and its
+parameters as UTF-8. An event's parameters are parsed, without a copy,
+only when something listens for the method; a method result is copied
+once, for the call waiting on it.
 
 ## Internal-page services
 

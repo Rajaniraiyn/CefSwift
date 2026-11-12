@@ -23,6 +23,24 @@ public enum CefOffscreenFrame {
     case cpu(buffer: UnsafeRawPointer, width: Int, height: Int, dirtyRects: [CGRect])
 }
 
+/// What changed in an accelerated frame, as Chromium's compositor reports
+/// it.
+public struct CefOffscreenPaintDetails: Sendable, Equatable {
+    /// The part of the surface that differs from the previous frame of the
+    /// same element, in pixels with a top-left origin. Outside it, the
+    /// frame equals the previous one.
+    public var damage: CGRect
+    /// The frame's number in Chromium's capture sequence, when known. A gap
+    /// means frames were not delivered, so ``damage`` does not cover what
+    /// changed since the last frame seen: treat the whole frame as damaged.
+    public var sequence: UInt64?
+
+    public init(damage: CGRect, sequence: UInt64? = nil) {
+        self.damage = damage
+        self.sequence = sequence
+    }
+}
+
 /// The surface an offscreen frame belongs to.
 public enum CefOffscreenPaintElement: Sendable {
     /// The page itself.
@@ -97,6 +115,10 @@ public protocol CefOffscreenHost: AnyObject {
     var offscreenViewInfo: CefOffscreenViewInfo { get }
     /// A frame for `element` is ready. It is valid only for this call.
     func offscreenDidPaint(_ frame: CefOffscreenFrame, element: CefOffscreenPaintElement)
+    /// An accelerated frame for `element` is ready, with what changed in
+    /// it, so a copy can be limited to the damage. It is valid only for
+    /// this call. The default calls ``offscreenDidPaint(_:element:)``.
+    func offscreenDidPaint(_ frame: CefOffscreenFrame, element: CefOffscreenPaintElement, details: CefOffscreenPaintDetails)
     /// The page wants a different cursor.
     func offscreenDidChangeCursor(_ cursor: CefCursorType)
     /// The popup widget was shown or hidden.
@@ -131,6 +153,9 @@ public protocol CefOffscreenHost: AnyObject {
 
 extension CefOffscreenHost {
     public func offscreenSnapshot() -> CGImage? { nil }
+    public func offscreenDidPaint(_ frame: CefOffscreenFrame, element: CefOffscreenPaintElement, details: CefOffscreenPaintDetails) {
+        offscreenDidPaint(frame, element: element)
+    }
     public func offscreenBeginDraggingSession(_ data: CefDragData, allowedOperations: CefDragOperation, at point: CGPoint) -> Bool { false }
     public func offscreenDragOperationDidChange(_ operation: CefDragOperation) {}
     public func offscreenAccessibilityTreeDidChange(_ changes: CefAccessibilityChanges) {}
@@ -191,14 +216,15 @@ extension CefBrowserClient {
             CefBrowserClient.withOffscreenHost(s) { $0.offscreenDidPaint(frame, element: element) }
         }
 
-        handler.pointee.on_accelerated_paint = { s, browser, type, _, _, info in
+        handler.pointee.on_accelerated_paint = { s, browser, type, dirtyCount, dirtyRects, info in
             cefRelease(browser)
-            guard let opaque = info?.pointee.shared_texture_io_surface else { return }
+            guard let info, let opaque = info.pointee.shared_texture_io_surface else { return }
             let element = CefOffscreenPaintElement(cefValue: type)
             let surface = Unmanaged<IOSurfaceRef>.fromOpaque(opaque).takeUnretainedValue()
             let size = CGSize(width: IOSurfaceGetWidth(surface), height: IOSurfaceGetHeight(surface))
+            let details = CefOffscreenPaintDetails(info.pointee, dirtyRects: dirtyRects, count: dirtyCount, size: size)
             CefBrowserClient.withOffscreenHost(s) {
-                $0.offscreenDidPaint(.accelerated(surface: surface, size: size), element: element)
+                $0.offscreenDidPaint(.accelerated(surface: surface, size: size), element: element, details: details)
             }
         }
 
@@ -282,6 +308,20 @@ extension CefBrowserClient {
             guard let host = client.offscreenHost else { return }
             body(host)
         }
+    }
+}
+
+extension CefOffscreenPaintDetails {
+    /// The damage CEF reports: its dirty rectangles (one, from viz's
+    /// `capture_update_rect`, on macOS), clipped to the surface; the whole
+    /// surface when it reports none.
+    init(_ info: cef_accelerated_paint_info_t, dirtyRects: UnsafePointer<cef_rect_t>?, count: Int, size: CGSize) {
+        let bounds = CGRect(origin: .zero, size: size)
+        let rects = CGRect.array(dirtyRects, count: count)
+        let union = rects.reduce(CGRect.null) { $0.union($1) }.intersection(bounds)
+        self.init(
+            damage: union.isNull || union.isEmpty && rects.isEmpty ? bounds : union,
+            sequence: info.extra.has_capture_counter != 0 ? info.extra.capture_counter : nil)
     }
 }
 

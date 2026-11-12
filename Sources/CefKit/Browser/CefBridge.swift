@@ -27,7 +27,8 @@ import Foundation
 ///
 /// The global exists before any page script runs, in every document
 /// ``access`` permits, cross-site frames and popups included. Arguments and
-/// results travel as JSON, so any `Codable` type works on the Swift side. A
+/// results are JSON's kinds of values plus bytes, so any `Codable` type
+/// works on the Swift side, and `Data` is an `ArrayBuffer` in the page. A
 /// handler that throws rejects the promise.
 ///
 /// The helper's renderer code defines the global with the V8 API as each
@@ -77,7 +78,11 @@ public final class CefBridge {
         }
     }
 
-    private typealias Handler = @MainActor (CefJSON, CefBridgeCall) async throws -> CefJSON
+    /// A method: decodes the call's argument from the payload, in place,
+    /// and returns the work that runs the handler and encodes its result
+    /// into a reply.
+    private typealias Handler = @MainActor (CefWireDecoder, CefBridgeCall) throws -> Work
+    private typealias Work = @MainActor (CefWireEncoder) async throws -> Void
     private var handlers: [String: Handler] = [:]
     /// The browsers whose options list this bridge.
     private var attachedBrowsers: [WeakBrowser] = []
@@ -103,8 +108,9 @@ public final class CefBridge {
         _ method: String,
         _ handler: @escaping @MainActor (Input, CefBridgeCall) async throws -> Output
     ) {
-        handlers[method] = { arguments, call in
-            try CefJSON(encoding: await handler(arguments.decode(Input.self), call))
+        handlers[method] = { decoder, call in
+            let input = try decoder.decode(Input.self)
+            return { encoder in try encoder.encode(await handler(input, call)) }
         }
     }
 
@@ -121,9 +127,12 @@ public final class CefBridge {
         _ method: String,
         _ handler: @escaping @MainActor (Input, CefBridgeCall) async throws -> Void
     ) {
-        handlers[method] = { arguments, call in
-            try await handler(arguments.decode(Input.self), call)
-            return .null
+        handlers[method] = { decoder, call in
+            let input = try decoder.decode(Input.self)
+            return { encoder in
+                try await handler(input, call)
+                encoder.buffer.appendNull()
+            }
         }
     }
 
@@ -146,15 +155,18 @@ public final class CefBridge {
     /// in the top-level page of `browser` — or of every browser this bridge
     /// is attached to when `browser` is nil.
     public func emit(_ event: String, _ payload: some Encodable = CefJSON.null, to browser: CefBrowser? = nil) {
-        guard let payload = try? CefJSON(encoding: payload) else {
-            CefLog.error("CefBridge.emit(\(event)): payload is not JSON-encodable")
+        let encoder = CefWireEncoder(header: CefWireHeader())
+        encoder.buffer.append(name)
+        encoder.buffer.append(event)
+        do {
+            try encoder.encode(payload)
+        } catch {
+            CefLog.error("CefBridge.emit(\(event)): payload cannot be encoded: \(error)")
             return
         }
-        let message = CefProcessMessage(
-            CefPageScriptingMessage.emit, [.string(name), .string(event), .string(payload.text)])
         // A discarded page is gone; its next document starts afresh.
         for target in browsers where (browser == nil || target === browser) && !target.isDiscarded {
-            target.withMainFrame { message.send(from: $0, to: PID_RENDERER) }
+            target.withMainFrame { encoder.buffer.send(CefPageScriptingMessage.emit, from: $0, to: PID_RENDERER) }
         }
     }
 
@@ -182,38 +194,52 @@ public final class CefBridge {
 
     // MARK: Dispatch
 
-    /// A call from a page, `[bridge, context, call, method, arguments,
-    /// origin]`, sent by `frame`'s renderer.
-    func received(_ message: CefProcessMessage, in browser: CefBrowser, from frame: CefRef<cef_frame_t>) {
-        let method = message.string(3)
-        let context = message.int(1), callID = message.int(2)
-        let reply: (Bool, CefJSON) -> Void = { [name] ok, value in
-            _ = CefProcessMessage(CefPageScriptingMessage.reply, [
-                .string(name), .int(Int32(context)), .int(Int32(callID)), .bool(ok),
-                .string(ok ? value.text : (value.stringValue ?? value.text)),
-            ]).send(from: frame.pointer, to: PID_RENDERER)
+    /// A call from a page, sent by `frame`'s renderer. `reader` is past
+    /// the header and the bridge's name, at the method, the origin and the
+    /// argument.
+    func received(_ payload: CefWirePayload, reader: CefWireReader, in browser: CefBrowser, from frame: CefRef<cef_frame_t>) {
+        var reader = reader
+        guard let header = try? payload.reader.header(),
+              let method = try? reader.readString(), let origin = try? reader.readString()
+        else { return }
+        let replyHeader = { (succeeded: Bool) in CefWireHeader(target: header.target, call: header.call, succeeded: succeeded) }
+        let fail: (String) -> Void = { [name] message in
+            let encoder = CefWireEncoder(header: replyHeader(false))
+            encoder.buffer.append(name)
+            encoder.buffer.append(message)
+            encoder.buffer.send(CefPageScriptingMessage.reply, from: frame.pointer, to: PID_RENDERER)
         }
         let isMainFrame = frame.pointer.pointee.is_main(frame.pointer) != 0
         let url = CefStringUtil.takingUserFree(frame.pointer.pointee.get_url(frame.pointer)).flatMap(URL.init(string:))
-        let origin = message.string(5)
         let call = CefBridgeCall(browser: browser, method: method, origin: origin, isMainFrame: isMainFrame)
 
         // The renderer reports the document's origin; the browser process
         // knows the frame and its address, which must agree with it.
         guard Self.origin(origin, isConsistentWith: url), isPermitted(call) else {
-            reply(false, .string("\(name).\(method): caller is not permitted to use this bridge"))
+            fail("\(name).\(method): caller is not permitted to use this bridge")
             return
         }
         guard let handler = handlers[method] else {
-            reply(false, .string("\(name).\(method) is not defined"))
+            fail("\(name).\(method) is not defined")
             return
         }
-        let arguments = (try? CefJSON(data: Data(message.string(4).utf8))) ?? .null
-        Task {
+        // The argument decodes now, in place; the payload is released once
+        // it has, unless a `Data` argument keeps its shared memory.
+        let work: Work
+        do {
+            work = try handler(CefWireDecoder(payload: payload, offset: reader.offset), call)
+        } catch {
+            fail(String(describing: error))
+            return
+        }
+        Task { [name] in
+            let encoder = CefWireEncoder(header: replyHeader(true))
+            encoder.buffer.append(name)
             do {
-                reply(true, try await handler(arguments, call))
+                try await work(encoder)
+                encoder.buffer.send(CefPageScriptingMessage.reply, from: frame.pointer, to: PID_RENDERER)
             } catch {
-                reply(false, .string(String(describing: error)))
+                fail(String(describing: error))
             }
         }
     }

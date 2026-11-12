@@ -1,3 +1,4 @@
+import CefBase
 /// Callers suspended on one kind of asynchronous browser work: waiting for
 /// creation, a script's result, a DevTools reply.
 ///
@@ -27,6 +28,7 @@ final class CefPendingOperations<Value: Sendable> {
                     return
                 }
                 waiting[id] = continuation
+                CefCensus.add(.custom("pending operations"), 1)
                 start(id)
             }
         } onCancel: {
@@ -41,6 +43,7 @@ final class CefPendingOperations<Value: Sendable> {
     @discardableResult
     func complete(_ id: Int, _ result: Result<Value, Error>) -> Bool {
         guard let continuation = waiting.removeValue(forKey: id) else { return false }
+        CefCensus.add(.custom("pending operations"), -1)
         continuation.resume(with: result)
         return true
     }
@@ -49,6 +52,7 @@ final class CefPendingOperations<Value: Sendable> {
     func completeAll(_ result: Result<Value, Error>) {
         let all = waiting.sorted { $0.key < $1.key }
         waiting = [:]
+        CefCensus.add(.custom("pending operations"), -all.count)
         all.forEach { $0.value.resume(with: result) }
     }
 }

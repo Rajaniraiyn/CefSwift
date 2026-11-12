@@ -1,5 +1,5 @@
 import AppKit
-import CefKit
+@_spi(Testing) import CefKit
 import CefSwiftUI
 import Darwin
 
@@ -31,6 +31,7 @@ enum Benchmarks {
             CefRuntime.shared.registerSchemeHandler(scheme: "selftest", domain: "bench", handler: BenchmarkPages())
             await frames()
         case "compositor": await compositor()
+        case "bridge", "evaluate", "codec", "axingest", "devtools": await transport(name)
         default: print("bench error: unknown benchmark \(name)")
         }
     }
@@ -61,6 +62,9 @@ enum Benchmarks {
             SelfTest.window.contentView!.addSubview(view)
             let meter = MainThreadMeter()
             let memory = MemorySampler()
+            CefDiagnostics.isEnabled = true
+            CefDiagnostics.reset()
+            let cpu = ProcessCPU.sample()
             let start = ContinuousClock.now
             meter.start()
             memory.start()
@@ -69,10 +73,12 @@ enum Benchmarks {
             let elapsed = ContinuousClock.now - start
             meter.stop()
             memory.stop()
+            let overhead = CefDiagnostics.counter(.requestFilterOverhead)
             print(String(
-                format: "bench requests run %d (%@): %@; total %.0f ms; main thread busy %.1f%% (%.0f ms); peak footprint %.0f MB (+%.0f MB)",
+                format: "bench requests run %d (%@): %@; total %.0f ms; main thread busy %.1f%% (%.0f ms); peak footprint %.0f MB (+%.0f MB); app CPU %.0f ms; request filter overhead %.2f µs each (%d)",
                 run, kind, browser.title, elapsed.benchMilliseconds, meter.busyFraction * 100, meter.busy.benchMilliseconds,
-                memory.peakMB, memory.peakMB - memory.startMB))
+                memory.peakMB, memory.peakMB - memory.startMB, ProcessCPU.used(from: cpu, to: ProcessCPU.sample()).app * 1000,
+                overhead.microsecondsEach, overhead.count))
             browser.close(force: true)
             _ = await SelfTest.waitUntil { browser.state == .closed }
             view.removeFromSuperview()
@@ -110,6 +116,12 @@ struct BenchmarkPages: CefSchemeHandler {
             return CefSchemeResponse(mimeType: "text/html", body: Data(Self.timersPage.utf8))
         case "/frames.html":
             return CefSchemeResponse(mimeType: "text/html", body: Data(Self.framesPage.utf8))
+        case "/bridge.html":
+            return CefSchemeResponse(mimeType: "text/html", body: Data(TransportBench.page.utf8))
+        case "/axlarge.html":
+            return CefSchemeResponse(mimeType: "text/html", body: Data(TransportBench.largeAccessibilityPage.utf8))
+        case "/damage.html":
+            return CefSchemeResponse(mimeType: "text/html", body: Data(CompositorStage.damagePage.utf8))
         case "/compositor.html":
             return CefSchemeResponse(mimeType: "text/html", body: Data(CompositorStage.page.utf8))
         case "/big-data":

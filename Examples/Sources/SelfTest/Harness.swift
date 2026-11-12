@@ -271,6 +271,7 @@ extension SelfTest {
             environment["SELFTEST_JSON"] = nil
             environment["SELFTEST_STRICT"] = nil
             environment["SELFTEST_ONLY"] = group.name
+            environment["SELFTEST_ISOLATED_CHILD"] = "1"
             let child = Process()
             child.executableURL = executable
             child.environment = environment
@@ -300,6 +301,8 @@ extension SelfTest {
                 }
             }
             reader.finish()
+            // The child has exited, its helpers with it: its cache goes.
+            SelfTestCleanup.remove(ownedBy: child.processIdentifier)
             failures += reader.failures
             let status = child.terminationStatus
             if outcome == .timedOut {

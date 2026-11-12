@@ -1,3 +1,4 @@
+import os
 import AppKit
 import CCef
 import Foundation
@@ -520,10 +521,10 @@ private final class WeakService<Service: AnyObject> {
 
 /// Owner of a `cef_request_context_handler_t` that reports when a new
 /// context is ready. The callback arrives on the UI thread.
-private final class ContextHandler: @unchecked Sendable {
-    private let onInitialized: @MainActor () -> Void
+private final class ContextHandler: Sendable {
+    private let onInitialized: @MainActor @Sendable () -> Void
 
-    init(onInitialized: @escaping @MainActor () -> Void) {
+    init(onInitialized: @escaping @MainActor @Sendable () -> Void) {
         self.onInitialized = onInitialized
     }
 
@@ -541,16 +542,17 @@ private final class ContextHandler: @unchecked Sendable {
 // MARK: - Cookie plumbing
 
 /// Collects visited cookies and delivers them when CEF releases the visitor.
-private final class CookieCollector: @unchecked Sendable {
+private final class CookieCollector: Sendable {
     private let continuation: CheckedContinuation<[HTTPCookie], Never>
-    private var cookies: [HTTPCookie] = []
+    // CEF visits on the UI thread, one cookie at a time.
+    private let cookies = OSAllocatedUnfairLock(uncheckedState: [HTTPCookie]())
 
     init(continuation: CheckedContinuation<[HTTPCookie], Never>) {
         self.continuation = continuation
     }
 
     deinit {
-        continuation.resume(returning: cookies)
+        continuation.resume(returning: cookies.withLockUnchecked { $0 })
     }
 
     /// The returned +1 reference is consumed by the `visit_*_cookies` call.
@@ -559,7 +561,7 @@ private final class CookieCollector: @unchecked Sendable {
         visitor.pointee.visit = { s, cookie, _, _, _ in
             guard let cookie, let owner = cefOwner(CookieCollector.self, s) else { return 0 }
             if let converted = HTTPCookie(cefCookie: cookie.pointee) {
-                owner.cookies.append(converted)
+                owner.cookies.withLockUnchecked { $0.append(converted) }
             }
             return 1
         }

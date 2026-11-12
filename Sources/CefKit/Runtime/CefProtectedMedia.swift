@@ -205,23 +205,17 @@ extension CefRuntime {
 
 /// Resumes once with the result of `cef_component_updater_t.update`, or
 /// with a service error if CEF drops the callback unanswered.
-private final class ComponentUpdateCallback: @unchecked Sendable {
-    private var continuation: CheckedContinuation<cef_component_update_error_t, Never>?
+private final class ComponentUpdateCallback: Sendable {
+    private let continuation: CefResumeOnce<cef_component_update_error_t>
 
     init(continuation: CheckedContinuation<cef_component_update_error_t, Never>) {
-        self.continuation = continuation
-    }
-
-    deinit {
-        continuation?.resume(returning: CEF_COMPONENT_UPDATE_ERROR_SERVICE_ERROR)
+        self.continuation = CefResumeOnce(continuation, fallback: CEF_COMPONENT_UPDATE_ERROR_SERVICE_ERROR)
     }
 
     func makeCallback() -> UnsafeMutablePointer<cef_component_update_callback_t> {
         let callback = cefAllocate(cef_component_update_callback_t.self, owner: self)
         callback.pointee.on_complete = { s, _, error in
-            guard let owner = cefOwner(ComponentUpdateCallback.self, s) else { return }
-            owner.continuation?.resume(returning: error)
-            owner.continuation = nil
+            cefOwner(ComponentUpdateCallback.self, s)?.continuation.resume(returning: error)
         }
         return callback
     }

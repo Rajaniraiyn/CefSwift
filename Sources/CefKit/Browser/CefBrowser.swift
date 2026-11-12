@@ -484,7 +484,7 @@ public final class CefBrowser: Identifiable {
     ///   protection".
     @discardableResult
     public func evaluateJavaScript(_ script: String, userGesture: Bool = false) async throws -> CefJSON {
-        guard userGesture else { return try await pageScripting.evaluate(script) }
+        guard userGesture else { return try await pageScripting.evaluate(script, as: CefJSON.self) }
         let reply = try await devTools.send(
             "Runtime.evaluate",
             ["expression": .string(script), "returnByValue": true, "awaitPromise": true, "userGesture": true])
@@ -498,7 +498,10 @@ public final class CefBrowser: Identifiable {
     public func evaluateJavaScript<T: Decodable>(
         _ script: String, as type: T.Type = T.self, userGesture: Bool = false
     ) async throws -> T {
-        try await evaluateJavaScript(script, userGesture: userGesture).decode(T.self)
+        // Without a gesture the value decodes straight from the renderer's
+        // reply, with no JSON or `CefJSON` in between.
+        guard userGesture else { return try await pageScripting.evaluate(script, as: T.self) }
+        return try await evaluateJavaScript(script, userGesture: true).decode(T.self)
     }
 
     /// Injects `script` into every document loaded from now on, before the
@@ -1396,13 +1399,13 @@ private final class WeakOffscreenHost {
 
 /// Receives a favicon from `download_image` and converts it to an
 /// `NSImage` with one representation per scale factor Chromium decoded.
-private final class FaviconDownload: @unchecked Sendable {
+private final class FaviconDownload: Sendable {
     /// The largest icon asked for, in points.
     static let maximumSize = 32
 
-    private let completion: @MainActor (NSImage?) -> Void
+    private let completion: @MainActor @Sendable (NSImage?) -> Void
 
-    init(completion: @escaping @MainActor (NSImage?) -> Void) {
+    init(completion: @escaping @MainActor @Sendable (NSImage?) -> Void) {
         self.completion = completion
     }
 
@@ -1443,23 +1446,17 @@ private final class FaviconDownload: @unchecked Sendable {
 
 /// Bridges `cef_pdf_print_callback_t` to a continuation, which resumes with
 /// `false` if CEF drops the callback without calling it.
-final class PDFPrintCallback: @unchecked Sendable {
-    private var continuation: CheckedContinuation<Bool, Never>?
+final class PDFPrintCallback: Sendable {
+    private let continuation: CefResumeOnce<Bool>
 
     init(continuation: CheckedContinuation<Bool, Never>) {
-        self.continuation = continuation
-    }
-
-    deinit {
-        continuation?.resume(returning: false)
+        self.continuation = CefResumeOnce(continuation, fallback: false)
     }
 
     func makeCallback() -> UnsafeMutablePointer<cef_pdf_print_callback_t> {
         let callback = cefAllocate(cef_pdf_print_callback_t.self, owner: self)
         callback.pointee.on_pdf_print_finished = { s, _, ok in
-            guard let owner = cefOwner(PDFPrintCallback.self, s) else { return }
-            owner.continuation?.resume(returning: ok != 0)
-            owner.continuation = nil
+            cefOwner(PDFPrintCallback.self, s)?.continuation.resume(returning: ok != 0)
         }
         return callback
     }

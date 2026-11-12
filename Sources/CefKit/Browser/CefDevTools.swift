@@ -281,7 +281,15 @@ public final class CefDevTools {
     }
 
     func received(event method: String, params: Data) {
-        guard let handlers = listeners[method], !handlers.isEmpty else { return }
+        params.withUnsafeBytes { received(event: method, params: $0) }
+    }
+
+    /// An event, its parameters borrowed for the call. Nothing is copied
+    /// or parsed for an event nobody listens to.
+    func received(event method: String, params: UnsafeRawBufferPointer) {
+        guard let handlers = listeners[method], !handlers.isEmpty, let base = params.baseAddress else { return }
+        // Parsed before the call returns, so the bytes need no copy.
+        let params = Data(bytesNoCopy: UnsafeMutableRawPointer(mutating: base), count: params.count, deallocator: .none)
         // An event whose parameters are not a JSON object is malformed.
         guard let json = try? CefJSON(data: params), json.objectValue != nil else {
             CefLog.error("devTools: dropped \(method) with malformed parameters")
@@ -293,8 +301,8 @@ public final class CefDevTools {
 
 /// Owner of the `cef_dev_tools_message_observer_t`. Callbacks arrive on the
 /// UI thread; the message buffers are only valid for the duration of a call.
-private final class DevToolsObserver: @unchecked Sendable {
-    private weak var devTools: CefDevTools?
+private final class DevToolsObserver: Sendable {
+    private weak let devTools: CefDevTools?
 
     @MainActor
     init(devTools: CefDevTools) {
@@ -308,6 +316,8 @@ private final class DevToolsObserver: @unchecked Sendable {
             return 0  // not consumed: CEF goes on to the typed callbacks below
         }
         observer.pointee.on_dev_tools_method_result = { s, browser, messageID, success, result, size in
+            let started = CefDiagnostics.start()
+            defer { CefDiagnostics.record(.devToolsResult, since: started) }
             cefRelease(browser)
             let data = result.map { Data(bytes: $0, count: size) } ?? Data()
             guard let owner = cefOwner(DevToolsObserver.self, s) else { return }
@@ -316,12 +326,14 @@ private final class DevToolsObserver: @unchecked Sendable {
             }
         }
         observer.pointee.on_dev_tools_event = { s, browser, method, params, size in
+            let started = CefDiagnostics.start()
+            defer { CefDiagnostics.record(.devToolsEvent, since: started) }
             cefRelease(browser)
             let method = CefStringUtil.string(from: method)
-            let data = params.map { Data(bytes: $0, count: size) } ?? Data()
+            nonisolated(unsafe) let bytes = UnsafeRawBufferPointer(start: params, count: params == nil ? 0 : size)
             guard let owner = cefOwner(DevToolsObserver.self, s) else { return }
             MainActor.assumeIsolated {
-                owner.devTools?.received(event: method, params: data)
+                owner.devTools?.received(event: method, params: bytes)
             }
         }
         observer.pointee.on_dev_tools_agent_attached = { _, browser in cefRelease(browser) }

@@ -2,15 +2,15 @@ import CCef
 import CefBase
 
 /// Work posted to the renderer's main thread (`TID_RENDERER`).
-final class CefRendererTask: @unchecked Sendable {
-    private let body: @MainActor () -> Void
+final class CefRendererTask: Sendable {
+    private let body: @MainActor @Sendable () -> Void
 
-    private init(_ body: @escaping @MainActor () -> Void) {
+    private init(_ body: @escaping @MainActor @Sendable () -> Void) {
         self.body = body
     }
 
     /// Runs `body` on the renderer's main thread as a task of its own.
-    static func post(_ body: @escaping @MainActor () -> Void) {
+    static func post(_ body: @escaping @MainActor @Sendable () -> Void) {
         let task = cefAllocate(cef_task_t.self, owner: CefRendererTask(body))
         task.pointee.execute = { s in
             guard let owner = cefOwner(CefRendererTask.self, s) else { return }
