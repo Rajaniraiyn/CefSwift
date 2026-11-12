@@ -73,17 +73,34 @@ jobs:
       - name: Build examples
         run: swift build --package-path Examples
 
+      # The plugin keeps its cache in the invoking package's .cef/, so the
+      # Examples package would download the same archive again; give it a
+      # copy-on-write clone of the one already here.
       - name: Bundle SelfTest
         run: |
+          mkdir -p Examples/.cef
+          cp -Rc .cef/downloads Examples/.cef/
           swift package --package-path Examples \
             --allow-writing-to-package-directory \
             --allow-network-connections all \
             cef bundle --product SelfTest --configuration release --output dist
 
       # Runs every end-to-end check against the real Chromium runtime; the
-      # app exits with the number of failed checks.
+      # app exits with the number of failed checks. FAIL and SKIP lines go to
+      # the run summary.
       - name: SelfTest
-        run: ./Examples/dist/SelfTest.app/Contents/MacOS/SelfTest
+        shell: bash
+        run: |
+          set -o pipefail
+          status=0
+          ./Examples/dist/SelfTest.app/Contents/MacOS/SelfTest | tee "$RUNNER_TEMP/selftest.log" || status=$?
+          {
+            echo "### SelfTest: $(grep -c '^PASS' "$RUNNER_TEMP/selftest.log") passed, exit status $status"
+            echo '```'
+            grep -E '^(FAIL|SKIP)|CHECK' "$RUNNER_TEMP/selftest.log" || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
 
       - name: Working tree must stay clean
         run: |
@@ -93,4 +110,27 @@ jobs:
             echo "Working tree is dirty after the build — add the offenders to .gitignore:"
             echo "$UNTRACKED"
             exit 1
+          fi
+
+  # Runs started for an update pull request are dispatched with the workflow
+  # token, so a failure notifies nobody and auto-merge just waits. Say so on
+  # the pull request.
+  report:
+    needs: ci
+    if: >-
+      always() && needs.ci.result == 'failure' && github.event_name == 'workflow_dispatch' &&
+      (github.ref_name == 'cef-update' || github.ref_name == 'cef-api-update')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: Comment on the update pull request
+        run: |
+          if [ "$(gh pr view "$GITHUB_REF_NAME" --json state --jq .state 2>/dev/null)" = OPEN ]; then
+            gh pr comment "$GITHUB_REF_NAME" --body "CI failed for ${GITHUB_SHA:0:7}, so this will not merge: $RUN_URL (the run summary lists the SelfTest FAIL lines). Push a fix to this branch; later update runs leave it alone until a newer CEF is released."
           fi

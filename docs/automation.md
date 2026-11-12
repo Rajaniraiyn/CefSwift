@@ -9,14 +9,25 @@
    architectures. A release out for one architecture only is reported and
    waited for.
 2. If it is newer than `CEF_VERSION.json`, the script downloads the arm64
-   minimal build (resumed, size- and SHA-1-verified), stages the new headers
+   minimal build (resumed, size- and SHA-1-verified; a resumed download that
+   does not verify is fetched once more from scratch), stages the new headers
    and regenerates the C bridge in `.cef/update`, and only then swaps them
    into `Sources/CCef` and rewrites the manifest. A failure leaves the tree
    untouched; a second run is a no-op.
 3. The workflow commits to the `cef-update` branch, opens one pull request
    (or refreshes the open one in place), starts CI for it and enables
-   auto-merge. When there is nothing to do, an update pull request still
-   open is closed as obsolete.
+   auto-merge. An open pull request that already pins the same CEF and
+   `CEF_API_VERSION` is left alone, so fixes pushed to it survive later runs.
+   When there is nothing to do, an update pull request still open is closed
+   as obsolete.
+
+Failures are reported where someone will see them. CI started for an update
+branch is dispatched with the workflow token, which notifies nobody, so a
+failed CI run comments on the update pull request with a link to the run
+(its summary lists the SelfTest `FAIL` lines) and auto-merge keeps waiting. A
+failed update run, such as one where the new headers dropped the pinned API
+version, adds a comment to the open **CEF update failed** issue, opening it
+if needed; close it once a run succeeds.
 
 The pull request lists CEF, Chromium and `CEF_API_VERSION` before and after,
 and the C functions added, removed or changed. CI builds the package, runs
@@ -81,8 +92,10 @@ Scripts/generate-bindings.py [--check]      # regenerate (or verify) the bridge
 `.github/workflows/ci.yml` runs on pushes and pull requests to `main`: the
 update script's self-test, download CEF (cached by version),
 `Scripts/generate-bindings.py --check --framework …`, build, `swift test`,
-build the examples, then bundle and run SelfTest. SelfTest exits with the
-number of failed checks.
+build the examples, then bundle and run SelfTest. The Examples package reuses
+a clone of the downloaded archive rather than downloading it again. SelfTest
+exits with the number of failed checks; its `FAIL` and `SKIP` lines go to the
+run summary.
 
 ## Releases
 
