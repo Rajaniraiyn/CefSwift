@@ -1,47 +1,11 @@
 import Foundation
 
-/// Optional per-product overrides, read from `cefapp.json` next to the
-/// product target's sources.
-struct CefAppConfig: Decodable {
-    var bundleIdentifier: String?
-    var displayName: String?
-    var minimumSystemVersion: String?
-    /// `CFBundleShortVersionString`, the version users see. `--version`
-    /// takes precedence.
-    var version: String?
-    /// `CFBundleVersion`, the build number. `--build` takes precedence.
-    var build: String?
-    /// The codesigning identity, or "-" for ad hoc. `--sign` takes
-    /// precedence.
-    var signingIdentity: String?
-
-    static func load(near targetDirectory: URL?) -> CefAppConfig? {
-        guard let targetDirectory else { return nil }
-        let url = targetDirectory.appendingPathComponent("cefapp.json")
-        guard let data = try? Data(contentsOf: url) else { return nil }
-        do {
-            return try JSONDecoder().decode(CefAppConfig.self, from: data)
-        } catch {
-            print("[cef] warning: ignoring malformed \(url.path): \(error)")
-            return nil
-        }
-    }
-}
-
 /// Assembles a runnable .app: the main executable and its Info.plist, the CEF
 /// framework, the helpers' startup library, and five helper apps sharing
-/// one binary; then signs them inside out — framework, startup library,
-/// helpers, app. See docs/bundling.md.
+/// one binary; then signs them inside out: the framework's libraries, the
+/// framework, the startup library, each helper, the app. See
+/// docs/bundling.md.
 struct AppBundler {
-    /// Each helper's name suffix and bundle identifier suffix.
-    static let helpers: [(suffix: String?, bundleIDSuffix: String)] = [
-        (nil, ".helper"),
-        ("Alerts", ".helper.alerts"),
-        ("GPU", ".helper.gpu"),
-        ("Plugin", ".helper.plugin"),
-        ("Renderer", ".helper.renderer"),
-    ]
-
     let appName: String              // bundle + executable name, e.g. "Browser"
     let displayName: String
     let bundleIdentifier: String
@@ -53,7 +17,15 @@ struct AppBundler {
     let helperStartupLibrary: URL    // the helper's startup library (HelperBuilder)
     let frameworkSource: URL         // converted framework inside .cef/dist
     let outputDirectory: URL
-    let signingIdentity: String      // codesign identity; "-" = ad-hoc
+    let identity: SigningIdentity
+    /// Info.plist keys and entitlements from cefapp.json (DistributionPlan).
+    let plan: DistributionPlan
+    /// Embedded as Contents/embedded.provisionprofile.
+    let provisioningProfile: URL?
+    /// A keychain to find the identity in (`codesign --keychain`).
+    let signingKeychain: String?
+    /// Where the entitlements files passed to codesign are written.
+    let workDirectory: URL
 
     var appURL: URL { outputDirectory.appendingPathComponent("\(appName).app") }
 
@@ -73,8 +45,11 @@ struct AppBundler {
 
         try fm.copyItem(at: mainExecutable, to: macOS.appendingPathComponent(appName))
 
-        try writePlist(mainInfoPlist(), to: contents.appendingPathComponent("Info.plist"))
+        try Plist.write(mainInfoPlist(), to: contents.appendingPathComponent("Info.plist"))
         try Data("APPL????".utf8).write(to: contents.appendingPathComponent("PkgInfo"))
+        if let provisioningProfile {
+            try fm.copyItem(at: provisioningProfile, to: contents.appendingPathComponent("embedded.provisionprofile"))
+        }
 
         // `cp -R` keeps the framework's symlinks.
         let frameworkDest = frameworks.appendingPathComponent(frameworkSource.lastPathComponent)
@@ -85,94 +60,132 @@ struct AppBundler {
 
         let startupLibrary = frameworks.appendingPathComponent(HelperBuilder.startupLibraryName)
         try fm.copyItem(at: helperStartupLibrary, to: startupLibrary)
-        let helperAppURLs = try Self.helpers.map {
-            try makeHelperApp(in: frameworks, suffix: $0.suffix, bundleIDSuffix: $0.bundleIDSuffix)
-        }
+        let helperApps = try HelperKind.allCases.map { ($0, try makeHelperApp(in: frameworks, kind: $0)) }
 
-        try codesign(frameworkDest)
-        try codesign(startupLibrary)
-        for helperApp in helperAppURLs { try codesign(helperApp) }
-        try codesign(appURL)
+        // Inside out, each item before what contains it, and without
+        // --deep. Every library a helper loads carries the app's identity,
+        // which library validation under the hardened runtime requires;
+        // CEF ships its libraries linker-signed ad hoc.
+        try fm.createDirectory(at: workDirectory, withIntermediateDirectories: true)
+        for library in try Self.machOFiles(in: frameworkDest.appendingPathComponent("Versions/A/Libraries")) {
+            try codesign(library, entitlements: [:], isLibrary: true)
+        }
+        try codesign(frameworkDest, entitlements: [:], isLibrary: true)
+        try codesign(startupLibrary, entitlements: [:], isLibrary: true)
+        for (kind, helperApp) in helperApps {
+            try codesign(helperApp, entitlements: plan.helperEntitlements[kind] ?? [:], name: kind.rawValue)
+        }
+        try codesign(appURL, entitlements: plan.appEntitlements, name: "app")
 
         return appURL
     }
 
     // MARK: - Helpers
 
-    private func makeHelperApp(in frameworks: URL, suffix: String?, bundleIDSuffix: String) throws -> URL {
+    private func makeHelperApp(in frameworks: URL, kind: HelperKind) throws -> URL {
         let fm = FileManager.default
         // Chromium finds helpers by these exact names.
-        let helperName = suffix.map { "\(appName) Helper (\($0))" } ?? "\(appName) Helper"
+        let helperName = kind.appName(for: appName)
         let helperApp = frameworks.appendingPathComponent("\(helperName).app")
         let contents = helperApp.appendingPathComponent("Contents")
         let macOS = contents.appendingPathComponent("MacOS")
         try fm.createDirectory(at: macOS, withIntermediateDirectories: true)
 
         try fm.copyItem(at: helperExecutable, to: macOS.appendingPathComponent(helperName))
-        try writePlist(
-            helperInfoPlist(helperName: helperName, bundleIDSuffix: bundleIDSuffix),
+        try Plist.write(
+            helperInfoPlist(helperName: helperName, kind: kind),
             to: contents.appendingPathComponent("Info.plist")
         )
         try Data("APPL????".utf8).write(to: contents.appendingPathComponent("PkgInfo"))
         return helperApp
     }
 
-    private func mainInfoPlist() -> [String: Any] {
-        [
-            "CFBundleDevelopmentRegion": "en",
-            "CFBundleExecutable": appName,
-            "CFBundleIdentifier": bundleIdentifier,
-            "CFBundleInfoDictionaryVersion": "6.0",
-            "CFBundleName": appName,
-            "CFBundleDisplayName": displayName,
-            "CFBundlePackageType": "APPL",
-            "CFBundleShortVersionString": version,
-            "CFBundleVersion": build,
-            "LSMinimumSystemVersion": minimumSystemVersion,
-            "NSPrincipalClass": "NSApplication",
-            "NSHighResolutionCapable": true,
-            "NSSupportsAutomaticGraphicsSwitching": true,
+    func mainInfoPlist() -> PlistDictionary {
+        let base: PlistDictionary = [
+            "CFBundleDevelopmentRegion": .string("en"),
+            "CFBundleExecutable": .string(appName),
+            "CFBundleIdentifier": .string(bundleIdentifier),
+            "CFBundleInfoDictionaryVersion": .string("6.0"),
+            "CFBundleName": .string(appName),
+            "CFBundleDisplayName": .string(displayName),
+            "CFBundlePackageType": .string("APPL"),
+            "CFBundleShortVersionString": .string(version),
+            "CFBundleVersion": .string(build),
+            "LSMinimumSystemVersion": .string(minimumSystemVersion),
+            "NSPrincipalClass": .string("NSApplication"),
+            "NSHighResolutionCapable": .bool(true),
+            "NSSupportsAutomaticGraphicsSwitching": .bool(true),
             // Chromium's allocator does not work with the nano malloc zone.
-            "LSEnvironment": ["MallocNanoZone": "0"],
+            "LSEnvironment": .dictionary(["MallocNanoZone": .string("0")]),
         ]
+        return Plist.merge(base, plan.appInfoPlist)
     }
 
-    private func helperInfoPlist(helperName: String, bundleIDSuffix: String) -> [String: Any] {
-        [
-            "CFBundleDevelopmentRegion": "en",
-            "CFBundleExecutable": helperName,
-            "CFBundleIdentifier": bundleIdentifier + bundleIDSuffix,
-            "CFBundleInfoDictionaryVersion": "6.0",
-            "CFBundleName": helperName,
-            "CFBundleDisplayName": helperName,
-            "CFBundlePackageType": "APPL",
-            "CFBundleShortVersionString": version,
-            "CFBundleVersion": build,
-            "LSMinimumSystemVersion": minimumSystemVersion,
-            "NSSupportsAutomaticGraphicsSwitching": true,
-            "LSUIElement": true,
-            "LSFileQuarantineEnabled": true,
+    private func helperInfoPlist(helperName: String, kind: HelperKind) -> PlistDictionary {
+        let base: PlistDictionary = [
+            "CFBundleDevelopmentRegion": .string("en"),
+            "CFBundleExecutable": .string(helperName),
+            "CFBundleIdentifier": .string(bundleIdentifier + kind.bundleIdentifierSuffix),
+            "CFBundleInfoDictionaryVersion": .string("6.0"),
+            "CFBundleName": .string(helperName),
+            "CFBundleDisplayName": .string(helperName),
+            "CFBundlePackageType": .string("APPL"),
+            "CFBundleShortVersionString": .string(version),
+            "CFBundleVersion": .string(build),
+            "LSMinimumSystemVersion": .string(minimumSystemVersion),
+            "NSSupportsAutomaticGraphicsSwitching": .bool(true),
+            "LSUIElement": .bool(true),
+            "LSFileQuarantineEnabled": .bool(true),
         ]
+        return Plist.merge(Plist.merge(base, kind.infoPlist), plan.helperInfoPlist)
     }
 
-    private func writePlist(_ dictionary: [String: Any], to url: URL) throws {
-        let data = try PropertyListSerialization.data(
-            fromPropertyList: dictionary, format: .xml, options: 0
-        )
-        try data.write(to: url)
+    /// The Mach-O files under `directory`, found by their magic number.
+    static func machOFiles(in directory: URL) throws -> [URL] {
+        let keys: [URLResourceKey] = [.isRegularFileKey, .isSymbolicLinkKey]
+        guard let enumerator = FileManager.default.enumerator(at: directory, includingPropertiesForKeys: keys)
+        else { return [] }
+        let machOMagics: Set<[UInt8]> = [
+            [0xCF, 0xFA, 0xED, 0xFE], [0xCE, 0xFA, 0xED, 0xFE],  // thin, little-endian
+            [0xCA, 0xFE, 0xBA, 0xBE],                            // universal
+        ]
+        var files: [URL] = []
+        for case let url as URL in enumerator {
+            let values = try url.resourceValues(forKeys: Set(keys))
+            guard values.isRegularFile == true, values.isSymbolicLink != true,
+                  let handle = try? FileHandle(forReadingFrom: url) else { continue }
+            let magic = (try? handle.read(upToCount: 4)) ?? Data()
+            try? handle.close()
+            if machOMagics.contains(Array(magic)) { files.append(url) }
+        }
+        return files.sorted { $0.path < $1.path }
     }
 
-    private func codesign(_ path: URL) throws {
-        // No hardened runtime: loading the framework would need entitlements.
-        // No secure timestamp, so signing works offline.
+    /// Signs one item. Libraries and the framework take no options or
+    /// entitlements: those apply to executables, and a library runs with
+    /// those of the process that loads it.
+    private func codesign(_ path: URL, entitlements: PlistDictionary, name: String? = nil, isLibrary: Bool = false) throws {
+        var arguments = ["--force", "--sign", identity.name]
+        if plan.hardenedRuntime, !isLibrary { arguments += ["--options", "runtime"] }
+        // A secure timestamp needs Apple's timestamp server; without one,
+        // signing works offline.
+        arguments.append(plan.secureTimestamp ? "--timestamp" : "--timestamp=none")
+        if let signingKeychain { arguments += ["--keychain", signingKeychain] }
+        if !entitlements.isEmpty {
+            let file = workDirectory.appendingPathComponent("\(name ?? path.lastPathComponent).entitlements")
+            try Plist.write(entitlements, to: file)
+            arguments += ["--entitlements", file.path]
+        }
         try Shell.runChecked(
-            "/usr/bin/codesign",
-            ["--force", "--timestamp=none", "--sign", signingIdentity, path.path],
-            hint: signingIdentity == "-"
+            "/usr/bin/codesign", arguments + [path.path],
+            hint: identity.isAdHoc
                 ? "Ad-hoc signing needs no certificate, so the bundle layout is likely invalid. Run " +
                   "'swift package cef clean', then bundle again to re-download the framework."
-                : "Check that the identity '\(signingIdentity)' is valid ('security find-identity -v -p codesigning') " +
-                  "and that its private key is accessible, or pass '--sign -' for ad-hoc signing."
+                : "Check that the identity '\(identity.name)' is valid ('security find-identity -v -p codesigning') " +
+                  "and that its private key is accessible, or pass '--sign -' for ad-hoc signing." +
+                  (signingKeychain == nil ? "" : " SwiftPM's plugin sandbox can hide keychains that are not in " +
+                      "the search list; add it with 'security list-keychains -d user -s …'.") +
+                  (plan.secureTimestamp ? " A secure timestamp needs a network connection; --no-timestamp skips it." : "")
         )
     }
 }

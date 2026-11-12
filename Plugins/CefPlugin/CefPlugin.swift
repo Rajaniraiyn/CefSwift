@@ -7,7 +7,7 @@ private let hostCefPlatform = "macosarm64"
 private let hostCefPlatform = "macosx64"
 #endif
 
-/// `swift package cef <download|bundle|info|clean>`.
+/// `swift package cef <download|bundle|doctor|package|notarize|info|clean>`.
 ///
 /// Pre-approve the needed sandbox permissions on the command line:
 ///   swift package --allow-writing-to-package-directory \
@@ -34,10 +34,17 @@ struct CefPlugin: CommandPlugin {
             try info(context: context, extractor: &extractor)
         case "clean":
             try clean(context: context)
+        case "doctor":
+            try doctor(context: context, extractor: &extractor)
+        case "package":
+            try package(context: context, extractor: &extractor)
+        case "notarize":
+            try notarize(context: context, extractor: &extractor)
         default:
             print(Self.usage)
             throw CefPluginError(
-                "Unknown subcommand '\(subcommand)'. Expected one of: download, bundle, info, clean."
+                "Unknown subcommand '\(subcommand)'. Expected one of: download, bundle, doctor, package, " +
+                "notarize, info, clean."
             )
         }
     }
@@ -55,20 +62,37 @@ struct CefPlugin: CommandPlugin {
 
       bundle --product <Name> [--configuration debug|release] [--flavor minimal|standard]
              [--platform macosarm64|macosx64] [--output <dir>] [--bundle-id <id>]
-             [--name <DisplayName>] [--manifest <path>] [--sign <identity|->]
-             [--version <1.2.3>] [--build <42>]
-          Build <Name>, compile the helper, then assemble a runnable <Name>.app
-          (framework + five helper apps + Info.plists + codesign).
-          --version / --build: CFBundleShortVersionString / CFBundleVersion.
-          Precedence: option > cefapp.json "version"/"build" > 1.0 / 1.
-          LSMinimumSystemVersion: cefapp.json "minimumSystemVersion", else the
-          deployment target the product was built for (the package's
-          platforms), else 14.0.
-          --sign: codesign identity; '-' forces ad-hoc. Default: auto-detect
-          (first "Apple Development", else "Developer ID Application", else
-          ad-hoc). Precedence: --sign > cefapp.json "signingIdentity" > auto.
+             [--name <DisplayName>] [--manifest <path>] [--version <1.2.3>] [--build <42>]
+             [--config <cefapp.json>] [--sign <identity|->] [--team-id <ID>] [--keychain <file>]
+             [--capability <name>]... [--info-plist <file>]... [--entitlements <file>]
+             [--provisioning-profile <file>] [--[no-]hardened-runtime] [--[no-]timestamp]
+             [--package zip|dmg] [--notarize --keychain-profile <name>]
+          Build <Name>, compile the helper, then assemble and sign <Name>.app
+          (framework + five helper apps + Info.plists + entitlements).
+          Settings come from cefapp.json next to the target's sources (or
+          --config); options override it. --sign '-' signs ad hoc; without it,
+          the first "Apple Development", else "Developer ID Application"
+          identity, else ad hoc. The hardened runtime defaults to on for Apple
+          team identities, the secure timestamp to on for Developer ID.
+          --capability adds to cefapp.json "capabilities": \(Capability.all.map(\.name).joined(separator: ", ")).
+          --package and --notarize run the commands below on the result.
           Default output: <packageDir>/dist/<Name>.app.
-          Optional per-product overrides: cefapp.json next to the target sources.
+
+      doctor <App.app> | --product <Name> [--json]
+          Inspect a built bundle: signature, hardened runtime, each helper's
+          entitlements, the embedded profile, Info.plist usage descriptions,
+          Gatekeeper, stapling and quarantine; then, per feature, whether it
+          works and what is missing. Exits non-zero when it finds errors.
+
+      package <App.app> | --product <Name> [--format zip|dmg] [--sign <identity>] [--output <dir>]
+          Wrap the app in a zip (ditto) or disk image (hdiutil; signed with
+          --sign). Default: zip, next to the app.
+
+      notarize <App.app> | --product <Name> --keychain-profile <name> [--format zip|dmg]
+               [--sign <identity>]
+          Package, submit with 'xcrun notarytool submit --wait', and staple the
+          ticket. Create the profile once with 'xcrun notarytool store-credentials'.
+          cefapp.json "notarization": {"keychainProfile", "format"} sets defaults.
 
       info
           Print the pinned CEF version and the state of the .cef/ cache.
@@ -112,9 +136,21 @@ struct CefPlugin: CommandPlugin {
         let outputPath = extractor.extractOption(named: "output").last
         let bundleIDOption = extractor.extractOption(named: "bundle-id").last
         let nameOption = extractor.extractOption(named: "name").last
-        let signOption = extractor.extractOption(named: "sign").last
         let versionOption = extractor.extractOption(named: "version").last
         let buildOption = extractor.extractOption(named: "build").last
+        let configPath = extractor.extractOption(named: "config").last
+        let signOption = extractor.extractOption(named: "sign").last
+        let teamOption = extractor.extractOption(named: "team-id").last
+        let keychainOption = extractor.extractOption(named: "keychain").last
+        let capabilityOptions = extractor.extractOption(named: "capability")
+        let infoPlistOptions = extractor.extractOption(named: "info-plist")
+        let entitlementsOption = extractor.extractOption(named: "entitlements").last
+        let profileOption = extractor.extractOption(named: "provisioning-profile").last
+        let hardenedRuntime = try Self.toggle(&extractor, "hardened-runtime")
+        let timestamp = try Self.toggle(&extractor, "timestamp")
+        let packageFormat = extractor.extractOption(named: "package").last
+        let notarize = extractor.extractFlag(named: "notarize") > 0
+        let keychainProfileOption = extractor.extractOption(named: "keychain-profile").last
         // Undocumented: bundle prebuilt executables, or skip straight to the
         // `swift build` fallback.
         let testExe = extractor.extractOption(named: "_test-exe").last
@@ -136,13 +172,57 @@ struct CefPlugin: CommandPlugin {
             throw CefPluginError("Invalid --configuration '\(configurationName)'. Use 'debug' or 'release'.")
         }
 
-        // 1. The CEF distribution, downloaded on first use.
+        // 1. Settings, checked before anything slow runs. cefapp.json sits
+        // beside the target's sources.
+        let appConfig = try CefAppConfig.load(
+            near: targetDirectory(named: productName, in: context.package),
+            explicit: configPath.map { packageRelative($0, context: context) })
+        if let appConfig { print("[cef] Settings: \(appConfig.source.path)") }
+        let appName = nameOption ?? productName
+        let displayName = nameOption ?? appConfig?.displayName ?? productName
+        let bundleID = bundleIDOption
+            ?? appConfig?.bundleIdentifier
+            ?? "com.cefswift.\(productName.lowercased())"
+        let keychain = (keychainOption.map { packageRelative($0, context: context) }
+            ?? appConfig?.signingKeychain.map { appConfig!.resolve($0) })?.path
+        let workDirectory = context.pluginWorkDirectoryURL.appendingPathComponent("signing")
+        let (identity, certificateSHA1) = try Signing.resolveIdentity(
+            flag: signOption, configValue: appConfig?.signingIdentity,
+            teamIdentifier: teamOption ?? appConfig?.teamIdentifier, keychain: keychain,
+            workDirectory: workDirectory)
+        if identity.isAdHoc {
+            print("[cef] note: an ad-hoc signed app loses its keychain \"Always Allow\" grant on every " +
+                  "rebuild — see CefSafeStoragePolicy.")
+        }
+        let distribution = try distributionSettings(
+            config: appConfig, context: context, bundleIdentifier: bundleID, identity: identity,
+            certificateSHA1: certificateSHA1, capabilityOptions: capabilityOptions,
+            infoPlistOptions: infoPlistOptions, entitlementsOption: entitlementsOption,
+            profileOption: profileOption, hardenedRuntime: hardenedRuntime, timestamp: timestamp)
+        let plan = try distribution.settings.plan()
+        for warning in plan.warnings { print("[cef] warning: \(warning)") }
+        if let profile = distribution.settings.profile, identity.kind.hasAppleTeam {
+            let problems = profile.problems(
+                bundleIdentifier: bundleID, identity: identity, certificateSHA1: certificateSHA1,
+                entitlements: plan.appEntitlements)
+            for problem in problems where !problem.isError { print("[cef] warning: \(problem.message)") }
+            let errors = problems.filter(\.isError).map(\.message)
+            if !errors.isEmpty {
+                throw CefPluginError("The provisioning profile does not fit this bundle:\n  " +
+                                     errors.joined(separator: "\n  "))
+            }
+        }
+        let notarization = try notarizationSettings(
+            notarize: notarize, keychainProfile: keychainProfileOption, format: packageFormat,
+            config: appConfig, identity: identity, plan: plan)
+
+        // 2. The CEF distribution, downloaded on first use.
         let manifest = try CefManifest.resolve(context: context, explicitPath: manifestPath)
         let downloader = Downloader(cacheRoot: cacheRoot(context: context))
         let dist = try downloader.ensure(manifest: manifest, platform: platform, flavor: flavor)
         let framework = downloader.frameworkURL(in: dist)
 
-        // 2. Build the product, linked to the framework (see
+        // 3. Build the product, linked to the framework (see
         // frameworkLinkerFlags).
         let mainExecutable: URL
         if let testExe {
@@ -155,13 +235,6 @@ struct CefPlugin: CommandPlugin {
                 forceCLIBuild: forceCLIBuild
             )
         }
-
-        // 3. Per-product overrides from cefapp.json beside the target's
-        // sources. (`directoryURL` needs tools version 6.1.)
-        let targetDirectory = context.package.targets
-            .first { $0 is SourceModuleTarget && $0.name == productName }
-            .map { URL(fileURLWithPath: $0.directory.string) }
-        let appConfig = CefAppConfig.load(near: targetDirectory)
         let minimumSystemVersion = appConfig?.minimumSystemVersion
             ?? MachOVersion.minimumSystemVersion(of: mainExecutable) ?? "14.0"
 
@@ -187,20 +260,16 @@ struct CefPlugin: CommandPlugin {
             ).build()
         }
 
-        let appName = nameOption ?? productName
-        let displayName = nameOption ?? appConfig?.displayName ?? productName
-        let bundleID = bundleIDOption
-            ?? appConfig?.bundleIdentifier
-            ?? "com.cefswift.\(productName.lowercased())"
-        let outputDirectory = outputPath
-            .map { URL(fileURLWithPath: $0, relativeTo: context.package.directoryURL).absoluteURL }
+        let outputDirectory = outputPath.map { packageRelative($0, context: context) }
             ?? context.package.directoryURL.appendingPathComponent("dist")
         try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
 
         // 5. Assemble and sign.
-        let signingIdentity = resolveSigningIdentity(
-            flag: signOption, configValue: appConfig?.signingIdentity
-        )
+        print("[cef] Signing \(identity.kind.displayName)" +
+              (identity.teamIdentifier.map { ", team \($0)" } ?? "") +
+              (plan.hardenedRuntime ? ", hardened runtime" : "") +
+              (plan.secureTimestamp ? ", secure timestamp" : "") +
+              (distribution.profileURL != nil ? ", with \(distribution.profileURL!.lastPathComponent)" : ""))
         let bundler = AppBundler(
             appName: appName,
             displayName: displayName,
@@ -213,59 +282,192 @@ struct CefPlugin: CommandPlugin {
             helperStartupLibrary: helper.startupLibrary,
             frameworkSource: framework,
             outputDirectory: outputDirectory,
-            signingIdentity: signingIdentity
+            identity: identity,
+            plan: plan,
+            provisioningProfile: identity.kind.hasAppleTeam ? distribution.profileURL : nil,
+            signingKeychain: keychain,
+            workDirectory: workDirectory
         )
         let app = try bundler.assemble()
 
         print("")
         print("[cef] Created \(app.path)")
         print("[cef] Run it with: open \"\(app.path)\"")
+        print("[cef] Check it with: swift package cef doctor \"\(app.path)\"")
+
+        if let notarization {
+            let archive = try Notarizer.package(app, format: notarization.format, output: nil,
+                                                identity: identity.name, keychain: keychain)
+            if let keychainProfile = notarization.keychainProfile {
+                try Notarizer.notarize(archive: archive, app: app, keychainProfile: keychainProfile)
+            }
+        }
     }
 
-    /// Resolves the codesigning identity for `cef bundle`.
-    /// Precedence: `--sign <identity|->` > cefapp.json `signingIdentity` >
-    /// auto-detect via `security find-identity -v -p codesigning` (first
-    /// "Apple Development", else first "Developer ID Application", else
-    /// ad-hoc "-").
-    private func resolveSigningIdentity(flag: String?, configValue: String?) -> String {
-        if let flag {
-            print(flag == "-"
-                ? "[cef] Signing: ad-hoc (--sign -)"
-                : "[cef] Signing with identity from --sign: \(flag)")
-            return flag
-        }
-        if let configValue {
-            print(configValue == "-"
-                ? "[cef] Signing: ad-hoc (cefapp.json signingIdentity)"
-                : "[cef] Signing with identity from cefapp.json: \(configValue)")
-            return configValue
-        }
+    /// `--name` / `--no-name`: true, false, or nil when neither is given.
+    private static func toggle(_ extractor: inout ArgumentExtractor, _ name: String) throws -> Bool? {
+        let on = extractor.extractFlag(named: name) > 0
+        let off = extractor.extractFlag(named: "no-\(name)") > 0
+        if on && off { throw CefPluginError("Pass either --\(name) or --no-\(name), not both.") }
+        return on ? true : off ? false : nil
+    }
 
-        // If `security` fails or lists nothing, sign ad hoc. Its lines look
-        // like:  1) <SHA-1> "Apple Development: Jane Doe (TEAMID)"
-        var identities: [String] = []
-        if let result = try? Shell.run("/usr/bin/security", ["find-identity", "-v", "-p", "codesigning"]),
-           result.exitCode == 0 {
-            identities = result.stdout
-                .split(separator: "\n")
-                .compactMap { line in
-                    guard let start = line.firstIndex(of: "\""),
-                          let end = line.lastIndex(of: "\""), start < end
-                    else { return nil }
-                    return String(line[line.index(after: start)..<end])
-                }
-        }
+    private func packageRelative(_ path: String, context: PluginContext) -> URL {
+        URL(fileURLWithPath: (path as NSString).expandingTildeInPath, relativeTo: context.package.directoryURL)
+            .standardizedFileURL
+    }
 
-        let chosen = identities.first { $0.hasPrefix("Apple Development") }
-            ?? identities.first { $0.hasPrefix("Developer ID Application") }
-        if let chosen {
-            print("[cef] Signing with auto-detected identity: \(chosen)")
-            return chosen
+    /// The directory of a target's sources: the closest directory that holds
+    /// all of them. (`Target.directoryURL` needs tools version 6.1.)
+    private func targetDirectory(named name: String, in package: Package) -> URL? {
+        guard let target = package.targets.first(where: { $0.name == name }) as? SourceModuleTarget else {
+            return nil
         }
-        print("[cef] Signing: ad-hoc (no codesigning identity found)")
-        print("[cef] note: an ad-hoc signed app loses its keychain \"Always Allow\" grant on every " +
-              "rebuild — see CefSafeStoragePolicy.")
-        return "-"
+        let directories = target.sourceFiles.map { $0.url.deletingLastPathComponent().standardizedFileURL.pathComponents }
+        guard var common = directories.first else { return nil }
+        for components in directories.dropFirst() {
+            common = Array(zip(common, components).prefix { $0 == $1 }.map(\.0))
+        }
+        return URL(fileURLWithPath: NSString.path(withComponents: common))
+    }
+
+    private struct ResolvedDistribution {
+        var settings: DistributionSettings
+        var profileURL: URL?
+    }
+
+    /// Reads the files cefapp.json and the options name, with options taking
+    /// precedence.
+    private func distributionSettings(
+        config: CefAppConfig?, context: PluginContext, bundleIdentifier: String, identity: SigningIdentity,
+        certificateSHA1: String?, capabilityOptions: [String], infoPlistOptions: [String],
+        entitlementsOption: String?, profileOption: String?, hardenedRuntime: Bool?, timestamp: Bool?
+    ) throws -> ResolvedDistribution {
+        var settings = DistributionSettings(bundleIdentifier: bundleIdentifier, identity: identity)
+        settings.certificateSHA1 = certificateSHA1
+        settings.capabilities = (config?.capabilities ?? []) + capabilityOptions
+        settings.usageDescriptions = config?.usageDescriptions ?? [:]
+        if let infoPlist = config?.infoPlist {
+            settings.infoPlistOverlays.append(("\(config!.source.lastPathComponent) infoPlist", infoPlist))
+        }
+        for path in infoPlistOptions {
+            let url = packageRelative(path, context: context)
+            settings.infoPlistOverlays.append((url.path, try Plist.read(url)))
+        }
+        if let url = entitlementsOption.map({ packageRelative($0, context: context) })
+            ?? config?.entitlements.map({ config!.resolve($0) }) {
+            settings.appEntitlementsFile = (url.lastPathComponent, try Plist.read(url))
+        }
+        for (name, path) in config?.helperEntitlements ?? [:] {
+            guard let helper = HelperKind(rawValue: name), let config else { continue }
+            let url = config.resolve(path)
+            settings.helperEntitlementFiles[helper] = (url.lastPathComponent, try Plist.read(url))
+        }
+        let profileURL = profileOption.map { packageRelative($0, context: context) }
+            ?? config?.provisioningProfile.map { config!.resolve($0) }
+        if let profileURL {
+            settings.profile = try Signing.decodeProfile(at: profileURL)
+        }
+        settings.hardenedRuntime = hardenedRuntime ?? config?.hardenedRuntime
+        settings.secureTimestamp = timestamp ?? config?.timestamp
+        return ResolvedDistribution(settings: settings, profileURL: profileURL)
+    }
+
+    private struct NotarizationSettings {
+        var format: Notarizer.Format
+        var keychainProfile: String?
+    }
+
+    /// What `bundle --package/--notarize` asks for, checked up front so a
+    /// long build does not end in a configuration error.
+    private func notarizationSettings(
+        notarize: Bool, keychainProfile: String?, format: String?, config: CefAppConfig?,
+        identity: SigningIdentity, plan: DistributionPlan
+    ) throws -> NotarizationSettings? {
+        guard notarize || format != nil else { return nil }
+        let formatName = format ?? config?.notarization?.format ?? "zip"
+        guard let parsed = Notarizer.Format(rawValue: formatName) else {
+            throw CefPluginError("Invalid package format '\(formatName)'. Use 'zip' or 'dmg'.")
+        }
+        guard notarize else { return NotarizationSettings(format: parsed, keychainProfile: nil) }
+        guard let profile = keychainProfile ?? config?.notarization?.keychainProfile else {
+            throw CefPluginError(
+                "--notarize needs a notarytool keychain profile: pass --keychain-profile <name> or set " +
+                "\"notarization\": {\"keychainProfile\": \"<name>\"} in cefapp.json. Create it once with " +
+                "'xcrun notarytool store-credentials <name>'.")
+        }
+        guard identity.kind == .developerID, plan.hardenedRuntime, plan.secureTimestamp else {
+            throw CefPluginError(
+                "Notarization needs a Developer ID Application signature with the hardened runtime and a " +
+                "secure timestamp; this bundle is signed \(identity.kind.displayName)" +
+                (plan.hardenedRuntime ? "" : ", without the hardened runtime") +
+                (plan.secureTimestamp ? "" : ", without a secure timestamp") + ".")
+        }
+        return NotarizationSettings(format: parsed, keychainProfile: profile)
+    }
+
+    // MARK: - doctor, package, notarize
+
+    /// The app a subcommand works on: a path, or `--product` in `dist/`.
+    private func appArgument(context: PluginContext, extractor: inout ArgumentExtractor, command: String) throws -> URL {
+        let product = extractor.extractOption(named: "product").last
+        let positional = extractor.remainingArguments.filter { !$0.hasPrefix("--") }
+        if let path = positional.first {
+            extractor = ArgumentExtractor(extractor.remainingArguments.filter { $0 != path })
+            return packageRelative(path, context: context)
+        }
+        if let product {
+            return context.package.directoryURL.appendingPathComponent("dist/\(product).app")
+        }
+        throw CefPluginError("Missing the app: swift package cef \(command) <App.app> (or --product <Name>).")
+    }
+
+    private func doctor(context: PluginContext, extractor: inout ArgumentExtractor) throws {
+        let json = extractor.extractFlag(named: "json") > 0
+        let app = try appArgument(context: context, extractor: &extractor, command: "doctor")
+        try rejectLeftovers(extractor)
+        let report = Doctor.evaluate(try DoctorInspector.inspect(app))
+        print(json ? try report.json() : report.text())
+        if report.errorCount > 0 {
+            throw CefPluginError("cef doctor found \(report.errorCount) error(s) in \(app.lastPathComponent).")
+        }
+    }
+
+    private func package(context: PluginContext, extractor: inout ArgumentExtractor) throws {
+        let format = extractor.extractOption(named: "format").last ?? "zip"
+        let sign = extractor.extractOption(named: "sign").last
+        let keychain = extractor.extractOption(named: "keychain").last
+        let output = extractor.extractOption(named: "output").last
+        let app = try appArgument(context: context, extractor: &extractor, command: "package")
+        try rejectLeftovers(extractor)
+        guard let parsed = Notarizer.Format(rawValue: format) else {
+            throw CefPluginError("Invalid --format '\(format)'. Use 'zip' or 'dmg'.")
+        }
+        _ = try Notarizer.package(app, format: parsed, output: output.map { packageRelative($0, context: context) },
+                                  identity: sign, keychain: keychain)
+    }
+
+    private func notarize(context: PluginContext, extractor: inout ArgumentExtractor) throws {
+        let profile = extractor.extractOption(named: "keychain-profile").last
+        let format = extractor.extractOption(named: "format").last ?? "zip"
+        let sign = extractor.extractOption(named: "sign").last
+        let keychain = extractor.extractOption(named: "keychain").last
+        let app = try appArgument(context: context, extractor: &extractor, command: "notarize")
+        try rejectLeftovers(extractor)
+        guard let profile else {
+            throw CefPluginError(
+                "Missing --keychain-profile <name>. Create the profile once with " +
+                "'xcrun notarytool store-credentials <name>' (an app-specific password or an App Store " +
+                "Connect API key).")
+        }
+        guard let parsed = Notarizer.Format(rawValue: format) else {
+            throw CefPluginError("Invalid --format '\(format)'. Use 'zip' or 'dmg'.")
+        }
+        if parsed == .dmg, sign == nil {
+            throw CefPluginError("--format dmg needs --sign <Developer ID Application identity> to sign the disk image.")
+        }
+        let archive = try Notarizer.package(app, format: parsed, output: nil, identity: sign, keychain: keychain)
+        try Notarizer.notarize(archive: archive, app: app, keychainProfile: profile)
     }
 
     /// Links the app to the framework, weakly, so that dyld loads it at
