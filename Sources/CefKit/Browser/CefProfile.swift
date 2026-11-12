@@ -48,8 +48,7 @@ public final class CefProfile {
     private static var persistentProfiles: [String: CefProfile] = [:]
 
     // MARK: Bookmarks, history, autocomplete
-    // Built on Chromium's internal pages; see CefBookmarks.swift,
-    // CefHistory.swift and CefAutocomplete.swift.
+    // Built on Chromium's internal services; see CefInternalServices.swift.
 
     /// The profile's bookmarks.
     ///
@@ -68,22 +67,53 @@ public final class CefProfile {
     /// Omnibox-ranked address-bar suggestions. Experimental.
     public private(set) lazy var autocomplete = CefAutocomplete(profile: self)
 
-    /// The hidden browsers behind ``bookmarks``, ``history`` and
-    /// ``autocomplete`` that have been set up.
-    private var services: [CefInternalPageService] = []
+    /// The hidden service hosts behind ``bookmarks``, ``history`` and
+    /// ``autocomplete``.
+    private(set) lazy var services = CefInternalServices(profile: self)
 
-    func register(_ service: CefInternalPageService) {
-        services.append(service)
-    }
-
-    /// The profile's last browser has closed. Its service browsers close
-    /// too — they hold the profile, so an incognito profile and its data
-    /// could not go otherwise — and start again on the next call. The
-    /// default profile keeps them: apps read its bookmarks and history with
-    /// no window open.
+    /// The profile's last browser has closed. Its service hosts close too —
+    /// they hold the profile, so an incognito profile and its data could
+    /// not go otherwise — and start again on the next call. The default
+    /// profile's close when idle.
     func lastBrowserDidClose() {
         guard self !== CefProfile.default else { return }
-        services.forEach { $0.stopIfIdle() }
+        services.stopAll()
+    }
+
+    // MARK: Service hosts, for tests
+
+    /// The names of the service hosts open or opening.
+    @_spi(Testing) public var runningServiceHosts: [String] { services.runningHostNames }
+
+    /// Closes every service host, as idling does.
+    @_spi(Testing) public func stopServiceHosts() { services.stopAll() }
+
+    /// Kills the renderer of the running service host called `name`, as a
+    /// crash would.
+    @_spi(Testing) public func crashServiceHost(named name: String) async {
+        let hosts: [CefServiceHost] = [.bookmarks, .history, .mostVisited, .omnibox, .discards]
+        guard let host = hosts.first(where: { $0.name == name }) else { return }
+        await services.crashRenderer(of: host)
+    }
+
+    /// How long a service host stays open after its last call.
+    @_spi(Testing) public static var serviceIdleTimeout: Duration {
+        get { CefInternalServices.idleTimeout }
+        set { CefInternalServices.idleTimeout = newValue }
+    }
+
+    /// The directory Chromium keeps this profile's files in; `nil` for an
+    /// incognito profile.
+    var directory: URL? {
+        guard let context = requestContext(),
+              let path = CefStringUtil.takingUserFree(context.pointer.pointee.get_cache_path(context.pointer)),
+              !path.isEmpty
+        else { return nil }
+        let url = URL(fileURLWithPath: path, isDirectory: true)
+        // The global context's cache path is Chromium's user data directory
+        // when it equals the root cache path; its profile is "Default".
+        let user = url.appendingPathComponent("Default", isDirectory: true)
+        return FileManager.default.fileExists(atPath: user.appendingPathComponent("Preferences").path) ? user : url
     }
 
     // MARK: Preferences

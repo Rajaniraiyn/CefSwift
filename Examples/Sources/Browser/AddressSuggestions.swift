@@ -43,10 +43,8 @@ final class AddressSuggestions {
 
     // MARK: Editing
 
-    /// Starts following the keyboard and readies `profile`'s suggestions;
-    /// call when the field begins editing.
+    /// Starts following the keyboard; call when the field begins editing.
     func beginEditing(profile: CefProfile) {
-        Task { await profile.autocomplete.prepare() }
         guard keyMonitor == nil else { return }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             // Local monitors run on the main thread, with the event in hand.
