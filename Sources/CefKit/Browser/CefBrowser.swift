@@ -40,9 +40,16 @@ public struct CefBrowserOptions {
     public var contextMenu = CefContextMenuConfiguration()
     /// Inspects — and may block, redirect or amend — every network request.
     public var requestFilter: CefRequestFilter?
-    /// Whether horizontal swipes navigate back and forward (offscreen
-    /// rendering; Chrome-style windows follow the system setting).
+    /// Whether horizontal swipes navigate back and forward, as the system's
+    /// "Swipe between pages" setting allows: two-finger scrolls that start
+    /// sideways, and the dedicated navigation swipe. Chrome-style browsers
+    /// (``CefBrowserWindow``) use Chrome's own swipe handling; views use
+    /// CefSwift's. While a swipe is in progress,
+    /// ``CefBrowser/navigationGestureProgress`` follows it.
     public var allowsBackForwardNavigationGestures = false
+    /// How a swipe in progress is shown when
+    /// ``allowsBackForwardNavigationGestures`` is on.
+    public var navigationGestureIndicator = CefNavigationGestureIndicator.automatic
     /// (Offscreen only) Forward raw trackpad touches to Chromium instead of
     /// translating gestures natively.
     public var forwardsRawTouchEvents = false
@@ -224,10 +231,12 @@ public final class CefBrowser: Identifiable {
     public internal(set) var statusText = ""
     /// Downloads started by this browser, oldest first.
     public private(set) var downloads: [CefDownload] = []
-    /// Progress of an in-flight swipe-to-navigate gesture: 0 at rest, toward
-    /// -1 while swiping back, toward 1 while swiping forward. Draw your own
-    /// indicator from it. CefSwiftUI's offscreen view updates it; offscreen
-    /// rendering only.
+    /// Progress of a back or forward swipe
+    /// (``CefBrowserOptions/allowsBackForwardNavigationGestures``): 0 at
+    /// rest, moving toward -1 while swiping back and toward 1 while swiping
+    /// forward. At -1 or 1 and beyond, releasing navigates. Use it to draw
+    /// your own indicator with
+    /// ``CefBrowserOptions/navigationGestureIndicator`` set to `.hidden`.
     public package(set) var navigationGestureProgress = 0.0
     /// The latest result of ``find(_:backwards:caseSensitive:)``.
     public internal(set) var findResult: CefFindResult?
@@ -269,6 +278,9 @@ public final class CefBrowser: Identifiable {
     /// For a popup, the window features its page asked for — the size to
     /// give the popup's window, for instance.
     @ObservationIgnored public internal(set) var popupFeatures: CefPopupFeatures?
+
+    /// Find in page as an observable model, for a find bar of your own.
+    @ObservationIgnored public private(set) lazy var findSession = CefFindSession(browser: self)
 
     /// Chrome DevTools Protocol access to this browser.
     @ObservationIgnored public private(set) lazy var devTools = CefDevTools(browser: self)
@@ -587,7 +599,12 @@ public final class CefBrowser: Identifiable {
 
     /// Runs one of Chrome's own commands — open history, zoom, find, print,
     /// bookmark, and so on. Chrome-style browsers only.
+    ///
+    /// In a ``CefBrowserWindow``, a command whose surface the window
+    /// presents with your interface or hides (``CefBrowserWindow/chromiumUI``)
+    /// goes there instead of to Chrome.
     public func execute(_ command: CefChromeCommand, disposition: CefWindowOpenDisposition = .currentTab) {
+        if let window = CefBrowserWindow.hosting(self), window.handleSurfaceCommand(command) { return }
         guard !isDiscarded else {
             whenRestored { [weak self] in self?.execute(command, disposition: disposition) }
             return
@@ -1018,7 +1035,14 @@ extension CefBrowser {
 
     func applyFullscreen(_ isFullscreen: Bool) { self.isFullscreen = isFullscreen }
     func applyStatusText(_ text: String) { statusText = text }
-    func applyFindResult(_ result: CefFindResult) { findResult = result }
+    func applyFindResult(_ result: CefFindResult) {
+        var result = result
+        // Updates that only recount leave the active match out.
+        if result.activeMatchIndex <= 0, result.matchCount > 0, let previous = findResult?.activeMatchIndex, previous > 0 {
+            result.activeMatchIndex = min(previous, result.matchCount)
+        }
+        findResult = result
+    }
 
     func applyDownload(_ download: CefDownload, control: CefRef<cef_download_item_callback_t>?) {
         if let index = downloads.firstIndex(where: { $0.id == download.id }) {

@@ -91,6 +91,9 @@ enum SelfTest {
         ("bridgeScope", bridgeScopeChecks),
         ("internalPages", internalPageDataChecks),
         ("serviceLifetime", serviceLifetimeChecks),
+        // After the history checks: the pages these visit would crowd the
+        // probe out of the most-visited tiles.
+        ("nativeUI", nativeUIChecks),
         ("relaunch", relaunchChecks),
         ("passkeys", passkeyChecks),
         ("chromeWindow", chromeWindowChecks),

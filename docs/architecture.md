@@ -101,6 +101,70 @@ whole content area in one layer, so `contentInsets` and
 `contentCornerRadius` are drawn by a native view laid over the page that
 paints everything except the page's rectangle and passes events through.
 
+## Chromium's AppKit classes
+
+The framework exports only CEF's C API, but Chromium's macOS UI is AppKit,
+and its Objective-C classes are visible to the Objective-C runtime.
+`CefObjCHook` overrides a few of their methods. Each override is looked up
+by class name, selector and type encoding; a missing one is logged, left
+out, and listed by SelfTest's "runtime hooks" check, and the feature that
+needs it falls back to Chromium's own behavior. An override added to a
+class that inherits the method stays on that class alone.
+
+**Surfaces.** Chromium's bubbles, dialogs, find bar and status bubble are
+Views widgets, each in a `NativeWidgetMacNSWindow` that Chromium attaches to
+the browser window as a child window. Every CEF Views window is a
+`CefNSWindow`, a subclass; `CefSurfaceTracker` overrides its
+`-addChildWindow:ordered:` and `-removeChildWindow:`. As Chromium attaches a
+widget, `CefBrowserWindow` makes it transparent; once attached, it reads
+what the widget shows and applies the kind's presentation: it restores the
+widget and moves it under its anchor with `setFrameOrigin(_:)` (and again
+when the widget or the window moves or resizes), or keeps it transparent,
+ignoring the mouse, and closes it as Esc would, or for the find bar with
+`IDC_CLOSE_FIND_OR_STOP`. Status bubbles and fullscreen notices are only
+kept transparent, since Chromium reuses their windows.
+
+A widget's kind comes from the class of the view inside it. Views reports
+each view's class name to accessibility as `AXDOMClassList`, so the tracker
+walks the widget's accessibility tree (`QRCodeGeneratorBubble`,
+`CastDialogView`, `FindBarView`, `LoginView`, `StatusView`,
+`SubtleNotificationView`, `DownloadBubbleContentsView`, …). When no class
+matches, the title is compared with Chromium's localized strings for each
+kind, read by identifier from the resource bundle
+(`cef_resource_bundle_t`); anything else is `.other`, with the title or the
+first specific class name. The QR code bubble's address comes from its text
+field's accessibility value.
+
+Commands that open a surface the window replaces or hides never reach
+Chromium: `CefBrowser.execute(_:)` and the command handler's
+`on_chrome_command` hand them to the window's presenter first. The custom
+find bar drives CEF's `find`/`stop_finding` and reads `on_find_result`; the
+custom status bubble reads `on_status_message`; the Cast picker uses CEF's
+`cef_media_router_t`.
+
+CEF's own hooks do not cover placement: `cef_window_delegate_t` and
+`cef_browser_view_delegate_t` have no say in where bubbles go, and Chromium
+anchors them to its toolbar's buttons. `CEF_CTT_NORMAL` and
+`CEF_CTT_LOCATION` do not change where they appear in a `CefBrowserWindow`,
+which does not add Chrome's toolbar view (`get_chrome_toolbar`) to its
+window; adding it would draw Chrome's toolbar.
+
+**Swipes.** For Chrome-style browsers, Chromium sets a
+`ChromeRenderWidgetHostViewMacDelegate` on each page's
+`RenderWidgetHostViewCocoa`; its `HistorySwiper` turns overscrolling
+two-finger swipes into navigation and draws progress with a
+`HistoryOverlayController`. CefSwift overrides the delegate's
+`-shouldAllowHistorySwiping`, to follow
+`allowsBackForwardNavigationGestures`, and the controller's
+`-initForMode:`, `-showPanelForView:`, `-setProgress:finished:` and
+`-dismiss`, to report progress to `navigationGestureProgress` and to skip
+Chrome's overlay unless `.chromium` is chosen. Alloy-style browsers have no
+such delegate; views track swipes themselves with
+`NSEvent.trackSwipeEvent`, the offscreen view from its own scroll events
+and the windowed view from a local event monitor, since Chromium's view
+receives the events. The built-in indicator is a layer-backed view over the
+page that never takes events.
+
 ## Offscreen accessibility
 
 Windowed browsers expose Chromium's own `NSAccessibility` objects. For
