@@ -184,6 +184,16 @@ private func profile(
         #expect(team.helperEntitlements[.renderer]?[key] == nil)
     }
 
+    @Test func protectedMediaLetsTheBaseHelperLoadGooglesCDM() throws {
+        var settings = DistributionSettings(bundleIdentifier: "b", identity: developerID)
+        settings.capabilities = ["protectedMedia"]
+        let plan = try settings.plan()
+        let key = Capability.disableLibraryValidation
+        #expect(plan.helperEntitlements[.base]?[key] == .bool(true))
+        #expect(plan.helperEntitlements[.renderer]?[key] == nil)
+        #expect(plan.appEntitlements[key] == nil)
+    }
+
     @Test func capabilitiesExpandToKeysAndEntitlements() throws {
         var settings = DistributionSettings(bundleIdentifier: "com.example.browser", identity: .adHoc)
         settings.capabilities = ["camera", "microphone", "localNetwork", "defaultBrowser"]
@@ -402,6 +412,17 @@ private func profile(
         facts.app.entitlements = [:]
         facts.helpers[.gpu]?.entitlements["com.apple.security.cs.disable-library-validation"] = nil
         #expect(Doctor.evaluate(facts).errorCount == 2)
+    }
+
+    @Test func protectedMediaNeedsLibraryValidationOffInTeamSignedHelper() {
+        func status(_ facts: BundleFacts) -> DoctorReport.Status? {
+            Doctor.evaluate(facts).sections.flatMap(\.checks).first { $0.title == "protectedMedia" }?.status
+        }
+        var facts = facts(kind: .developerID, team: team, runtime: true)
+        #expect(status(facts) == .info)
+        facts.helpers[.base]?.entitlements[Capability.disableLibraryValidation] = .bool(true)
+        #expect(status(facts) == .ok)
+        #expect(status(self.facts(kind: .adHoc, team: nil, runtime: false)) == .ok)
     }
 
     @Test func mismatchedLibrarySignatureIsAnError() {

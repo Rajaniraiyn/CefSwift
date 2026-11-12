@@ -35,6 +35,11 @@ are `@MainActor`.
   - [Bookmarks, history and suggestions](#bookmarks-history-and-suggestions)
 - [DevTools](#devtools)
 - [Serving your own content](#serving-your-own-content)
+- [Playing streaming services](#playing-streaming-services)
+  - [Widevine in Chromium](#widevine-in-chromium)
+  - [WebKit and FairPlay](#webkit-and-fairplay)
+  - [Services](#services)
+- [Footprint and launch time](#footprint-and-launch-time)
 - [Known limits](#known-limits)
 
 ## Starting Chromium
@@ -100,8 +105,8 @@ Start from a preset and change what you need:
 
 | Preset | Use |
 |---|---|
-| `CefConfiguration.embedded` | Showing your own or trusted web content. Turns off background networking, component updates, sync, translation, first-run and default-browser prompts, and starts renderer processes only when a page needs one. |
-| `CefConfiguration.browser` | A general-purpose browser. Keeps session cookies across launches and skips first-run and default-browser prompts. |
+| `CefConfiguration.embedded` | Showing your own or trusted web content. Turns off background networking, component updates (and with them Widevine), sync, translation, first-run and default-browser prompts, and starts renderer processes only when a page needs one. |
+| `CefConfiguration.browser` | A general-purpose browser. Keeps session cookies across launches, skips first-run and default-browser prompts, and fetches Widevine for protected media. |
 | `CefConfiguration()` or `.default` | Chromium's defaults. |
 
 Common options:
@@ -117,6 +122,7 @@ Common options:
 | `memoryPolicy` | How many helper processes Chromium keeps running. See [Footprint and launch time](#footprint-and-launch-time). |
 | `enabledFeatures`, `disabledFeatures` | Chromium feature names, passed as `--enable-features` and `--disable-features`. |
 | `safeStorage` | Whether Chromium uses the keychain. See [Keychain access](#keychain-access). |
+| `protectedMedia` | Whether Chromium fetches Google's Widevine CDM for protected (DRM) media: `.automatic`, `.disabled` (the `.embedded` preset), or `.preinstalled(widevineDirectory:)`. See [Playing streaming services](#playing-streaming-services). |
 | `rootCacheDirectory`, `cacheDirectory` | Where profile data lives. Defaults to `~/Library/Application Support/<bundle ID>/CefSwift`. |
 | `persistsSessionCookies` | Whether session cookies survive a relaunch. |
 | `locale`, `acceptLanguages` | UI locale and `Accept-Language` list. |
@@ -170,6 +176,7 @@ if !capabilities.passkeyAuthenticators.contains(.iCloudKeychain) {
 | `entitlements`, `keychainAccessGroups` | The entitlements the signature grants. |
 | `usageDescriptions` | The `NS…UsageDescription` keys in the Info.plist. |
 | `passkeyAuthenticators` | `.securityKey`, `.hybrid`, `.touchID`, `.iCloudKeychain`: what `.chromium` passkeys can offer. |
+| `canLoadWidevine` | Whether the base helper can load Google's Widevine CDM: false for a team-signed hardened helper without `disable-library-validation` (the `protectedMedia` capability). |
 | `resolvedSafeStorage(_:)` | The safe-storage policy Chromium gets for a configured one. |
 
 At start-up CefSwift logs one line (subsystem `CefSwift`) naming what the
@@ -1311,6 +1318,202 @@ registered handler serves every profile, including incognito and persistent
 ones. The default `CefCustomScheme` options make the scheme standard,
 secure, CORS-enabled and fetchable; pass `options:` to change them.
 
+## Playing streaming services
+
+Streaming services protect their video with DRM, which browsers expose
+through Encrypted Media Extensions (EME). A CefSwift app has two engines for
+it:
+
+| | Chromium (`CefBrowser`) | WebKit (`CefSystemBrowser`) |
+|---|---|---|
+| DRM | Widevine, downloaded from Google at run time; Clear Key | FairPlay Streaming; Clear Key |
+| Widevine level | Software (L3), host not verified (no VMP) | — |
+| Video codecs | VP8, VP9, AV1 (no H.264 or HEVC) | H.264, HEVC, VP9, AV1 |
+| Audio codecs | Opus, MP3 and other open formats (no AAC) | AAC and the open formats |
+| Needs | Nothing for test streams and services that accept L3 | Nothing: no entitlement, licence or signing |
+| Plays Netflix-class services | No: they require VMP | Yes, as Safari does (see [Services](#services)) |
+
+The short version: services that play in Safari play in a
+`CefSystemBrowser`, and Chromium plays Widevine content that does not
+require a verified host. Show streaming sites in WebKit and everything else
+in Chromium.
+
+### Widevine in Chromium
+
+CEF does not ship Google's Widevine content decryption module (CDM).
+Chromium's component updater downloads it from Google into the profile
+directory, `<rootCacheDirectory>/WidevineCdm/`, on the user's Mac.
+`configuration.protectedMedia` decides whether it does:
+
+| `protectedMedia` | Effect |
+|---|---|
+| `.automatic` | The component updater runs and fetches Widevine. The default, and the `.browser` preset's. It also keeps Chromium's other components current (certificate revocation lists, safety lists and the like). |
+| `.disabled` | The component updater is off (`--disable-component-update`), so Chromium neither downloads the CDM nor loads one already on disk. The `.embedded` preset's. |
+| `.preinstalled(widevineDirectory:)` | As `.automatic`, and copies a CDM your app carries into the profile before Chromium starts, so protected media works on first launch and offline. Only for apps licensed by Google to distribute the CDM. |
+
+With the updater on, CefSwift asks for Widevine as soon as the app creates
+its first browser (Chromium's update service fetches nothing before that),
+and the download takes from a few seconds to tens of seconds; left to
+itself the updater would wait a minute. Clear Key (`org.w3.clearkey`) is built in and works in every mode.
+
+```swift
+var configuration = CefConfiguration.embedded
+configuration.protectedMedia = .automatic
+
+// Later, for example before showing a player:
+switch await CefRuntime.shared.installWidevine() {
+case .installed(let version): print("Widevine \(version)")
+case .failed: print("Could not fetch Widevine; offline?")
+default: break
+}
+```
+
+`CefRuntime.shared.widevine` reports `.unavailable`, `.notInstalled`,
+`.installing`, `.installed(version:)` or `.failed` at any time. Pages that
+asked for `com.widevine.alpha` before it arrived ask again when reloaded.
+
+What Chromium in CefSwift plays with Widevine is content that accepts a
+software CDM on an unverified host, in VP9 or AV1 video with Opus audio:
+Google's and Shaka Player's test streams, `browser://playground/` in the
+Browser example, and services that do not require a verified host.
+
+**Codecs.** CEF's official builds leave out H.264, HEVC and AAC: they are
+patent-licensed, and Chromium includes them only in Google Chrome. Content
+that offers only those codecs does not play in Chromium here, protected or
+not. Enabling them takes a CEF built with `proprietary_codecs=true
+ffmpeg_branding=Chrome`, which CefSwift does not use.
+
+**Verified Media Path.** Widevine on desktop has a second requirement that
+the major services enforce: the browser binary that hosts the CDM must carry
+a Verified Media Path (VMP) signature from Widevine. The CDM reports to the
+licence server whether its host is verified, and services such as Netflix
+refuse licences to an unverified one (Netflix reports error M7121-1331).
+Chrome has it (`Google Chrome Framework.sig`); CEF builds do not, and
+CEF 156 passes the CDM no host binary to verify at all: with
+`--vmodule=cdm_host_files=1`, the CDM process logs `InitVerification:
+Calling VerifyCdmHost_0() with 1 files`, the CDM itself, where Chrome passes
+its framework too. So no signing step on your side makes a stock CEF app
+verified.
+
+The routes to a verified host are a build of CEF patched to register its
+framework's `.sig`, plus either castLabs' commercial VMP certification for
+custom Chromium builds (castLabs' free EVS signing service covers its own
+Electron builds only) or a licence agreement with Widevine
+([widevine.com](https://www.widevine.com)). Both are outside what CefSwift
+can do for you.
+
+**Licensing.** The CDM is Google's proprietary software. Its `LICENSE`
+reads: "You may not use, modify, sell, or otherwise distribute the Software
+without a separate license agreement with Google." Copying it out of Google
+Chrome, or bundling it, is distribution; letting Chromium's component
+updater fetch it from Google on the user's Mac is the route that needs no
+agreement. Pointing an app at the copy inside an installed Chrome gains
+nothing either: it is the same CDM the component updater downloads (Chrome
+157 and CEF 156 both use 4.10.3112.0), and the host is still unverified.
+`.preinstalled(widevineDirectory:)` exists for apps that hold a Widevine
+licence covering distribution.
+
+**Signing.** The CDM runs in `<App> Helper.app` and is signed by Google's
+team. Under the hardened runtime, library validation lets a process load
+libraries from its own team only, so a team-signed helper refuses the CDM.
+Add the `protectedMedia` capability to `cefapp.json`; it gives that helper
+`com.apple.security.cs.disable-library-validation`. Ad hoc builds without
+the hardened runtime need nothing. `CefRuntime.shared.capabilities.canLoadWidevine`
+and `cef doctor` report the state. Chromium's sandbox, the mock keychain and
+ad hoc signing do not affect Widevine.
+
+### WebKit and FairPlay
+
+`CefSystemBrowser` shows a page with the system's WebKit, the engine Safari
+uses, which has FairPlay Streaming through EME. Any app can use it: FairPlay
+in a `WKWebView` needs no entitlement, licence or signing, and the page
+identifies as Safari, so services serve their Safari player.
+
+```swift
+@State private var movie = CefSystemBrowser(url: URL(string: "https://www.netflix.com/")!)
+
+var body: some View {
+    CefSystemWebView(movie)
+        .navigationTitle(movie.title)
+}
+```
+
+It has the parts of `CefBrowser`'s surface WebKit offers:
+
+| `CefSystemBrowser` | |
+|---|---|
+| `url`, `title`, `isLoading`, `estimatedProgress`, `canGoBack`, `canGoForward`, `hasOnlySecureContent` | Observable, as on `CefBrowser`. |
+| `load(_:)`, `loadHTML(_:baseURL:)`, `goBack()`, `goForward()`, `reload(ignoringCache:)`, `stopLoading()`, `close()` | Navigation. |
+| `evaluateJavaScript(_:)`, `evaluateJavaScript(_:as:)` | Awaits promises; throws `CefJavaScriptError`. |
+| `options.userScripts` | `CefUserScript`s, with `urlPattern` and `isolatedWorldName` (a WebKit content world). |
+| `find(_:backwards:caseSensitive:)`, `pageZoom`, `snapshot()` | Find, zoom, a PNG of the page. |
+| `decidePolicy`, `onOpenWindow` | Main-frame navigation decisions and new windows. |
+| `options.identifiesAsSafari` | On by default: the User-Agent ends `Version/<Safari's version> Safari/605.1.15`. |
+| `nativeView` | The `WKWebView`. |
+
+Chromium's own features (the DevTools protocol, bridges, `chrome://` pages,
+extensions, passkey modes, downloads, discarding) belong to `CefBrowser`
+only. Element full screen is on and AirPlay is allowed; pages are not
+offered picture in picture (`webkitSupportsPresentationMode('picture-in-picture')`
+is false in a `WKWebView`).
+
+**Choosing the engine.** `CefSystemBrowser.prefersSystemEngine(for:)` is true
+for the hosts in `CefSystemBrowser.protectedStreamingHosts` (Netflix,
+Disney+, Prime Video, Max, Hulu, Apple TV, Peacock, Paramount+ and others;
+edit the set to suit your app). Hand such navigations over from your
+`CefBrowserDelegate`:
+
+```swift
+func browser(_ browser: CefBrowser, decidePolicyFor navigation: CefNavigationAction) -> CefNavigationDecision {
+    guard let url = navigation.url, CefSystemBrowser.prefersSystemEngine(for: url) else { return .allow }
+    let profile = browser.options.profile ?? .default
+    let movie = CefSystemBrowser(options: .init(profile: profile))
+    Task {
+        await movie.importCookies(from: profile, for: url)   // optional: carry a sign-in over
+        movie.load(url)
+    }
+    showInNewTab(movie)
+    return .cancel
+}
+```
+
+**Website data.** WebKit keeps its own cookies and storage, separate from
+Chromium's. Each `CefProfile` maps to a WebKit data store: the default
+profile to the app's default store, `.persistent(name:)` to a persistent
+store of that name, and `.incognito()` to an in-memory store discarded with
+the profile. `importCookies(from:for:)` copies the Chromium profile's
+cookies for one site into the WebKit store, when you call it and not
+otherwise.
+
+The Browser example opens streaming services in WebKit tabs by itself
+(Settings: "Play streaming services with WebKit"), marks them with a WebKit
+badge in the address field, hands a tab back to Chromium when you follow a
+link off the service, and has View › Open in WebKit for any page.
+
+### Services
+
+Status as of 2026-11-12, macOS 27.2.1. "Verified here" means tested on this
+Mac without an account; signed-in playback could not be tested.
+
+| Service or content | Chromium with Widevine | WebKit with FairPlay |
+|---|---|---|
+| Google's Widevine test stream (Shaka "Angel One", VP9) | Plays, licence granted (verified here) | — |
+| Axinom's FairPlay test stream (H.264) | — | Plays, licence granted (verified here) |
+| H.264 or AAC-only content, protected or not | Does not play: no codecs (verified here) | Plays (verified here) |
+| Netflix | Refuses playback without VMP (verified by castLabs' and users' reports) | Player starts and is granted `com.apple.fps.3_0` (verified here); signed-in playback expected, unverified. Netflix lists Safari for up to 4K. |
+| Hulu, Disney+, Max | Expected to refuse without VMP (reported, unverified here) | Expected to play as in Safari, unverified |
+| Prime Video | Reported to fall back to SD without VMP, unverified here | Expected to play as in Safari, unverified |
+| Apple TV (tv.apple.com) | Unverified | Expected to play as in Safari, unverified |
+| Spotify web player | Expected to play, unverified | Expected to play, unverified |
+
+macOS screenshots leave protected video out, so a captured frame of a
+playing DRM video shows black or the page behind it.
+
+**Other DRM.** FairPlay exists only in Apple's WebKit; Chromium on macOS has
+no FairPlay. PlayReady exists only in Microsoft Edge and Chrome on Windows.
+Firefox uses the same Widevine CDM, downloaded from Google under Mozilla's
+own agreement; there is no other DRM a third-party macOS browser can adopt.
+
 ## Footprint and launch time
 
 Measured on an Apple M3 MacBook with 16 GB of memory, macOS 27.2.1, CEF
@@ -1371,6 +1574,7 @@ difference between the "before" rows and the rest
 | Background networking, component updates, sync, domain reliability, phishing detection, pings, crash reporting | On | Off | On |
 | Translate, Media Router (Cast), optimization hints, Autofill server, feed suggestions | On | Off | On |
 | First-run and default-browser prompts | On | Off | Off |
+| Widevine (`protectedMedia`) | On | Off | On |
 | Spare renderer (`memoryPolicy`) | `.standard` | `.reduced` | `.standard` |
 | Session cookies across launches | Off | Off | On |
 
@@ -1469,3 +1673,9 @@ driver crash cannot end the app.
   authorizes, which start with the team identifier.
 - The App Sandbox is not supported, so CefSwift apps do not ship in the
   Mac App Store ([bundling](bundling.md#app-sandbox)).
+- Chromium plays Widevine only as an unverified software (L3) client and
+  has no H.264, HEVC or AAC, so Netflix-class services do not play in it;
+  `CefSystemBrowser` plays them with WebKit and FairPlay
+  ([Playing streaming services](#playing-streaming-services)).
+- `CefSystemBrowser` keeps website data apart from Chromium's; only
+  `importCookies(from:for:)` carries cookies across.

@@ -238,7 +238,10 @@ struct BrowserCommands: Commands {
         }
         // Into the system's View menu, beside its tab bar and full screen items.
         CommandGroup(before: .toolbar) {
-            Button("Reload") { controller.current?.reload() }.keyboardShortcut("r")
+            Button("Reload") {
+                if let tab = controller.currentSystemTab { tab.browser.reload() } else { controller.current?.reload() }
+            }
+            .keyboardShortcut("r")
             Button("Reload Ignoring Cache") { controller.current?.reload(ignoringCache: true) }
                 .keyboardShortcut("r", modifiers: [.command, .shift])
             Divider()
@@ -248,6 +251,9 @@ struct BrowserCommands: Commands {
             Divider()
             Button("Developer Tools") { controller.current?.execute(.showDevTools) }
                 .keyboardShortcut("i", modifiers: [.command, .option])
+            Divider()
+            Button("Open in WebKit") { controller.openCurrentTabInSystemEngine() }
+                .help("Show this page with the system's WebKit, which plays FairPlay-protected video")
             Divider()
         }
         // Menu contents are views, so they follow the library as it changes.
@@ -278,8 +284,14 @@ private struct HistoryMenu: View {
     let controller: BrowserController
 
     var body: some View {
-        Button("Back") { controller.current?.goBack() }.keyboardShortcut("[")
-        Button("Forward") { controller.current?.goForward() }.keyboardShortcut("]")
+        Button("Back") {
+            if let tab = controller.currentSystemTab { tab.browser.goBack() } else { controller.current?.goBack() }
+        }
+        .keyboardShortcut("[")
+        Button("Forward") {
+            if let tab = controller.currentSystemTab { tab.browser.goForward() } else { controller.current?.goForward() }
+        }
+        .keyboardShortcut("]")
         Divider()
         ForEach(controller.library.recentHistory) { entry in
             Button(BrowserCommands.menuTitle(entry.title, entry.url)) { controller.openInFrontmostTab(entry.url) }
@@ -336,6 +348,7 @@ struct SettingsView: View {
     @AppStorage("appearance") private var appearance = Appearance.system.rawValue
     @AppStorage(ChromiumPanels.customPanelsKey) private var customPanels = false
     @AppStorage("memorySaver") private var memorySaver = MemorySaver.current.rawValue
+    @AppStorage(SystemEngineTab.automaticKey) private var streamingInSystemEngine = true
 
     var body: some View {
         Form {
@@ -355,6 +368,10 @@ struct SettingsView: View {
                 Text("Sleeping tabs free their memory and reload when you return to them.")
             }
             .onChange(of: memorySaver) { MemorySaver.current.apply() }
+            Toggle(isOn: $streamingInSystemEngine) {
+                Text("Play streaming services with WebKit")
+                Text("Netflix, Disney+ and other services that need FairPlay open in a tab shown by the system's WebKit.")
+            }
             PasskeySettings()
         }
         .formStyle(.grouped)

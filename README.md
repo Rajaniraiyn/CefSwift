@@ -165,6 +165,7 @@ covers identifiers, signing, entitlements, notarization and the bundle layout;
 | Bookmarks, history, address-bar suggestions | `CefBookmarks`, `CefHistory`, `CefAutocomplete` | [Bookmarks, history and suggestions](docs/guide.md#bookmarks-history-and-suggestions) |
 | Chrome DevTools Protocol, in-process | `CefDevTools` | [DevTools](docs/guide.md#devtools) |
 | Content served from your own URL scheme | `CefSchemeHandler` | [Serving your own content](docs/guide.md#serving-your-own-content) |
+| Protected media: Widevine in Chromium, FairPlay through the system's WebKit for streaming services | `CefConfiguration.protectedMedia`, `CefSystemBrowser`, `CefSystemWebView` | [Playing streaming services](docs/guide.md#playing-streaming-services) |
 
 ## Examples
 

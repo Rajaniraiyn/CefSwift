@@ -1159,6 +1159,12 @@ public struct CefJavaScriptError: Error, Sendable, CustomStringConvertible {
     public var line: Int
     public var column: Int
 
+    init(message: String, line: Int, column: Int) {
+        self.message = message
+        self.line = line
+        self.column = column
+    }
+
     init(exceptionDetails details: CefJSON) {
         message = details["exception"]["description"].stringValue
             ?? details["text"].stringValue ?? "JavaScript exception"

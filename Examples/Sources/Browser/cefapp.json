@@ -11,7 +11,7 @@
   // profile that authorizes them; ad hoc builds leave them out and say so.
   "capabilities": [
     "camera", "microphone", "location", "passkeys", "usb", "localNetwork",
-    "defaultBrowser", "handoff",
+    "defaultBrowser", "handoff", "protectedMedia",
   ],
   "usageDescriptions": {
     "camera": "Websites you allow can use the camera, for example for video calls.",

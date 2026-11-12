@@ -102,6 +102,11 @@ final class CefAppContext: @unchecked Sendable {
         for (name, value) in configuration.extraCommandLineSwitches {
             commandLine.appendSwitch(name, value: value)
         }
+        // Chromium registers no components, Widevine included, while its
+        // component updater is off.
+        if !configuration.protectedMedia.usesComponentUpdater, !commandLine.hasSwitch("disable-component-update") {
+            commandLine.appendSwitch("disable-component-update")
+        }
         if configuration.safeStorage.resolved() == .mockKeychain, !commandLine.hasSwitch("use-mock-keychain") {
             commandLine.appendSwitch("use-mock-keychain")
         }

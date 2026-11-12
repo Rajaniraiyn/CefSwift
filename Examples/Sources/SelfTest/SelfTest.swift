@@ -29,6 +29,12 @@ enum SelfTest {
         if let relaunchDirectory {
             configuration.rootCacheDirectory = URL(fileURLWithPath: relaunchDirectory)
         }
+        // protectedMediaChecks() starts this app a second time with Widevine on.
+        let widevineProbeDirectory = ProcessInfo.processInfo.environment[widevineProbeEnvironmentKey]
+        if let widevineProbeDirectory {
+            configuration.rootCacheDirectory = URL(fileURLWithPath: widevineProbeDirectory)
+            configuration.protectedMedia = .automatic
+        }
         do {
             try CefRuntime.shared.initialize(configuration: configuration)
             if relaunchDirectory != nil {
@@ -59,6 +65,8 @@ enum SelfTest {
         Task {
             if ServiceBenchmark.isRequested {
                 await ServiceBenchmark.run()
+            } else if widevineProbeDirectory != nil {
+                await widevineProbeChecks()
             } else {
                 await runChecks()
             }
@@ -102,6 +110,8 @@ enum SelfTest {
         // probe out of the most-visited tiles.
         ("nativeUI", nativeUIChecks),
         ("relaunch", relaunchChecks),
+        ("protectedMedia", protectedMediaChecks),
+        ("systemEngine", systemEngineChecks),
         ("passkeys", passkeyChecks),
         ("chromeWindow", chromeWindowChecks),
         // Last: it leaves discarded browsers open for the quit.
