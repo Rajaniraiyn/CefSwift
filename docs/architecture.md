@@ -189,6 +189,13 @@ and calls into the page through the DevTools Protocol. A call that times
 out, or a renderer that dies, discards the browser; the next call starts a
 new one.
 
+`CefHistory.mostVisited()` binds a new most-visited page handler for each
+call. Chromium's `TopSites` reads the list from history once, shortly after
+it loads, and then hourly, and a handler's `updateMostVisitedInfo` returns
+that cached list; creating a handler is what makes `TopSites` read history
+again. The handler reports the cached tiles first and the fresh ones when
+they differ, so the call waits a moment for a second report.
+
 Service browsers are left out of `CefRuntime.browsers` and
 `CefBrowserWindow.all`. Their windows are transparent, ignore the mouse and
 are ordered out whenever Chromium shows them, as it does when it brings its
@@ -291,11 +298,15 @@ streams carry on unchanged.
 An Alloy browser is not a tab, and Chromium has no lifecycle unit for it.
 CefKit closes the Chromium browser and keeps the `CefBrowser` in
 `CefRuntime.browsers` without an identifier. When its view is shown again,
-or the browser is used, a new Chromium browser is created in the same view
-on the saved address and set up as a new one is: bridges, user scripts and
-scripts added with `addUserScript` are installed first, and `CefDevTools`
-enables again the domains enabled before, so event streams keep
-delivering. Its back/forward list starts from that page. Closing a browser
+or the browser is used, a new Chromium browser is created in the same view.
+It always starts on `about:blank` and is set up before it navigates to the
+saved address: `CefDevTools` enables again the domains enabled before, so
+event streams keep delivering; the accessibility state is applied; then
+passkeys, user scripts (scripts added with `addUserScript` included) and
+bridges are installed, as for a new browser. Calls that wait for the
+restore resume when that page starts loading, and
+`browserDidRestore(_:)` follows. Its back/forward list starts from that
+page. Closing a browser
 never ends a renderer process another browser shares; Chromium keeps the
 process until its last frame goes.
 

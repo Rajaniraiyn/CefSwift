@@ -666,7 +666,10 @@ public final class CefBrowser: Identifiable {
     /// Suspends until the browser exists in Chromium, restoring it first if
     /// it is discarded. Throws if it closes first.
     public func ready() async throws {
-        if isDiscarded, !isBootstrapping {
+        // A browser created again after a discard sets itself up through
+        // the DevTools protocol before its page loads; only that waits for
+        // nothing more.
+        if isDiscarded, !(isBootstrapping && raw != nil) {
             restore()
             try await withCheckedThrowingContinuation { restoreWaiters.append($0) }
         }
@@ -727,9 +730,10 @@ extension CefBrowser {
         }
 
         // Bridges and user scripts must be installed before the first real
-        // document, so such browsers start blank and navigate once set up.
+        // document, so such browsers start blank and navigate once set up,
+        // as does every browser created again after a discard.
         isBootstrapping = !options.bridges.isEmpty || !options.userScripts.isEmpty || !addedUserScripts.isEmpty
-            || !options.passkeys.isChromium
+            || !options.passkeys.isChromium || isDiscarded
         let url = isBootstrapping ? "about:blank" : (initialURL?.absoluteString ?? "about:blank")
 
         return Blueprint(
@@ -912,7 +916,16 @@ extension CefBrowser {
     }
 
     /// Installs bridges and user scripts, then performs the real first load.
+    ///
+    /// A browser created again after a discard always comes through here,
+    /// so everything a page relies on is in place before its document
+    /// starts: the DevTools domains enabled before the discard, the
+    /// accessibility state, passkeys, user scripts and bridges.
     private func bootstrap() async {
+        if isDiscarded {
+            await devTools.enableDomainsAgain()
+            reassertAccessibilityState()
+        }
         if !options.passkeys.isChromium { await startPasskeys() }
         do {
             // Scripts added at runtime, when a discarded browser is created

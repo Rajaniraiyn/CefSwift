@@ -108,16 +108,11 @@ public final class CefHistory {
     }
 
     /// The profile's most-visited sites, most visited first — what Chrome's
-    /// new tab page shows as tiles. Updated by Chromium a few seconds after
-    /// history changes.
+    /// new tab page shows as tiles, including visits made just before the
+    /// call.
     public func mostVisited() async throws -> [CefMostVisitedSite] {
         try await newTabPage.call(
-            """
-            s => new Promise(resolve => {
-              s.waiters.push(resolve);
-              s.handler.updateMostVisitedInfo();
-            }).then(info => info.tiles.map(t => ({ url: t.url, title: t.title })))
-            """
+            "s => s.tiles().then(tiles => tiles.map(t => ({ url: t.url, title: t.title })))"
         ).decode([TileRecord].self).compactMap { tile in
             URL(string: tile.url).map { CefMostVisitedSite(url: $0, title: tile.title) }
         }
@@ -186,22 +181,42 @@ public final class CefHistory {
         }
         """
 
-    /// Binds an own `most_visited.mojom.MostVisitedPageHandler`; tiles arrive
-    /// through its page callback.
+    /// Reads the tiles through a `most_visited.mojom.MostVisitedPageHandler`
+    /// of its own, created for each call.
+    ///
+    /// Chromium's `TopSites` reads the most-visited list from history once,
+    /// shortly after it loads, and afterwards only every hour; asking a
+    /// handler for its tiles (`updateMostVisitedInfo`) returns that cached
+    /// list. Creating a handler is what makes `TopSites` read history again
+    /// (`MostVisitedSites::AddMostVisitedURLsObserver` calls `Refresh()`).
+    /// The new handler first reports the cached tiles, and reports again once
+    /// the fresh list differs; without a second report within a moment, the
+    /// cached tiles were current.
     private static let mostVisitedSetup = """
         async () => {
           const m = await import('chrome://resources/cr_components/most_visited/most_visited.mojom-webui.js');
-          const router = new m.MostVisitedPageCallbackRouter();
-          const handler = new m.MostVisitedPageHandlerRemote();
-          m.MostVisitedPageHandlerFactory.getRemote().createPageHandler(
-            router.$.bindNewPipeAndPassRemote(), handler.$.bindNewPipeAndPassReceiver());
-          const service = { handler, waiters: [] };
-          router.setMostVisitedInfo.addListener(info => {
-            const waiters = service.waiters;
-            service.waiters = [];
-            waiters.forEach(resolve => resolve(info));
+          const factory = m.MostVisitedPageHandlerFactory.getRemote();
+          const tiles = () => new Promise((resolve, reject) => {
+            const router = new m.MostVisitedPageCallbackRouter();
+            const handler = new m.MostVisitedPageHandlerRemote();
+            let latest = null, settle = null;
+            const finish = () => {
+              clearTimeout(settle);
+              clearTimeout(giveUp);
+              handler.$.close();
+              router.$.close?.();
+              latest ? resolve(latest) : reject(new Error('the new tab page sent no tiles'));
+            };
+            const giveUp = setTimeout(finish, 10000);
+            router.setMostVisitedInfo.addListener(info => {
+              const isFirst = latest === null;
+              latest = info.tiles;
+              if (isFirst) { settle = setTimeout(finish, 750); } else { finish(); }
+            });
+            factory.createPageHandler(router.$.bindNewPipeAndPassRemote(), handler.$.bindNewPipeAndPassReceiver());
+            handler.updateMostVisitedInfo();
           });
-          return service;
+          return { tiles };
         }
         """
 }

@@ -1033,7 +1033,8 @@ let suggestions = try await profile.autocomplete.suggestions(for: "cef")
   `move(_:to:at:)` and `remove(_:)`. `changes` yields for edits made through
   this API and in Chrome's UI.
 - `history` groups visits by day, as `chrome://history` does. It records
-  only visits made in Chrome-style browsers.
+  only visits made in Chrome-style browsers. `mostVisited()` includes visits
+  made up to the call and takes up to a second.
 - `history.favicon(for:size:)` returns the icon Chromium keeps for a page
   that is not open, such as a history entry, bookmark or most-visited site,
   or `nil` when it has none. For an open page, use `browser.favicon`.

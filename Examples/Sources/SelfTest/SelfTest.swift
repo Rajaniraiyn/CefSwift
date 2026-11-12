@@ -91,6 +91,7 @@ enum SelfTest {
         }
         await windowedBrowserChecks()
         await offscreenBrowserChecks()
+        await offscreenAccessibilityChecks()
         await profileChecks()
         await browserWindowChecks()
         await browserBehaviorChecks()
@@ -102,10 +103,6 @@ enum SelfTest {
         await relaunchChecks()
         await passkeyChecks()
         await chromeWindowChecks()
-        // After the history checks: discarding an offscreen browser once the
-        // DevTools protocol has been used makes Chromium's most-visited
-        // sites miss later visits.
-        await offscreenAccessibilityChecks()
         // Last: it leaves discarded browsers open for the quit.
         await discardChecks()
     }
@@ -357,6 +354,14 @@ enum SelfTest {
         let visitedURL = URL(string: "selftest://app/history-probe.html")!
         let visitor = CefBrowserWindow(browser: CefBrowser(url: visitedURL))
         check("history: page visited", await waitUntil { visitor.browser.title == "CefSwift History Probe" })
+        // Most visited has eight places, and earlier checks visit other
+        // pages; visit this one more often than any of them.
+        for _ in 0..<12 {
+            visitor.browser.load(URL(string: "selftest://app/second.html")!)
+            _ = await waitUntil { visitor.browser.title == "second" && !visitor.browser.isLoading }
+            visitor.browser.load(visitedURL)
+            _ = await waitUntil { visitor.browser.title == "CefSwift History Probe" && !visitor.browser.isLoading }
+        }
         visitor.close()
         _ = await waitUntil { visitor.isClosed }
 
@@ -370,9 +375,11 @@ enum SelfTest {
             check("history: entry details", entry.title == "CefSwift History Probe" && !entry.visitDates.isEmpty
                   && abs(entry.lastVisitDate.timeIntervalSinceNow) < 120)
         }
+        var tiles: [URL] = []
         check("history: most visited includes the visit", await waitUntilAsync(timeout: .seconds(20)) {
-            (try? await history.mostVisited().contains { $0.url == visitedURL }) == true
-        })
+            tiles = (try? await history.mostVisited().map(\.url)) ?? []
+            return tiles.contains(visitedURL)
+        }, detail: "\(tiles.count) tiles: \(tiles.map(\.absoluteString))")
 
         await profile.autocomplete.prepare()
         await expect("autocomplete: bookmark ranked for a title prefix") {
