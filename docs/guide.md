@@ -770,10 +770,13 @@ func browser(_ browser: CefBrowser, decideWindowOpenFor request: CefWindowOpenRe
 ### Downloads
 
 `browser.downloads` lists the browser's downloads, oldest first, as
-`CefDownload` values with `receivedBytes`, `totalBytes`, `isComplete`,
-`isCancelled` and `destinationURL`. Control them with
-`pauseDownload(_:)`, `resumeDownload(_:)` and `cancelDownload(_:)`, and start
-one with `startDownload(_:)`.
+`CefDownload` values with `receivedBytes`, `expectedBytes` (`nil` when the
+server gives no size), `destinationURL` and a `state`: `.inProgress`,
+`.paused`, `.completed`, `.cancelled`, or `.interrupted(reason)` when an
+error stopped it. Control them with `pauseDownload(_:)`,
+`resumeDownload(_:)` and `cancelDownload(_:)`, and start one with
+`startDownload(_:)`. A paused or interrupted download keeps its controls,
+so `canResume` downloads continue with `resumeDownload(_:)`.
 
 Each download asks the delegate where to save:
 
@@ -1480,7 +1483,8 @@ struct MyApp: CefSwiftApp {
 ```
 
 `CefDirectorySchemeHandler` serves files from a folder, with MIME types from
-file extensions, and never outside that folder. For generated content,
+file extensions, and never outside that folder: a symbolic link is followed
+only when its target lies inside the folder. For generated content,
 implement `CefSchemeHandler`:
 
 ```swift

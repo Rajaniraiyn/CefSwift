@@ -105,10 +105,25 @@ public enum CefDialogPresenter {
         return CefCredential(username: username.stringValue, password: password.stringValue)
     }
 
+    /// Shows `alert` until the user answers or the calling task is
+    /// cancelled, which dismisses it as Cancel (`.abort`): CefKit cancels
+    /// a dialog whose page navigated or closed.
     private static func run(_ alert: NSAlert, in window: NSWindow?) async -> NSApplication.ModalResponse {
-        if let window, window.isVisible {
-            return await alert.beginSheetModal(for: window)
+        guard !Task.isCancelled else { return .abort }
+        let dismiss = { @MainActor @Sendable in
+            if let parent = alert.window.sheetParent {
+                parent.endSheet(alert.window, returnCode: .abort)
+            } else if NSApp.modalWindow === alert.window {
+                NSApp.stopModal(withCode: .abort)
+            }
         }
-        return alert.runModal()
+        return await withTaskCancellationHandler {
+            if let window, window.isVisible {
+                return await alert.beginSheetModal(for: window)
+            }
+            return alert.runModal()
+        } onCancel: {
+            Task { @MainActor in dismiss() }
+        }
     }
 }

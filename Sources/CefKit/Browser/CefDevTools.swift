@@ -35,38 +35,88 @@ public struct CefDevToolsError: Error, Sendable, Equatable, CustomStringConverti
 /// `debugger` statements. Enable what you need and disable it when done.
 /// The guide's "Compatibility with bot protection" lists which CefKit
 /// features use the protocol.
+///
+/// CefKit's own features and your app share this one session. Enabling a
+/// domain takes a lease on it: `X.disable` turns the domain off only when
+/// every `X.enable` sent through the session has been matched by one, so
+/// your `Runtime.disable` leaves the domain on for a feature still using
+/// it, and the other way round. Each `X.enable` still reaches Chromium, so
+/// the newest parameters apply.
 @MainActor
 public final class CefDevTools {
     private weak var browser: CefBrowser?
     private var registration: CefRef<cef_registration_t>?
-    private var nextMessageID: Int32 = 0
-    private var pending: [Int32: (method: String, continuation: CheckedContinuation<CefJSON, Error>)] = [:]
+    /// Calls waiting for their reply; the operation's identifier is the
+    /// protocol message's `id`.
+    private let pending = CefPendingOperations<Reply>()
     private var listeners: [String: [UUID: @MainActor (CefJSON) -> Void]] = [:]
+    /// Counts sessions: a call that suspended across a new session (a
+    /// discard) or the browser closing starts over or fails.
+    private var session = 0
+
+    struct Reply: Sendable {
+        var succeeded: Bool
+        var result: Data
+    }
 
     init(browser: CefBrowser) {
         self.browser = browser
     }
 
     /// Domains enabled through this session (`Network.enable` and the
-    /// like), with their parameters, in the order they were enabled.
+    /// like), with their latest parameters, in the order they were enabled.
     private var enabledDomains: [(method: String, params: CefJSON)] = []
+    /// Unmatched `X.enable` calls, by `X.enable`.
+    private var domainLeases: [String: Int] = [:]
     /// Set when the browser was discarded by closing it: the next session
     /// enables ``enabledDomains`` again before anything else is sent.
     private var needsDomainReplay = false
 
     /// Calls a protocol method and returns its result object.
     ///
-    /// Waits for the browser to be created if it is still pending, and
-    /// restores a discarded browser first.
+    /// Waits for the browser to be ready (``CefBrowser/ready()``),
+    /// restoring a discarded browser first. Throws ``CefDevToolsError``
+    /// for an error reply, ``CefError/browserClosed`` when the browser
+    /// closes first, and `CancellationError` when the calling task is
+    /// cancelled; Chromium still runs a call that was already sent.
     @discardableResult
     public func send(_ method: String, _ params: CefJSON = [:]) async throws -> CefJSON {
         guard let browser else { throw CefError.browserClosed }
-        try await browser.ready()
-        await enableDomainsAgain(in: browser)
+        // Each suspension can outlive the session: start over in the new
+        // one after a discard; fail once the browser has closed.
+        var current: Int
+        repeat {
+            try await browser.ready()
+            current = session
+            await enableDomainsAgain(in: browser)
+            try Task.checkCancellation()
+            guard browser.state != .closed else { throw CefError.browserClosed }
+        } while current != session || browser.raw == nil
         attachIfNeeded(to: browser)
+        if let lease = Self.lease(for: method), lease.isDisable, (domainLeases[lease.enable] ?? 0) > 1 {
+            // Another user of the domain still needs it.
+            domainLeases[lease.enable, default: 1] -= 1
+            return [:]
+        }
         let result = try await deliver(method, params, to: browser)
-        recordDomainState(method, params)
+        if current == session { recordDomainState(method, params) }
         return result
+    }
+
+    /// For `X.enable` or `X.disable`, the enable method and which it is.
+    private static func lease(for method: String) -> (enable: String, isDisable: Bool)? {
+        guard let dot = method.lastIndex(of: ".") else { return nil }
+        let enable = String(method[..<dot]) + ".enable"
+        switch method[method.index(after: dot)...] {
+        case "enable": return (enable, false)
+        case "disable": return (enable, true)
+        default: return nil
+        }
+    }
+
+    /// How many users hold `domain` (`"Debugger"`, say) enabled.
+    func leaseCount(_ domain: String) -> Int {
+        domainLeases[domain + ".enable"] ?? 0
     }
 
     /// In the session of a browser created again after a discard, enables
@@ -89,16 +139,14 @@ public final class CefDevTools {
     }
 
     private func recordDomainState(_ method: String, _ params: CefJSON) {
-        guard let dot = method.lastIndex(of: ".") else { return }
-        let enable = method[..<dot] + ".enable"
-        switch method[method.index(after: dot)...] {
-        case "enable":
+        guard let lease = Self.lease(for: method) else { return }
+        if lease.isDisable {
+            domainLeases[lease.enable] = nil
+            enabledDomains.removeAll { $0.method == lease.enable }
+        } else {
+            domainLeases[method, default: 0] += 1
             enabledDomains.removeAll { $0.method == method }
             enabledDomains.append((method, params))
-        case "disable":
-            enabledDomains.removeAll { $0.method == enable }
-        default:
-            break
         }
     }
 
@@ -113,20 +161,30 @@ public final class CefDevTools {
 
     private func deliver(_ method: String, _ params: CefJSON, to browser: CefBrowser) async throws -> CefJSON {
         sentMessageCount += 1
-        nextMessageID += 1
-        let id = nextMessageID
-        let message = CefJSON.object(["id": .number(Double(id)), "method": .string(method), "params": params]).data
-
-        return try await withCheckedThrowingContinuation { continuation in
-            pending[id] = (method, continuation)
+        let reply = try await pending.wait { id in
+            let message = CefJSON.object(["id": .number(Double(id)), "method": .string(method), "params": params]).data
             let sent = browser.withHost { host in
                 message.withUnsafeBytes { host.pointee.send_dev_tools_message(host, $0.baseAddress, $0.count) != 0 }
             }
-            if sent != true {
-                pending[id] = nil
-                continuation.resume(throwing: CefError.browserClosed)
-            }
+            if sent != true { pending.complete(id, .failure(CefError.browserClosed)) }
         }
+        return try Self.result(of: reply, for: method)
+    }
+
+    /// A reply's result object, or the error it reports. A reply that is
+    /// not a JSON object is malformed and throws.
+    static func result(of reply: Reply, for method: String) throws -> CefJSON {
+        let json = try? CefJSON(data: reply.result)
+        guard let json, json.objectValue != nil else {
+            throw CefError.operationFailed("\(method) returned a malformed reply")
+        }
+        guard reply.succeeded else {
+            throw CefDevToolsError(
+                method: method,
+                code: json["code"].intValue ?? 0,
+                message: json["message"].stringValue ?? "unknown error")
+        }
+        return json
     }
 
     /// Calls a protocol method and decodes its result as `Result`.
@@ -172,8 +230,8 @@ public final class CefDevTools {
     /// CefKit's own listeners are dropped: bridges install themselves again.
     func prepareForNewSession() {
         registration = nil
-        pending.values.forEach { $0.continuation.resume(throwing: CefError.browserClosed) }
-        pending = [:]
+        session += 1
+        pending.completeAll(.failure(CefError.browserClosed))
         for method in listeners.keys {
             listeners[method] = listeners[method]?.filter { streams[$0.key] != nil }
         }
@@ -183,8 +241,8 @@ public final class CefDevTools {
     /// Fails outstanding calls and ends event streams. Called at browser close.
     func invalidate() {
         registration = nil
-        pending.values.forEach { $0.continuation.resume(throwing: CefError.browserClosed) }
-        pending = [:]
+        session += 1
+        pending.completeAll(.failure(CefError.browserClosed))
         listeners = [:]
         streams.values.forEach { $0.finish() }
         streams = [:]
@@ -207,21 +265,16 @@ public final class CefDevTools {
     }
 
     fileprivate func received(result: Data, forMessage id: Int32, succeeded: Bool) {
-        guard let (method, continuation) = pending.removeValue(forKey: id) else { return }
-        let json = (try? CefJSON(data: result)) ?? .null
-        if succeeded {
-            continuation.resume(returning: json)
-        } else {
-            continuation.resume(throwing: CefDevToolsError(
-                method: method,
-                code: json["code"].intValue ?? 0,
-                message: json["message"].stringValue ?? "unknown error"))
-        }
+        pending.complete(Int(id), .success(Reply(succeeded: succeeded, result: result)))
     }
 
     fileprivate func received(event method: String, params: Data) {
         guard let handlers = listeners[method], !handlers.isEmpty else { return }
-        let json = (try? CefJSON(data: params)) ?? .null
+        // An event whose parameters are not a JSON object is malformed.
+        guard let json = try? CefJSON(data: params), json.objectValue != nil else {
+            CefLog.error("devTools: dropped \(method) with malformed parameters")
+            return
+        }
         handlers.values.forEach { $0(json) }
     }
 }

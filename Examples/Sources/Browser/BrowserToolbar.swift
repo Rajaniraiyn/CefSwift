@@ -364,7 +364,7 @@ private struct DownloadsButton: View {
     let browser: CefBrowser
     @State private var isPresented = false
 
-    private var isActive: Bool { browser.downloads.contains { !$0.isComplete && !$0.isCancelled } }
+    private var isActive: Bool { browser.downloads.contains { $0.state == .inProgress } }
 
     var body: some View {
         Button("Downloads", systemImage: isActive ? "arrow.down.circle.dotted" : "arrow.down.circle") { isPresented.toggle() }
@@ -372,7 +372,11 @@ private struct DownloadsButton: View {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Downloads").font(.headline)
                     ForEach(browser.downloads.reversed()) { download in
-                        DownloadRow(download: download) { browser.cancelDownload(download.id) }
+                        DownloadRow(download: download) {
+                            browser.cancelDownload(download.id)
+                        } resume: {
+                            browser.resumeDownload(download.id)
+                        }
                     }
                 }
                 .padding()
@@ -384,6 +388,7 @@ private struct DownloadsButton: View {
 private struct DownloadRow: View {
     let download: CefDownload
     let cancel: () -> Void
+    let resume: () -> Void
 
     var body: some View {
         HStack(spacing: 10) {
@@ -394,21 +399,34 @@ private struct DownloadRow: View {
                 Text(download.destinationURL?.lastPathComponent ?? download.url?.lastPathComponent ?? "Download")
                     .lineLimit(1)
                     .truncationMode(.middle)
-                if download.isComplete {
+                switch download.state {
+                case .completed:
                     Button("Show in Finder") {
                         if let path = download.destinationURL { NSWorkspace.shared.activateFileViewerSelecting([path]) }
                     }
                     .buttonStyle(.link)
                     .font(.caption)
-                } else if download.isCancelled {
+                case .cancelled:
                     Text("Canceled").font(.caption).foregroundStyle(.secondary)
-                } else if download.totalBytes > 0 {
-                    ProgressView(value: Double(download.receivedBytes), total: Double(download.totalBytes))
-                } else {
-                    ProgressView().controlSize(.small)
+                case .interrupted(let reason):
+                    Text("Failed (\(reason.description))").font(.caption).foregroundStyle(.secondary)
+                case .paused:
+                    Text("Paused").font(.caption).foregroundStyle(.secondary)
+                case .inProgress:
+                    if let expected = download.expectedBytes {
+                        ProgressView(value: Double(download.receivedBytes), total: Double(expected))
+                    } else {
+                        ProgressView().controlSize(.small)
+                    }
                 }
             }
-            if !download.isComplete, !download.isCancelled {
+            if download.canResume {
+                Button("Resume", systemImage: "arrow.clockwise.circle.fill", action: resume)
+                    .labelStyle(.iconOnly)
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(.secondary)
+            }
+            if !download.state.isFinished {
                 Button("Cancel", systemImage: "xmark.circle.fill", action: cancel)
                     .labelStyle(.iconOnly)
                     .buttonStyle(.borderless)

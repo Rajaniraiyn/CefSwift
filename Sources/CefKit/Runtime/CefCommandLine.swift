@@ -3,14 +3,35 @@ import Foundation
 import CefBase
 
 /// The command line Chromium is about to process, passed to
-/// ``CefConfiguration/onBeforeCommandLineProcessing``. Valid only during
-/// that call; do not keep it.
-public struct CefCommandLine: @unchecked Sendable, CustomStringConvertible {
-    let raw: UnsafeMutablePointer<cef_command_line_t>
+/// ``CefConfiguration/onBeforeCommandLineProcessing``.
+///
+/// Valid only during that call: CefKit invalidates it when the call
+/// returns, and using it afterwards stops the program.
+public final class CefCommandLine: CustomStringConvertible {
+    /// Chromium's command line; `nil` once the callback has returned.
+    private var borrowed: UnsafeMutablePointer<cef_command_line_t>?
 
-    init(raw: UnsafeMutablePointer<cef_command_line_t>) {
-        self.raw = raw
+    private init(raw: UnsafeMutablePointer<cef_command_line_t>) {
+        borrowed = raw
     }
+
+    /// Runs `body` with a wrapper of the borrowed `raw`, which is
+    /// invalidated when `body` returns.
+    static func borrowing<R>(_ raw: UnsafeMutablePointer<cef_command_line_t>, _ body: (CefCommandLine) -> R) -> R {
+        let commandLine = CefCommandLine(raw: raw)
+        defer { commandLine.borrowed = nil }
+        return body(commandLine)
+    }
+
+    private var raw: UnsafeMutablePointer<cef_command_line_t> {
+        guard let borrowed else {
+            preconditionFailure("CefCommandLine used after the callback that provided it returned")
+        }
+        return borrowed
+    }
+
+    /// Whether the callback that provided it is still running.
+    var isValid: Bool { borrowed != nil }
 
     /// Appends `--name` (or `--name=value` when `value` is non-nil).
     public func appendSwitch(_ name: String, value: String? = nil) {

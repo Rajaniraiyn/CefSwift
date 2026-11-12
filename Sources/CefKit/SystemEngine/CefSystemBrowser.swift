@@ -132,20 +132,45 @@ public final class CefSystemBrowser {
     /// Evaluates `script` in the page and returns its value as JSON,
     /// awaiting it if it is a promise. Throws ``CefJavaScriptError`` when
     /// the script throws.
+    ///
+    /// As ``CefBrowser/evaluateJavaScript(_:userGesture:)`` does, this runs
+    /// `script` as a classic script: statements, declarations and `throw`
+    /// work, and the value is that of the last statement. Its top-level
+    /// `let`, `const` and `class` declarations stay local to the call. On a
+    /// page whose Content Security Policy forbids `eval`, the script runs
+    /// without awaiting a promise it returns.
     @discardableResult
     public func evaluateJavaScript(_ script: String) async throws -> CefJSON {
-        // callAsyncJavaScript awaits promises; the body must return.
-        let body = "return await (async () => (\(script)))()"
-        let value: Any?
+        // An indirect eval runs the source as a global classic script and
+        // yields its completion value; callAsyncJavaScript awaits it.
+        let body = "return await (0, eval)(source)"
         do {
-            value = try await nativeView.callAsyncJavaScript(body, arguments: [:], contentWorld: .page)
+            return CefJSON(foundationValue: try await nativeView.callAsyncJavaScript(
+                body, arguments: ["source": script], contentWorld: .page))
+        } catch let error as NSError where Self.isEvalBlocked(error) {
+            // CSP: evaluateJavaScript is exempt, and runs a classic script.
+            do {
+                return CefJSON(foundationValue: try await nativeView.evaluateJavaScript(script, contentWorld: .page))
+            } catch let error as NSError {
+                throw Self.javaScriptError(error)
+            }
         } catch let error as NSError {
-            let message = error.userInfo["WKJavaScriptExceptionMessage"] as? String ?? error.localizedDescription
-            let line = error.userInfo["WKJavaScriptExceptionLineNumber"] as? Int ?? 0
-            let column = error.userInfo["WKJavaScriptExceptionColumnNumber"] as? Int ?? 0
-            throw CefJavaScriptError(message: message, line: line, column: column)
+            throw Self.javaScriptError(error)
         }
-        return CefJSON(foundationValue: value)
+    }
+
+    /// Whether `error` is the page's Content Security Policy refusing
+    /// `eval`, which leaves `script` unrun.
+    private static func isEvalBlocked(_ error: NSError) -> Bool {
+        let message = error.userInfo["WKJavaScriptExceptionMessage"] as? String ?? ""
+        return message.hasPrefix("EvalError") && message.contains("unsafe-eval")
+    }
+
+    private static func javaScriptError(_ error: NSError) -> CefJavaScriptError {
+        let message = error.userInfo["WKJavaScriptExceptionMessage"] as? String ?? error.localizedDescription
+        let line = error.userInfo["WKJavaScriptExceptionLineNumber"] as? Int ?? 0
+        let column = error.userInfo["WKJavaScriptExceptionColumnNumber"] as? Int ?? 0
+        return CefJavaScriptError(message: message, line: line, column: column)
     }
 
     /// Evaluates `script` and decodes its value as `T`.
@@ -155,10 +180,14 @@ public final class CefSystemBrowser {
 
     // MARK: Page
 
-    /// The page's zoom factor: 1 is actual size.
-    public var pageZoom: Double {
-        get { nativeView.pageZoom }
-        set { nativeView.pageZoom = newValue }
+    /// The page's zoom factor: 1 is actual size. Observable; it tracks
+    /// changes made here, not ones made to ``nativeView`` directly.
+    public var pageZoom: Double = 1 {
+        didSet {
+            nativeView.pageZoom = pageZoom
+            // WebKit may clamp the factor.
+            if nativeView.pageZoom != pageZoom { pageZoom = nativeView.pageZoom }
+        }
     }
 
     /// Finds the next match for `text`, selecting it; returns whether there

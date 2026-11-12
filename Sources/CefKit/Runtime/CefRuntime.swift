@@ -361,6 +361,8 @@ public final class CefRuntime {
 
     func register(_ browser: CefBrowser) {
         lifecycleCoordinator.setNeedsUpdate()
+        // A DevTools window's browser comes and goes like any other.
+        defer { CefBrowser.refreshDevToolsStates() }
         browsersByIdentifier[browser.identifier] = browser
         // Internal-page service browsers stay out of the public list. A
         // browser restored after a discard is listed already.
@@ -388,6 +390,7 @@ public final class CefRuntime {
     }
 
     func unregister(_ browser: CefBrowser) {
+        defer { CefBrowser.refreshDevToolsStates() }
         browsersByIdentifier[browser.identifier] = nil
         browser.lifecycle = .hidden
         if browsers.contains(where: { $0 === browser }) {

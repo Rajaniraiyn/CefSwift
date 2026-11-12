@@ -77,8 +77,9 @@ extension CefContextMenuTarget {
 /// A context menu about to be shown.
 ///
 /// A menu model is valid only during the call that provides it, such as
-/// ``CefBrowserDelegate/browser(_:configureContextMenu:for:)``; do not
-/// keep it.
+/// ``CefBrowserDelegate/browser(_:configureContextMenu:for:)``: CefKit
+/// invalidates it when the call returns, and using it afterwards stops
+/// the program.
 ///
 /// Give your own items command IDs from ``userCommandIDs``. Choosing one
 /// calls ``CefBrowserDelegate/browser(_:handleContextMenuCommand:for:)``.
@@ -88,10 +89,32 @@ public final class CefMenuModel {
     /// through `MENU_ID_USER_LAST`).
     public nonisolated static let userCommandIDs = Int(MENU_ID_USER_FIRST.rawValue)...Int(MENU_ID_USER_LAST.rawValue)
 
-    private let raw: UnsafeMutablePointer<cef_menu_model_t>
+    /// Chromium's model; `nil` once the callback has returned.
+    private var borrowed: UnsafeMutablePointer<cef_menu_model_t>?
 
     init(raw: UnsafeMutablePointer<cef_menu_model_t>) {
-        self.raw = raw
+        borrowed = raw
+    }
+
+    /// Runs `body` with a wrapper of the borrowed `raw`, which is
+    /// invalidated when `body` returns.
+    static func borrowing<R>(_ raw: UnsafeMutablePointer<cef_menu_model_t>, _ body: (CefMenuModel) -> R) -> R {
+        let menu = CefMenuModel(raw: raw)
+        defer { menu.invalidate() }
+        return body(menu)
+    }
+
+    /// Ends the wrapper's use: the callback that provided it returned.
+    func invalidate() { borrowed = nil }
+
+    /// Whether the callback that provided it is still running.
+    var isValid: Bool { borrowed != nil }
+
+    private var raw: UnsafeMutablePointer<cef_menu_model_t> {
+        guard let borrowed else {
+            preconditionFailure("CefMenuModel used after the callback that provided it returned")
+        }
+        return borrowed
     }
 
     /// The number of items, separators included.

@@ -135,14 +135,14 @@ extension SelfTest {
 
         browser.load(URL(string: "http://127.0.0.1:\(server.port)/report.txt")!)
         check("download: attachment is saved where the delegate says", await waitUntil {
-            browser.downloads.contains { $0.isComplete && $0.destinationURL?.deletingLastPathComponent().lastPathComponent == directory.lastPathComponent }
+            browser.downloads.contains { $0.state == .completed && $0.destinationURL?.deletingLastPathComponent().lastPathComponent == directory.lastPathComponent }
         }, detail: "\(browser.downloads)")
         check("download: page stays put", browser.title == "tab")
 
         recorder.downloadDestination = nil
         browser.load(URL(string: "http://127.0.0.1:\(server.port)/denied.txt")!)
         check("download: denied download is cancelled", await waitUntil {
-            browser.downloads.contains { $0.url?.lastPathComponent == "denied.txt" && $0.isCancelled }
+            browser.downloads.contains { $0.url?.lastPathComponent == "denied.txt" && $0.state == .cancelled }
         }, detail: "\(browser.downloads)")
 
         window.close()

@@ -110,6 +110,9 @@ extension CefJSON: Codable {
         switch self {
         case .null: try container.encodeNil()
         case .bool(let value): try container.encode(value)
+        // JSON has no NaN or infinity: like `JSON.stringify`, encode them
+        // as `null`, so one such number does not spoil the whole tree.
+        case .number(let value) where !value.isFinite: try container.encodeNil()
         case .number(let value): try container.encode(value)
         case .string(let value): try container.encode(value)
         case .array(let value): try container.encode(value)
@@ -131,9 +134,10 @@ extension CefJSON: Codable {
         }
     }
 
-    /// The compact JSON text for this value.
+    /// The compact JSON text for this value. A number that is not finite
+    /// becomes `null`, as `JSON.stringify` makes it.
     public var data: Data {
-        // Encoding a CefJSON tree cannot fail: every case is JSON-representable.
+        // Every case encodes, non-finite numbers included (as `null`).
         (try? JSONEncoder().encode(self)) ?? Data("null".utf8)
     }
 

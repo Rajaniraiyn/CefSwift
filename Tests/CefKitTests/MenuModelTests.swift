@@ -61,6 +61,32 @@ struct MenuModelTests {
             #expect(MenuModelProbe.lastRemovedIndex == 3)
         }
     }
+
+    /// Borrowed wrappers end with the callback that lent them: one kept
+    /// past it is invalid, and using it stops the program.
+    @Test func borrowedWrappersAreInvalidatedAfterTheCallback() {
+        var model = cef_menu_model_t()
+        model.get_count = { _ in 3 }
+        withUnsafeMutablePointer(to: &model) { ptr in
+            var kept: CefMenuModel?
+            let count = CefMenuModel.borrowing(ptr) { menu in
+                kept = menu
+                return menu.isValid ? menu.count : -1
+            }
+            #expect(count == 3)
+            #expect(kept?.isValid == false)
+        }
+        var commandLine = cef_command_line_t()
+        withUnsafeMutablePointer(to: &commandLine) { ptr in
+            var kept: CefCommandLine?
+            let wasValid = CefCommandLine.borrowing(ptr) { line in
+                kept = line
+                return line.isValid
+            }
+            #expect(wasValid)
+            #expect(kept?.isValid == false)
+        }
+    }
 }
 
 /// Records calls made by the callbacks above.

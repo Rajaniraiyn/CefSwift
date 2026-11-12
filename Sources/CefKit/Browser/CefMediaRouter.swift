@@ -109,7 +109,7 @@ public final class CefMediaRouter {
               let sourceObject = mediaSource(source, router: router)
         else { return false }
         // is_compatible_with takes a reference to the source.
-        return sinkObject.pointer.pointee.is_compatible_with(sinkObject.pointer, sourceObject.detach()) != 0
+        return sinkObject.pointer.pointee.is_compatible_with(sinkObject.pointer, sourceObject.retainedPointer()) != 0
     }
 
     /// Connects `source` to `sink`.
@@ -127,7 +127,7 @@ public final class CefMediaRouter {
                 self?.routeObjects[value.id] = route
                 continuation.resume(returning: value)
             }.makeCallback()
-            router.pointer.pointee.create_route(router.pointer, sourceObject.detach(), sinkObject.detach(), callback)
+            router.pointer.pointee.create_route(router.pointer, sourceObject.retainedPointer(), sinkObject.retainedPointer(), callback)
         }
     }
 
