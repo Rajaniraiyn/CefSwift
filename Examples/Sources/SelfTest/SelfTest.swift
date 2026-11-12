@@ -52,12 +52,16 @@ enum SelfTest {
         window.makeKeyAndOrderFront(nil)
         NSApp.activate()
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 240) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + (ServiceBenchmark.isRequested ? 900 : 240)) {
             print("FAIL watchdog: checks did not finish in 240s")
             exit(124)
         }
         Task {
-            await runChecks()
+            if ServiceBenchmark.isRequested {
+                await ServiceBenchmark.run()
+            } else {
+                await runChecks()
+            }
             // Quit as an app does, through terminate: and cef_shutdown(). A
             // crash there ends the process with a signal instead.
             NotificationCenter.default.addObserver(
