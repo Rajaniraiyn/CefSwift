@@ -162,6 +162,11 @@ public struct CefConfiguration: Sendable {
     /// ``embedded`` turns it off. See ``CefProtectedMedia``.
     public var protectedMedia: CefProtectedMedia = .automatic
 
+    /// Whether pages can play AAC with the system's decoder.
+    /// **Experimental**; ``CefMediaCompatibility/none`` by default. See
+    /// ``CefMediaCompatibility``.
+    public var mediaCompatibility: CefMediaCompatibility = .none
+
     /// Trims Chrome's own UI in Chrome-style windows.
     public var chromeUI = CefChromeUIConfiguration()
 

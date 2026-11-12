@@ -14,6 +14,7 @@ package struct CefProcessMessage: Sendable, Equatable {
         case int(Int32)
         case bool(Bool)
         case double(Double)
+        case binary([UInt8])
     }
 
     package var name: String
@@ -40,6 +41,15 @@ package struct CefProcessMessage: Sendable, Equatable {
                 arguments.append(.bool(list.pointee.get_bool(list, index) != 0))
             case VTYPE_DOUBLE:
                 arguments.append(.double(list.pointee.get_double(list, index)))
+            case VTYPE_BINARY:
+                var bytes: [UInt8] = []
+                if let binary = list.pointee.get_binary(list, index) {
+                    defer { cefRelease(binary) }
+                    let size = binary.pointee.get_size(binary)
+                    bytes = [UInt8](repeating: 0, count: size)
+                    if size > 0 { _ = bytes.withUnsafeMutableBytes { binary.pointee.get_data(binary, $0.baseAddress, size, 0) } }
+                }
+                arguments.append(.binary(bytes))
             default:
                 arguments.append(.string(""))
             }
@@ -58,6 +68,11 @@ package struct CefProcessMessage: Sendable, Equatable {
                 case .int(let value): _ = list.pointee.set_int(list, index, value)
                 case .bool(let value): _ = list.pointee.set_bool(list, index, value ? 1 : 0)
                 case .double(let value): _ = list.pointee.set_double(list, index, value)
+                case .binary(let value):
+                    // set_binary takes the value's reference.
+                    if let binary = value.withUnsafeBytes({ cef_binary_value_create($0.baseAddress, $0.count) }) {
+                        _ = list.pointee.set_binary(list, index, binary)
+                    }
                 }
             }
         }
@@ -83,6 +98,20 @@ package struct CefProcessMessage: Sendable, Equatable {
         switch arguments[index] {
         case .int(let value): return Int(value)
         case .double(let value): return Int(value)
+        default: return 0
+        }
+    }
+
+    package func bytes(_ index: Int) -> [UInt8] {
+        guard index < arguments.count, case .binary(let value) = arguments[index] else { return [] }
+        return value
+    }
+
+    package func double(_ index: Int) -> Double {
+        guard index < arguments.count else { return 0 }
+        switch arguments[index] {
+        case .double(let value): return value
+        case .int(let value): return Double(value)
         default: return 0
         }
     }
@@ -121,4 +150,26 @@ package enum CefPageScriptingMessage {
     package static let call = "cefswift.page.call"
     /// `[request, succeeded, value JSON or error message, line, column]`.
     package static let evaluated = "cefswift.page.evaluated"
+}
+
+/// The system-decoder media shim's protocol between `MediaShim` in the
+/// helper's renderer and `CefMediaDecoding` in the browser process
+/// (``CefMediaCompatibility/systemDecoders``).
+package enum CefMediaShimMessage {
+    /// The helper switch that turns the shim on in renderers.
+    package static let rendererSwitch = "cefswift-media-shim"
+
+    // Renderer → browser process.
+
+    /// `[stream, request, reset, ES descriptor (binary, empty after the
+    /// first), packets (binary), packet sizes (comma-separated)]`.
+    package static let decode = "cefswift.media.decode"
+    /// `[stream]`: the stream's decoder is no longer needed.
+    package static let release = "cefswift.media.release"
+
+    // Browser process → renderer.
+
+    /// `[request, succeeded, PCM (binary, 16-bit interleaved), channels,
+    /// sample rate, frames per packet (comma-separated)]`.
+    package static let decoded = "cefswift.media.decoded"
 }

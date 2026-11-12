@@ -1382,7 +1382,11 @@ CefSwift's changes them, and some need a different Chromium build:
 - **Codecs**: CEF's standard builds have no H.264, AAC or HEVC, so
   `canPlayType('video/mp4; codecs="avc1.42E01E"')` returns `""` where Chrome
   returns `"probably"`. Adding them takes a CEF build with
-  `proprietary_codecs` and the licenses that come with them.
+  `proprietary_codecs` and the licenses that come with them. The
+  experimental `mediaCompatibility = .systemDecoders` answers `"probably"`
+  for AAC and still `""` for H.264 and HEVC; see
+  [Experimental: system-decoder media shim](#experimental-system-decoder-media-shim)
+  for what else a page can tell from it.
 - **Google services**: no Google network voices for speech synthesis
   (Chrome lists about 20 more), no Safe Browsing, sync or Google sign-in.
 - **Alloy style** (`CefWebView`): CEF answers Chromium's media permission
@@ -1633,6 +1637,91 @@ playing DRM video shows black or the page behind it.
 no FairPlay. PlayReady exists only in Microsoft Edge and Chrome on Windows.
 Firefox uses the same Widevine CDM, downloaded from Google under Mozilla's
 own agreement; there is no other DRM a third-party macOS browser can adopt.
+
+### Experimental: system-decoder media shim
+
+`configuration.mediaCompatibility = .systemDecoders` plays AAC audio in
+Chromium browsers with the AAC decoder macOS ships. It is off by default
+and app-wide. It decodes unencrypted audio that the page itself holds or
+could read; it bundles no decoder and changes nothing for H.264 or HEVC
+video.
+
+```swift
+var configuration = CefConfiguration.browser
+configuration.mediaCompatibility = .systemDecoders
+```
+
+**What plays.** Measured on CEF 156.0.28, macOS 27.2.1, an Apple M3, with
+local test media made with AVFoundation and `afconvert`:
+
+| Content | Plays | Notes |
+|---|---|---|
+| MSE `audio/mp4; codecs="mp4a.40.2"` (AAC-LC), and `mp4a.40.5`, `mp4a.40.29` | Yes | Segments join without a gap; `buffered` is one range. Each 2-second append takes 3 to 63 ms (natively 3 to 9). |
+| hls.js 1.5 with an audio-only fMP4 stream, and with Apple's bipbop audio-only stream (AAC in MPEG-TS) | Yes | hls.js unmodified; it remuxes MPEG-TS to fMP4 itself. |
+| `<audio>`/`<video>` with a same-origin `.m4a`, `.mp4` (audio only) or `.aac` | Yes | Starts in 0.3 to 1 s, since the file's head is fetched before the first decode. Seeking outside what is buffered takes 30 to 45 ms locally. |
+| The same, cross-origin with `crossorigin` and a CORS response | Yes | |
+| HE-AAC and HE-AAC v2 files | Yes | Decoded at the SBR rate (48 kHz from a 24 kHz core). |
+| Cross-origin media without CORS | No | Refused before any fetch, so nothing becomes readable that was not; the page gets Chromium's error. |
+| Any H.264 or HEVC video, and MSE `video/mp4` with `avc1` | No | `isTypeSupported` and `canPlayType` stay false and `""`. |
+| Encrypted media (EME) | Untouched | Clear Key and Widevine behave as without the option. |
+| `MediaSource` in a worker (`MediaSourceHandle`) | No | Only documents' main worlds get the shim. |
+
+Timing is sample-exact: beeps at whole seconds in the test files sound at
+the same `currentTime` as the same audio played natively as FLAC, before
+and after seeking. Priming is skipped as the file signals it, through its
+edit list or, without one, iTunes' `iTunSMPB` tag. A stream that signals
+neither (ADTS `.aac`, AVFoundation's fragmented MP4) plays its priming, as
+any player does. Playing a 5-minute file takes 4.8 % of one core across all
+of the app's processes, against 4.0 % for the same audio as native FLAC.
+
+**How it works.** Pages see the AAC types as supported. The audio the
+page appends, or the file a media element could not play, is demuxed in
+the page's renderer, decoded by AudioToolbox in the browser process, and
+appended as lossless FLAC (verbatim, 16-bit) in fragmented MP4 to a native
+`SourceBuffer` of the same `MediaSource`. The media element and its clock
+are Chromium's own; `currentTime`, seeking and pause behave as with native
+audio (measured), and the rest of the element is Chromium's unchanged. FLAC takes about twelve times the bytes of AAC,
+so the option raises Chromium's audio `SourceBuffer` limit to 96 MB
+(`--mse-audio-buffer-size-limit-mb`), about 8 minutes of stereo at 48 kHz.
+
+**What a page can observe.** The shim's functions are JavaScript, not
+native: `Function.prototype.toString` shows the source of
+`MediaSource.isTypeSupported`, `MediaSource.prototype.addSourceBuffer`,
+`removeSourceBuffer`, `endOfStream`, `HTMLMediaElement.prototype.canPlayType`
+and the `src` and `currentSrc` getters. It leaves no global. Beyond that:
+
+- `addSourceBuffer` for AAC returns an object whose prototype is not
+  `SourceBuffer.prototype` (it inherits from it, so `instanceof
+  SourceBuffer` holds), and `mediaSource.sourceBuffers` lists the native
+  FLAC buffer, not that object.
+- `canPlayType` answers `"probably"` for AAC where CEF answers `""`;
+  Chrome answers `"probably"` too.
+- Appends complete later than native ones, and the buffer holds the
+  decoded audio's size.
+- A media element whose AAC file the shim plays fires no `error` for the
+  native player's failure, and plays from a `MediaSource` of the shim's;
+  `src` and `currentSrc` report the page's address.
+
+**Decoding happens in the browser process.** Chromium's sandbox keeps
+AudioToolbox's AAC decoder and VideoToolbox out of sandboxed renderers
+(`AudioConverterNew` returns `'fmt?'`; `VTDecompressionSessionCreate`
+returns -12906), so the renderer sends the page's AAC packets to the
+browser process, which runs outside the sandbox. Chromium decodes media
+inside sandboxed processes; with this option, a page's audio is parsed by
+the system's decoder in the app's own process. That is one reason it is
+experimental.
+
+**Why no video.** H.264 has no lossless, cheap target codec the way AAC
+has FLAC, so video would have to be decoded natively and its frames shown
+by other means. Neither way keeps the page's `<video>` as it is: a
+`MediaStream` (`srcObject`) replaces the element's clock, `buffered`,
+`duration` and seeking with a live stream's, which players such as hls.js
+and Shaka rely on; drawing the frames over the element leaves the element
+itself black, so full screen of the element, picture in picture,
+`drawImage` and `requestVideoFrameCallback` show nothing, and the overlay
+is in the page's DOM. WebRTC's hardware H.264 decoder cannot be reached
+either: CEF 156 can send no H.264 (`RTCRtpSender.getCapabilities` lists
+none) and Blink refuses to change an encoded frame's `payloadType`.
 
 ## Footprint and launch time
 
