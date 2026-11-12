@@ -5,13 +5,14 @@ import AppKit
 @_spi(Testing)
 @MainActor
 public enum CefTesting {
-    /// The overrides of Chromium's AppKit classes that could not be
-    /// installed in this CEF build, as `Class -selector` strings. Empty
-    /// when Chromium surface handling and Chrome-style swipe integration work.
-    public static var missingRuntimeHooks: [String] {
+    /// Each feature built on overrides of Chromium's AppKit classes, with
+    /// the `Class -selector` methods it lacks in this CEF build. A feature
+    /// with an empty list is installed; one with missing methods is not
+    /// installed at all.
+    public static var runtimeHookFeatures: [(name: String, missing: [String])] {
         CefSurfaceTracker.install()
         CefHistorySwipeHooks.install()
-        return CefObjCHook.missingHooks
+        return CefObjCHook.features
     }
 
     /// Sets ``CefBrowser/navigationGestureProgress`` as a swipe would.

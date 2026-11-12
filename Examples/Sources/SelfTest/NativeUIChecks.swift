@@ -8,9 +8,14 @@ import SwiftUI
 /// its indicator. A CEF update that renames those classes fails here.
 extension SelfTest {
     static func nativeUIChecks() async {
-        let missing = CefTesting.missingRuntimeHooks
-        check("runtime hooks: Chromium's AppKit classes and methods exist", missing.isEmpty,
-              detail: missing.joined(separator: ", "))
+        let features = CefTesting.runtimeHookFeatures
+        check("runtime hooks: every feature's AppKit classes and methods exist",
+              !features.isEmpty && features.allSatisfy(\.missing.isEmpty),
+              detail: features.filter { !$0.missing.isEmpty }.map { "\($0.name): \($0.missing.joined(separator: ", "))" }
+                  .joined(separator: "; "))
+        for feature in features {
+            print("     \(feature.name): \(feature.missing.isEmpty ? "installed" : "unavailable")")
+        }
         await bubbleChecks()
         await chromeSwipeChecks()
         await viewSwipeIndicatorChecks()

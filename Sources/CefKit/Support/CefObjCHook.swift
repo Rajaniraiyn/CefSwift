@@ -4,64 +4,94 @@ import ObjectiveC
 /// Overrides Objective-C methods of Chromium's AppKit classes, which the
 /// framework does not export but the Objective-C runtime can see.
 ///
-/// Every hook is feature-detected: a class or selector that a CEF update
-/// renames or removes leaves the hook uninstalled, and the feature that
-/// depends on it falls back to Chromium's own behavior. SelfTest checks
-/// ``missingHooks`` so such an update fails CI instead of degrading quietly.
+/// Hooks are installed a feature at a time, all or nothing: every class,
+/// selector and type encoding a feature needs is probed first, and the
+/// feature's overrides go in only when all of them are present. A CEF
+/// update that renames or removes one leaves the whole feature uninstalled,
+/// so it falls back to Chromium's own behavior instead of running half
+/// hooked. SelfTest checks ``features`` so such an update fails CI instead
+/// of degrading quietly.
 @MainActor
 enum CefObjCHook {
-    /// Hooks that could not be installed, as `Class -selector` strings.
-    private(set) static var missingHooks: [String] = []
-    private static var installed: Set<String> = []
+    /// A method a feature calls or overrides: the instance method
+    /// `selector` of the class named `className`, whose type encoding,
+    /// compared without offsets (`v32@0:8@16q24` matches `v@:@q`), is
+    /// `types`.
+    struct Method {
+        let className: String
+        let selector: Selector
+        let types: String
 
-    /// Replaces the implementation of the instance method `selector` in the
-    /// class named `className` with `block`, and returns the implementation
-    /// to call through to. When the class inherits the method, the override
-    /// is added to the class alone and the inherited implementation is
-    /// returned, so other classes are unaffected.
-    ///
-    /// Returns `nil`, and records the hook as missing, when the class or the
-    /// method does not exist or its type encoding is not `expectedTypes`
-    /// (compared without offsets, so `v32@0:8@16q24` matches `v@:@q`).
-    static func override(
-        _ className: String, _ selector: Selector, expectedTypes: String, with block: Any
-    ) -> IMP? {
-        let key = "\(className) -\(NSStringFromSelector(selector))"
-        guard !installed.contains(key) else { return nil }
-        guard let cls = NSClassFromString(className),
-              let method = class_getInstanceMethod(cls, selector),
-              let encoding = method_getTypeEncoding(method),
-              stripOffsets(String(cString: encoding)) == expectedTypes
-        else {
-            if !missingHooks.contains(key) { missingHooks.append(key) }
-            CefLog.error("CefSwift: \(key) is unavailable in this CEF build; the feature that uses it is disabled")
-            return nil
+        init(_ className: String, _ selector: Selector, types: String) {
+            self.className = className
+            self.selector = selector
+            self.types = types
         }
-        installed.insert(key)
-        let replacement = imp_implementationWithBlock(block)
-        let original = method_getImplementation(method)
-        if class_addMethod(cls, selector, replacement, encoding) {
-            // The class inherited the method: the override is its own now,
-            // and `original` is the superclass's implementation.
-            return original
-        }
-        return method_setImplementation(method, replacement)
+
+        var key: String { "\(className) -\(NSStringFromSelector(selector))" }
     }
 
-    /// Records whether a class and selector exist, for features that call
-    /// a method rather than override it.
+    /// One override: the method, the block that replaces it, and where to
+    /// hand the implementation it calls through to.
+    struct Override {
+        let method: Method
+        let block: Any
+        let original: (IMP) -> Void
+    }
+
+    /// Each feature's name and the methods it lacks; an empty list means
+    /// the feature is installed.
+    private(set) static var features: [(name: String, missing: [String])] = []
+
+    /// Every method some feature lacks, as `Class -selector` strings.
+    static var missingHooks: [String] { features.flatMap(\.missing) }
+
+    /// Whether the feature called `name` was installed.
+    static func isInstalled(_ name: String) -> Bool {
+        features.first { $0.name == name }?.missing.isEmpty ?? false
+    }
+
+    /// Installs the feature called `name` once: `overrides` go in only when
+    /// they and every method in `requires` exist with the expected types.
+    /// Returns whether the feature is installed.
     @discardableResult
-    static func require(_ className: String, _ selector: Selector) -> Bool {
-        let key = "\(className) -\(NSStringFromSelector(selector))"
-        guard let cls = NSClassFromString(className), class_getInstanceMethod(cls, selector) != nil else {
-            if !missingHooks.contains(key) { missingHooks.append(key) }
+    static func installFeature(_ name: String, requires: [Method] = [], overrides: [Override]) -> Bool {
+        if let installed = features.first(where: { $0.name == name }) { return installed.missing.isEmpty }
+        let missing = (requires + overrides.map(\.method)).filter { resolve($0) == nil }.map(\.key)
+        features.append((name, missing))
+        guard missing.isEmpty else {
+            CefLog.error("CefSwift: \(missing.joined(separator: ", ")) unavailable in this CEF build; \(name) is disabled")
             return false
+        }
+        for override in overrides {
+            guard let (cls, method) = resolve(override.method) else { continue }
+            let replacement = imp_implementationWithBlock(override.block)
+            let original = method_getImplementation(method)
+            if class_addMethod(cls, override.method.selector, replacement, method_getTypeEncoding(method)) {
+                // The class inherited the method: the override is its own
+                // now, and `original` is the superclass's implementation, so
+                // other classes are unaffected.
+                override.original(original)
+            } else {
+                override.original(method_setImplementation(method, replacement))
+            }
         }
         return true
     }
 
+    /// The class and method for `method`, when both exist and the method's
+    /// type encoding matches.
+    private static func resolve(_ method: Method) -> (AnyClass, ObjectiveC.Method)? {
+        guard let cls = NSClassFromString(method.className),
+              let found = class_getInstanceMethod(cls, method.selector),
+              let encoding = method_getTypeEncoding(found),
+              stripOffsets(String(cString: encoding)) == method.types
+        else { return nil }
+        return (cls, found)
+    }
+
     /// `v32@0:8@16q24` → `v@:@q`.
-    private static func stripOffsets(_ encoding: String) -> String {
+    static func stripOffsets(_ encoding: String) -> String {
         String(encoding.filter { !$0.isNumber })
     }
 }

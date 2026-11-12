@@ -520,9 +520,6 @@ enum CefSurfaceTracker {
                 CefBrowserWindow.owning(parent)?.childWindowDidAttach(child)
             }
         }
-        if let imp = CefObjCHook.override("CefNSWindow", addSelector, expectedTypes: "v@:@q", with: add) {
-            addOriginal = unsafeBitCast(imp, to: AddChild.self)
-        }
 
         let removeSelector = #selector(NSWindow.removeChildWindow(_:))
         var removeOriginal: RemoveChild?
@@ -532,10 +529,6 @@ enum CefSurfaceTracker {
                 CefBrowserWindow.owning(parent)?.childWindowDidDetach(child)
             }
         }
-        if let imp = CefObjCHook.override("CefNSWindow", removeSelector, expectedTypes: "v@:@", with: remove) {
-            removeOriginal = unsafeBitCast(imp, to: RemoveChild.self)
-        }
-        CefObjCHook.require("NativeWidgetMacNSWindow", #selector(NSWindow.sendEvent(_:)))
 
         // Chromium fades some widgets in by setting their window's alpha
         // (the status bubble does on every hover), which would undo hiding
@@ -546,9 +539,23 @@ enum CefSurfaceTracker {
             let hidden = objc_getAssociatedObject(window, &hiddenKey) != nil
             alphaOriginal?(window, alphaSelector, hidden ? 0 : alpha)
         }
-        if let imp = CefObjCHook.override("NativeWidgetMacNSWindow", alphaSelector, expectedTypes: "v@:d", with: setAlpha) {
-            alphaOriginal = unsafeBitCast(imp, to: SetAlpha.self)
-        }
+
+        // Recognizing surfaces as they attach, and keeping hidden ones
+        // transparent, work together: all of them or none.
+        CefObjCHook.installFeature(
+            "Chromium surfaces",
+            requires: [.init("NativeWidgetMacNSWindow", #selector(NSWindow.sendEvent(_:)), types: "v@:@")],
+            overrides: [
+                .init(method: .init("CefNSWindow", addSelector, types: "v@:@q"), block: add) {
+                    addOriginal = unsafeBitCast($0, to: AddChild.self)
+                },
+                .init(method: .init("CefNSWindow", removeSelector, types: "v@:@"), block: remove) {
+                    removeOriginal = unsafeBitCast($0, to: RemoveChild.self)
+                },
+                .init(method: .init("NativeWidgetMacNSWindow", alphaSelector, types: "v@:d"), block: setAlpha) {
+                    alphaOriginal = unsafeBitCast($0, to: SetAlpha.self)
+                },
+            ])
     }
 
     private typealias SetAlpha = @convention(c) (NSWindow, Selector, CGFloat) -> Void

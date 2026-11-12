@@ -211,11 +211,14 @@ enum CefHistorySwipeHooks {
                 return browser.options.allowsBackForwardNavigationGestures
             }
         }
-        if CefObjCHook.require("ChromeRenderWidgetHostViewMacDelegate", nsViewSelector),
-           let imp = CefObjCHook.override(
-               "ChromeRenderWidgetHostViewMacDelegate", allowSelector, expectedTypes: "B@:", with: allow) {
-            allowOriginal = unsafeBitCast(imp, to: BoolGetter.self)
-        }
+        let delegate = "ChromeRenderWidgetHostViewMacDelegate"
+        CefObjCHook.installFeature(
+            "swipe gating", requires: [.init(delegate, nsViewSelector, types: "@@:")],
+            overrides: [
+                .init(method: .init(delegate, allowSelector, types: "B@:"), block: allow) {
+                    allowOriginal = unsafeBitCast($0, to: BoolGetter.self)
+                },
+            ])
 
         let controller = "HistoryOverlayController"
 
@@ -228,9 +231,6 @@ enum CefHistorySwipeHooks {
                 objc_setAssociatedObject(result, &modeKey, NSNumber(value: mode), .OBJC_ASSOCIATION_RETAIN)
             }
             return result
-        }
-        if let imp = CefObjCHook.override(controller, initSelector, expectedTypes: "@@:i", with: initForMode) {
-            initOriginal = unsafeBitCast(imp, to: InitForMode.self)
         }
 
         // Find the browser, and show Chrome's overlay only when asked to.
@@ -245,9 +245,6 @@ enum CefHistorySwipeHooks {
             objc_setAssociatedObject(overlay, &browserKey, WeakBrowser(browser), .OBJC_ASSOCIATION_RETAIN)
             let showsChromium = MainActor.assumeIsolated { browser.options.navigationGestureIndicator == .chromium }
             if showsChromium { showOriginal?(overlay, showSelector, view) }
-        }
-        if let imp = CefObjCHook.override(controller, showSelector, expectedTypes: "v@:@", with: show) {
-            showOriginal = unsafeBitCast(imp, to: ShowPanel.self)
         }
 
         // Report progress. Chrome's overlay methods do nothing when its view
@@ -265,9 +262,6 @@ enum CefHistorySwipeHooks {
                 box.browser?.navigationGestureProgress = mode == forwardMode ? magnitude : -magnitude
             }
         }
-        if let imp = CefObjCHook.override(controller, progressSelector, expectedTypes: "v@:dB", with: setProgress) {
-            progressOriginal = unsafeBitCast(imp, to: SetProgress.self)
-        }
 
         let dismissSelector = NSSelectorFromString("dismiss")
         var dismissOriginal: Dismiss?
@@ -276,9 +270,23 @@ enum CefHistorySwipeHooks {
             guard let box = objc_getAssociatedObject(overlay, &browserKey) as? WeakBrowser else { return }
             MainActor.assumeIsolated { box.browser?.navigationGestureProgress = 0 }
         }
-        if let imp = CefObjCHook.override(controller, dismissSelector, expectedTypes: "v@:", with: dismiss) {
-            dismissOriginal = unsafeBitCast(imp, to: Dismiss.self)
-        }
+
+        // The overlay's hooks share state (its browser and direction): all
+        // of them or none.
+        CefObjCHook.installFeature("swipe indicator", overrides: [
+            .init(method: .init(controller, initSelector, types: "@@:i"), block: initForMode) {
+                initOriginal = unsafeBitCast($0, to: InitForMode.self)
+            },
+            .init(method: .init(controller, showSelector, types: "v@:@"), block: show) {
+                showOriginal = unsafeBitCast($0, to: ShowPanel.self)
+            },
+            .init(method: .init(controller, progressSelector, types: "v@:dB"), block: setProgress) {
+                progressOriginal = unsafeBitCast($0, to: SetProgress.self)
+            },
+            .init(method: .init(controller, dismissSelector, types: "v@:"), block: dismiss) {
+                dismissOriginal = unsafeBitCast($0, to: Dismiss.self)
+            },
+        ])
     }
 
     /// The browser of the ``CefBrowserWindow`` that shows `view`.
