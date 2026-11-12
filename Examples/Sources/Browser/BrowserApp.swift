@@ -333,6 +333,7 @@ struct SettingsView: View {
                 Text("Sleeping tabs free their memory and reload when you return to them.")
             }
             .onChange(of: memorySaver) { MemorySaver.current.apply() }
+            PasskeySettings()
         }
         .formStyle(.grouped)
         .frame(width: 420)

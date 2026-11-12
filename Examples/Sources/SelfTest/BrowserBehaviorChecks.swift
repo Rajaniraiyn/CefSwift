@@ -451,7 +451,10 @@ final class LocalServer: @unchecked Sendable {
                 let request = data.flatMap { String(data: $0, encoding: .utf8) } ?? ""
                 let path = request.split(separator: " ").dropFirst().first.map(String.init) ?? "/"
                 let head: String, body: String
-                if path.hasSuffix(".txt") {
+                if path.hasPrefix("/passkeys") {
+                    head = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n"
+                    body = PasskeyChecks.page
+                } else if path.hasSuffix(".txt") {
                     head = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n"
                         + "Content-Disposition: attachment; filename=\"\(path.dropFirst())\"\r\n"
                     body = String(repeating: "CefSwift\n", count: 2048)

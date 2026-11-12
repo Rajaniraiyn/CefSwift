@@ -77,6 +77,18 @@ enum SelfTest {
     // MARK: Checks
 
     static func runChecks() async {
+        // SELFTEST_ONLY=accessibility runs one group while working on it;
+        // accessibility-external shows the page for an outside AX client.
+        switch ProcessInfo.processInfo.environment["SELFTEST_ONLY"] {
+        case "accessibility":
+            await offscreenAccessibilityChecks()
+            return
+        case "accessibility-external":
+            await accessibilityExternalClientSession()
+            return
+        default:
+            break
+        }
         await windowedBrowserChecks()
         await offscreenBrowserChecks()
         await profileChecks()
@@ -91,7 +103,12 @@ enum SelfTest {
         // probe out of the most-visited tiles.
         await nativeUIChecks()
         await relaunchChecks()
+        await passkeyChecks()
         await chromeWindowChecks()
+        // After the history checks: discarding an offscreen browser once the
+        // DevTools protocol has been used makes Chromium's most-visited
+        // sites miss later visits.
+        await offscreenAccessibilityChecks()
         // Last: it leaves discarded browsers open for the quit.
         await discardChecks()
     }

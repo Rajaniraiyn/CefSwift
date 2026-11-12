@@ -88,17 +88,25 @@ public protocol CefOffscreenHost: AnyObject {
     func offscreenBeginDraggingSession(_ data: CefDragData, allowedOperations: CefDragOperation, at point: CGPoint) -> Bool
     /// The drag cursor should show `operation`. The default does nothing.
     func offscreenDragOperationDidChange(_ operation: CefDragOperation)
+    /// The browser's ``CefBrowser/accessibilityTree`` changed. Post the
+    /// matching platform notifications. The default does nothing.
+    func offscreenAccessibilityTreeDidChange(_ changes: CefAccessibilityChanges)
 }
 
 extension CefOffscreenHost {
     public func offscreenBeginDraggingSession(_ data: CefDragData, allowedOperations: CefDragOperation, at point: CGPoint) -> Bool { false }
     public func offscreenDragOperationDidChange(_ operation: CefDragOperation) {}
+    public func offscreenAccessibilityTreeDidChange(_ changes: CefAccessibilityChanges) {}
 }
 
 extension CefBrowserClient {
     /// Builds the `cef_render_handler_t` installed for offscreen browsers.
     func makeRenderHandler() -> UnsafeMutablePointer<cef_render_handler_t> {
         let handler = cefAllocate(cef_render_handler_t.self, owner: self)
+
+        handler.pointee.get_accessibility_handler = { s in
+            cefOwner(CefBrowserClient.self, s)?.handlers.retained(cef_accessibility_handler_t.self)
+        }
 
         handler.pointee.get_view_rect = { s, browser, rect in
             cefRelease(browser)
@@ -147,6 +155,14 @@ extension CefBrowserClient {
             let size = CGSize(width: IOSurfaceGetWidth(surface), height: IOSurfaceGetHeight(surface))
             CefBrowserClient.withOffscreenHost(s) {
                 $0.offscreenDidPaint(.accelerated(surface: surface, size: size), element: element)
+            }
+        }
+
+        handler.pointee.on_scroll_offset_changed = { s, browser, x, y in
+            cefRelease(browser)
+            guard let client = cefOwner(CefBrowserClient.self, s) else { return }
+            MainActor.assumeIsolated {
+                client.primary?.accessibilityScrollOffsetDidChange(CGPoint(x: x, y: y))
             }
         }
 

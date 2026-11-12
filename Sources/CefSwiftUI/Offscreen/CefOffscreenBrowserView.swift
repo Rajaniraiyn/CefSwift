@@ -30,9 +30,13 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
             }
             hostBrowserIfPossible()
             updateVisibility(notifyingBrowser: true)
+            accessibilityBridge.browserDidChange()
             gestureIndicator = updatedGestureIndicator(gestureIndicator, browser: browser, isAllowed: showsBuiltInGestureIndicator)
         }
     }
+
+    /// The page's accessibility elements.
+    lazy var accessibilityBridge = CefOffscreenAccessibilityBridge(view: self)
 
     /// Whether the view draws the built-in swipe indicator that
     /// ``CefBrowserOptions/navigationGestureIndicator`` chooses. `CefWebView`
