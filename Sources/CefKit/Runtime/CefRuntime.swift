@@ -318,6 +318,10 @@ public final class CefRuntime {
     /// hosts, observers and timers, media router registrations, profile
     /// request contexts, the message pump, then Chromium itself, with jobs
     /// for the thread actors waiting it out.
+    ///
+    /// The framework stays loaded (the loader has no unload), and CEF
+    /// cannot start again in the same process: the state ends at
+    /// ``State/stopped`` and a later ``initialize(configuration:)`` throws.
     func shutDownChromium() {
         guard state == .running || state == .stopping else { return }
         guard hasNoBrowsers, CefBrowserWindow.liveCount == 0, messagePump?.isPerformingWork != true else {
