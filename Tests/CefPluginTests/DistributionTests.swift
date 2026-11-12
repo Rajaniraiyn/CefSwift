@@ -434,6 +434,23 @@ private func profile(
         })
     }
 
+    @Test func linkageProblemsAreErrors() {
+        func linking(_ facts: BundleFacts) -> DoctorReport.Check? {
+            Doctor.evaluate(facts).sections.flatMap(\.checks).first { $0.title == "linking" }
+        }
+        var facts = facts(kind: .adHoc, team: nil, runtime: false)
+        facts.architectures = ["arm64"]
+        facts.appLibraries = ["libGreeter.dylib"]
+        facts.resourceBundles = ["App_Hello.bundle"]
+        #expect(linking(facts)?.status == .ok)
+        #expect(linking(facts)?.detail.contains("libGreeter.dylib") == true)
+        #expect(linking(facts)?.detail.contains("App_Hello.bundle") == true)
+
+        facts.linkageProblems = ["Contents/MacOS/Browser searches /build/out for libraries, outside the bundle"]
+        #expect(linking(facts)?.status == .error)
+        #expect(Doctor.evaluate(facts).errorCount == 1)
+    }
+
     @Test func developerIDWithEntitlementAndProfileOffersICloudKeychain() throws {
         var facts = facts(kind: .developerID, team: team, runtime: true, entitlements: [
             Capability.publicKeyCredentialEntitlement: .bool(true),
