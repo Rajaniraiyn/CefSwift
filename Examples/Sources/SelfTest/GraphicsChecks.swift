@@ -53,8 +53,8 @@ extension SelfTest {
                 _ = try? await browser.evaluateJavaScript(
                     "window.__frames = 0; (function tick() { window.__frames++; requestAnimationFrame(tick); })()")
                 try? await Task.sleep(for: .milliseconds(500))
-                let frames = (try? await browser.evaluateJavaScript("window.__frames").intValue) ?? 0
-                check("graphics (windowed): the page produces frames", (frames ?? 0) > 5, detail: "\(String(describing: frames)) frames")
+                let frames = (try? await browser.evaluateJavaScript("window.__frames").intValue ?? 0) ?? 0
+                check("graphics (windowed): the page produces frames", frames > 5, detail: "\(frames) frames")
             }
             let renderer = (try? await browser.evaluateJavaScript(webGLRendererScript).stringValue) ?? nil
             print("NOTE graphics (\(label)): WebGL renderer '\(renderer ?? "nil")'" +

@@ -56,6 +56,14 @@ public final class CefBrowserWindow: Identifiable {
         /// Windows sharing an identifier are grouped as native macOS tabs.
         /// `nil` keeps the window out of tab groups.
         public var tabbingIdentifier: String?
+        /// How Chromium's interface is presented at first:
+        /// ``CefBrowserWindow/chromiumUI`` starts as this, or with every
+        /// surface ``CefChromiumSurface/Presentation/native`` when `nil`.
+        /// A status bubble
+        /// or zoom bubble hidden here is never created, as the browser
+        /// starts with Chromium's own switched off (`cef_browser_settings_t`);
+        /// hiding one later keeps Chromium's window invisible instead.
+        public var chromiumUI: CefChromiumUI?
 
         public init() {}
     }
@@ -100,8 +108,13 @@ public final class CefBrowserWindow: Identifiable {
         Self.liveCount += 1
         Self.installRuntimeHooks()
 
+        let initialUI = configuration.chromiumUI ?? CefChromiumUI()
+        chromiumUI = initialUI
         let viewDelegate = BrowserViewDelegate(toolbar: configuration.toolbar, window: self)
-        browserView = CefRef(adopting: browser.createBrowserView(delegate: viewDelegate.makeDelegate()))
+        browserView = CefRef(adopting: browser.createBrowserView(
+            delegate: viewDelegate.makeDelegate(),
+            showsStatusBubble: initialUI[.statusBubble] != .hidden,
+            showsZoomBubble: initialUI[.zoom] != .hidden))
         createWindow()
     }
 

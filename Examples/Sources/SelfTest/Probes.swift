@@ -17,6 +17,7 @@ extension SelfTest {
     static let probes: [String: @MainActor () async -> Void] = [
         "chromiumSignIn": chromiumSignInProbeChecks,
         "localization": localizationProbeChecks,
+        "policies": policiesProbeChecks,
     ]
 
     /// Changes the configuration for the probe `name`.
@@ -26,6 +27,8 @@ extension SelfTest {
             configuration.authenticationPrompt = .chromium
         case "localization":
             configureLocalizationProbe(&configuration)
+        case "policies":
+            configurePoliciesProbe(&configuration)
         default:
             break
         }

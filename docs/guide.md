@@ -7,7 +7,9 @@ are `@MainActor`.
 - [Starting Chromium](#starting-chromium)
   - [Configuration](#configuration)
   - [Languages](#languages)
+  - [Services and privacy](#services-and-privacy)
   - [Keychain access](#keychain-access)
+  - [Enterprise policies](#enterprise-policies)
   - [Preferences](#preferences)
   - [Relaunching](#relaunching)
 - [Browsers](#browsers)
@@ -112,8 +114,8 @@ Start from a preset and change what you need:
 
 | Preset | Use |
 |---|---|
-| `CefConfiguration.embedded` | Showing your own or trusted web content. Turns off background networking, component updates (and with them Widevine), sync, translation, first-run and default-browser prompts, and starts renderer processes only when a page needs one. |
-| `CefConfiguration.browser` | A general-purpose browser. Keeps session cookies across launches, skips first-run and default-browser prompts, and fetches Widevine for protected media. |
+| `CefConfiguration.embedded` | Showing your own or trusted web content. Turns off background networking, component updates, Widevine, sync, translation, preloading, hyperlink auditing, password saving and autofill, first-run and default-browser prompts, and starts renderer processes only when a page needs one. |
+| `CefConfiguration.browser` | A general-purpose browser. Keeps session cookies across launches and skips first-run and default-browser prompts; everything else is as Chromium has it and as users set it in `chrome://settings`, Widevine included. |
 | `CefConfiguration()` or `.default` | Chromium's defaults. |
 
 Common options:
@@ -128,7 +130,10 @@ Common options:
 | `extensions` | Unpacked extension folders (each with a `manifest.json`) to load. Extensions run in Chrome-style browsers. |
 | `memoryPolicy` | How many helper processes Chromium keeps running. See [Footprint and launch time](#footprint-and-launch-time). |
 | `enabledFeatures`, `disabledFeatures` | Chromium feature names, passed as `--enable-features` and `--disable-features`. |
-| `safeStorage` | Whether Chromium uses the keychain. See [Keychain access](#keychain-access). |
+| `safeStorage`, `keychainItem` | Whether Chromium uses the keychain, and which item. See [Keychain access](#keychain-access). |
+| `services`, `network`, `privacy`, `security`, `credentials` | Component updates and translation; preloading and DNS over HTTPS; third-party cookies and hyperlink auditing; HTTPS-First; password saving and autofill. See [Services and privacy](#services-and-privacy). |
+| `enterprisePolicy` | Whether Chromium applies administrator-managed policies, and from which preferences domain. See [Enterprise policies](#enterprise-policies). |
+| `authenticationPrompt` | Who asks for HTTP sign-in credentials. See [HTTP authentication](#http-authentication). |
 | `protectedMedia` | Whether Chromium fetches Google's Widevine CDM for protected (DRM) media: `.automatic`, `.disabled` (the `.embedded` preset), or `.preinstalled(widevineDirectory:)`. See [Playing streaming services](#playing-streaming-services). |
 | `rootCacheDirectory`, `cacheDirectory` | Where profile data lives. Defaults to `~/Library/Application Support/<bundle ID>/CefSwift`. |
 | `persistsSessionCookies` | Whether session cookies survive a relaunch. |
@@ -137,7 +142,7 @@ Common options:
 | `logSeverity`, `logFile` | Chromium's log. |
 | `remoteDebuggingPort` | Exposes the DevTools Protocol on a localhost port. Leave it `nil` in shipping apps. |
 | `defaultRuntimeStyle` | Chrome or Alloy style for browsers that do not choose. |
-| `isSandboxEnabled` | Chromium's macOS sandbox. See [Sandbox](sandbox.md). |
+| `isSandboxEnabled` | Chromium's macOS sandbox for the helper processes. On by default; see [Sandbox](sandbox.md). |
 | `extraCommandLineSwitches`, `onBeforeCommandLineProcessing` | Any other Chromium switch, such as `["proxy-server": "socks5://localhost:1080"]`. |
 | `frameworkDirectory`, `helperExecutableURL` | Override where the framework and helper are found. Rarely needed. |
 
@@ -188,16 +193,70 @@ Spelling follows the spelling language of macOS (Keyboard settings, Text
 Input), as in Chrome on macOS; `spellcheck.dictionaries` reports it and
 `browser.enable_spellchecking` turns checking off.
 
+### Services and privacy
+
+Typed options for what Chromium does on its own. Each defaults to
+Chromium's behavior, which users can change in `chrome://settings` where
+Chromium offers the setting; any other value is set again at every launch
+and wins over what users chose there. A key in `preferences` wins over the
+typed option that sets the same preference.
+
+| Option | Values | Chromium setting | Scope |
+|---|---|---|---|
+| `services.componentUpdates` | `.automatic`, `.disabled` | `--disable-component-update` | App, at start-up |
+| `services.translation` | `.automatic`, `.disabled` | `translate.enabled` | Every profile |
+| `network.preloading` | `.automatic`, `.standard`, `.extended`, `.disabled` | `net.network_prediction_options` | Every profile |
+| `network.secureDNS` | `.automatic`, `.disabled`, `.secure(templates:)` | `dns_over_https.mode`, `dns_over_https.templates` | App |
+| `privacy.thirdPartyCookies` | `.automatic`, `.block` | `profile.cookie_controls_mode` | Every profile |
+| `privacy.hyperlinkAuditing` | `.automatic`, `.disabled` | `--no-pings` | App, at start-up |
+| `security.httpsFirst` | `.automatic`, `.balanced`, `.strict` | `https_first_balanced_mode_enabled`, `https_only_mode_enabled` | Every profile |
+| `credentials.passwordSaving` | `.automatic`, `.disabled` | `credentials_enable_service`, `credentials_enable_autosignin` | Every profile |
+| `credentials.autofill` | `.automatic`, `.disabled` | `autofill.profile_enabled`, `autofill.credit_card_enabled` | Every profile |
+
+```swift
+var configuration = CefConfiguration.browser
+configuration.privacy.thirdPartyCookies = .block
+configuration.security.httpsFirst = .balanced
+configuration.network.secureDNS = .secure(templates: ["https://dns.example/dns-query{?dns}"])
+```
+
+- Component updates keep data files current: certificate revocation
+  (CRLSet) and Certificate Transparency lists, Safe Browsing file-type and
+  SSL error lists, origin trials, subresource filter rules, and the
+  Widevine CDM. Turned off, Chromium registers none of them; it still
+  fetches one component of its own, the on-device model manifest, which
+  no switch stops ([design notes](design-notes.md#locale-packs-swiftshader-and-component-updates)). Protected
+  media that needs Widevine keeps the updater on, since the CDM arrives
+  through it; see [Widevine in Chromium](#widevine-in-chromium).
+- Preloading covers DNS prefetch, preconnect, prefetch and prerender.
+  `.disabled` saves those requests; navigations can take longer.
+- `.secure(templates:)` sends every lookup to those DNS-over-HTTPS servers,
+  which can bypass a network's split DNS or VPN resolver.
+- Blocking third-party cookies can break sign-in, payment and comment
+  widgets embedded from another site.
+- `.strict` HTTPS-First warns before every HTTP page, intranet and device
+  pages included; `.balanced` warns only for sites that usually have HTTPS.
+- `passwordSaving = .disabled` stops Chromium from offering to save
+  passwords and from signing in automatically; it still fills passwords the
+  profile saved earlier.
+- Hyperlink auditing is the request an `<a ping>` link sends when it is
+  followed. Pages can still send requests of their own.
+
+Chromium 156 keeps the Privacy Sandbox ad APIs (Topics, Protected Audience,
+ad measurement) off: their preferences default to off and are cleared at
+start-up, and no setting turns them on, so there is no option for them.
+
 ### Keychain access
 
-Chromium encrypts cookies and saved passwords with a key it keeps in the
-user's keychain as "Chromium Safe Storage". The first time an app reads that
-item, macOS asks the user to allow it. Choosing Always Allow records the
+Chromium encrypts cookies and saved passwords with a key it keeps in an
+item of the user's keychain. The first time an app reads that item, macOS
+asks the user to allow it. Choosing Always Allow records the
 app's code signature, so the question does not come back while the signature
 stays the same. An ad hoc signature changes with every build, so ad hoc
 signed builds are asked again after each rebuild.
 
-`configuration.safeStorage` chooses the behavior:
+`configuration.safeStorage` chooses the behavior, and
+`configuration.keychainItem` the item:
 
 | Policy | Behavior |
 |---|---|
@@ -205,9 +264,47 @@ signed builds are asked again after each rebuild.
 | `.keychain` | Always use the keychain, as Chrome does. |
 | `.mockKeychain` | Use a fixed key and never touch the keychain (`--use-mock-keychain`). Nothing is protected at rest; use it for development, demos and tests. |
 
+| `keychainItem` | Item |
+|---|---|
+| `.application` (default) | The app's own: service "`<bundle identifier>` Safe Storage", account "`<bundle identifier>`". Other apps built on Chromium cannot read it. |
+| `.chromium` | Chromium's "Chromium Safe Storage", shared by every app built on stock Chromium or CEF that names no other. |
+| `.named(service:account:)` | An item of your choice, for instance one several of your apps share. |
+
+The item holds the key, so a different item means a different key:
+cookies and passwords a profile saved under the old item cannot be read
+under the new one, and Chromium drops them. Choose the item before you
+ship. `keychainItem` applies only while Chromium uses the keychain; the mock
+keychain of ad hoc builds has no item.
+
 `cef bundle` signs with your Apple Development or Developer ID identity
 when the keychain has one; [bundling](bundling.md#distribution) lists what
 each kind of signature allows.
+
+### Enterprise policies
+
+Chromium applies the policies an administrator manages for Chrome
+(`HomepageLocation`, `PasswordManagerEnabled`, `URLBlocklist`, …) only
+from a preferences domain the app names:
+
+```swift
+configuration.enterprisePolicy = .applicationBundleIdentifier   // or .domain("com.google.Chrome")
+```
+
+| `enterprisePolicy` | Domain |
+|---|---|
+| `.disabled` (default) | None: no policies apply. |
+| `.applicationBundleIdentifier` | The app's bundle identifier, which an administrator manages as they would `com.google.Chrome`. |
+| `.domain(_:)` | Another domain, such as Chrome's, to follow what is managed for Chrome. |
+
+Values a configuration profile forces (`/Library/Managed Preferences`)
+are mandatory policies: users cannot change them. Values in the user's
+own preferences for the domain, such as `defaults write <domain>
+ShowHomeButton -bool true`, are recommended policies: they set the
+default, which users can change. On a Mac that is not managed, Chromium
+ignores the policies it counts as sensitive. `chrome://policy`, in a
+Chrome-style browser, lists what applies. The app's own `UserDefaults`
+are not policies unless the domain is the app's and the names are
+Chromium's.
 
 ### Signing and capabilities
 
@@ -830,9 +927,9 @@ itself.
 
 `configuration.authenticationPrompt = .chromium` shows Chromium's own
 dialog instead, for the whole app, and the delegate is not asked. In a
-Chrome-style browser the dialog is the `.signIn` surface ([Chromium's own interface](#chromiums-own-interface))
-and Chromium's password manager can fill it. In a `CefWebView` the load first
-fails with `ERR_INVALID_AUTH_CREDENTIALS`, reported to
+Chrome-style browser the dialog is the `.signIn` surface
+([Chromium's own interface](#chromiums-own-interface)) and Chromium's
+password manager can fill it. In a `CefWebView` the load first fails with `ERR_INVALID_AUTH_CREDENTIALS`, reported to
 `browser(_:didFailLoad:)`, and Chromium shows the dialog in a window of its
 own; closing such a browser leaves the page first, which dismisses that
 window (Chromium crashes when the browser closes under it).
@@ -1203,6 +1300,21 @@ window.chromiumUI.anchors[.qrCode] = .view(qrButton, alignment: .trailing)
 window.chromiumUI[.statusBubble] = .hidden
 ```
 
+A status bubble or zoom bubble hidden in the window's configuration is
+switched off in Chromium when the browser is created
+(`cef_browser_settings_t`'s `chrome_status_bubble` and
+`chrome_zoom_bubble`), so Chromium never creates its window, and
+`browser.statusText` still follows the pointer. Hidden later, through
+`window.chromiumUI`, Chromium's window is created and kept invisible:
+
+```swift
+var configuration = CefBrowserWindow.Configuration()
+var ui = CefChromiumUI()
+ui[.statusBubble] = .hidden
+configuration.chromiumUI = ui              // window.chromiumUI starts as this
+let window = CefBrowserWindow(browser: browser, configuration: configuration)
+```
+
 In SwiftUI, mark the views in your toolbar:
 
 ```swift
@@ -1562,12 +1674,12 @@ measurement a page can make.
 | `browser.devTools` | Whatever you send; CefKit's features share the session, and a domain stays enabled until every `X.enable` sent through it has had its `X.disable` | `Runtime.enable` makes every `console` call serialize its arguments: logging a large object takes 2–3 times as long. `Debugger.enable` stops the page at `debugger` statements. `Page.enable`, `Network.enable` and the like: nothing measured. |
 | `CefPasskeyMode.app` and `.disabled` | `WebAuthn`, `Debugger`, `Page` and `Runtime`, for the browser's lifetime | Each `debugger` statement takes about 10 ms (CefKit resumes at once), and `console` calls serialize their arguments as above. Use `.chromium` for browsers that show sites you do not control. |
 | `evaluateJavaScript(_:userGesture: true)` | `Runtime.evaluate`, no domain | The gesture itself. |
-| `snapshot()` | `Page.captureScreenshot`, no domain | Nothing measured. |
+| `snapshot()` of a windowed browser | `Page.captureScreenshot`, no domain | Nothing measured. An offscreen browser's snapshot is the frame its view shows, with an open `<select>` list or date picker drawn in, and uses no protocol. |
 | `discard()` | `Runtime.evaluate` and `DOMDebugger.getEventListeners`, no domain | Nothing measured; the page is about to be unloaded. |
-| Offscreen accessibility actions | `Accessibility` for the length of one lookup; `DOM.focus`, `DOM.scrollIntoViewIfNeeded`, `Input.insertText` | Nothing measured. Only an assistive app's actions use it. |
+| Offscreen accessibility actions | `Accessibility` for the length of one lookup; `DOM.focus`, `DOM.scrollIntoViewIfNeeded`; `Input.insertText` only for a field that takes no input-method text | Nothing measured. Only an assistive app's actions use it. |
 
-CefKit's own services (bookmarks, history, suggestions) use the protocol
-only in hidden browsers that show Chromium's own pages.
+CefKit's own services (bookmarks, history, suggestions) run in hidden
+browsers that show Chromium's own pages, and attach no DevTools session.
 
 ### How the app names itself
 
@@ -1759,8 +1871,8 @@ directory, `<rootCacheDirectory>/WidevineCdm/`, on the user's Mac.
 
 | `protectedMedia` | Effect |
 |---|---|
-| `.automatic` | The component updater runs and fetches Widevine. The default, and the `.browser` preset's. It also keeps Chromium's other components current (certificate revocation lists, safety lists and the like). |
-| `.disabled` | The component updater is off (`--disable-component-update`), so Chromium neither downloads the CDM nor loads one already on disk. The `.embedded` preset's. |
+| `.automatic` | The component updater runs and fetches Widevine, whatever `services.componentUpdates` says. The default, and the `.browser` preset's. |
+| `.disabled` | CefSwift does not ask for the CDM. With `services.componentUpdates = .disabled`, as in the `.embedded` preset, Chromium registers no component, neither downloads the CDM nor loads one already on disk, and refuses `com.widevine.alpha`. With component updates on, Chromium registers Widevine with its other components, and its updater has no way to leave one out: it downloads the CDM at its first check, about a minute after start-up, and pages can use it from then on. |
 | `.preinstalled(widevineDirectory:)` | As `.automatic`, and copies a CDM your app carries into the profile before Chromium starts, so protected media works on first launch and offline. Only for apps licensed by Google to distribute the CDM. |
 
 With the updater on, CefSwift asks for Widevine as soon as the app creates
@@ -1978,10 +2090,11 @@ measurement).
 
 | | `.default` | `.embedded` | `.browser` |
 |---|---|---|---|
-| Background networking, component updates, sync, domain reliability, phishing detection, pings, crash reporting | On | Off | On |
-| Translate, Media Router (Cast), optimization hints, Autofill server, feed suggestions | On | Off | On |
+| Background networking, sync, default apps, domain reliability | On | Off | On |
+| Component updates (`services.componentUpdates`), Widevine (`protectedMedia`) | On | Off | On |
+| Translation, preloading, hyperlink auditing, password saving, autofill | On | Off | On |
+| Media Router (Cast), optimization hints, Autofill server predictions, on-device model execution | On | Off | On |
 | First-run and default-browser prompts | On | Off | Off |
-| Widevine (`protectedMedia`) | On | Off | On |
 | Spare renderer (`memoryPolicy`) | `.standard` | `.reduced` | `.standard` |
 | Session cookies across launches | Off | Off | On |
 

@@ -48,6 +48,13 @@ final class MappedCefSettings {
         CefStringUtil.set(configuration.logFile?.path, into: &raw.log_file)
         CefStringUtil.set(frameworkDirectory?.path, into: &raw.framework_dir_path)
         CefStringUtil.set(configuration.helperExecutableURL?.path, into: &raw.browser_subprocess_path)
+        CefStringUtil.set(configuration.enterprisePolicy.domain(bundleIdentifier: Bundle.main.bundleIdentifier),
+                          into: &raw.chrome_policy_id)
+        if configuration.safeStorage.resolved() == .keychain,
+           let item = configuration.keychainItem.names(bundleIdentifier: Bundle.main.bundleIdentifier) {
+            CefStringUtil.set(item.service, into: &raw.keychain_service_name)
+            CefStringUtil.set(item.account, into: &raw.keychain_account_name)
+        }
     }
 
     /// Default per-app CEF data directory:
@@ -72,6 +79,9 @@ final class MappedCefSettings {
         ccef_string_clear(&raw.log_file)
         ccef_string_clear(&raw.framework_dir_path)
         ccef_string_clear(&raw.browser_subprocess_path)
+        ccef_string_clear(&raw.chrome_policy_id)
+        ccef_string_clear(&raw.keychain_service_name)
+        ccef_string_clear(&raw.keychain_account_name)
     }
 }
 
@@ -196,7 +206,7 @@ public final class CefRuntime {
         }
         state = .running
         lifecycleCoordinator.start()
-        applyApplicationWidePreferences(configuration.preferences)
+        applyApplicationWidePreferences(configuration.effectivePreferences)
         logCapabilities()
     }
 
@@ -250,7 +260,10 @@ public final class CefRuntime {
         let capabilities = CefAppCapabilities.current
         if let summary = capabilities.limitationsSummary(passkeysUseChromium: true) {
             CefLog.notice(summary)
-        } else {
+        }
+        CefLog.info("CefSwift: Chromium's sandbox is \(configuration?.isSandboxEnabled == true ? "on" : "off"); " +
+                    "locale \(locale ?? "en-US")")
+        if capabilities.limitationsSummary(passkeysUseChromium: true) == nil {
             CefLog.info("CefSwift: signed \(capabilities.signature.rawValue), team " +
                         "\(capabilities.teamIdentifier ?? "none"); passkeys: " +
                         CefAppCapabilities.PasskeyAuthenticator.allCases
@@ -443,7 +456,7 @@ public final class CefRuntime {
         // Chromium's update service starts fetching once a browser exists;
         // ask for Widevine then rather than at its first scheduled run, a
         // minute after launch.
-        if !hasRequestedWidevine, configuration?.protectedMedia.usesComponentUpdater == true {
+        if !hasRequestedWidevine, let configuration, configuration.protectedMedia != .disabled {
             hasRequestedWidevine = true
             if !widevine.isInstalled { Task { await installWidevine() } }
         }
@@ -568,6 +581,9 @@ public final class CefRuntime {
     /// Live service browsers: hidden, created by CefKit itself, and left out
     /// of ``browsers``.
     @ObservationIgnored private var serviceBrowsers: [CefBrowser] = []
+
+    /// The hidden browsers of internal-page services that are open.
+    @_spi(Testing) public var openServiceBrowsers: [CefBrowser] { serviceBrowsers }
     @ObservationIgnored private var serviceBrowserIDs: Set<CefBrowser.ID> = []
 
     /// Marks `browser` as a service browser. Call before it is created.

@@ -180,7 +180,19 @@ extension CefBrowser {
                 deleteSelection()
                 return true
             }
-            // Inserted as an input method would, replacing the selection.
+            // Committed as an input method would, replacing the whole value.
+            let old = accessibilityTree.node(id)?.value ?? ""
+            insertText(text, replacementRange: NSRange(location: 0, length: old.utf16.count))
+            let deadline = ContinuousClock.now + .seconds(1)
+            while ContinuousClock.now < deadline {
+                let value = accessibilityTree.node(id)?.value ?? ""
+                if value == text { return true }
+                // Changed some other way: typing it again would add to it.
+                if value != old { return false }
+                try? await Task.sleep(for: .milliseconds(20))
+            }
+            // The field took no input-method text, as some editors do not.
+            CefAccessibilityTesting.setValueProtocolFallbacks += 1
             return (try? await devTools.send("Input.insertText", ["text": .string(text)])) != nil
         }
     }
@@ -274,4 +286,11 @@ extension CefBrowser {
         sendMouseDown(at: point, button: button, clickCount: 1)
         sendMouseUp(at: point, button: button, clickCount: 1)
     }
+}
+
+/// Counters for tests.
+@_spi(Testing) @MainActor public enum CefAccessibilityTesting {
+    /// How often a value set through accessibility went through the
+    /// DevTools Protocol because the field took no input-method text.
+    public static var setValueProtocolFallbacks = 0
 }

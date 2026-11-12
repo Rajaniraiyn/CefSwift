@@ -121,9 +121,16 @@ public protocol CefOffscreenHost: AnyObject {
     /// The browser's ``CefBrowser/accessibilityTree`` changed. Post the
     /// matching platform notifications. The default does nothing.
     func offscreenAccessibilityTreeDidChange(_ changes: CefAccessibilityChanges)
+    /// The frame the host shows, with the popup widget (a `<select>` list,
+    /// a date picker) drawn over it while one is open, at the view's pixel
+    /// size; `nil` before the first frame. ``CefBrowser/snapshot()`` returns
+    /// it. The default returns `nil`, and the snapshot comes from the
+    /// DevTools Protocol instead.
+    func offscreenSnapshot() -> CGImage?
 }
 
 extension CefOffscreenHost {
+    public func offscreenSnapshot() -> CGImage? { nil }
     public func offscreenBeginDraggingSession(_ data: CefDragData, allowedOperations: CefDragOperation, at point: CGPoint) -> Bool { false }
     public func offscreenDragOperationDidChange(_ operation: CefDragOperation) {}
     public func offscreenAccessibilityTreeDidChange(_ changes: CefAccessibilityChanges) {}

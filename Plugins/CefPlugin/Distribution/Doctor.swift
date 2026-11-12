@@ -463,6 +463,16 @@ enum Doctor {
                         "web browsers, in a provisioning profile, and an Apple team signature.",
                     fix: "request the entitlement from Apple, then add \"passkeys\" to capabilities and set provisioningProfile."))
 
+        let libraryNames = Set(facts.libraries.map(\.name))
+        features.append(libraryNames.contains("libcef_sandbox.dylib") && libraryNames.contains("libcefswift_helper_startup.dylib")
+            ? .init(status: .ok, title: "Chromium sandbox",
+                    detail: "the helpers can seal themselves (libcef_sandbox.dylib, libcefswift_helper_startup.dylib); " +
+                        "CefConfiguration.isSandboxEnabled decides at run time.")
+            : .init(status: .warning, title: "Chromium sandbox",
+                    detail: "the bundle lacks libcef_sandbox.dylib or libcefswift_helper_startup.dylib, so sandboxed " +
+                        "helpers cannot start.",
+                    fix: "bundle with cef bundle, or set CefConfiguration.isSandboxEnabled = false."))
+
         return DoctorReport(
             app: app.name, bundleIdentifier: bundleID,
             signature: app.kind.displayName + (runtime ? ", hardened runtime" : ""),

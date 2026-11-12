@@ -315,7 +315,7 @@ public final class CefProfile {
     private func requestContext() -> CefRef<cef_request_context_t>? {
         if let context { return context }
         guard CefRuntime.shared.isInitialized else { return nil }
-        let preferences = CefRuntime.shared.configuration?.preferences ?? [:]
+        let preferences = CefRuntime.shared.configuration?.effectivePreferences ?? [:]
         switch kind {
         case .global:
             context = CefRef(adopting: cef_request_context_get_global_context())

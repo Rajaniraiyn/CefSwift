@@ -249,20 +249,31 @@ final class CefServiceHostBrowser {
     private var window: CefBrowserWindow?
     private var browser: CefBrowser?
     private var starting: Task<CefBrowser, Error>?
-    private var events: Task<Void, Never>?
     private var idleStop: Task<Void, Never>?
     private var callsInProgress = 0
     private var isStopped = false
     private let delegate = ServiceBrowserDelegate()
 
-    /// The binding module events reach Swift through.
-    private static let eventBinding = "__cefswiftServiceEvent"
+    /// The bridge module events reach Swift through, as
+    /// `window.__cefswiftServiceEvents.event({module, name, payload})`: a
+    /// native V8 function, so the host attaches no DevTools session.
+    private static let eventBridgeName = "__cefswiftServiceEvents"
+    private let eventBridge = CefBridge(name: CefServiceHostBrowser.eventBridgeName)
+
+    private struct ModuleEvent: Decodable {
+        var module: String
+        var name: String
+        var payload: CefJSON?
+    }
 
     init(host: CefServiceHost, services: CefInternalServices) {
         self.host = host
         self.services = services
         self.profile = services.profile
         delegate.onTerminated = { [weak self] _ in self?.stop() }
+        eventBridge.handle("event") { [weak self] (event: ModuleEvent) in
+            self?.services?.deliver(module: event.module, name: event.name, payload: event.payload ?? .null)
+        }
     }
 
     var isIdle: Bool { callsInProgress == 0 }
@@ -302,8 +313,8 @@ final class CefServiceHostBrowser {
         return """
             (async () => {
               const registry = window.__cefswiftServices ??= {};
-              const emit = (event, payload) => window.\(eventBinding)?.(
-                JSON.stringify({ module: \(name), name: event, payload: payload ?? null }));
+              const emit = (event, payload) => window.\(eventBridgeName)?.event(
+                { module: \(name), name: event, payload: payload ?? null });
               const service = await (registry[\(name)] ??= (\(module.setup))(emit).catch(error => {
                 delete registry[\(name)];
                 throw error;
@@ -337,6 +348,7 @@ final class CefServiceHostBrowser {
     private func launch() async throws -> CefBrowser {
         var options = CefBrowserOptions()
         options.profile = profile
+        options.bridges = [eventBridge]
         let browser = CefBrowser(
             url: URL(string: host.document), options: options, delegate: delegate)
         CefRuntime.shared.registerServiceBrowser(browser)
@@ -351,7 +363,6 @@ final class CefServiceHostBrowser {
         self.window = window
 
         try await browser.ready()
-        try await listenForEvents(in: browser)
         let deadline = ContinuousClock.now + .seconds(15)
         let document = CefJSON.string(host.document).text
         while ContinuousClock.now < deadline, browser.state == .live, !isStopped {
@@ -371,31 +382,12 @@ final class CefServiceHostBrowser {
         throw CefError.operationFailed("\(host.document) did not load")
     }
 
-    /// Installs the event binding as a page global; the DevTools Protocol
-    /// reports its calls once the Runtime domain is enabled.
-    private func listenForEvents(in browser: CefBrowser) async throws {
-        // Every event is a module's, which the loop below hands on at once.
-        let stream = browser.devTools.events("Runtime.bindingCalled", bufferingPolicy: .unbounded)
-        try await browser.devTools.send("Runtime.enable")
-        try await browser.devTools.send("Runtime.addBinding", ["name": .string(Self.eventBinding)])
-        events = Task { [weak self] in
-            for await event in stream where event["name"].stringValue == Self.eventBinding {
-                guard let text = event["payload"].stringValue, let data = text.data(using: .utf8),
-                      let message = try? CefJSON(data: data), let module = message["module"].stringValue,
-                      let name = message["name"].stringValue
-                else { continue }
-                self?.services?.deliver(module: module, name: name, payload: message["payload"])
-            }
-        }
-    }
-
     /// Closes the browser; calls still waiting fail, and the next call
     /// starts a new host.
     func stop() {
         guard !isStopped else { return }
         isStopped = true
         idleStop?.cancel()
-        events?.cancel()
         services?.hostDidStop(self)
         if window != nil { retain = self }
         if browser?.state == .live {

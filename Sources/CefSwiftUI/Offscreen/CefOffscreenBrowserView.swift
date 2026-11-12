@@ -343,6 +343,49 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
         CATransaction.commit()
     }
 
+    public func offscreenSnapshot() -> CGImage? {
+        guard let page = Self.image(of: contentLayer.contents) else { return nil }
+        guard !popupLayer.isHidden, let popup = Self.image(of: popupLayer.contents), bounds.width > 0,
+              let context = CGContext(
+                  data: nil, width: page.width, height: page.height, bitsPerComponent: 8, bytesPerRow: 0,
+                  space: page.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!,
+                  bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue)
+        else { return page }
+        // View points, origin at the top left, to image pixels, origin at
+        // the bottom left.
+        let scale = CGFloat(page.width) / bounds.width
+        let rect = popupLayer.frame
+        context.draw(page, in: CGRect(x: 0, y: 0, width: page.width, height: page.height))
+        context.draw(popup, in: CGRect(
+            x: rect.minX * scale, y: CGFloat(page.height) - rect.maxY * scale,
+            width: rect.width * scale, height: rect.height * scale))
+        return context.makeImage() ?? page
+    }
+
+    /// A layer's contents as an image: a CPU frame already is one; an
+    /// IOSurface the compositor owns is copied out of it.
+    private static func image(of contents: Any?) -> CGImage? {
+        guard let contents else { return nil }
+        if CFGetTypeID(contents as CFTypeRef) == CGImage.typeID { return (contents as! CGImage) }
+        guard CFGetTypeID(contents as CFTypeRef) == IOSurfaceGetTypeID() else { return nil }
+        let surface = contents as! IOSurfaceRef
+        guard IOSurfaceLock(surface, .readOnly, nil) == kIOReturnSuccess else { return nil }
+        defer { IOSurfaceUnlock(surface, .readOnly, nil) }
+        let width = IOSurfaceGetWidth(surface), height = IOSurfaceGetHeight(surface)
+        let bytesPerRow = IOSurfaceGetBytesPerRow(surface)
+        guard IOSurfaceGetBytesPerElement(surface) == 4, width > 0, height > 0 else { return nil }
+        let data = Data(bytes: IOSurfaceGetBaseAddress(surface), count: bytesPerRow * height)
+        let space = IOSurfaceCopyValue(surface, kIOSurfaceColorSpace).flatMap {
+            CGColorSpace(propertyListPlist: $0 as CFPropertyList)
+        } ?? CGColorSpace(name: CGColorSpace.sRGB)!
+        guard let provider = CGDataProvider(data: data as CFData) else { return nil }
+        return CGImage(
+            width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: bytesPerRow,
+            space: space,
+            bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue),
+            provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)
+    }
+
     public func offscreenDidChangeCursor(_ cursor: CefCursorType) {
         currentCursor = NSCursor.cursor(for: cursor) ?? .arrow
         currentCursor.set()

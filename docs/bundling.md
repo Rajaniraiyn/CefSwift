@@ -481,7 +481,7 @@ bundle identifier with the capabilities enabled.
   attach. The app runs on the Mac that built it and on the devices the
   profile lists; Gatekeeper refuses it when downloaded.
 - [ ] `.automatic` safe storage uses the login keychain: macOS asks once for
-  "Chromium Safe Storage", and Always Allow lasts across rebuilds.
+  "<bundle identifier> Safe Storage", and Always Allow lasts across rebuilds.
 
 ### Distribution builds (Developer ID, notarized)
 
@@ -561,7 +561,7 @@ Other features:
 
 | Feature | Needs |
 |---|---|
-| Safe storage in the keychain ("Chromium Safe Storage") | A team signature: `.automatic` picks the keychain then. Ad hoc builds use `--use-mock-keychain`. See [Keychain access](guide.md#keychain-access). |
+| Safe storage in the keychain (`keychainItem`, by default "<bundle identifier> Safe Storage") | A team signature: `.automatic` picks the keychain then. Ad hoc builds use `--use-mock-keychain`. See [Keychain access](guide.md#keychain-access). |
 | Chromium's profile passkeys with Touch ID | Not available with CEF 156: Chromium checks for the keychain access group `.org.chromium.Chromium.webauthn`, compiled in from Chromium's branding with an empty team identifier, and a provisioning profile authorizes only groups that start with a team identifier. `CefPasskeyMode.app` with `CefKeychainPasskeyStore` verifies the user with Touch ID instead. |
 | `CefKeychainPasskeyStore` | A team signature with a provisioning profile, which gives the app the `com.apple.application-identifier` entitlement the data protection keychain needs. Ad hoc builds get `errSecMissingEntitlement` (-34018). |
 | Screen sharing (`getDisplayMedia`) | Nothing in the bundle; macOS asks the user for Screen Recording permission. |

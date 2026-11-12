@@ -61,3 +61,61 @@ nothing on an idle page, cost more than they saved, or save the same as
   isolation.
 - `--enable-low-end-device-mode`: saves the spare renderer and 3 MB more in
   the GPU process, and lowers rendering quality.
+
+## Locale packs, SwiftShader and component updates
+
+Measured on 2026-11-13 with CEF 156.0.28 arm64 on an M3, macOS 27.2.
+
+**Bundle size.** The Minimal example (English only), logical size of
+regular files: 333.0 MiB with every locale pack, 284.0 MiB with `en` only
+(54 packs, 48.9 MiB, left out), 268.0 MiB without SwiftShader as well
+(16.1 MiB). `du` reports 334 MiB, 284 MiB and 268 MiB.
+
+**A locale without a pack.** Chromium told `--lang=ja` with no `ja.lproj`
+in the framework starts, reports the locale it was told, and shows English
+strings: `NSBundle` falls back to another localization of the framework.
+CefKit therefore resolves the locale against the packs before
+`cef_initialize`, so the locale Chromium reports matches its strings.
+
+**SwiftShader.** Pages render, windowed and offscreen, with and without it
+and with `--disable-gpu`. WebGL runs on ANGLE's Metal backend with the GPU;
+with `--disable-gpu` there is no WebGL unless `--enable-unsafe-swiftshader`
+is passed and SwiftShader is in the bundle. Chromium 156 does not fall back
+to SwiftShader by itself.
+
+**Component updates off.** With `--disable-component-update` Chromium
+registers none of the components of `RegisterComponentsForUpdate`
+(Widevine, CRLSet, PKI metadata, Safe Browsing lists, origin trials, …),
+but it still registers the on-device model manifest ("Optimization Guide
+On DeviceModels Manifest") and starts downloading it: the optimization
+guide registers it outside that function. Turning off the
+`OptimizationHints` or `OptimizationGuideModelExecution` features does not
+stop it; no switch that does was found.
+
+**Widevine with component updates on and protected media off.** CefSwift
+does not ask for the CDM, and Chromium's updater still tries to fetch it:
+in a run with `protectedMedia = .disabled`, `componentUpdates = .automatic`
+and an unreachable DNS-over-HTTPS server, the Widevine component, which
+started as not installed, reported an update error within 170 seconds,
+having been checked without any request from CefSwift.
+
+## Sandbox
+
+Measured on 2026-11-13 with CEF 156.0.28 on an M3 MacBook, macOS 27.2, ad
+hoc signed bundles, `Scripts/measure-footprint.py --kinds relaunch`
+(median of five runs, physical footprint of the app and every helper,
+launch to the first `didFinishLoad`). Another build ran on the same Mac at
+the time, so run-to-run spread is wider than in the guide's table.
+
+| App | Sandbox | Launch | Memory (range) |
+|---|---|---|---|
+| Minimal (`.embedded`) | On | 322 ms | 108.6 MiB (102.7–113.0) |
+| Minimal (`.embedded`) | Off (`-sandbox NO`) | 315 ms | 110.6 MiB (90.2–118.2) |
+| Browser (`.browser`) | On | 440 ms | 173.2 MiB (171.1–179.3) |
+| Browser (`.browser`) | Off (`--no-sandbox`) | 384 ms | 162.0 MiB (160.9–165.1) |
+
+In an earlier pair of Minimal runs, per process: GPU 24.5 MiB sandboxed
+against 21.0 MiB, network service 10.9 against 7.7 MiB, the others within
+1 MiB. The sandbox costs a few MiB in the GPU and network processes and
+some tens of milliseconds at launch; SelfTest passes every check with it
+on (491 checks, none skipped). It is on by default in every preset.

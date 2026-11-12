@@ -378,6 +378,11 @@ struct EdgePages: CefSchemeHandler {
 final class LocalServer: @unchecked Sendable {
     private let listener: NWListener
     private(set) var port: UInt16 = 0
+    private let lock = NSLock()
+    private var receivedRequestLines: [String] = []
+
+    /// The first line of each request received, such as `POST /ping HTTP/1.1`.
+    var requestLines: [String] { lock.withLock { receivedRequestLines } }
 
     private init(listener: NWListener) {
         self.listener = listener
@@ -392,6 +397,9 @@ final class LocalServer: @unchecked Sendable {
             connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { data, _, _, _ in
                 let request = data.flatMap { String(data: $0, encoding: .utf8) } ?? ""
                 let path = request.split(separator: " ").dropFirst().first.map(String.init) ?? "/"
+                server.lock.withLock {
+                    server.receivedRequestLines.append(String(request.prefix { $0 != "\r" && $0 != "\n" }))
+                }
                 let head: String, body: String
                 if path.hasPrefix("http://") {
                     // A request sent to this server as a proxy.
@@ -403,6 +411,12 @@ final class LocalServer: @unchecked Sendable {
                             + "Proxy-Authenticate: Basic realm=\"selftest-proxy\"\r\n"
                         body = "<title>proxy denied</title>denied"
                     }
+                } else if path == "/ping-page" {
+                    head = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n"
+                    body = "<title>ping-page</title><a id=link ping=/ping href=/page>A link that pings</a>"
+                } else if path == "/ping" {
+                    head = "HTTP/1.1 204 No Content\r\n"
+                    body = ""
                 } else if path == "/accept-language" {
                     let header = request.split(separator: "\r\n")
                         .first { $0.lowercased().hasPrefix("accept-language:") }

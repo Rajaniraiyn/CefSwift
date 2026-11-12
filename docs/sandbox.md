@@ -1,19 +1,34 @@
 # Sandbox
 
-CefSwift supports Chromium's macOS sandbox, which confines renderer, GPU and
-other helper processes. Turn it on in the configuration:
+Chromium's macOS sandbox confines the renderer, GPU, network and other
+helper processes. CefSwift turns it on by default, in every preset, as
+Chrome does. Turn it off only to debug a helper, or for a bundle that
+`cef bundle` did not make:
 
 ```swift
 static var cefConfiguration: CefConfiguration {
     var configuration = CefConfiguration.browser
-    configuration.isSandboxEnabled = true
+    configuration.isSandboxEnabled = false   // development only
     return configuration
 }
 ```
 
-It is off by default, because sandboxed helpers depend on a consistently
-signed bundle (see [Requirements](#requirements)). Turn it on for
-distribution builds once your signing is in place.
+`--no-sandbox` on the app's command line turns it off for one run.
+
+## Evidence
+
+Measured on 2026-11-13 with CEF 156.0.28 on an M3 MacBook, macOS 27.2, ad
+hoc signed bundles from `cef bundle`:
+
+- SelfTest passes every check with the sandbox on (491 passed, none
+  skipped), and `sandbox_check` reports each helper process sandboxed and
+  the app process not. CI runs SelfTest with `SELFTEST_SANDBOX=1`;
+  `SELFTEST_SANDBOX=0` runs it without the sandbox.
+- Footprint and launch time, measured with
+  [`Scripts/measure-footprint.py`](../Scripts/measure-footprint.py), are in
+  [design notes](design-notes.md#sandbox).
+- Not covered by SelfTest: system media decoders a sandboxed renderer
+  cannot open, which Chromium does not use for web media.
 
 ## How it works
 
@@ -55,10 +70,10 @@ does not have, fails to start the GPU process, and ends the app.
 ## Requirements
 
 - **Signing.** The sandbox depends on bundle identity and on consistent
-  signing across the app and all five helpers. Ship sandboxed builds signed
-  with a Developer ID or App Store identity, with the hardened runtime for
-  notarization ([bundling](bundling.md#distribution)). Ad hoc signed builds
-  may work, but that is not guaranteed across macOS updates.
+  signing across the app and all five helpers, which `cef bundle` gives
+  every bundle, ad hoc ones included. Ship builds signed with a Developer
+  ID or App Store identity, with the hardened runtime for notarization
+  ([bundling](bundling.md#distribution)).
 - **Bundle layout.** The helper finds both libraries and the framework by
   paths relative to its executable, so keep the layout that `cef bundle`
   produces.

@@ -1,7 +1,7 @@
 import Foundation
 
 /// Whether Chromium keeps the key that encrypts cookies and other secrets in
-/// the user's keychain, as the "Chromium Safe Storage" item.
+/// the user's keychain, in the item ``CefConfiguration/keychainItem`` names.
 ///
 /// The first time an app uses that item, macOS asks the user to allow it.
 /// Choosing Always Allow records the app's code signature, so a signed app
@@ -22,6 +22,40 @@ public enum CefSafeStoragePolicy: Sendable {
     /// (`--use-mock-keychain`). Nothing is protected at rest, so use this
     /// only for development, demos and tests.
     case mockKeychain
+}
+
+/// The keychain item that holds Chromium's encryption key, for
+/// ``CefSafeStoragePolicy/keychain``. Set it with
+/// ``CefConfiguration/keychainItem``.
+///
+/// The key encrypts each profile's cookies, saved passwords and other
+/// secrets. Another item holds another key, so changing the item makes
+/// what profiles saved under the old one unreadable: Chromium drops those
+/// cookies and passwords. Choose the item before the first release.
+public enum CefKeychainItem: Sendable, Equatable {
+    /// An item of the app's own: service `"<bundle identifier> Safe
+    /// Storage"`, account `"<bundle identifier>"`. Other Chromium-based
+    /// apps, which share Chromium's item, cannot read it. The default.
+    case application
+    /// Chromium's own item, "Chromium Safe Storage", which every app built
+    /// on stock Chromium or CEF uses unless it names another.
+    case chromium
+    /// An item by service and account name, for instance one several apps
+    /// of yours share (each needs the user's permission to read it).
+    case named(service: String, account: String)
+
+    /// The service and account Chromium gets; `nil` for Chromium's own.
+    func names(bundleIdentifier: String?) -> (service: String, account: String)? {
+        switch self {
+        case .chromium:
+            return nil
+        case .named(let service, let account):
+            return (service, account)
+        case .application:
+            guard let bundleIdentifier, !bundleIdentifier.isEmpty else { return nil }
+            return ("\(bundleIdentifier) Safe Storage", bundleIdentifier)
+        }
+    }
 }
 
 extension CefSafeStoragePolicy {

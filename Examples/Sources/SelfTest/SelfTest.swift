@@ -28,6 +28,7 @@ enum SelfTest {
         configuration.preferences["webkit.webprefs.default_font_size"] = 21
         configuration.preferences["browser.confirm_to_quit"] = false
         configuration.customSchemes = [CefCustomScheme(name: "selftest")]
+        if let sandboxOverride { configuration.isSandboxEnabled = sandboxOverride }
         configuration.rootCacheDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("cefswift-selftest-\(ProcessInfo.processInfo.processIdentifier)")
         // relaunchChecks() starts this app a second time on the same cache
@@ -146,6 +147,7 @@ enum SelfTest {
     /// outside accessibility client instead of checks.
     static let checkGroups: [(name: String, run: @MainActor () async -> Void)] = [
         ("capabilities", { capabilityChecks() }),
+        ("sandbox", sandboxChecks),
         ("windowed", windowedBrowserChecks),
         ("offscreen", offscreenBrowserChecks),
         ("threads", threadChecks),
@@ -159,6 +161,7 @@ enum SelfTest {
         ("behavior", browserBehaviorChecks),
         ("authentication", authenticationChecks),
         ("localization", localizationChecks),
+        ("configuration", configurationChecks),
         ("favicon", faviconChecks),
         ("toolbarAndZoom", toolbarAndZoomChecks),
         ("bridgeScope", bridgeScopeChecks),
@@ -321,6 +324,19 @@ enum SelfTest {
             skip("offscreen: paints", because: "the test window is not visible (screen locked or asleep?)", .environment)
         }
         await expect("offscreen: evaluateJavaScript") { try await browser.evaluateJavaScript("document.title").stringValue == "second" }
+        if window.occlusionState.contains(.visible) {
+            // From the frame the view shows, at its pixel size, without a
+            // DevTools session.
+            let attachedBefore = browser.devTools.isAttached
+            let png = try? await browser.snapshot()
+            let image = png.flatMap { NSBitmapImageRep(data: $0) }
+            let scale = window.backingScaleFactor
+            check("offscreen: snapshot comes from the view's frame, without DevTools",
+                  image?.pixelsWide == Int(view.bounds.width * scale) && image?.pixelsHigh == Int(view.bounds.height * scale)
+                    && !attachedBefore && !browser.devTools.isAttached,
+                  detail: "\(image.map { "\($0.pixelsWide)x\($0.pixelsHigh)" } ?? "no image"), view \(view.bounds.size) at \(scale), "
+                      + "DevTools attached \(browser.devTools.isAttached)")
+        }
         browser.close(force: true)
         check("offscreen: closes", await waitUntil { browser.state == .closed })
         view.removeFromSuperview()

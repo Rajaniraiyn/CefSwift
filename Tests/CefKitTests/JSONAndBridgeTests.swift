@@ -115,7 +115,7 @@ import Testing
     @Test func embeddedPresetTurnsOffBackgroundServices() {
         let configuration = CefConfiguration.embedded
         #expect(configuration.extraCommandLineSwitches.keys.contains("disable-background-networking"))
-        #expect(configuration.disabledFeatures.contains("Translate"))
+        #expect(configuration.disabledFeatures.contains("OptimizationHints"))
     }
 
     /// Chromium sets `navigator.webdriver` for these; no preset may.

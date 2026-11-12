@@ -9,7 +9,7 @@ import Testing
         #expect(CefConfiguration.default.protectedMedia == .automatic)
         #expect(CefConfiguration.browser.protectedMedia == .automatic)
         #expect(CefConfiguration.embedded.protectedMedia == .disabled)
-        // The switch follows protectedMedia rather than the preset's list.
+        // The switch follows the typed options rather than the preset's list.
         #expect(CefConfiguration.embedded.extraCommandLineSwitches["disable-component-update"] == nil)
     }
 

@@ -17,11 +17,64 @@ extension SelfTest {
             print("     \(feature.name): \(feature.missing.isEmpty ? "installed" : "unavailable")")
         }
         await bubbleChecks()
+        await statusBubbleOffAtCreationChecks()
         await chromeSwipeChecks()
         await viewSwipeIndicatorChecks()
     }
 
     // MARK: Chromium's surfaces
+
+    /// A status bubble hidden in the window's configuration is switched off
+    /// in Chromium: no window for it ever attaches, and the hovered link's
+    /// address still reaches `statusText`.
+    static func statusBubbleOffAtCreationChecks() async {
+        guard let server = try? await LocalServer.start() else {
+            skip("surfaces: status bubble off at creation", because: "could not start a local HTTP server", .environment)
+            return
+        }
+        defer { server.stop() }
+        let browser = CefBrowser(url: URL(string: "http://127.0.0.1:\(server.port)/page")!)
+        var configuration = CefBrowserWindow.Configuration()
+        configuration.frame = CGRect(x: 160, y: 160, width: 900, height: 640)
+        var ui = CefChromiumUI()
+        ui[.statusBubble] = .hidden
+        ui[.zoom] = .hidden
+        configuration.chromiumUI = ui
+        let window = CefBrowserWindow(browser: browser, configuration: configuration)
+        window.show()
+        defer { window.close() }
+        guard await waitUntil({ browser.title == "page" && !browser.isLoading }), let nsWindow = window.window else {
+            check("surfaces: status bubble off at creation: page loads", false, detail: browser.title)
+            return
+        }
+        check("surfaces: chromiumUI starts as the configuration's", window.chromiumUI[.statusBubble] == .hidden)
+        nsWindow.orderFrontRegardless()
+        var hovered = false
+        for _ in 0..<5 where !hovered {
+            _ = try? await browser.devTools.send("Input.dispatchMouseEvent", ["type": "mouseMoved", "x": 1, "y": 1])
+            let point = try? await browser.evaluateJavaScript(
+                "(() => { const r = document.getElementById('link').getBoundingClientRect(); return [r.x + 4, r.y + 4]; })()")
+            _ = try? await browser.devTools.send("Input.dispatchMouseEvent", [
+                "type": "mouseMoved", "x": .number(point?[0].doubleValue ?? 0), "y": .number(point?[1].doubleValue ?? 0),
+            ])
+            hovered = await waitUntil(timeout: .seconds(2)) { !browser.statusText.isEmpty }
+        }
+        // Chromium shows its bubble a moment after the address arrives.
+        try? await Task.sleep(for: .milliseconds(800))
+        let attached = (nsWindow.childWindows ?? []).filter { NSStringFromClass(type(of: $0)) == "NativeWidgetMacNSWindow" }.count
+        if !hovered, !nsWindow.occlusionState.contains(.visible) {
+            skip("surfaces: a status bubble hidden at creation is never created",
+                 because: "the test window is covered, so Chromium does not hover the page", .environment)
+        } else {
+            check("surfaces: a status bubble hidden at creation is never created, and statusText still follows the pointer",
+                  hovered && attached == 0, detail: "statusText '\(browser.statusText)', \(attached) Chromium windows")
+        }
+        browser.execute(.zoomIn)
+        try? await Task.sleep(for: .milliseconds(500))
+        let zoomWindows = (nsWindow.childWindows ?? []).filter { NSStringFromClass(type(of: $0)) == "NativeWidgetMacNSWindow" }
+        check("surfaces: a zoom bubble hidden at creation does not appear", zoomWindows.isEmpty,
+              detail: "\(zoomWindows.count) Chromium windows")
+    }
 
     static func bubbleChecks() async {
         guard let server = try? await LocalServer.start() else {
