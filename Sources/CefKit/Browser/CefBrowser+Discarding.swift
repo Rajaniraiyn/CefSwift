@@ -269,6 +269,7 @@ extension CefBrowser {
         let waiters = restoreWaiters
         restoreWaiters = []
         waiters.forEach { $0.resume() }
+        reassertAccessibilityState()
         delegate?.browserDidRestore(self)
     }
 

@@ -45,7 +45,7 @@ extension SelfTest {
             allElements(under: view).contains { ($0.accessibilityTitle() ?? $0.accessibilityLabel()) == "Inner button" }
         }
         check("accessibility: tree arrives, iframe included", loaded,
-              detail: "\(browser.accessibilityTree.nodeCount) nodes")
+              detail: "\(browser.accessibilityTree.nodeCount) nodes, enabled \(browser.isAccessibilityEnabled), discarded \(browser.isDiscarded), state \(browser.state), title \(browser.title), loading \(browser.isLoading)")
 
         let children = view.accessibilityChildren() ?? []
         let webArea = children.first as? NSAccessibilityElement
@@ -226,7 +226,7 @@ extension SelfTest {
         view.isHidden = false
         browser.restore()
         check("accessibility: the tree comes back after a restore", await waitUntil { !browser.isDiscarded && browser.isAccessibilityEnabled && hasButton() },
-              detail: "\(browser.accessibilityTree.nodeCount) nodes")
+              detail: "\(browser.accessibilityTree.nodeCount) nodes, enabled \(browser.isAccessibilityEnabled), discarded \(browser.isDiscarded), state \(browser.state), title \(browser.title), loading \(browser.isLoading)")
         browser.close(force: true)
         _ = await waitUntil { browser.state == .closed }
     }

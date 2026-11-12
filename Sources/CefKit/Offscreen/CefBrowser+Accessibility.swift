@@ -92,6 +92,14 @@ extension CefBrowser {
         accessibilityDidClose()
     }
 
+    /// Setting the state at creation does not take for a browser created
+    /// again after a discard (in CEF 156), so it is set again when the
+    /// restored page starts loading.
+    func reassertAccessibilityState() {
+        guard isAccessibilityEnabled else { return }
+        withHost { $0.pointee.set_accessibility_state($0, STATE_ENABLED) }
+    }
+
     // MARK: Updates from Chromium
 
     func accessibilityTreeDidChange(_ value: CefJSON) {
@@ -109,28 +117,13 @@ extension CefBrowser {
     }
 
     /// Chromium reports scrolling to accessibility clients in a form CEF
-    /// does not pass on, so the document's scroll position is read with the
-    /// DevTools protocol's `Page.getLayoutMetrics` after the page repaints,
-    /// at most a few times a second.
-    func accessibilityPageDidPaint() {
-        guard isAccessibilityEnabled, !isAccessibilityScrollRefreshPending, !accessibilityTree.isEmpty else { return }
-        isAccessibilityScrollRefreshPending = true
-        Task {
-            try? await Task.sleep(for: .milliseconds(150))
-            await refreshAccessibilityScrollPosition()
-            isAccessibilityScrollRefreshPending = false
-        }
-    }
-
-    /// Reads the document's scroll position into the tree.
-    func refreshAccessibilityScrollPosition() async {
-        guard isAccessibilityEnabled, let metrics = try? await devTools.send("Page.getLayoutMetrics") else { return }
-        let viewport = metrics["cssLayoutViewport"]
-        guard isAccessibilityEnabled, let x = viewport["pageX"].doubleValue, let y = viewport["pageY"].doubleValue,
-              let width = viewport["clientWidth"].doubleValue
-        else { return }
-        let changes = accessibilityTree.applyDocumentScroll(CGPoint(x: x, y: y), viewportWidth: width)
-        if !changes.isEmpty { client?.offscreenHost?.offscreenAccessibilityTreeDidChange(changes) }
+    /// does not pass on, so the document's scroll position comes from the
+    /// render handler's `on_scroll_offset_changed`, which reports it in the
+    /// same physical pixels as the tree.
+    func accessibilityScrollOffsetDidChange(_ offset: CGPoint) {
+        guard isAccessibilityEnabled, let host = client?.offscreenHost else { return }
+        let changes = accessibilityTree.applyDocumentScroll(offset)
+        if !changes.isEmpty { host.offscreenAccessibilityTreeDidChange(changes) }
     }
 
     /// Keeps the tree's pixel-to-point ratio in step with the host.
@@ -247,7 +240,6 @@ extension CefBrowser {
         // The scroll lands in the renderer asynchronously.
         let deadline = ContinuousClock.now + .seconds(1)
         while ContinuousClock.now < deadline {
-            await refreshAccessibilityScrollPosition()
             if isInView(accessibilityTree.frame(of: node.id)) { return true }
             try? await Task.sleep(for: .milliseconds(16))
         }

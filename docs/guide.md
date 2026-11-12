@@ -452,6 +452,7 @@ What a discard keeps:
 | `devTools` event streams | Keep delivering | Keep delivering; enabled domains are enabled again |
 | Other DevTools session state | Kept | Lost (overrides, scripts added through `devTools`) |
 | `identifier` | Kept | A new one |
+| Offscreen accessibility tree | — | Emptied, and built again when the page loads |
 
 A Chrome-style browser is discarded by Chromium itself and comes back when
 its window is shown. A browser in a view is discarded by closing its

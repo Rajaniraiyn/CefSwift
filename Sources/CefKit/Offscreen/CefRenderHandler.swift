@@ -145,7 +145,6 @@ extension CefBrowserClient {
             let rects = CGRect.array(dirtyRects, count: dirtyCount)
             let frame = CefOffscreenFrame.cpu(buffer: buffer, width: Int(width), height: Int(height), dirtyRects: rects)
             CefBrowserClient.withOffscreenHost(s) { $0.offscreenDidPaint(frame, element: element) }
-            if element == .view { CefBrowserClient.pageDidPaint(s) }
         }
 
         handler.pointee.on_accelerated_paint = { s, browser, type, _, _, info in
@@ -157,7 +156,14 @@ extension CefBrowserClient {
             CefBrowserClient.withOffscreenHost(s) {
                 $0.offscreenDidPaint(.accelerated(surface: surface, size: size), element: element)
             }
-            if element == .view { CefBrowserClient.pageDidPaint(s) }
+        }
+
+        handler.pointee.on_scroll_offset_changed = { s, browser, x, y in
+            cefRelease(browser)
+            guard let client = cefOwner(CefBrowserClient.self, s) else { return }
+            MainActor.assumeIsolated {
+                client.primary?.accessibilityScrollOffsetDidChange(CGPoint(x: x, y: y))
+            }
         }
 
         handler.pointee.start_dragging = { s, browser, dragData, allowedOps, x, y in
@@ -220,12 +226,6 @@ extension CefBrowserClient {
     ) -> CefOffscreenViewInfo {
         guard let client = cefOwner(CefBrowserClient.self, handler) else { return CefOffscreenViewInfo() }
         return MainActor.assumeIsolated { client.offscreenHost?.offscreenViewInfo ?? CefOffscreenViewInfo() }
-    }
-
-    /// Lets the accessibility tree catch up with scrolling, which repaints.
-    private nonisolated static func pageDidPaint(_ handler: UnsafeMutablePointer<cef_render_handler_t>?) {
-        guard let client = cefOwner(CefBrowserClient.self, handler) else { return }
-        MainActor.assumeIsolated { client.primary?.accessibilityPageDidPaint() }
     }
 
     /// Runs `body` with the offscreen host, if the client and host still exist.
