@@ -541,12 +541,25 @@ final class CefBrowserClient {
                 return 0
             }
             return CefBrowserClient.run(s, browser, default: 0) { _, b in
-                b.decide(.page) { await $0.browser(b, decidePermissionFor: request) } then: { decision in
-                    if decision == .allow {
-                        callback.pointer.pointee.cont(callback.pointer, kinds.mediaMask(within: requested))
+                // Chromium asks before it reads the site settings for media,
+                // so stored values answer here, and only the rest is asked.
+                let stored = b.storedAnswer(to: request)
+                let answer = { (granted: CefPermissionKind) in
+                    let mask = granted.mediaMask(within: requested)
+                    if mask != 0 {
+                        callback.pointer.pointee.cont(callback.pointer, mask)
                     } else {
                         callback.pointer.pointee.cancel(callback.pointer)
                     }
+                }
+                guard !stored.undecided.isEmpty else {
+                    answer(stored.granted(after: nil))
+                    return 1
+                }
+                let asked = CefPermissionRequest(kinds: stored.undecided, origin: request.origin)
+                b.decide(.page) { await $0.browser(b, decidePermissionFor: asked) } then: { decision in
+                    b.remember(decision, for: asked.kinds, origin: asked.origin)
+                    answer(stored.granted(after: decision))
                 }
                 return 1
             }
@@ -562,6 +575,7 @@ final class CefBrowserClient {
             }
             return CefBrowserClient.run(s, browser, default: 0) { _, b in
                 b.decide(.permissionPrompt(promptID)) { await $0.browser(b, decidePermissionFor: request) } then: { decision in
+                    b.remember(decision, for: request.kinds, origin: request.origin)
                     callback.pointer.pointee.cont(callback.pointer, decision.cefResult)
                 }
                 return 1

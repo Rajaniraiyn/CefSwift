@@ -32,6 +32,7 @@ are `@MainActor`.
   - [Tabs Chromium opens itself](#tabs-chromium-opens-itself)
 - [Customizing Chromium's own pages](#customizing-chromiums-own-pages)
 - [Profiles](#profiles)
+  - [Site settings](#site-settings)
   - [Bookmarks, history and suggestions](#bookmarks-history-and-suggestions)
 - [DevTools](#devtools)
 - [Compatibility with bot protection](#compatibility-with-bot-protection)
@@ -214,6 +215,31 @@ try CefRuntime.shared.setPreference("browser.confirm_to_quit", to: false)
 throws `CefError.operationFailed` for an unknown name or a value of the wrong
 type, and restores the default when passed `nil`. Values are `CefJSON`,
 which accepts Swift literals.
+
+`CefProfile.preferences` and `CefRuntime.shared.preferences` give the same
+preferences typed keys, observation and their state. A `CefPreferences.Key`
+names a preference with the Swift type of its value; the common ones are
+static members, and `Key<Bool>("dotted.name")` makes others:
+
+```swift
+let preferences = profile.preferences
+try preferences.set(false, for: .savesPasswords)
+let size = preferences[.defaultFontSize]                 // Int?
+try preferences.set(["de", "en-US"], for: .acceptLanguages)
+try preferences.reset(.acceptLanguages)                  // its default again
+
+for await languages in preferences.observe(.acceptLanguages) {
+    print(languages ?? [])                               // now, then on each change
+}
+```
+
+`canSet(_:)` is `false` for a preference an enterprise policy manages or a
+command-line switch set; Chromium does not say which of the two.
+`isDefault(_:)` tells whether anything set a preference. Chromium has no
+call that reads a default while another value is set, so to see one,
+`reset(_:)` the preference. `observe(_:)` yields the value first, then each
+change, from Chromium's settings pages as well as from your code, for as
+long as you iterate it.
 
 ### Relaunching
 
@@ -729,7 +755,7 @@ final class Policy: CefBrowserDelegate {
 |---|---|
 | `browser(_:runJavaScriptDialog:) async` | Native sheet |
 | `browser(_:confirmLeavingPage:) async` (`beforeunload`) | Native sheet |
-| `browser(_:decidePermissionFor:) async` | `.deny` |
+| `browser(_:decidePermissionFor:) async` | `.deny`. Asked only when the site settings leave the request to the user; see [Site settings](#site-settings) |
 | `browser(_:credentialFor:) async` (HTTP authentication) | Native sign-in sheet. CEF 156 does not call it; see [Known limits](#known-limits) |
 | `browser(_:shouldProceedDespite:) async` (certificate errors) | `false`: the load is cancelled |
 | `browser(_:decideDestinationFor:suggestedName:) async` | `.allow(destination: nil)`: `~/Downloads` |
@@ -1322,6 +1348,64 @@ alive forever.
 `allPreferences(includingDefaults:)` returns every preference as one JSON
 object. `setColorScheme(_:accentColor:)` themes Chrome-style UI and sets the
 `prefers-color-scheme` pages see.
+
+### Site settings
+
+`profile.siteSettings` holds what each site may use, as Chrome's site
+settings do: a `CefSitePermission` (`.camera`, `.microphone`,
+`.geolocation`, `.notifications`, `.popups`, `.javaScript`, `.images`,
+`.cookies`, `.sound`, `.automaticDownloads`, `.clipboard`, `.usbDevices`,
+`.serialPorts`, `.hidDevices`, `.bluetoothDevices`, …) set to `.allow`,
+`.block` or `.ask` for an origin:
+
+```swift
+let site = URL(string: "https://meet.example")!
+let settings = profile.siteSettings
+settings.set(.allow, for: .camera, origin: site)
+settings.setting(for: .notifications, origin: site)      // .ask: the default applies
+settings.setDefaultSetting(.block, for: .popups)         // for every site without its own
+settings.reset(origin: site)                             // the defaults apply again
+
+for await change in settings.changes {
+    print(change.permission, change.origin)
+}
+```
+
+`setting(for:origin:)` returns the value that applies: the site's own or
+the profile's default. `supportedSettings` lists the values a permission
+takes; Chromium has no `.ask` for content switches such as images and
+JavaScript, and no `.allow` for device choosers, which ask for each
+device. Cookies also take `.sessionOnly`. Settings belong to origins, so
+every page of a site shares them.
+
+`changes` reports every change for as long as you iterate it, including
+those Chromium's own prompts and `chrome://settings` make.
+`exceptions(for:)` lists the values sites have of their own. Chromium has
+no call for that; it reads the profile's
+`profile.content_settings.exceptions` preference, where Chromium keeps
+them, so for an incognito profile, which keeps them in memory, it lists
+none.
+
+The settings and the permission delegate agree. Chromium does not ask
+about a prompt-based permission (notifications, location, MIDI, window
+management, …) that a site has `.allow` or `.block` for, and keeps the
+answer the delegate gives, `.allow` or `.deny`, for the site as Chrome
+does. Camera and microphone requests reach the delegate before Chromium
+reads the settings, so CefSwift answers them from the settings itself, and
+asks the delegate only about kinds that are still `.ask`. An answer there
+applies to that request; `.alwaysAllow` and `.alwaysDeny` also store it:
+
+```swift
+func browser(_ browser: CefBrowser, decidePermissionFor request: CefPermissionRequest) async -> CefPermissionDecision {
+    let (allowed, remember) = await askUserRemembering(about: request.kinds, from: request.origin)
+    switch (allowed, remember) {
+    case (true, true): return .alwaysAllow
+    case (true, false): return .allow
+    case (false, true): return .alwaysDeny
+    case (false, false): return .deny
+    }
+}
+```
 
 ### Bookmarks, history and suggestions
 

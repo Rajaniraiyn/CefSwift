@@ -166,6 +166,7 @@ enum SelfTest {
         ("chromiumTabs", chromiumTabChecks),
         ("chromeWindow", chromeWindowChecks),
         ("operations", operationChecks),
+        ("siteSettings", siteSettingsChecks),
         // Last: it leaves discarded browsers open for the quit.
         ("discard", discardChecks),
     ]

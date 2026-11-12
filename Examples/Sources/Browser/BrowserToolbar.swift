@@ -141,6 +141,9 @@ struct AddressBar: View {
                     .padding(.vertical, 2)
                     .background(.tint.opacity(0.2), in: .capsule)
             }
+            if !isFocused, let security = SiteSecurity(url: browser.url) {
+                PageInfoButton(browser: browser, security: security)
+            }
             ZStack {
                 TextField("Search or enter website name", text: $text)
                     .textFieldStyle(.plain)
@@ -153,7 +156,6 @@ struct AddressBar: View {
                     // full address. (Changing the field's own alignment
                     // would end editing, so this is a separate view.)
                     HStack(spacing: 5) {
-                        if let security = SiteSecurity(url: browser.url) { security.badge }
                         Text(summary.isEmpty ? "Search or enter website name" : summary)
                             .foregroundStyle(summary.isEmpty ? .tertiary : .primary)
                             .lineLimit(1)

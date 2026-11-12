@@ -331,8 +331,17 @@ final class BrowserController: CefBrowserDelegate {
         alert.messageText = "Allow \(request.origin) to use \(request.kinds.summary)?"
         alert.addButton(withTitle: "Allow")
         alert.addButton(withTitle: "Don’t Allow")
+        alert.showsSuppressionButton = true
+        alert.suppressionButton?.title = "Remember for this website"
         guard let window = browser.hostWindow else { return .deny }
-        return await alert.beginSheetModal(for: window) == .alertFirstButtonReturn ? .allow : .deny
+        let allowed = await alert.beginSheetModal(for: window) == .alertFirstButtonReturn
+        let remembers = alert.suppressionButton?.state == .on
+        switch (allowed, remembers) {
+        case (true, true): return .alwaysAllow
+        case (true, false): return .allow
+        case (false, true): return .alwaysDeny
+        case (false, false): return .deny
+        }
     }
 }
 
