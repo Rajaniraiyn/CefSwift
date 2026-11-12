@@ -284,10 +284,18 @@ def exported_names(framework):
         binary = binary / binary.stem
     if not binary.is_file():
         fail(f"no framework binary at {binary}")
-    result = subprocess.run(["xcrun", "nm", "-gUj", str(binary)], capture_output=True, text=True)
-    if result.returncode != 0:
-        fail(f"nm failed for {binary}:\n{result.stderr}")
-    return {line[1:] for line in result.stdout.split() if line.startswith("_")}, binary
+    archs = subprocess.run(["xcrun", "lipo", "-archs", str(binary)], capture_output=True, text=True)
+    if archs.returncode != 0 or not archs.stdout.split():
+        fail(f"lipo could not read the architectures of {binary}:\n{archs.stderr}")
+    # A universal framework must export every function from each slice.
+    exported = None
+    for arch in archs.stdout.split():
+        result = subprocess.run(["xcrun", "nm", "-gUj", "-arch", arch, str(binary)], capture_output=True, text=True)
+        if result.returncode != 0:
+            fail(f"nm failed for the {arch} slice of {binary}:\n{result.stderr}")
+        names = {line[1:] for line in result.stdout.split() if line.startswith("_")}
+        exported = names if exported is None else exported & names
+    return exported, binary
 
 
 def audit_framework(framework, names):

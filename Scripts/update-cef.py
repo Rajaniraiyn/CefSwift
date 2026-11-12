@@ -13,13 +13,20 @@
 A release counts only when it is stable and ships the minimal and standard
 distributions for both macOS architectures. Updating:
 
-  1. downloads the arm64 minimal distribution into .cef/downloads (resumed,
-     size- and SHA-1-verified, one fresh retry if a resumed download does not
-     verify; shared with the CefPlugin cache),
-  2. stages a copy of Sources/CCef/include in .cef/update with the new headers,
+  1. downloads the minimal distributions of both architectures into
+     .cef/downloads (resumed, size- and SHA-1-verified, one fresh retry if a
+     resumed download does not verify),
+  2. stages a copy of Sources/CCef/include in .cef/update with the new
+     headers (from the arm64 distribution),
   3. regenerates the C bridge there (Scripts/generate-bindings.py), which also
      fails clearly if the new headers no longer support the pinned API version,
-  4. only then swaps the staged files into the tree and rewrites CEF_VERSION.json.
+  4. repackages the two distributions' frameworks as the XCFramework zip in
+     .cef/xcframework (Scripts/package-cef.py),
+  5. only then swaps the staged files into the tree, pins the zip's release
+     URL and checksum in Package.swift, and rewrites CEF_VERSION.json.
+
+The zip still has to be published as the `cef-<version>` release asset that
+Package.swift names; the CEF Update workflow does that (docs/automation.md).
 
 A failure at any step leaves the tree untouched. Running it twice is a no-op.
 
@@ -28,7 +35,8 @@ never changes the C API the Swift code sees. --api-version alone works on the
 headers already vendored and leaves the CEF version alone.
 
 Results: $GITHUB_OUTPUT (or stdout) gets updated, cef_old, cef_new, api_old,
-api_new and subject; .cef/update/ gets commit-message.txt and pr-body.md.
+api_new, subject, xcframework_tag and xcframework_checksum; .cef/update/ gets
+commit-message.txt and pr-body.md.
 """
 
 import argparse
@@ -51,6 +59,8 @@ CCEF_INCLUDE = ROOT / "Sources" / "CCef" / "include"
 VENDORED = CCEF_INCLUDE / "include"
 GENERATED = ("ccef_config.h", "ccef_capi.h", "ccef_symbols.h")
 GENERATOR = ROOT / "Scripts" / "generate-bindings.py"
+PACKAGER = ROOT / "Scripts" / "package-cef.py"
+PACKAGE_SWIFT = ROOT / "Package.swift"
 DOWNLOADS = ROOT / ".cef" / "downloads"
 WORK = ROOT / ".cef" / "update"
 
@@ -78,13 +88,31 @@ def version_key(version):
     return tuple(int(part) for part in match.groups()[:3]) if match else None
 
 
-def bindings():
-    """Scripts/generate-bindings.py as a module, for its pin helpers."""
+def script_module(name, path):
     sys.dont_write_bytecode = True  # no Scripts/__pycache__ in the tree
-    spec = importlib.util.spec_from_file_location("generate_bindings", GENERATOR)
+    spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def bindings():
+    """Scripts/generate-bindings.py as a module, for its pin helpers."""
+    return script_module("generate_bindings", GENERATOR)
+
+
+def package_cef():
+    """Scripts/package-cef.py as a module, for the XCFramework."""
+    return script_module("package_cef", PACKAGER)
+
+
+def repository(manifest):
+    """The GitHub repository whose releases host the XCFramework."""
+    if os.environ.get("GITHUB_REPOSITORY"):
+        return os.environ["GITHUB_REPOSITORY"]
+    match = re.match(r"^https://github\.com/([^/]+/[^/]+)/releases/",
+                     manifest.get("xcframework", {}).get("url", ""))
+    return match.group(1) if match else "Rajaniraiyn/CefSwift"
 
 
 # --- network -----------------------------------------------------------------
@@ -268,7 +296,7 @@ def move(source, destination):
 # --- describing the change ---------------------------------------------------
 
 
-def describe(cef_old, cef_new, chromium_old, chromium_new, api_old, api_new, symbols):
+def describe(cef_old, cef_new, chromium_old, chromium_new, api_old, api_new, symbols, xcframework=None):
     """(subject, commit body, pull-request description)."""
     cef_moved, api_moved = cef_old != cef_new, api_old != api_new
     if cef_moved and api_moved:
@@ -299,8 +327,14 @@ def describe(cef_old, cef_new, chromium_old, chromium_new, api_old, api_new, sym
         row("Chromium", chromium_old, chromium_new),
         row("`CEF_API_VERSION`", api_old, api_new), "",
         symbols.strip(), "",
+        *([f"`Package.swift` links the framework from the `{xcframework['tag']}` release "
+           f"([{Path(xcframework['url']).name}]({xcframework['url']}), {xcframework['size'] // 1_000_000} MB, "
+           f"checksum `{xcframework['checksum']}`), which this workflow published as a prerelease from "
+           "the official distributions of both architectures (`Scripts/package-cef.py`).", ""]
+          if xcframework and cef_moved else []),
         "CI builds and tests the package, checks the generated bridge against the headers and "
-        "the framework's exports, and runs the SelfTest app against the real Chromium.", "",
+        "the framework's exports, rebuilds the XCFramework to check its checksum, and runs the "
+        "SelfTest app against the real Chromium.", "",
     ])
     return subject, body, description
 
@@ -386,6 +420,21 @@ def main(argv=None):
         fail(f"could not generate the bridge for CEF {version}; the working tree is unchanged{hint}")
     api_new = bindings().read_pin(stage)
 
+    # The XCFramework that Package.swift's binary target pins, from both
+    # architectures' distributions (Scripts/package-cef.py).
+    package_swift = None
+    if revendor or "xcframework" not in current:
+        packager = package_cef()
+        _, archive = packager.build(manifest)
+        tag = packager.release_tag(manifest["cef"])
+        url = packager.asset_url(repository(current), tag)
+        checksum = packager.sha256(archive)
+        manifest = dict(manifest, xcframework={"tag": tag, "url": url, "checksum": checksum,
+                                               "size": archive.stat().st_size})
+        package_swift = packager.pin_package_swift(PACKAGE_SWIFT.read_text(), url, checksum)
+        if package_swift == PACKAGE_SWIFT.read_text():
+            package_swift = None
+
     headers_changed = not same_tree(stage / "include", VENDORED)
     changed_files = [n for n in GENERATED if (stage / n).read_bytes() != (CCEF_INCLUDE / n).read_bytes()]
     manifest_changed = manifest != current
@@ -402,6 +451,10 @@ def main(argv=None):
         move(stage / "include", VENDORED)
     for name in changed_files:
         os.replace(stage / name, CCEF_INCLUDE / name)
+    if package_swift is not None:
+        temporary = PACKAGE_SWIFT.with_name(PACKAGE_SWIFT.name + ".tmp")
+        temporary.write_text(package_swift)
+        os.replace(temporary, PACKAGE_SWIFT)
     if manifest_changed:
         temporary = MANIFEST.with_name(MANIFEST.name + ".tmp")
         temporary.write_text(json.dumps(manifest, indent=2) + "\n")
@@ -411,11 +464,13 @@ def main(argv=None):
 
     subject, body, description = describe(current["cef"], manifest["cef"], current["chromium"],
                                            manifest["chromium"], api_old, api_new,
-                                           (WORK / "symbols.md").read_text())
+                                           (WORK / "symbols.md").read_text(), manifest.get("xcframework"))
     (WORK / "commit-message.txt").write_text(f"{subject}\n\n{body}\n")
     (WORK / "pr-body.md").write_text(description)
+    xcframework = manifest.get("xcframework", {})
     write_outputs(updated="true", cef_old=current["cef"], cef_new=manifest["cef"],
-                  api_old=api_old, api_new=api_new, subject=subject)
+                  api_old=api_old, api_new=api_new, subject=subject,
+                  xcframework_tag=xcframework.get("tag", ""), xcframework_checksum=xcframework.get("checksum", ""))
     log(subject)
 
 
@@ -474,7 +529,10 @@ def self_test():
             for platform in PLATFORMS:
                 self.assertEqual(list(manifest["platforms"][platform]), list(FLAVORS))
                 self.assertEqual(list(manifest["platforms"][platform]["minimal"]), ["name", "sha1", "size"])
-            self.assertEqual(list(manifest), list(json.loads(MANIFEST.read_text())))
+            # CEF_VERSION.json adds the XCFramework pin (Scripts/package-cef.py) last.
+            self.assertEqual(list(manifest) + ["xcframework"], list(json.loads(MANIFEST.read_text())))
+            self.assertEqual(sorted(json.loads(MANIFEST.read_text())["xcframework"]),
+                             ["checksum", "size", "tag", "url"])
 
         def test_rejects_unexpected_index_shapes(self):
             with tempfile.TemporaryDirectory() as directory:
@@ -581,6 +639,19 @@ def self_test():
             self.assertEqual(gb.describe_diff(before, before, True), "C API: unchanged (3 functions).")
             self.assertIn("- Added: `cef_d`", gb.describe_diff(before, after, True))
 
+        def test_finds_the_hosting_repository(self):
+            saved = os.environ.pop("GITHUB_REPOSITORY", None)
+            try:
+                url = "https://github.com/someone/fork/releases/download/cef-1.2.3/x.zip"
+                self.assertEqual(repository({"xcframework": {"url": url}}), "someone/fork")
+                self.assertEqual(repository({}), "Rajaniraiyn/CefSwift")
+                os.environ["GITHUB_REPOSITORY"] = "org/repo"
+                self.assertEqual(repository({"xcframework": {"url": url}}), "org/repo")
+            finally:
+                os.environ.pop("GITHUB_REPOSITORY", None)
+                if saved is not None:
+                    os.environ["GITHUB_REPOSITORY"] = saved
+
         def test_describes_each_kind_of_change(self):
             a, b = v("156.0.26"), v("156.0.28")
             subject, body, text = describe(a, b, "1", "2", 15600, 15600, "C API: unchanged (1 functions).")
@@ -592,6 +663,10 @@ def self_test():
             self.assertIn("does not merge itself", text)
             self.assertEqual(describe(a, b, "1", "2", 15600, 15700, "")[0],
                              f"Update CEF to {b} and CEF_API_VERSION to 15700")
+            pin = {"tag": "cef-156.0.28", "url": "https://h/cef-156.0.28/F.zip", "checksum": "abc", "size": 264_000_000}
+            text = describe(a, b, "1", "2", 15600, 15600, "", pin)[2]
+            self.assertIn("`cef-156.0.28` release ([F.zip](https://h/cef-156.0.28/F.zip), 264 MB, checksum `abc`)", text)
+            self.assertNotIn("cef-156.0.28", describe(a, a, "1", "1", 15600, 15700, "", pin)[2])
 
     result = unittest.TextTestRunner(verbosity=2).run(unittest.defaultTestLoader.loadTestsFromTestCase(Tests))
     sys.exit(0 if result.wasSuccessful() else 1)

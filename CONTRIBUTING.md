@@ -14,20 +14,36 @@ plugin's signing and distribution logic; none of them starts Chromium.
 directory symlink, since a test target cannot depend on a plugin, so keep
 that directory free of `PackagePlugin` and of running tools.
 
-The loader tests run only when `CEF_FRAMEWORK_PATH` names a CEF framework,
-either the `.framework` directory or the binary inside it. Download one with
-the plugin and point at it with an absolute path:
+SwiftPM fetches the CEF framework that `Package.swift` pins from its GitHub
+release ([The framework](docs/bundling.md#the-framework)). To build without
+that release, for example on a branch that moves CEF before its framework is
+published, repackage the official distributions locally and point the
+package at the result:
 
 ```sh
-swift package --allow-writing-to-package-directory --allow-network-connections all cef download
-CEF_FRAMEWORK_PATH="$PWD/.cef/dist/<version>_macosarm64_minimal/Release/Chromium Embedded Framework.framework" \
+Scripts/package-cef.py --no-zip        # downloads both minimal distributions (~280 MB) once
+export CEFSWIFT_LOCAL_FRAMEWORK=1      # use .cef/xcframework instead of the release asset
+```
+
+Keep the variable set for every `swift` command in that shell, including the
+plugin's: SwiftPM caches the evaluated manifest by its environment.
+
+The loader tests run only when `CEF_FRAMEWORK_PATH` names a CEF framework,
+either the `.framework` directory or the binary inside it, by an absolute
+path. The XCFramework SwiftPM resolved has one:
+
+```sh
+CEF_FRAMEWORK_PATH="$PWD/.cef/xcframework/ChromiumEmbeddedFramework.xcframework/macos-arm64_x86_64/Chromium Embedded Framework.framework" \
     swift test
 ```
 
-`swift package cef info` prints the pinned version and the cache's state.
-Tests that need a downloaded framework or a repository checkout are
-conditioned with `.enabled(if:)`, as in `LoaderTests`; do the same for new
-ones.
+(Without `CEFSWIFT_LOCAL_FRAMEWORK`, SwiftPM extracts the XCFramework under
+`.build/artifacts/`.)
+`swift package cef info` prints the framework's version and where it came
+from. Tests that need a framework or a repository checkout are conditioned
+with `.enabled(if:)`, as in `LoaderTests`; do the same for new ones. Test
+targets do not depend on the `ChromiumEmbeddedFramework` product: a test
+bundle that links it cannot load.
 
 ## Run the examples
 
@@ -41,9 +57,9 @@ swift package --package-path Examples \
 open Examples/dist/Browser.app
 ```
 
-The other products are `Showcase` and `SelfTest`. The plugin keeps its cache
-in the invoking package, so the Examples package downloads CEF into
-`Examples/.cef/`. [Examples/README.md](Examples/README.md) lists the launch
+The other products are `Showcase`, `Minimal`, `Compat` and `SelfTest`. The
+Examples package depends on the checkout by path, so it uses the same
+framework. [Examples/README.md](Examples/README.md) lists the launch
 arguments.
 
 ## Verify with SelfTest
@@ -93,8 +109,10 @@ Scripts/generate-bindings.py           # regenerate
 Scripts/generate-bindings.py --check   # verify, as CI does
 ```
 
-Do not edit the vendored headers in `Sources/CCef/include/include` or
-`CEF_VERSION.json` by hand either; `Scripts/update-cef.py` refreshes them.
+Do not edit the vendored headers in `Sources/CCef/include/include`,
+`CEF_VERSION.json` or the `cefFramework` pin in `Package.swift` by hand
+either; `Scripts/update-cef.py` and `Scripts/package-cef.py --write`
+refresh them.
 [Automation](docs/automation.md) describes CEF updates and moving the API
 pin.
 
