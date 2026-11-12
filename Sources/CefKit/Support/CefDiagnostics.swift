@@ -1,3 +1,4 @@
+import CefBase
 import Darwin
 import os
 
@@ -28,6 +29,22 @@ import os
         case devToolsResult
     }
 
+    /// How offscreen accessibility updates are taken from CEF.
+    public enum AccessibilityIngestion: Sendable {
+        /// `cef_write_json` on the main thread, parsed on a queue.
+        case json
+        /// A deep copy on the main thread, read value by value on a queue.
+        case valueCopy
+    }
+
+    private static let ingestion = OSAllocatedUnfairLock(initialState: AccessibilityIngestion.json)
+
+    /// For SelfTest's `axingest` benchmark.
+    public static var accessibilityIngestion: AccessibilityIngestion {
+        get { ingestion.withLock { $0 } }
+        set { ingestion.withLock { $0 = newValue } }
+    }
+
     private static let state = OSAllocatedUnfairLock(initialState: (enabled: false, counters: [Metric: Counter]()))
 
     public static var isEnabled: Bool {
@@ -56,5 +73,25 @@ import os
             $0.counters[metric, default: Counter()].count += 1
             $0.counters[metric, default: Counter()].nanoseconds += elapsed
         }
+    }
+}
+
+// MARK: - Census
+
+extension CefDiagnostics {
+    /// Turns on the live-object census: counts of `CefRef`s by CEF type,
+    /// CEF structs CefSwift implements by owner type, received payloads and
+    /// their shared memory mappings. Call it before
+    /// ``CefRuntime/initialize(configuration:)``; objects made before are
+    /// not counted.
+    public static func enableCensus() {
+        CefCensus.setEnabled(true)
+    }
+
+    /// The live counts that are not zero, by description.
+    public static func census() -> [String: Int] {
+        var result: [String: Int] = [:]
+        for (kind, count) in CefCensus.snapshot() { result[kind.description] = count }
+        return result
     }
 }

@@ -1,6 +1,6 @@
 import AppKit
 import CefKit
-import CefSwiftUI
+@_spi(Testing) import CefSwiftUI
 import IOSurface
 import QuartzCore
 
@@ -79,6 +79,9 @@ extension Benchmarks {
         ]
         let only = UserDefaults.standard.string(forKey: "compositorSize")
         let page = CompositorStage.Page(rawValue: UserDefaults.standard.string(forKey: "compositorPage") ?? "") ?? .full
+        // `-compositorCopy whole` measures copying whole frames.
+        CefOffscreenBrowserView.copiesWholeFrames = UserDefaults.standard.string(forKey: "compositorCopy") == "whole"
+        let copy = CefOffscreenBrowserView.copiesWholeFrames ? "whole" : "damage"
         for (label, points) in sizes where only == nil || label.hasPrefix(only!) {
             for run in 1...2 {
                 let memory = MemorySampler()
@@ -95,7 +98,7 @@ extension Benchmarks {
                 let latencies = page == .full ? await stage.mouseLatencies(count: 30) : []
                 let resized = await stage.animate(for: .seconds(2), resizing: true)
                 print(String(
-                    format: "bench compositor \(page.rawValue) %@ run %d (%.0fx%.0f px): presented %.1f/s, rAF %.1f/s, app CPU %.1f%%, all CPU %.1f%%; mouse to screen median %.1f ms, p90 %.1f ms (%d); peak footprint while animating +%.0f MB; changed on screen %d, torn %d; while resizing changed %d, torn %d of %d",
+                    format: "bench compositor \(page.rawValue) copy \(copy) %@ run %d (%.0fx%.0f px): presented %.1f/s, rAF %.1f/s, app CPU %.1f%%, all CPU %.1f%%; mouse to screen median %.1f ms, p90 %.1f ms (%d); peak footprint while animating +%.0f MB; changed on screen %d, torn %d; while resizing changed %d, torn %d of %d",
                     label, run, animated.pixelSize.width, animated.pixelSize.height,
                     animated.presentedPerSecond, animated.rafPerSecond,
                     used.app / animated.seconds * 100, used.total / animated.seconds * 100,
@@ -212,7 +215,7 @@ final class CompositorStage {
         }
         let surface = contents as! IOSurfaceRef
         if page == .damage {
-            shown = Self.readGrid(surface).map { (surface, $0.reduce(0) { $0 * 64 + $1 }) }
+            shown = Self.readGrid(surface).map { (surface, $0.reduce(0) { ($0 &* 67) &+ $1 }) }
         } else {
             shown = Self.readCodes(surface).map { (surface, $0.0) }
         }
@@ -225,7 +228,7 @@ final class CompositorStage {
         else { return }
         if page == .damage {
             guard let grid = Self.readGrid(shown.surface) else { return }
-            let hash = grid.reduce(0) { $0 * 64 + $1 }
+            let hash = grid.reduce(0) { ($0 &* 67) &+ $1 }
             samples.append(Sample(
                 changedOnScreen: hash != shown.code, top: 0, bottom: 0, time: CACurrentMediaTime(),
                 inconsistent: !Self.isConsistent(grid)))
@@ -269,8 +272,6 @@ final class CompositorStage {
     /// Whether the blocks show one moment of the page: block `f % 16`
     /// holds `f % 64` for the last 16 frames `f`.
     nonisolated static func isConsistent(_ grid: [Int]) -> Bool {
-        // Frames before the 16th leave blocks at their initial 0.
-        if grid.allSatisfy({ $0 == 0 }) { return true }
         // The newest block is the one whose successor does not continue it.
         for newest in 0..<16 {
             let code = grid[newest]
@@ -376,17 +377,21 @@ final class CompositorStage {
           window.__animate = false; window.__rafs = 0;
           addEventListener('DOMContentLoaded', () => {
             const blocks = [];
+            const paint = f => {
+              const code = f % 64, r = (code % 8) * 32 + 16, g = (Math.floor(code / 8) % 8) * 32 + 16;
+              blocks[f % 16].style.background = `rgb(${r}, ${g}, 128)`;
+            };
+            // Blocks start as frames 0 to 15 left them.
             for (let i = 0; i < 16; i++) {
               const d = document.createElement('div');
               d.style.left = (i % 4) * 25 + 'vw'; d.style.top = Math.floor(i / 4) * 25 + 'vh';
-              document.body.appendChild(d); blocks.push(d);
+              document.body.appendChild(d); blocks.push(d); paint(i);
             }
             let frame = 15;
             const tick = () => {
               if (window.__animate) {
                 window.__rafs++; frame++;
-                const code = frame % 64, r = (code % 8) * 32 + 16, g = (Math.floor(code / 8) % 8) * 32 + 16;
-                blocks[frame % 16].style.background = `rgb(${r}, ${g}, 128)`;
+                paint(frame);
               }
               requestAnimationFrame(tick);
             };

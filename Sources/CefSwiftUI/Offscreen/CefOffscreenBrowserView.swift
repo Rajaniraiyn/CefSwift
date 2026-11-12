@@ -314,14 +314,29 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
         return info
     }
 
+    /// For SelfTest's `compositor` benchmark: copy every frame whole, as an
+    /// earlier design did, instead of only its damage.
+    @_spi(Testing) public static var copiesWholeFrames: Bool {
+        get { CefOffscreenCompositor.copiesWholeFrames }
+        set { CefOffscreenCompositor.copiesWholeFrames = newValue }
+    }
+
     public func offscreenDidPaint(_ frame: CefOffscreenFrame, element: CefOffscreenPaintElement) {
+        let size: CGSize
+        if case let .accelerated(_, frameSize) = frame { size = frameSize } else { size = .zero }
+        offscreenDidPaint(frame, element: element, details: CefOffscreenPaintDetails(damage: CGRect(origin: .zero, size: size)))
+    }
+
+    public func offscreenDidPaint(_ frame: CefOffscreenFrame, element: CefOffscreenPaintElement, details: CefOffscreenPaintDetails) {
         let target = element == .popup ? popupLayer : contentLayer
         let contents: Any
         switch frame {
         case let .accelerated(surface, _):
             // Chromium paints the next frames into the same few surfaces,
-            // so the layer shows a copy the view owns.
-            guard let copy = (element == .popup ? popupCompositor : contentCompositor).copy(surface) else { return }
+            // so the layer shows a copy the view owns, updated where the
+            // frame changed.
+            let compositor = element == .popup ? popupCompositor : contentCompositor
+            guard let copy = compositor.copy(surface, damage: details.damage, sequence: details.sequence) else { return }
             contents = copy
         case let .cpu(buffer, width, height, _):
             // The buffer is only valid during this call; the image copies it.

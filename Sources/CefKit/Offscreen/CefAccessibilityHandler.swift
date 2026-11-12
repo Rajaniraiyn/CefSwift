@@ -39,6 +39,10 @@ extension CefBrowserClient {
         guard let client = cefOwner(CefBrowserClient.self, handler), let value else { return }
         let started = CefDiagnostics.start()
         defer { CefDiagnostics.record(.accessibilityIngestMain, since: started) }
+        if CefDiagnostics.accessibilityIngestion == .valueCopy {
+            deliverAccessibilityCopy(client, value, apply)
+            return
+        }
         // cef_write_json takes over a reference; the callback keeps its own.
         cefAddRef(value)
         guard let text = CefStringUtil.takingUserFree(cef_write_json(value, JSON_WRITER_DEFAULT)) else { return }
@@ -47,6 +51,31 @@ extension CefBrowserClient {
             defer { CefDiagnostics.record(.accessibilityIngestBackground, since: parseStarted) }
             let object = try? JSONSerialization.jsonObject(with: Data(text.utf8), options: [.fragmentsAllowed])
             let json = object.map(CefJSON.init(foundationObject:)) ?? .null
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    guard let browser = client.primary else { return }
+                    apply(browser, json)
+                }
+            }
+        }
+    }
+}
+
+extension CefBrowserClient {
+    /// The alternative SelfTest's `axingest` benchmark measures: a deep
+    /// copy of the value on the main thread (`cef_value_t` objects may be
+    /// used on any thread), read value by value into `CefJSON` on the
+    /// queue.
+    private nonisolated static func deliverAccessibilityCopy(
+        _ client: CefBrowserClient, _ value: UnsafeMutablePointer<cef_value_t>,
+        _ apply: @escaping @MainActor @Sendable (CefBrowser, CefJSON) -> Void
+    ) {
+        guard let copy = value.pointee.copy(value) else { return }
+        let owned = CefRef(adopting: copy)
+        accessibilityQueue.async {
+            let parseStarted = CefDiagnostics.start()
+            let json = CefJSON(cefValue: owned.pointer)
+            CefDiagnostics.record(.accessibilityIngestBackground, since: parseStarted)
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
                     guard let browser = client.primary else { return }

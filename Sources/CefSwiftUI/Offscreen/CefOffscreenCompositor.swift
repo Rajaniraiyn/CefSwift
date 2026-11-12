@@ -18,9 +18,15 @@ import Metal
 /// callback returns. A pool surface is written only when it is not the
 /// layer's contents and the window server no longer reads it
 /// (`IOSurfaceIsInUse`, which turns false about one display refresh after
-/// the layer shows another surface). The pool holds up to four surfaces of
-/// the frame's size; a frame that finds none free is dropped, and the
-/// compositor asks for a new one a refresh later.
+/// the layer shows another surface). A frame that finds none free is
+/// dropped, and the compositor asks for a new one a refresh later.
+///
+/// Only what changed is copied. Each pool surface keeps the part that is
+/// out of date: the damage of every frame since it was last written, which
+/// Chromium reports with each frame (viz's `capture_update_rect`). A gap
+/// in the frames' sequence numbers, or a new size, makes a surface wholly
+/// out of date. The pool holds up to four surfaces of the frame's size,
+/// and three above 32 MB each (a 5120×3200 frame is 64 MB).
 @MainActor
 final class CefOffscreenCompositor {
     /// The marker the owned surfaces carry, for tests.
@@ -29,13 +35,31 @@ final class CefOffscreenCompositor {
     private static let device = MTLCreateSystemDefaultDevice()
     private static let queue = device?.makeCommandQueue()
     private static let maximumPoolSize = 4
+    private static let maximumLargePoolSize = 3
+    private static let largeSurfaceBytes = 32 << 20
 
-    private struct Buffer {
+    /// For SelfTest's `compositor` benchmark: copy whole frames, into up
+    /// to four surfaces at any size, as an earlier design did.
+    static var copiesWholeFrames = false
+
+    private final class Buffer {
         let surface: IOSurfaceRef
         let texture: MTLTexture?
+        /// The part of the surface older than the latest frame, in pixels.
+        var stale: CGRect
+
+        init(surface: IOSurfaceRef, texture: MTLTexture?, stale: CGRect) {
+            self.surface = surface
+            self.texture = texture
+            self.stale = stale
+        }
     }
 
     private var pool: [Buffer] = []
+    /// The sequence number of the last frame seen.
+    private var lastSequence: UInt64?
+    /// Bytes copied, for tests and benchmarks.
+    private(set) var copiedBytes = 0
     /// The surface last returned, which the layer shows.
     private(set) var presented: IOSurfaceRef?
     /// Asks Chromium for a new frame, after one was dropped.
@@ -46,27 +70,49 @@ final class CefOffscreenCompositor {
     /// or `nil` if the frame is dropped. Call it during the paint callback
     /// and make the returned surface the layer's contents, with implicit
     /// animations off: a contents transition keeps the old surface in use.
-    func copy(_ source: IOSurfaceRef) -> IOSurfaceRef? {
+    ///
+    /// `damage` is the part of `source` that differs from the previous
+    /// frame, in pixels; `sequence` the frame's number, when known.
+    func copy(_ source: IOSurfaceRef, damage: CGRect? = nil, sequence: UInt64? = nil) -> IOSurfaceRef? {
         let width = IOSurfaceGetWidth(source), height = IOSurfaceGetHeight(source)
         let format = IOSurfaceGetPixelFormat(source)
         guard width > 0, height > 0 else { return nil }
+        let bounds = CGRect(x: 0, y: 0, width: width, height: height)
         pool.removeAll {
             $0.surface !== presented && (IOSurfaceGetWidth($0.surface) != width
                 || IOSurfaceGetHeight($0.surface) != height || IOSurfaceGetPixelFormat($0.surface) != format)
+        }
+        // What changed since each surface was written. Without a known
+        // predecessor, everything did.
+        let continuous = !Self.copiesWholeFrames && sequence != nil && lastSequence.map { sequence == $0 &+ 1 } == true
+        let changed = continuous ? (damage ?? bounds).intersection(bounds) : bounds
+        lastSequence = sequence
+        for buffer in pool {
+            let matches = IOSurfaceGetWidth(buffer.surface) == width && IOSurfaceGetHeight(buffer.surface) == height
+            buffer.stale = matches ? buffer.stale.union(changed).intersection(bounds) : bounds
+            if buffer.stale.isNull { buffer.stale = .zero }
         }
         guard let target = takeBuffer(width: width, height: height, format: format) else {
             scheduleFrameRequest()
             return nil
         }
         syncColorSpace(from: source, to: target.surface)
-        // Paint callbacks run inside CEF's message loop work, which an idle
-        // run loop can repeat many times before AppKit drains its pool;
-        // the Metal objects of each copy must not wait for that.
-        let copied = autoreleasepool {
-            target.texture.map { blit(source, into: $0, width: width, height: height) }
-                ?? copyOnCPU(source, into: target.surface)
+        let region = target.stale.integral.intersection(bounds)
+        if !region.isEmpty {
+            // Paint callbacks run inside CEF's message loop work, which an
+            // idle run loop can repeat many times before AppKit drains its
+            // pool; the Metal objects of each copy must not wait for that.
+            let copied = autoreleasepool {
+                target.texture.map { blit(source, into: $0, region: region) }
+                    ?? copyOnCPU(source, into: target.surface, region: region)
+            }
+            guard copied else {
+                target.stale = bounds
+                return nil
+            }
+            copiedBytes += Int(region.width * region.height) * 4
         }
-        guard copied else { return nil }
+        target.stale = .zero
         presented = target.surface
         return target.surface
     }
@@ -80,6 +126,7 @@ final class CefOffscreenCompositor {
     /// Forgets every surface, after the layer's contents were cleared.
     func reset() {
         presented = nil
+        lastSequence = nil
         pool = []
     }
 
@@ -89,10 +136,14 @@ final class CefOffscreenCompositor {
         if let free = pool.first(where: { $0.surface !== presented && !IOSurfaceIsInUse($0.surface) }) {
             return free
         }
-        guard pool.count < Self.maximumPoolSize,
+        let limit = width * height * 4 > Self.largeSurfaceBytes && !Self.copiesWholeFrames
+            ? Self.maximumLargePoolSize : Self.maximumPoolSize
+        guard pool.count < limit,
               let surface = Self.makeSurface(width: width, height: height, format: format)
         else { return nil }
-        let buffer = Buffer(surface: surface, texture: Self.makeTexture(surface, width: width, height: height, format: format))
+        let buffer = Buffer(
+            surface: surface, texture: Self.makeTexture(surface, width: width, height: height, format: format),
+            stale: CGRect(x: 0, y: 0, width: width, height: height))
         pool.append(buffer)
         return buffer
     }
@@ -143,18 +194,20 @@ final class CefOffscreenCompositor {
 
     // MARK: Copying
 
-    /// Copies on the GPU and waits for the copy, so Chromium may reuse
-    /// `source` once the paint callback returns.
-    private func blit(_ source: IOSurfaceRef, into target: MTLTexture, width: Int, height: Int) -> Bool {
+    /// Copies `region` on the GPU and waits for the copy, so Chromium may
+    /// reuse `source` once the paint callback returns.
+    private func blit(_ source: IOSurfaceRef, into target: MTLTexture, region: CGRect) -> Bool {
+        let width = IOSurfaceGetWidth(source), height = IOSurfaceGetHeight(source)
         guard let queue = Self.queue,
               let sourceTexture = Self.makeTexture(source, width: width, height: height, format: IOSurfaceGetPixelFormat(source)),
               let commands = queue.makeCommandBuffer(),
               let encoder = commands.makeBlitCommandEncoder()
         else { return false }
+        let origin = MTLOrigin(x: Int(region.minX), y: Int(region.minY), z: 0)
         encoder.copy(
-            from: sourceTexture, sourceSlice: 0, sourceLevel: 0, sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
-            sourceSize: MTLSize(width: width, height: height, depth: 1),
-            to: target, destinationSlice: 0, destinationLevel: 0, destinationOrigin: MTLOrigin(x: 0, y: 0, z: 0))
+            from: sourceTexture, sourceSlice: 0, sourceLevel: 0, sourceOrigin: origin,
+            sourceSize: MTLSize(width: Int(region.width), height: Int(region.height), depth: 1),
+            to: target, destinationSlice: 0, destinationLevel: 0, destinationOrigin: origin)
         encoder.endEncoding()
         commands.commit()
         commands.waitUntilCompleted()
@@ -163,18 +216,19 @@ final class CefOffscreenCompositor {
 
     /// The fallback without Metal or for another pixel format: a row copy
     /// under both surfaces' locks.
-    private func copyOnCPU(_ source: IOSurfaceRef, into target: IOSurfaceRef) -> Bool {
+    private func copyOnCPU(_ source: IOSurfaceRef, into target: IOSurfaceRef, region: CGRect) -> Bool {
         guard IOSurfaceGetBytesPerElement(source) == IOSurfaceGetBytesPerElement(target),
               IOSurfaceLock(source, .readOnly, nil) == kIOReturnSuccess
         else { return false }
         defer { IOSurfaceUnlock(source, .readOnly, nil) }
         guard IOSurfaceLock(target, [], nil) == kIOReturnSuccess else { return false }
         defer { IOSurfaceUnlock(target, [], nil) }
-        let rowBytes = IOSurfaceGetWidth(source) * IOSurfaceGetBytesPerElement(source)
+        let element = IOSurfaceGetBytesPerElement(source)
+        let rowBytes = Int(region.width) * element, left = Int(region.minX) * element
         let sourceRow = IOSurfaceGetBytesPerRow(source), targetRow = IOSurfaceGetBytesPerRow(target)
         let from = IOSurfaceGetBaseAddress(source), to = IOSurfaceGetBaseAddress(target)
-        for y in 0..<IOSurfaceGetHeight(source) {
-            to.advanced(by: y * targetRow).copyMemory(from: from.advanced(by: y * sourceRow), byteCount: rowBytes)
+        for y in Int(region.minY)..<Int(region.maxY) {
+            to.advanced(by: y * targetRow + left).copyMemory(from: from.advanced(by: y * sourceRow + left), byteCount: rowBytes)
         }
         return true
     }
