@@ -62,6 +62,13 @@ public struct CefBrowserOptions {
     /// which VoiceOver and other assistive apps read. Building it costs
     /// time and memory, so by default it starts on first demand.
     public var offscreenAccessibility: CefOffscreenAccessibility = .automatic
+    /// Who answers when the page stops responding: Chromium's dialog for
+    /// Chrome-style browsers and the delegate for others, or the delegate
+    /// for every browser.
+    public var unresponsivePages: CefUnresponsivePagePolicy = .automatic
+    /// Who picks the certificate a site asks the user to identify with:
+    /// Chromium's picker, or the delegate.
+    public var clientCertificates: CefClientCertificatePolicy = .automatic
 
     public init() {}
 }
@@ -256,6 +263,13 @@ public final class CefBrowser: Identifiable {
     public package(set) var navigationGestureProgress = 0.0
     /// The latest result of ``find(_:backwards:caseSensitive:)``.
     public internal(set) var findResult: CefFindResult?
+    /// Whether the page responds to input. Chromium reports a page whose
+    /// renderer has not handled input for 15 seconds as unresponsive; see
+    /// ``CefBrowserDelegate/browserPageIsUnresponsive(_:)``.
+    public internal(set) var isResponsive = true
+    /// How the page shown was loaded: TLS, its certificate, insecure
+    /// content. `nil` before the first page commits.
+    public internal(set) var connectionSecurity: CefConnectionSecurity?
 
     /// Whether the page has been unloaded to free its memory, by
     /// ``discard()`` or ``CefRuntime/memorySaver``.
@@ -610,26 +624,6 @@ public final class CefBrowser: Identifiable {
             return
         }
         withHost { $0.pointee.print($0) }
-    }
-
-    /// Renders the page to a PDF file.
-    public func printToPDF(at destination: URL) async throws {
-        try await ready()
-        let succeeded: Bool = await withCheckedContinuation { continuation in
-            let callback = PDFPrintCallback(continuation: continuation).makeCallback()
-            var settings = cef_pdf_print_settings_t()
-            settings.size = MemoryLayout<cef_pdf_print_settings_t>.stride
-            settings.print_background = 1
-            let started: Void? = withHost { host in
-                CefStringUtil.withCefString(destination.path) {
-                    host.pointee.print_to_pdf(host, $0, &settings, callback)
-                }
-            }
-            if started == nil {
-                cefRelease(callback)
-            }
-        }
-        guard succeeded else { throw CefError.operationFailed("print_to_pdf did not produce \(destination.path)") }
     }
 
     /// Captures the visible page as PNG data.
@@ -1227,6 +1221,8 @@ extension CefBrowser {
         case dialog
         /// A permission prompt: ends when Chromium dismisses the prompt.
         case permissionPrompt(UInt64)
+        /// An unresponsive page: ends when the page responds again.
+        case unresponsive
         /// The browser: ends when it closes.
         case browser
     }
@@ -1426,7 +1422,7 @@ private final class FaviconDownload: @unchecked Sendable {
 
 /// Bridges `cef_pdf_print_callback_t` to a continuation, which resumes with
 /// `false` if CEF drops the callback without calling it.
-private final class PDFPrintCallback: @unchecked Sendable {
+final class PDFPrintCallback: @unchecked Sendable {
     private var continuation: CheckedContinuation<Bool, Never>?
 
     init(continuation: CheckedContinuation<Bool, Never>) {

@@ -284,6 +284,7 @@ final class CefBrowserClient {
         h.pointee.on_loading_state_change = { s, browser, isLoading, canGoBack, canGoForward in
             CefBrowserClient.run(s, browser, default: ()) { _, b in
                 b.applyLoadingState(isLoading: isLoading != 0, canGoBack: canGoBack != 0, canGoForward: canGoForward != 0)
+                b.refreshConnectionSecurity()
             }
         }
         h.pointee.on_load_start = { s, browser, frame, _ in
@@ -331,7 +332,10 @@ final class CefBrowserClient {
             cefRelease(frame)
             let url = CefStringUtil.string(from: url)
             CefBrowserClient.run(s, browser, default: ()) { _, b in
-                if isMain { b.applyURL(url) }
+                if isMain {
+                    b.applyURL(url)
+                    b.refreshConnectionSecurity()
+                }
             }
         }
         h.pointee.on_favicon_urlchange = { s, browser, iconURLs in
@@ -541,12 +545,25 @@ final class CefBrowserClient {
                 return 0
             }
             return CefBrowserClient.run(s, browser, default: 0) { _, b in
-                b.decide(.page) { await $0.browser(b, decidePermissionFor: request) } then: { decision in
-                    if decision == .allow {
-                        callback.pointer.pointee.cont(callback.pointer, kinds.mediaMask(within: requested))
+                // Chromium asks before it reads the site settings for media,
+                // so stored values answer here, and only the rest is asked.
+                let stored = b.storedAnswer(to: request)
+                let answer = { (granted: CefPermissionKind) in
+                    let mask = granted.mediaMask(within: requested)
+                    if mask != 0 {
+                        callback.pointer.pointee.cont(callback.pointer, mask)
                     } else {
                         callback.pointer.pointee.cancel(callback.pointer)
                     }
+                }
+                guard !stored.undecided.isEmpty else {
+                    answer(stored.granted(after: nil))
+                    return 1
+                }
+                let asked = CefPermissionRequest(kinds: stored.undecided, origin: request.origin)
+                b.decide(.page) { await $0.browser(b, decidePermissionFor: asked) } then: { decision in
+                    b.remember(decision, for: asked.kinds, origin: asked.origin)
+                    answer(stored.granted(after: decision))
                 }
                 return 1
             }
@@ -562,6 +579,7 @@ final class CefBrowserClient {
             }
             return CefBrowserClient.run(s, browser, default: 0) { _, b in
                 b.decide(.permissionPrompt(promptID)) { await $0.browser(b, decidePermissionFor: request) } then: { decision in
+                    b.remember(decision, for: request.kinds, origin: request.origin)
                     callback.pointer.pointee.cont(callback.pointer, decision.cefResult)
                 }
                 return 1
@@ -613,9 +631,16 @@ final class CefBrowserClient {
             }
         }
         h.pointee.on_certificate_error = { s, browser, certError, requestURL, sslInfo, callback in
-            cefRelease(sslInfo)
-            let error = CefCertificateError(
+            var error = CefCertificateError(
                 code: Int(certError.rawValue), url: URL(string: CefStringUtil.string(from: requestURL)))
+            if let sslInfo {
+                error.status = CefCertificateStatus(rawValue: UInt32(sslInfo.pointee.get_cert_status(sslInfo).rawValue))
+                if let x509 = sslInfo.pointee.get_x509_certificate(sslInfo) {
+                    error.certificate = CefCertificate(borrowing: x509)
+                    cefRelease(x509)
+                }
+                cefRelease(sslInfo)
+            }
             guard let callback = CefRef(adopting: callback) else {
                 cefRelease(browser)
                 return 0
@@ -669,8 +694,11 @@ final class CefBrowserClient {
             CefBrowserClient.run(s, browser, default: ()) { _, b in
                 b.pageScripting.failPendingEvaluations()
                 b.delegate?.browser(b, renderProcessDidTerminate: reason)
+                b.renderProcessEnded()
             }
         }
+        Self.installResponsivenessCallbacks(on: h)
+        Self.installClientCertificateCallback(on: h)
         // IO thread.
         h.pointee.get_resource_request_handler = { s, browser, frame, request, _, _, _, _ in
             cefRelease(browser)

@@ -46,6 +46,13 @@ public protocol CefBrowserDelegate: AnyObject {
     func browser(_ browser: CefBrowser, didLog message: CefConsoleMessage)
     /// The render process went away. Reloading recovers.
     func browser(_ browser: CefBrowser, renderProcessDidTerminate reason: CefTerminationReason)
+    /// The page has not responded to input for 15 seconds: wait for it, or
+    /// end its renderer. Not asked for Chrome-style browsers, which show
+    /// Chromium's dialog, unless ``CefBrowserOptions/unresponsivePages`` is
+    /// ``CefUnresponsivePagePolicy/delegate``. The question is withdrawn,
+    /// and the task cancelled, when the page responds again. The default
+    /// asks with ``CefUnresponsivePagePresenter``.
+    func browserPageIsUnresponsive(_ browser: CefBrowser) async -> CefUnresponsivePageDecision
 
     // MARK: Synchronous policy
 
@@ -83,6 +90,13 @@ public protocol CefBrowserDelegate: AnyObject {
     /// Return `true` to proceed despite a certificate error. The default
     /// cancels the load.
     func browser(_ browser: CefBrowser, shouldProceedDespite error: CefCertificateError) async -> Bool
+    /// Pick the certificate to identify the user with when a site asks for
+    /// one, or `nil` to continue without. Asked only when
+    /// ``CefBrowserOptions/clientCertificates`` is
+    /// ``CefClientCertificatePolicy/delegate``; otherwise Chromium shows
+    /// its own picker. The default asks with
+    /// ``CefClientCertificatePresenter``.
+    func browser(_ browser: CefBrowser, selectClientCertificateFor request: CefClientCertificateRequest) async -> CefCertificate?
     /// Decide where a download goes. The default saves to `~/Downloads`.
     func browser(_ browser: CefBrowser, decideDestinationFor download: CefDownload, suggestedName: String) async -> CefDownloadDecision
     /// Answer a page's request to register or use a passkey, for browsers
@@ -120,6 +134,9 @@ extension CefBrowserDelegate {
     public func browser(_ browser: CefBrowser, didFailLoad error: CefLoadError) {}
     public func browser(_ browser: CefBrowser, didLog message: CefConsoleMessage) {}
     public func browser(_ browser: CefBrowser, renderProcessDidTerminate reason: CefTerminationReason) {}
+    public func browserPageIsUnresponsive(_ browser: CefBrowser) async -> CefUnresponsivePageDecision {
+        await CefUnresponsivePagePresenter.present(for: browser, in: browser.hostWindow)
+    }
 
     public func browser(_ browser: CefBrowser, decidePolicyFor navigation: CefNavigationAction) -> CefNavigationDecision {
         .allow
@@ -149,6 +166,9 @@ extension CefBrowserDelegate {
         await CefDialogPresenter.requestCredential(for: challenge, in: browser.hostWindow)
     }
     public func browser(_ browser: CefBrowser, shouldProceedDespite error: CefCertificateError) async -> Bool { false }
+    public func browser(_ browser: CefBrowser, selectClientCertificateFor request: CefClientCertificateRequest) async -> CefCertificate? {
+        await CefClientCertificatePresenter.present(request, in: browser.hostWindow)
+    }
     public func browser(_ browser: CefBrowser, decideDestinationFor download: CefDownload, suggestedName: String) async -> CefDownloadDecision {
         .allow(destination: nil)
     }
@@ -209,6 +229,10 @@ public struct CefCertificateError: Sendable, Equatable {
     /// `ERR_CERT_AUTHORITY_INVALID`.
     public var code: Int
     public var url: URL?
+    /// What Chromium found wrong with the certificate.
+    public var status: CefCertificateStatus = []
+    /// The certificate the server presented.
+    public var certificate: CefCertificate?
 }
 
 /// Credentials answering a ``CefAuthenticationChallenge``.

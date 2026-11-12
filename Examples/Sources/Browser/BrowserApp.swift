@@ -52,6 +52,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if urls.isEmpty { controller.openTab() } else { urls.forEach { controller.openTab(url: $0) } }
         }
         controller.library.start()
+        if UserDefaults.standard.bool(forKey: "showTaskManager") { TaskManagerWindow.show() }
 
         let launch = LaunchOptions()
         let urls = launch.urls.isEmpty ? [nil] : launch.urls.map(Optional.some)
@@ -259,6 +260,10 @@ struct BrowserCommands: Commands {
         // Menu contents are views, so they follow the library as it changes.
         CommandMenu("History") { HistoryMenu(controller: controller) }
         CommandMenu("Bookmarks") { BookmarksMenu(controller: controller) }
+        CommandGroup(before: .windowList) {
+            Button("Task Manager") { TaskManagerWindow.show() }
+            Divider()
+        }
         CommandMenu("Browser") {
             Button("Extensions") { controller.openTab(url: URL(string: "chrome://extensions")!) }
             Button("Passwords") { controller.openTab(url: URL(string: "chrome://password-manager")!) }

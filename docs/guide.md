@@ -10,11 +10,14 @@ are `@MainActor`.
   - [Preferences](#preferences)
   - [Relaunching](#relaunching)
 - [Browsers](#browsers)
+  - [PDF](#pdf)
 - [Showing a browser](#showing-a-browser)
   - [Offscreen rendering](#offscreen-rendering)
   - [Swipe navigation](#swipe-navigation)
   - [Offscreen accessibility](#offscreen-accessibility)
 - [Discarding browsers](#discarding-browsers)
+- [Processes](#processes)
+  - [Unresponsive pages](#unresponsive-pages)
 - [JavaScript](#javascript)
   - [User scripts and style sheets](#user-scripts-and-style-sheets)
   - [Bridge](#bridge)
@@ -24,6 +27,8 @@ are `@MainActor`.
   - [Passkeys](#passkeys)
 - [Context menu](#context-menu)
 - [Building a browser](#building-a-browser)
+  - [Connection security](#connection-security)
+  - [Client certificates](#client-certificates)
   - [Toolbar and window](#toolbar-and-window)
   - [Tabs](#tabs)
   - [Popups](#popups)
@@ -32,6 +37,8 @@ are `@MainActor`.
   - [Tabs Chromium opens itself](#tabs-chromium-opens-itself)
 - [Customizing Chromium's own pages](#customizing-chromiums-own-pages)
 - [Profiles](#profiles)
+  - [Network maintenance](#network-maintenance)
+  - [Site settings](#site-settings)
   - [Bookmarks, history and suggestions](#bookmarks-history-and-suggestions)
 - [DevTools](#devtools)
 - [Compatibility with bot protection](#compatibility-with-bot-protection)
@@ -215,6 +222,31 @@ throws `CefError.operationFailed` for an unknown name or a value of the wrong
 type, and restores the default when passed `nil`. Values are `CefJSON`,
 which accepts Swift literals.
 
+`CefProfile.preferences` and `CefRuntime.shared.preferences` give the same
+preferences typed keys, observation and their state. A `CefPreferences.Key`
+names a preference with the Swift type of its value; the common ones are
+static members, and `Key<Bool>("dotted.name")` makes others:
+
+```swift
+let preferences = profile.preferences
+try preferences.set(false, for: .savesPasswords)
+let size = preferences[.defaultFontSize]                 // Int?
+try preferences.set(["de", "en-US"], for: .acceptLanguages)
+try preferences.reset(.acceptLanguages)                  // its default again
+
+for await languages in preferences.observe(.acceptLanguages) {
+    print(languages ?? [])                               // now, then on each change
+}
+```
+
+`canSet(_:)` is `false` for a preference an enterprise policy manages or a
+command-line switch set; Chromium does not say which of the two.
+`isDefault(_:)` tells whether anything set a preference. Chromium has no
+call that reads a default while another value is set, so to see one,
+`reset(_:)` the preference. `observe(_:)` yields the value first, then each
+change, from Chromium's settings pages as well as from your code, for as
+long as you iterate it.
+
 ### Relaunching
 
 Only one process can use a data directory, so an app runs as a single
@@ -245,7 +277,7 @@ when it is first shown.
 |---|---|
 | State | `url`, `title`, `isLoading`, `estimatedProgress`, `canGoBack`, `canGoForward`, `favicon`, `faviconURL`, `zoomLevel`, `isFullscreen`, `statusText`, `downloads`, `findResult`, `state` (`.pending`, `.live`, `.closed`) |
 | Navigation | `load(_:)`, `goBack()`, `goForward()`, `reload(ignoringCache:)`, `stopLoading()` |
-| Page | `isAudioMuted`, `find(_:backwards:caseSensitive:)`, `stopFinding(clearingSelection:)`, `findSession` (an observable find-bar model), `print()`, `printToPDF(at:)`, `snapshot()` |
+| Page | `isAudioMuted`, `find(_:backwards:caseSensitive:)`, `stopFinding(clearingSelection:)`, `findSession` (an observable find-bar model), `print()`, `pdf(configuration:)`, `printToPDF(at:configuration:)` ([PDF](#pdf)), `snapshot()` |
 | JavaScript | `evaluateJavaScript(_:)`, `evaluateJavaScript(_:as:)`, `executeJavaScript(_:)`, `addUserScript(_:)` |
 | DevTools | `devTools`, `showDevTools(inspecting:)`, `closeDevTools()`, `isShowingDevTools` |
 | Lifetime | `ready()`, `close(force:)` |
@@ -310,6 +342,36 @@ released at once and the browser falls back to the default decisions.
 A browser you create lives until you call `close()`. Unless you pass
 `force: true`, the page's `beforeunload` handler can ask the user to stay.
 After `state` becomes `.closed`, create a new `CefBrowser` to browse again.
+
+### PDF
+
+`pdf(configuration:)` renders the page as PDF data, and
+`printToPDF(at:configuration:)` writes it to a file. A
+`CefBrowser.PDFConfiguration` starts from the user's Page Setup: the paper
+size of `NSPrintInfo.shared`, portrait, Chromium's default margins,
+backgrounds printed, and a tagged PDF, which assistive apps read in order,
+with an outline made from the page's headings.
+
+```swift
+var configuration = CefBrowser.PDFConfiguration()
+configuration.isLandscape = true
+configuration.margins = .uniform(36)                     // points
+configuration.pageRanges = [1...2, 5...5]
+configuration.footerTemplate = """
+    <div style="font-size: 9px; margin: auto">
+      <span class=pageNumber></span> / <span class=totalPages></span>
+    </div>
+    """
+let data = try await browser.pdf(configuration: configuration)
+```
+
+Sizes and margins are in points. `prefersCSSPageSize` uses the size a
+page's `@page` rule asks for instead of `paperSize`; a page whose rule
+gives a size keeps that size's orientation whatever `isLandscape` says.
+Header and footer templates fill in elements with the classes `date`,
+`title`, `url`, `pageNumber` and `totalPages`; give them a font size, since
+Chromium sets none. A page range past the last page, or ranges that leave
+no page, make the call throw.
 
 ## Showing a browser
 
@@ -597,6 +659,71 @@ CefRuntime.shared.energySaver = CefEnergySaver(reducedOffscreenFrameRate: 45)
 Windowed and Chrome-style browsers draw at the display's rate in any
 case.
 
+## Processes
+
+`CefRuntime.shared.tasks` is Chromium's task manager: an `@Observable`
+list of the app's processes and what runs in them, with CPU and memory,
+as Chrome's Task Manager shows them.
+
+```swift
+struct TaskList: View {
+    private let manager = CefRuntime.shared.tasks
+
+    var body: some View {
+        Table(manager.tasks) {
+            TableColumn("Task", value: \.title)
+            TableColumn("Memory") { task in
+                Text(task.memory.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .memory) } ?? "–")
+            }
+        }
+    }
+}
+```
+
+Each `CefTaskManager.Task` has a `kind` (`.browser`, `.gpu`, `.renderer`,
+`.utility`, `.serviceWorker`, …), Chromium's `title`, `cpuUsage` in percent
+of one core (up to `processorCount` × 100), `memory` and `gpuMemory` in
+bytes (`nil` until Chromium has measured them), and `canTerminate`.
+`terminate(_:)` ends a task's process, as End Process does; the pages it
+showed report `browser(_:renderProcessDidTerminate:)`. Chromium does not
+end the app's own process.
+
+`tasks` refreshes every `refreshInterval` (one second) while something
+reads it: a view showing it, or code that reads it again within two
+intervals. When nothing does, it stops, and Chromium stops measuring.
+`refresh()` takes one snapshot at once.
+
+The figures belong to processes, and several tasks can share one: tabs of
+one site in one renderer, a page and its workers. Tasks of one process
+report the same figures and the same `process`; `processes` groups them,
+and `CefTaskManager.Process.totalMemory(of:)` counts each process once.
+Chromium's API names no process, so CefSwift groups the consecutive
+renderer tasks with identical figures, which is what the tasks of one
+process have.
+
+`browser.process` is the task of the renderer showing a browser's page,
+and `tasks.browsers(in:)` lists every browser a process serves, so a
+browser's memory is that process's memory shared with those browsers.
+
+### Unresponsive pages
+
+A page whose renderer has not handled input for 15 seconds, such as one
+stuck in a loop, is unresponsive: `browser.isResponsive` turns `false`
+until it responds again or its process ends. Chrome-style browsers show
+Chromium's “Page Unresponsive” dialog. Other browsers ask the delegate,
+whose default is a native sheet offering Wait and Force Reload:
+
+```swift
+func browserPageIsUnresponsive(_ browser: CefBrowser) async -> CefUnresponsivePageDecision {
+    .reload   // .wait asks again later if the page still does not respond; .terminate ends it
+}
+```
+
+Set `CefBrowserOptions.unresponsivePages` to `.delegate` to have
+Chrome-style browsers ask the delegate too, instead of showing Chromium's
+dialog. A page that responds again before you answer withdraws the
+question: the task is cancelled and the default sheet dismisses itself.
+
 ## JavaScript
 
 ```swift
@@ -729,9 +856,11 @@ final class Policy: CefBrowserDelegate {
 |---|---|
 | `browser(_:runJavaScriptDialog:) async` | Native sheet |
 | `browser(_:confirmLeavingPage:) async` (`beforeunload`) | Native sheet |
-| `browser(_:decidePermissionFor:) async` | `.deny` |
+| `browser(_:decidePermissionFor:) async` | `.deny`. Asked only when the site settings leave the request to the user; see [Site settings](#site-settings) |
 | `browser(_:credentialFor:) async` (HTTP authentication) | Native sign-in sheet. CEF 156 does not call it; see [Known limits](#known-limits) |
 | `browser(_:shouldProceedDespite:) async` (certificate errors) | `false`: the load is cancelled |
+| `browser(_:selectClientCertificateFor:) async` | Native sheet; asked only with `options.clientCertificates = .delegate`, otherwise Chromium's picker. See [Client certificates](#client-certificates) |
+| `browserPageIsUnresponsive(_:) async` | Native sheet; Chrome-style browsers show Chromium's dialog instead. See [Unresponsive pages](#unresponsive-pages) |
 | `browser(_:decideDestinationFor:suggestedName:) async` | `.allow(destination: nil)`: `~/Downloads` |
 | `browser(_:decidePasskeyRequest:) async` | Native passkey sheet; see [Passkeys](#passkeys) |
 | `browser(_:decidePolicyFor:)` | `.allow` |
@@ -1013,6 +1142,60 @@ and its frame, title, ordering and tabbing are yours.
 `CefRuntime.shared.openChromeWindow(url:frame:options:delegate:)` opens a
 window drawn entirely by Chrome instead, with its tab strip, omnibox and
 menus.
+
+### Connection security
+
+`browser.connectionSecurity` describes how the page shown was loaded, and
+changes as the browser navigates:
+
+```swift
+if let security = browser.connectionSecurity {
+    switch security.level {
+    case .secure: showLock()
+    case .partiallySecure, .notSecure: showWarning()
+    case .local: break                      // the app's scheme, a file, a Chromium page
+    }
+    print(security.protocolVersion as Any, security.certificate?.subject.displayName ?? "")
+}
+```
+
+`level` sums up `isSecureConnection`, the `certificateStatus` Chromium
+found (`.dateInvalid`, `.authorityInvalid`, `.nameMismatch`,
+`.extendedValidation`, …) and whether the page `displayedInsecureContent`
+or `ranInsecureContent` loaded over HTTP. `protocolVersion` is the TLS
+version, `.tls1_2`, `.tls1_3` or `.quic`; Chromium's API gives no cipher
+suite. An HTTPS page your own scheme handler serves has no TLS, so it is
+`.notSecure`.
+
+A `CefCertificate` has its `subject` and `issuer` (common name,
+organizations, country, …), `serialNumber`, `validFrom` and `validUntil`,
+the `issuerChain` the server sent, the `sha256Fingerprint`, and the
+`subjectAlternativeNames` it covers. `derRepresentation` and
+`secCertificate` bridge it to the Security framework, for example to show
+the system's certificate sheet:
+
+```swift
+import SecurityInterface
+
+if let chain = browser.connectionSecurity?.certificate?.secCertificateChain, let window = browser.hostWindow {
+    SFCertificatePanel.shared().beginSheet(for: window, modalDelegate: nil, didEnd: nil,
+                                           contextInfo: nil, certificates: chain, showGroup: true)
+}
+```
+
+The `CefCertificateError` that `browser(_:shouldProceedDespite:)` receives
+carries the same `certificate` and its `status`.
+
+### Client certificates
+
+A site can ask for a certificate to identify the user. Chromium lists the
+user's identities in the keychain whose issuers the server accepts, and by
+default shows its own picker. With `options.clientCertificates =
+.delegate`, `browser(_:selectClientCertificateFor:)` decides instead: the
+`CefClientCertificateRequest` has the `host`, `port` and the offered
+`certificates`; return one of them, or `nil` to continue without. The
+default implementation asks with `CefClientCertificatePresenter`, a native
+sheet. Private keys stay in the keychain; Chromium signs with them itself.
 
 ### Toolbar and window
 
@@ -1322,6 +1505,82 @@ alive forever.
 `allPreferences(includingDefaults:)` returns every preference as one JSON
 object. `setColorScheme(_:accentColor:)` themes Chrome-style UI and sets the
 `prefers-color-scheme` pages see.
+
+### Network maintenance
+
+A profile clears what Chromium keeps for its connections, each `async`
+and done when it returns:
+
+```swift
+await profile.clearHTTPCache()                       // cookies and site data stay
+await profile.clearCertificateExceptions()           // certificate errors the user accepted
+await profile.clearHTTPAuthenticationCredentials()
+await profile.closeAllConnections()
+let addresses = try await profile.resolveHost("example.com")   // ["93.184.215.14", …]
+```
+
+Clearing certificate exceptions does not close a connection that uses
+one; close all connections too, or the browser keeps going without
+asking. `resolveHost(_:)` uses the profile's DNS settings, Secure DNS
+included, and throws when the name does not resolve.
+
+### Site settings
+
+`profile.siteSettings` holds what each site may use, as Chrome's site
+settings do: a `CefSitePermission` (`.camera`, `.microphone`,
+`.geolocation`, `.notifications`, `.popups`, `.javaScript`, `.images`,
+`.cookies`, `.sound`, `.automaticDownloads`, `.clipboard`, `.usbDevices`,
+`.serialPorts`, `.hidDevices`, `.bluetoothDevices`, …) set to `.allow`,
+`.block` or `.ask` for an origin:
+
+```swift
+let site = URL(string: "https://meet.example")!
+let settings = profile.siteSettings
+settings.set(.allow, for: .camera, origin: site)
+settings.setting(for: .notifications, origin: site)      // .ask: the default applies
+settings.setDefaultSetting(.block, for: .popups)         // for every site without its own
+settings.reset(origin: site)                             // the defaults apply again
+
+for await change in settings.changes {
+    print(change.permission, change.origin)
+}
+```
+
+`setting(for:origin:)` returns the value that applies: the site's own or
+the profile's default. `supportedSettings` lists the values a permission
+takes; Chromium has no `.ask` for content switches such as images and
+JavaScript, and no `.allow` for device choosers, which ask for each
+device. Cookies also take `.sessionOnly`. Settings belong to origins, so
+every page of a site shares them.
+
+`changes` reports every change for as long as you iterate it, including
+those Chromium's own prompts and `chrome://settings` make.
+`exceptions(for:)` lists the values sites have of their own. Chromium has
+no call for that; it reads the profile's
+`profile.content_settings.exceptions` preference, where Chromium keeps
+them, so for an incognito profile, which keeps them in memory, it lists
+none.
+
+The settings and the permission delegate agree. Chromium does not ask
+about a prompt-based permission (notifications, location, MIDI, window
+management, …) that a site has `.allow` or `.block` for, and keeps the
+answer the delegate gives, `.allow` or `.deny`, for the site as Chrome
+does. Camera and microphone requests reach the delegate before Chromium
+reads the settings, so CefSwift answers them from the settings itself, and
+asks the delegate only about kinds that are still `.ask`. An answer there
+applies to that request; `.alwaysAllow` and `.alwaysDeny` also store it:
+
+```swift
+func browser(_ browser: CefBrowser, decidePermissionFor request: CefPermissionRequest) async -> CefPermissionDecision {
+    let (allowed, remember) = await askUserRemembering(about: request.kinds, from: request.origin)
+    switch (allowed, remember) {
+    case (true, true): return .alwaysAllow
+    case (true, false): return .allow
+    case (false, true): return .alwaysDeny
+    case (false, false): return .deny
+    }
+}
+```
 
 ### Bookmarks, history and suggestions
 

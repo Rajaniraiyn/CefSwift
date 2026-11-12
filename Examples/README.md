@@ -141,6 +141,8 @@ Examples/dist/Browser.app/Contents/MacOS/Browser -private YES -addressBarText sw
 | `-addressBarText <text>` | Starts editing with that text typed. |
 | `-private YES` | Opens the tabs as private tabs. |
 | `-appearance light\|dark\|system` | Overrides the appearance setting. |
+| `-showTaskManager YES` | Opens the Task Manager window. |
+| `-showPageInfo YES` | Opens the page info of the first secure page shown. |
 | `-customChromiumPanels YES` | Uses the browser's QR code and Cast panels, as the setting does. |
 | `-cacheDirectory <path>` | Keeps Chromium's data there instead of in Application Support. |
 

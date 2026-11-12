@@ -1,0 +1,115 @@
+import CCef
+import CefBase
+import Foundation
+
+extension CefProfile {
+    /// Empties the profile's HTTP cache. Cookies and site data stay.
+    public func clearHTTPCache() async {
+        await completing { context, callback in
+            guard let clear = context.pointee.clear_http_cache else { return cefRelease(callback) }
+            clear(context, callback)
+        }
+    }
+
+    /// Forgets the certificate errors the user chose to proceed despite
+    /// (``CefBrowserDelegate/browser(_:shouldProceedDespite:)``), so the
+    /// delegate is asked again. Call ``closeAllConnections()`` too, or a
+    /// connection still open keeps the exception in use.
+    public func clearCertificateExceptions() async {
+        await completing { context, callback in context.pointee.clear_certificate_exceptions(context, callback) }
+    }
+
+    /// Forgets the HTTP authentication credentials sites were given.
+    public func clearHTTPAuthenticationCredentials() async {
+        await completing { context, callback in context.pointee.clear_http_auth_credentials(context, callback) }
+    }
+
+    /// Closes every open and idle connection. Requests already started
+    /// fail; later ones connect again.
+    public func closeAllConnections() async {
+        await completing { context, callback in context.pointee.close_all_connections(context, callback) }
+    }
+
+    /// The IP addresses Chromium resolves `host` to, with the profile's DNS
+    /// settings (Secure DNS included).
+    ///
+    /// Throws ``CefError/operationFailed(_:)`` with Chromium's network
+    /// error when the name does not resolve.
+    public func resolveHost(_ host: String) async throws -> [String] {
+        guard let context = requestContext() else { throw CefError.operationFailed("Chromium is not running") }
+        let url = host.contains("://") ? host : "https://\(host)"
+        let result: (Int32, [String]) = await withCheckedContinuation { continuation in
+            let callback = ResolveCallback(continuation: continuation).makeCallback()
+            CefStringUtil.withCefString(url) { context.pointer.pointee.resolve_host(context.pointer, $0, callback) }
+        }
+        guard result.0 == 0, !result.1.isEmpty else {
+            throw CefError.operationFailed("Cannot resolve \(host): net error \(result.0)")
+        }
+        return result.1
+    }
+
+    /// Runs a request-context call that reports completion through a
+    /// `cef_completion_callback_t`, and waits for it.
+    private func completing(
+        _ call: (UnsafeMutablePointer<cef_request_context_t>, UnsafeMutablePointer<cef_completion_callback_t>) -> Void
+    ) async {
+        guard let context = requestContext() else { return }
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            call(context.pointer, CompletionCallback(continuation: continuation).makeCallback())
+        }
+    }
+}
+
+/// Bridges `cef_completion_callback_t` to a continuation, which also
+/// resumes if CEF drops the callback without calling it.
+final class CompletionCallback: @unchecked Sendable {
+    private var continuation: CheckedContinuation<Void, Never>?
+    private let lock = NSLock()
+
+    init(continuation: CheckedContinuation<Void, Never>) {
+        self.continuation = continuation
+    }
+
+    deinit { resume() }
+
+    private func resume() {
+        lock.withLock {
+            continuation?.resume()
+            continuation = nil
+        }
+    }
+
+    /// The returned +1 reference is consumed by the call it is passed to.
+    func makeCallback() -> UnsafeMutablePointer<cef_completion_callback_t> {
+        let callback = cefAllocate(cef_completion_callback_t.self, owner: self)
+        callback.pointee.on_complete = { s in cefOwner(CompletionCallback.self, s)?.resume() }
+        return callback
+    }
+}
+
+/// Bridges `cef_resolve_callback_t` to a continuation.
+private final class ResolveCallback: @unchecked Sendable {
+    private var continuation: CheckedContinuation<(Int32, [String]), Never>?
+    private let lock = NSLock()
+
+    init(continuation: CheckedContinuation<(Int32, [String]), Never>) {
+        self.continuation = continuation
+    }
+
+    deinit { resume((-2, [])) }
+
+    private func resume(_ result: (Int32, [String])) {
+        lock.withLock {
+            continuation?.resume(returning: result)
+            continuation = nil
+        }
+    }
+
+    func makeCallback() -> UnsafeMutablePointer<cef_resolve_callback_t> {
+        let callback = cefAllocate(cef_resolve_callback_t.self, owner: self)
+        callback.pointee.on_resolve_completed = { s, result, addresses in
+            cefOwner(ResolveCallback.self, s)?.resume((result.rawValue, cefStrings(from: addresses)))
+        }
+        return callback
+    }
+}

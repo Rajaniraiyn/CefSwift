@@ -302,7 +302,7 @@ public final class CefProfile {
     // MARK: Request context
 
     /// The profile's `cef_request_context_t`, created on first use.
-    private func requestContext() -> CefRef<cef_request_context_t>? {
+    func requestContext() -> CefRef<cef_request_context_t>? {
         if let context { return context }
         guard CefRuntime.shared.isInitialized else { return nil }
         let preferences = CefRuntime.shared.configuration?.preferences ?? [:]
@@ -353,6 +353,8 @@ public final class CefProfile {
 
     /// Releases every profile's request context, before Chromium shuts down.
     static func releaseRequestContexts() {
+        CefObserverRegistration.releaseAll()
+        CefTaskManager.shared.releaseForShutdown()
         for profile in all { profile.context = nil }
         profilesWithOwnContext = []
     }
@@ -402,7 +404,7 @@ public final class CefProfile {
 
     /// `cef_request_context_t` extends `cef_preference_manager_t`, so the
     /// context pointer is also the profile's preference manager.
-    private func withPreferences<R>(_ body: (UnsafeMutablePointer<cef_preference_manager_t>) -> R) -> R? {
+    func withPreferences<R>(_ body: (UnsafeMutablePointer<cef_preference_manager_t>) -> R) -> R? {
         guard let context = requestContext() else { return nil }
         return context.pointer.withMemoryRebound(to: cef_preference_manager_t.self, capacity: 1, body)
     }

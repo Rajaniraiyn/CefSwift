@@ -83,6 +83,12 @@ public struct CefPermissionKind: OptionSet, Sendable, Hashable {
 }
 
 /// The answer to a ``CefPermissionRequest``.
+///
+/// For prompt-based permissions (notifications, location, MIDI, window
+/// management, …) Chromium itself keeps ``allow`` and ``deny`` for the
+/// origin, as Chrome does, so the site is not asked again. Camera and
+/// microphone answers apply to the one request; ``alwaysAllow`` and
+/// ``alwaysDeny`` store them in the profile's ``CefProfile/siteSettings``.
 public enum CefPermissionDecision: Sendable, Equatable {
     /// Grant the request.
     case allow
@@ -90,6 +96,17 @@ public enum CefPermissionDecision: Sendable, Equatable {
     case deny
     /// Dismiss the prompt without deciding; the page may ask again.
     case dismiss
+    /// Grant the request and store ``CefSitePermission/Setting/allow`` for
+    /// each requested permission, so later requests are granted without
+    /// asking.
+    case alwaysAllow
+    /// Refuse the request and store ``CefSitePermission/Setting/block`` for
+    /// each requested permission, so later requests are refused without
+    /// asking.
+    case alwaysDeny
+
+    /// Whether the decision grants the request.
+    public var grants: Bool { self == .allow || self == .alwaysAllow }
 }
 
 /// A permission request delivered to
@@ -109,8 +126,8 @@ public struct CefPermissionRequest: Sendable, Equatable {
 extension CefPermissionDecision {
     var cefResult: cef_permission_request_result_t {
         switch self {
-        case .allow: return CEF_PERMISSION_RESULT_ACCEPT
-        case .deny: return CEF_PERMISSION_RESULT_DENY
+        case .allow, .alwaysAllow: return CEF_PERMISSION_RESULT_ACCEPT
+        case .deny, .alwaysDeny: return CEF_PERMISSION_RESULT_DENY
         case .dismiss: return CEF_PERMISSION_RESULT_DISMISS
         }
     }
