@@ -136,6 +136,10 @@ public struct CefConfiguration: Sendable {
     /// `chrome://extensions` or the Chrome Web Store.
     public var extensions: [URL] = []
 
+    /// How many helper processes Chromium keeps running, trading memory for
+    /// speed and resilience. See ``CefMemoryPolicy``.
+    public var memoryPolicy: CefMemoryPolicy = .standard
+
     /// Chromium features to switch on (`--enable-features`), by name.
     public var enabledFeatures: Set<String> = []
 
@@ -191,10 +195,13 @@ public struct CefConfiguration: Sendable {
     /// A lean configuration for showing your own web content — an editor, a
     /// preview pane, an app UI. Turns off the parts of Chromium that only a
     /// general-purpose browser needs: background networking, component
-    /// updates, sync, translation, default-browser checks and first-run UI.
-    /// Fewer background tasks, fewer network requests, lower idle cost.
+    /// updates, sync, translation, default-browser checks and first-run UI;
+    /// and starts renderer processes only when a page needs one
+    /// (``CefMemoryPolicy/reduced``). Fewer background tasks, fewer network
+    /// requests, lower idle cost.
     public static var embedded: CefConfiguration {
         var configuration = CefConfiguration()
+        configuration.memoryPolicy = .reduced
         for name in [
             "disable-background-networking", "disable-component-update", "disable-sync",
             "disable-default-apps", "disable-domain-reliability", "disable-client-side-phishing-detection",

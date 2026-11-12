@@ -7,7 +7,6 @@ let package = Package(
     products: [
         .library(name: "CefKit", targets: ["CefKit"]),
         .library(name: "CefSwiftUI", targets: ["CefSwiftUI"]),
-        .executable(name: "cef-helper", targets: ["cef-helper"]),
         .plugin(name: "CefPlugin", targets: ["CefPlugin"]),
     ],
     targets: [
@@ -33,12 +32,9 @@ let package = Package(
             name: "CefSwiftUI",
             dependencies: ["CefKit"]
         ),
-        // Helper-process executable, bundled five times by the CefPlugin.
-        .executableTarget(
-            name: "cef-helper",
-            dependencies: ["CefKit"]
-        ),
         // `swift package cef <download|bundle|info|clean>`
+        // Also compiles the helper executable from the C sources in
+        // Plugins/CefPlugin/Helper when bundling.
         .plugin(
             name: "CefPlugin",
             capability: .command(
@@ -50,7 +46,8 @@ let package = Package(
                     .writeToPackageDirectory(reason: "Cache CEF distributions in .cef/ and write .app bundles"),
                     .allowNetworkConnections(scope: .all(ports: []), reason: "Download CEF binaries from cef-builds.spotifycdn.com"),
                 ]
-            )
+            ),
+            exclude: ["Helper"]
         ),
         .testTarget(
             name: "CefKitTests",

@@ -12,13 +12,14 @@ CefKit       CefRuntime, CefBrowser, CefBrowserWindow, CefBrowserDelegate, CefBr
     │        CefDevTools, CefProfile, configuration and policy types
 CCef         vendored CEF C headers, the generated bridge, the runtime loader (C)
 
-cef-helper   the helper-process executable, bundled five times by the plugin
-CefPlugin    swift package cef download | bundle | info | clean
+CefPlugin    swift package cef download | bundle | info | clean; compiles the
+             helper-process executable (C, Plugins/CefPlugin/Helper)
 ```
 
 ## The C bridge
 
-CefSwift calls CEF through its C API and never links the framework.
+CefSwift calls CEF through its C API and resolves every function at run
+time, so the Swift modules build without the framework.
 
 - `Scripts/generate-bindings.py` runs the C preprocessor over the vendored
   headers at the `CEF_API_VERSION` pinned in `ccef_config.h` and writes two
@@ -32,6 +33,9 @@ CefSwift calls CEF through its C API and never links the framework.
   compares `cef_api_hash` with the hash the headers define for the pinned
   version. A framework that does not match fails with
   `CefError.apiHashMismatch` instead of misbehaving.
+- In a bundle from `cef bundle`, the app executable also links the
+  framework, weakly, so dyld loads it at launch and `dlopen` returns the
+  library already loaded. See [Loading the framework at launch](#loading-the-framework-at-launch).
 
 Because the API version is pinned, CEF binaries update without changes to
 the Swift code. Adopting newer C APIs is a separate step that moves the pin
@@ -168,8 +172,42 @@ callback.
 ## Processes
 
 The app is Chromium's browser process. Renderer, GPU and utility processes
-run from the helper apps inside the bundle, all the same `cef-helper` binary,
-which calls `CefRuntime.helperMain()`. Custom URL schemes reach helpers on
-their command line (`--cefswift-schemes`), so every process registers the
-same list. With the sandbox on, each helper seals itself before it loads the
-framework ([sandbox](sandbox.md)).
+run from the helper apps inside the bundle, all the same executable, which
+`cef bundle` compiles from `Plugins/CefPlugin/Helper/helper_main.c`. It
+checks the API hash, registers the custom URL schemes it receives on its
+command line (`--cefswift-schemes`), so every process registers the same
+list, and calls `cef_execute_process`. With the sandbox on, each helper
+seals itself before any framework code runs ([sandbox](sandbox.md)).
+
+### Loading the framework at launch
+
+The helper is a small C program that links two libraries, in this order:
+
+1. `Contents/Frameworks/libcefswift_helper_startup.dylib`
+   (`helper_startup.c`). Its initializer calls `cef_sandbox_initialize`
+   from CEF's `libcef_sandbox.dylib` unless the helper was started with
+   `--no-sandbox`. dyld runs a library's initializers before those of the
+   libraries listed after it, so the sandbox is sealed before the
+   framework's static initializers run.
+2. The CEF framework.
+
+A library that dyld loads at launch is fixed up by the kernel as its pages
+are read in (page-in linking), so the framework's `__DATA_CONST` segment,
+about 12 MB of pointers, stays clean memory that every process shares. A
+library loaded with `dlopen` has the same segment fixed up in the process,
+which makes all of it private, dirty memory. The app executable gets the
+same benefit from its weak link. Across the six processes of the Minimal
+example this takes the idle footprint from 185 MB to 101 MB
+([guide](guide.md#footprint-and-launch-time)).
+
+Chrome 157 does the same with its "Aperitif" helpers: separate helper apps
+(`Google Chrome Helper (Aperitif).app` and so on) that link
+`libaperitif.dylib`, which registers PartitionAlloc's malloc zone and seals
+the sandbox in an initializer, and then the framework
+(`content/public/app/aperitif_mac.h`). Chromium chooses those helper names
+when its `AperitifHelpers` feature is on. CEF 156 does not ship
+`libaperitif.dylib` or Aperitif helpers and leaves the feature off; turning
+it on with `--enable-features=AperitifHelpers` makes Chromium launch helper
+apps that the bundle does not contain. CefSwift's helper keeps CEF's
+classic helper names and gets the memory saving without the feature.
+

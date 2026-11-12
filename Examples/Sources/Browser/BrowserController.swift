@@ -207,7 +207,14 @@ final class BrowserController: CefBrowserDelegate {
         }
     }
 
+    /// Called whenever a tab's page finishes loading.
+    @ObservationIgnored var onPageLoad: ((CefBrowser) -> Void)?
+
     // MARK: CefBrowserDelegate
+
+    func browser(_ browser: CefBrowser, didFinishLoadWithStatus httpStatus: Int) {
+        onPageLoad?(browser)
+    }
 
     func browser(_ browser: CefBrowser, decidePolicyFor navigation: CefNavigationAction) -> CefNavigationDecision {
         library.historyMayHaveChanged()
