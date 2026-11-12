@@ -26,6 +26,8 @@ struct AppBundler {
     let identity: SigningIdentity
     /// Info.plist keys and entitlements from cefapp.json (DistributionPlan).
     let plan: DistributionPlan
+    /// What the app keeps of the framework (cefapp.json `cef`).
+    let trim: FrameworkTrimPolicy
     /// Embedded as Contents/embedded.provisionprofile.
     let provisioningProfile: URL?
     /// A keychain to find the identity in (`codesign --keychain`).
@@ -70,7 +72,8 @@ struct AppBundler {
             libraries.append(destination)
         }
 
-        try Plist.write(mainInfoPlist(), to: contents.appendingPathComponent("Info.plist"))
+        let infoPlist = mainInfoPlist()
+        try Plist.write(infoPlist, to: contents.appendingPathComponent("Info.plist"))
         try Data("APPL????".utf8).write(to: contents.appendingPathComponent("PkgInfo"))
         if let provisioningProfile {
             try fm.copyItem(at: provisioningProfile, to: contents.appendingPathComponent("embedded.provisionprofile"))
@@ -78,6 +81,20 @@ struct AppBundler {
 
         let frameworkDest = frameworks.appendingPathComponent(frameworkSource.lastPathComponent)
         try copyPreservingLinks(frameworkSource, to: frameworkDest)
+        // Before signing, which seals what is left.
+        let trimmed = try FrameworkTrim.apply(
+            trim, to: frameworkDest, appLocalizations: FrameworkTrim.appLocalizations(infoPlist: infoPlist),
+            developmentLanguage: FrameworkTrim.developmentLanguage(infoPlist: infoPlist))
+        print("[cef] Locale packs: \(trimmed.locales.kept.sorted().joined(separator: ", "))" +
+              (trimmed.locales.removed.isEmpty ? "" : " (\(trimmed.locales.removed.count) others left out, " +
+                  "\(FrameworkTrim.formatted(trimmed.removedLocaleBytes)))"))
+        for mapping in trimmed.locales.mapping where mapping.pack == nil {
+            print("[cef] warning: Chromium has no locale pack for the localization \(mapping.localization); " +
+                  "it shows its own interface in \(FrameworkTrim.developmentLanguage(infoPlist: infoPlist)) there.")
+        }
+        if !trim.includesSoftwareGPU {
+            print("[cef] Software GPU fallback (SwiftShader) left out, \(FrameworkTrim.formatted(trimmed.removedSoftwareGPUBytes))")
+        }
 
         let startupLibrary = frameworks.appendingPathComponent(HelperBuilder.startupLibraryName)
         try fm.copyItem(at: helperStartupLibrary, to: startupLibrary)
@@ -163,7 +180,15 @@ struct AppBundler {
             // Chromium's allocator does not work with the nano malloc zone.
             "LSEnvironment": .dictionary(["MallocNanoZone": .string("0")]),
         ]
-        return Plist.merge(base, plan.appInfoPlist)
+        var info = Plist.merge(base, plan.appInfoPlist)
+        // Localized resource bundles make the app localized: say so, so that
+        // macOS picks the app's language, and Chromium's with it, from
+        // these (CefLocalization.application).
+        let localizations = FrameworkTrim.resourceLocalizations(in: product.resourceBundles)
+        if info["CFBundleLocalizations"] == nil, !localizations.isEmpty {
+            info["CFBundleLocalizations"] = .array(localizations.map { .string($0) })
+        }
+        return info
     }
 
     private func helperInfoPlist(helperName: String, kind: HelperKind) -> PlistDictionary {

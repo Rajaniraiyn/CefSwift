@@ -104,7 +104,32 @@ enum DoctorInspector {
         if let xattr = try? Shell.run("/usr/bin/xattr", ["-p", "com.apple.quarantine", app.path]) {
             facts.isQuarantined = xattr.exitCode == 0
         }
+        facts.footprint = footprint(app: app, framework: framework, executable: executable, info: info)
         return facts
+    }
+
+    private static func footprint(app: URL, framework: URL, executable: String, info: PlistDictionary) -> BundleFacts.Footprint {
+        let versions = framework.appendingPathComponent("Versions/A")
+        let resources = versions.appendingPathComponent("Resources")
+        var footprint = BundleFacts.Footprint()
+        footprint.appBytes = FrameworkTrim.size(of: app)
+        footprint.frameworkBinaryBytes = FrameworkTrim.size(of: versions.appendingPathComponent("Chromium Embedded Framework"))
+        footprint.frameworkResourcesBytes = FrameworkTrim.size(of: resources)
+        for pack in ChromiumLocales.packs(inResources: resources) {
+            footprint.localePacks[pack] = ([""] + ChromiumLocales.genderSuffixes).reduce(0) {
+                $0 + FrameworkTrim.size(of: resources.appendingPathComponent("\(pack)\($1).lproj"))
+            }
+        }
+        let libraries = versions.appendingPathComponent("Libraries")
+        let gpu = FrameworkTrim.softwareGPUFiles.map { libraries.appendingPathComponent($0) }
+            .filter { FileManager.default.fileExists(atPath: $0.path) }
+        footprint.softwareGPUBytes = gpu.isEmpty ? nil : gpu.reduce(0) { $0 + FrameworkTrim.size(of: $1) }
+        footprint.helperBytes = HelperKind.allCases.reduce(0) {
+            $0 + FrameworkTrim.size(of: app.appendingPathComponent("Contents/Frameworks/\($1.appName(for: executable)).app"))
+        }
+        footprint.appLocalizations = FrameworkTrim.appLocalizations(infoPlist: info)
+        footprint.developmentLanguage = FrameworkTrim.developmentLanguage(infoPlist: info)
+        return footprint
     }
 
     private static func part(named name: String, at url: URL, info: PlistDictionary) -> BundleFacts.Part {

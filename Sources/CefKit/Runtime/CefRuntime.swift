@@ -16,7 +16,9 @@ final class MappedCefSettings {
     ///   - configuration: the user configuration.
     ///   - frameworkDirectory: resolved `.framework` directory (maps to
     ///     `framework_dir_path`), or nil to let CEF use defaults.
-    init(configuration: CefConfiguration, frameworkDirectory: URL?) {
+    ///   - locale: the Chromium locale to start with (``CefLocalization``,
+    ///     resolved), or nil for CEF's default, `en-US`.
+    init(configuration: CefConfiguration, frameworkDirectory: URL?, locale: String? = nil) {
         raw.size = MemoryLayout<cef_settings_t>.stride
         raw.no_sandbox = configuration.isSandboxEnabled ? 0 : 1
         // Chromium's message loop is driven from the app's run loop
@@ -36,10 +38,13 @@ final class MappedCefSettings {
         CefStringUtil.set(rootCache.path, into: &raw.root_cache_path)
         CefStringUtil.set((configuration.cacheDirectory ?? rootCache).path, into: &raw.cache_path)
 
-        CefStringUtil.set(configuration.locale, into: &raw.locale)
+        CefStringUtil.set(locale, into: &raw.locale)
         CefStringUtil.set(configuration.userAgent.product, into: &raw.user_agent_product)
         CefStringUtil.set(configuration.userAgent.fullString, into: &raw.user_agent)
-        CefStringUtil.set(configuration.acceptLanguages.joined(separator: ","), into: &raw.accept_language_list)
+        let acceptLanguages = configuration.acceptLanguages.isEmpty
+            ? CefLocalization.defaultAcceptLanguages(locale: locale)
+            : configuration.acceptLanguages
+        CefStringUtil.set(acceptLanguages.joined(separator: ","), into: &raw.accept_language_list)
         CefStringUtil.set(configuration.logFile?.path, into: &raw.log_file)
         CefStringUtil.set(frameworkDirectory?.path, into: &raw.framework_dir_path)
         CefStringUtil.set(configuration.helperExecutableURL?.path, into: &raw.browser_subprocess_path)
@@ -116,6 +121,11 @@ public final class CefRuntime {
 
     /// The configuration CEF was initialized with.
     public private(set) var configuration: CefConfiguration?
+
+    /// The locale of Chromium's own interface, such as `"fr"`, `"pt-BR"` or
+    /// `"en-US"`: ``CefConfiguration/localization`` resolved to a locale the
+    /// bundle has strings for. `nil` until Chromium runs.
+    public private(set) var locale: String?
 
     /// Every live browser in the process, in creation order — including
     /// popups and tabs opened through Chrome's own UI.
@@ -205,10 +215,13 @@ public final class CefRuntime {
         let defaultClient = CefBrowserClient(browser: nil, requestFilter: nil, chromeUI: configuration.chromeUI)
         let context = CefAppContext(
             configuration: configuration, pump: pump, defaultClient: defaultClient.makeClient())
+        let frameworkDirectory = frameworkBinary.deletingLastPathComponent()
+        // Chromium loads whatever pack it is told to, and cannot start
+        // without one: ask only for a pack the framework has.
+        let packs = ChromiumLocales.packs(inResources: frameworkDirectory.appendingPathComponent("Resources"))
+        let locale = configuration.localization.resolve(packs: packs)?.locale
         let mapped = MappedCefSettings(
-            configuration: configuration,
-            frameworkDirectory: frameworkBinary.deletingLastPathComponent()
-        )
+            configuration: configuration, frameworkDirectory: frameworkDirectory, locale: locale)
 
         // Kept for the life of the process, as the real argv is.
         let arguments = CefCommandLine.chromiumArguments(from: CommandLine.arguments)
@@ -225,6 +238,7 @@ public final class CefRuntime {
 
         appContext = context
         settings = mapped
+        self.locale = locale ?? "en-US"
         self.configuration = configuration
         messagePump = pump
         pump.start()

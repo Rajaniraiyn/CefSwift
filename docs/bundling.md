@@ -116,6 +116,8 @@ a misspelled key does not go unnoticed.
 | `helperEntitlements` | None | Entitlements files merged over a helper's built-in ones, by helper: `helper`, `alerts`, `gpu`, `plugin`, `renderer`. A key set to `false` removes a built-in one. |
 | `provisioningProfile` | None | The profile to embed. |
 | `notarization.keychainProfile`, `notarization.format` | None, `zip` | Defaults of `cef notarize` and `bundle --notarize`. |
+| `cef.localizations` | `"application"` | Which of Chromium's locale packs the app keeps: `"application"`, `"all"`, or a list of localizations. As `--localizations`. See [Locale packs](#locale-packs). |
+| `cef.softwareGPUFallback` | `"include"` | `"exclude"` leaves out SwiftShader. As `--software-gpu-fallback`. See [Software GPU fallback](#software-gpu-fallback). |
 
 If you keep `cefapp.json` and entitlements files in the target's directory,
 exclude them in `Package.swift` (`exclude: ["cefapp.json",
@@ -153,6 +155,88 @@ signs it there, and only then replaces `<Name>.app`. A build that fails
 leaves the previous app as it was. `cef doctor` lists the app's libraries
 and resource bundles and reports code that loads or searches for
 libraries outside the bundle.
+
+## What `bundle` leaves out of the framework
+
+The framework's binary is 226 MiB of the 333 MiB a bundle with every part
+of the framework takes. Of the rest, `bundle` can leave out two parts that
+an app may not need. It removes them from the copy in the bundle, before
+signing; the shared cache in `.cef/` keeps everything.
+
+| Part | Size | Default |
+|---|---|---|
+| Locale packs for languages the app is not localized in (55 packs, 0.6 to 1.5 MiB each) | 48.9 MiB for an English-only app | Left out |
+| SwiftShader (`libvk_swiftshader.dylib`, `libvulkan.dylib`, `vk_swiftshader_icd.json`) | 16.1 MiB | Kept |
+
+Measured with the Minimal example (English only), CEF 156.0.28 arm64,
+logical size:
+
+| Bundle | Size |
+|---|---|
+| `--localizations all` | 333.0 MiB |
+| Default (`application`: `en` only) | 284.0 MiB |
+| Default and `--software-gpu-fallback exclude` | 268.0 MiB |
+
+The rest stays: `resources.pak` and the two `chrome_*_percent.pak` files
+hold resources every runtime style loads (DevTools' frontend among them,
+4.5 MiB, with no separate file to drop); `icudtl.dat` is the Unicode and
+locale data behind text segmentation, collation and `Intl`; the V8
+snapshot is what renderers start from; `libcef_sandbox.dylib` seals the
+helpers' sandbox. `cef doctor` reports what a bundle contains (see
+[cef doctor](#cef-doctor)).
+
+### Locale packs
+
+Chromium's interface strings come in one pack per locale,
+`Resources/<locale>.lproj/locale.pak`, with three small grammatical-gender
+variants beside each. With `"localizations": "application"`, the default,
+`bundle` keeps the packs for:
+
+- each localization in the app's `CFBundleLocalizations`, from
+  `cefapp.json`'s `infoPlist`. When the Info.plist does not set it and the
+  app's resource bundles are localized (`.lproj` directories, as a String
+  Catalog produces), `bundle` sets `CFBundleLocalizations` to their
+  localizations, so that macOS picks the app's language from them;
+- the development language, `CFBundleDevelopmentRegion` (`en`);
+- English, Chromium's last fallback.
+
+Localizations map onto packs as `CefLocalization` resolves them at run
+time, so the runtime only asks for packs the bundle has: `fr-CA` keeps
+`fr`, `pt` keeps `pt_BR`, `zh-Hant` keeps `zh_TW`, `en-AU` keeps `en_GB`.
+`bundle` warns about a localization Chromium has no pack for (`ga`, `eu`,
+…); Chromium's interface uses the development language there.
+
+```json
+{
+  "infoPlist": { "CFBundleLocalizations": ["en", "fr", "de", "pt-BR"] },
+  "cef": { "localizations": "application" }
+}
+```
+
+`"all"` keeps every pack, for a browser whose users pick any interface
+language. A list, such as `["en", "ja"]`, keeps those packs, the
+development language's and English, whatever the app declares.
+`--localizations application|all|en,ja` overrides `cefapp.json`.
+
+### Software GPU fallback
+
+SwiftShader is Chromium's software implementation of Vulkan, which ANGLE
+can run WebGL on without a GPU. In CEF 156 Chromium uses it only when told
+to (`--use-angle=swiftshader` or `--enable-unsafe-swiftshader`); it does not
+fall back to it by itself. Measured with SelfTest on an M3:
+
+| Bundle, switches | Pages render, windowed and offscreen | WebGL |
+|---|---|---|
+| With SwiftShader | Yes | ANGLE on Metal |
+| With SwiftShader, `--disable-gpu` | Yes, composited on the CPU | None |
+| With SwiftShader, `--disable-gpu --enable-unsafe-swiftshader` | Yes | ANGLE on SwiftShader |
+| Without SwiftShader | Yes | ANGLE on Metal |
+| Without SwiftShader, `--disable-gpu` (with or without `--enable-unsafe-swiftshader`) | Yes | None |
+
+`"softwareGPUFallback": "exclude"` (or `--software-gpu-fallback exclude`)
+saves 16.1 MiB and removes WebGL only where an app asks for SwiftShader,
+typically for a GPU-less virtual machine or a CI runner. Accelerated
+offscreen frames (IOSurfaces) need the GPU either way.
 
 ## Bundle anatomy
 
@@ -524,7 +608,12 @@ It reads the bundle with `codesign`, `security`, `spctl`, `stapler` and
   offer; whether the base helper can load the Widevine CDM; and that the
   build has no Verified Media Path, so services that require it refuse
   Widevine playback. Whether Chromium has downloaded the CDM is known only
-  at run time (`CefRuntime.shared.widevine`).
+  at run time (`CefRuntime.shared.widevine`);
+- the footprint: the bundle's logical size, with the framework binary, its
+  resources and the helpers; the locale packs it keeps and the pack each
+  of the app's localizations gets, with a warning for one that gets none
+  and the size of packs no localization uses; and whether SwiftShader is
+  in it.
 
 It exits non-zero when it finds an error, something that stops the app from
 launching, from loading a part, or from passing notarization. `--json`

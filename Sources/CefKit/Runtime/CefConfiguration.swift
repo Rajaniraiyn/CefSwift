@@ -87,8 +87,11 @@ public struct CefConfiguration: Sendable {
         return MappedCefSettings.defaultRootCacheDirectory()
     }
 
-    /// UI locale, e.g. `"en-US"`. Defaults to the system locale.
-    public var locale: String?
+    /// The language of Chromium's own interface: the app's
+    /// (``CefLocalization/application``, the default), the user's, or a
+    /// fixed one. Resolved at start-up to a locale the bundle has strings
+    /// for; ``CefRuntime/locale`` is the result.
+    public var localization: CefLocalization = .application
 
     /// How the browser names itself to sites: the `User-Agent` header and
     /// `navigator.userAgent`. Chromium's own by default. See
@@ -134,8 +137,18 @@ public struct CefConfiguration: Sendable {
     /// ``CefRuntime/registerSchemeHandler(scheme:domain:handler:)``.
     public var customSchemes: [CefCustomScheme] = []
 
-    /// Preferred languages for `Accept-Language`, most preferred first,
-    /// e.g. `["en-US", "en"]`. Empty uses the system's.
+    /// The languages pages are offered, most preferred first, e.g.
+    /// `["en-US", "fr"]`: the `Accept-Language` header and
+    /// `navigator.languages`, for every profile. Empty, the default, uses
+    /// the user's preferred languages (`Locale.preferredLanguages`), read at
+    /// start-up. Chromium adds each language's base (`fr` after `fr-CA`) to
+    /// the header.
+    ///
+    /// The list applies at every launch and wins over the languages set
+    /// in `chrome://settings/languages`. A profile can have a list of its
+    /// own: ``CefProfile/acceptLanguages``. Spelling follows the spelling
+    /// language of macOS (Keyboard settings, Text Input), as in Chrome on
+    /// macOS.
     public var acceptLanguages: [String] = []
 
     /// Unpacked extension directories (each containing a `manifest.json`)

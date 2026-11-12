@@ -403,6 +403,12 @@ final class LocalServer: @unchecked Sendable {
                             + "Proxy-Authenticate: Basic realm=\"selftest-proxy\"\r\n"
                         body = "<title>proxy denied</title>denied"
                     }
+                } else if path == "/accept-language" {
+                    let header = request.split(separator: "\r\n")
+                        .first { $0.lowercased().hasPrefix("accept-language:") }
+                        .map { $0.dropFirst("accept-language:".count).trimmingCharacters(in: .whitespaces) } ?? ""
+                    head = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n"
+                    body = "<title>accept-language \(header)</title>"
                 } else if path.hasPrefix("/passkeys") {
                     head = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n"
                     body = PasskeyChecks.page

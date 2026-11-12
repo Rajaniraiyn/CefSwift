@@ -35,6 +35,9 @@ struct CefAppConfig: Decodable, Sendable {
     /// Embedded as `Contents/embedded.provisionprofile`.
     var provisioningProfile: String?
     var notarization: Notarization?
+    /// What the app keeps of the CEF framework: locale packs and the
+    /// software GPU fallback.
+    var cef: CefFrameworkOptions?
 
     struct Notarization: Decodable, Sendable {
         /// A `notarytool store-credentials` profile name.
@@ -50,7 +53,7 @@ struct CefAppConfig: Decodable, Sendable {
     private enum CodingKeys: String, CodingKey, CaseIterable {
         case bundleIdentifier, displayName, minimumSystemVersion, version, build, signingIdentity,
              teamIdentifier, signingKeychain, hardenedRuntime, timestamp, capabilities, usageDescriptions,
-             infoPlist, entitlements, helperEntitlements, provisioningProfile, notarization
+             infoPlist, entitlements, helperEntitlements, provisioningProfile, notarization, cef
     }
 
     static let fileName = "cefapp.json"
@@ -97,12 +100,38 @@ struct CefAppConfig: Decodable, Sendable {
                     "\(source.path): unknown key \"\(key)\". Known keys: \(known.sorted().joined(separator: ", ")).")
             }
         }
+        if let object = try? JSONSerialization.jsonObject(with: data, options: .json5Allowed) as? [String: Any],
+           let cef = object["cef"] as? [String: Any] {
+            let known = Set(CefFrameworkOptions.CodingKeys.allCases.map(\.rawValue))
+            for key in cef.keys.sorted() where !known.contains(key) {
+                throw CefPluginError(
+                    "\(source.path): unknown key \"cef.\(key)\". Known keys: \(known.sorted().joined(separator: ", ")).")
+            }
+        }
+        if let value = config.cef?.softwareGPUFallback {
+            _ = try FrameworkTrimPolicy.includesSoftwareGPU(from: value, source: source.path)
+        }
         for name in config.helperEntitlements?.keys.sorted() ?? [] where HelperKind(rawValue: name) == nil {
             throw CefPluginError(
                 "\(source.path): unknown helper \"\(name)\" in helperEntitlements. Use one of: " +
                 "\(HelperKind.allCases.map(\.rawValue).joined(separator: ", ")).")
         }
         return config
+    }
+
+    /// The trim policy: `cef` with the command line's options over it.
+    func trimPolicy(localizationsOption: String?, softwareGPUOption: String?) throws -> FrameworkTrimPolicy {
+        var policy = FrameworkTrimPolicy()
+        if let localizations = cef?.localizations { policy.localizations = localizations }
+        if let value = cef?.softwareGPUFallback {
+            policy.includesSoftwareGPU = try FrameworkTrimPolicy.includesSoftwareGPU(from: value, source: source.path)
+        }
+        if let localizationsOption { policy.localizations = try FrameworkTrimPolicy.localizations(fromOption: localizationsOption) }
+        if let softwareGPUOption {
+            policy.includesSoftwareGPU = try FrameworkTrimPolicy.includesSoftwareGPU(
+                from: softwareGPUOption, source: "--software-gpu-fallback")
+        }
+        return policy
     }
 
     func resolve(_ path: String) -> URL {

@@ -6,6 +6,7 @@ are `@MainActor`.
 
 - [Starting Chromium](#starting-chromium)
   - [Configuration](#configuration)
+  - [Languages](#languages)
   - [Keychain access](#keychain-access)
   - [Preferences](#preferences)
   - [Relaunching](#relaunching)
@@ -131,7 +132,7 @@ Common options:
 | `protectedMedia` | Whether Chromium fetches Google's Widevine CDM for protected (DRM) media: `.automatic`, `.disabled` (the `.embedded` preset), or `.preinstalled(widevineDirectory:)`. See [Playing streaming services](#playing-streaming-services). |
 | `rootCacheDirectory`, `cacheDirectory` | Where profile data lives. Defaults to `~/Library/Application Support/<bundle ID>/CefSwift`. |
 | `persistsSessionCookies` | Whether session cookies survive a relaunch. |
-| `locale`, `acceptLanguages` | UI locale and `Accept-Language` list. |
+| `localization`, `acceptLanguages` | The language of Chromium's own interface, and the languages pages are offered. See [Languages](#languages). |
 | `userAgent` | How the browser names itself to sites: Chromium's own, with your product's token, or a string of your own. See [Compatibility with bot protection](#compatibility-with-bot-protection). |
 | `logSeverity`, `logFile` | Chromium's log. |
 | `remoteDebuggingPort` | Exposes the DevTools Protocol on a localhost port. Leave it `nil` in shipping apps. |
@@ -139,6 +140,53 @@ Common options:
 | `isSandboxEnabled` | Chromium's macOS sandbox. See [Sandbox](sandbox.md). |
 | `extraCommandLineSwitches`, `onBeforeCommandLineProcessing` | Any other Chromium switch, such as `["proxy-server": "socks5://localhost:1080"]`. |
 | `frameworkDirectory`, `helperExecutableURL` | Override where the framework and helper are found. Rarely needed. |
+
+### Languages
+
+`configuration.localization` chooses the language of Chromium's own
+interface: menus, dialogs, error pages, `chrome://` pages and the strings
+Chromium gives pages, such as a date picker's.
+
+| Policy | Language |
+|---|---|
+| `.application` (default) | The app's: the localization macOS picks for the app from those it has (`Bundle.main.preferredLocalizations`), which follows the user's language order and the per-app language in System Settings. An English-only app shows Chromium in English. |
+| `.system` | The first of the user's preferred languages (`Locale.preferredLanguages`) that Chromium has strings for. |
+| `.fixed("de")` | That language. |
+
+CefKit resolves the policy before Chromium starts, against the locale packs
+the bundle contains (`cef bundle` keeps those of the app's localizations; see
+[Bundling](bundling.md#locale-packs)): the first choice with a pack, else
+the app's development language, else English (`en-US`).
+`CefRuntime.shared.locale` is the result, such as `"fr"`, `"pt-BR"` or
+`"en-US"`. Identifiers map onto Chromium's locales as Chromium matches
+them: `zh-Hans` is `zh-CN` and `zh-Hant` is `zh-TW`; `pt` is `pt-BR`;
+Spanish for Latin America and the US is `es-419`; English outside the US is
+`en-GB`; `iw`, `tl`, `in` and `no` are `he`, `fil`, `id` and `nb`. Chromium
+reads the locale once; a change applies at the next launch.
+
+Telling Chromium a locale itself (`extraCommandLineSwitches["lang"]`)
+bypasses that check. For a locale without a pack, Chromium starts with a
+locale name its strings do not match: it reports the requested locale and
+shows English text.
+
+`acceptLanguages` lists the languages pages are offered, the
+`Accept-Language` header and `navigator.languages`, most preferred first.
+Empty, the default, takes the user's preferred languages at start-up,
+whatever the interface language: a French user of an English-only app gets
+English menus and French pages. Chromium adds each language's base
+(`fr-CA` brings `fr`) to the header. The list applies at every launch and
+wins over the languages a user picks in `chrome://settings/languages`. A
+profile can have a list of its own; set it before the profile's first
+browser:
+
+```swift
+let profile = CefProfile.persistent(id: "client")
+profile.acceptLanguages = ["de-CH", "fr"]
+```
+
+Spelling follows the spelling language of macOS (Keyboard settings, Text
+Input), as in Chrome on macOS; `spellcheck.dictionaries` reports it and
+`browser.enable_spellchecking` turns checking off.
 
 ### Keychain access
 
@@ -764,8 +812,8 @@ NTLM), Chromium asks the browser's delegate, in both runtime styles:
 
 ```swift
 func browser(_ browser: CefBrowser, credentialFor challenge: CefAuthenticationChallenge) async -> CefCredential? {
-    guard challenge.isProxy else { return await CefDialogPresenter.requestCredential(for: challenge, in: browser.hostWindow) }
-    return CefCredential(username: proxyUser, password: proxyPassword)
+    if challenge.isProxy { return CefCredential(username: "proxy-user", password: "proxy-password") }
+    return await CefDialogPresenter.requestCredential(for: challenge, in: browser.hostWindow)
 }
 ```
 

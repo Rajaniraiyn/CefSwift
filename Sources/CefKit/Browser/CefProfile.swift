@@ -36,6 +36,16 @@ public final class CefProfile {
     /// nothing on disk.
     public var displayName: String
     private var context: CefRef<cef_request_context_t>?
+
+    /// The languages this profile's pages are offered (`Accept-Language`,
+    /// `navigator.languages`), most preferred first, instead of
+    /// ``CefConfiguration/acceptLanguages``. `nil`, the default, uses the
+    /// configuration's.
+    ///
+    /// Chromium reads it when it creates the profile, before its first
+    /// browser; set it before then. The default profile always uses the
+    /// configuration's.
+    public var acceptLanguages: [String]?
     /// The profile's WebKit data store, for ``CefSystemBrowser``.
     var webKitDataStore: WKWebsiteDataStore?
 
@@ -320,7 +330,13 @@ public final class CefProfile {
                 CefStringUtil.set(path.path, into: &settings.cache_path)
                 settings.persist_session_cookies = configuration?.persistsSessionCookies == true ? 1 : 0
             }
-            defer { ccef_string_clear(&settings.cache_path) }
+            if let acceptLanguages {
+                CefStringUtil.set(acceptLanguages.joined(separator: ","), into: &settings.accept_language_list)
+            }
+            defer {
+                ccef_string_clear(&settings.cache_path)
+                ccef_string_clear(&settings.accept_language_list)
+            }
             // A new context finishes initializing asynchronously; its
             // preferences can only be set once it reports ready.
             let handler = preferences.isEmpty
