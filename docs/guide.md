@@ -19,6 +19,7 @@ are `@MainActor`.
   - [User scripts and style sheets](#user-scripts-and-style-sheets)
   - [Bridge](#bridge)
 - [Decisions](#decisions)
+  - [HTTP authentication](#http-authentication)
   - [Navigation and new windows](#navigation-and-new-windows)
   - [Downloads](#downloads)
   - [Passkeys](#passkeys)
@@ -730,7 +731,7 @@ final class Policy: CefBrowserDelegate {
 | `browser(_:runJavaScriptDialog:) async` | Native sheet |
 | `browser(_:confirmLeavingPage:) async` (`beforeunload`) | Native sheet |
 | `browser(_:decidePermissionFor:) async` | `.deny` |
-| `browser(_:credentialFor:) async` (HTTP authentication) | Native sign-in sheet. CEF 156 does not call it; see [Known limits](#known-limits) |
+| `browser(_:credentialFor:) async` (HTTP and proxy authentication) | Native sign-in sheet; see [HTTP authentication](#http-authentication) |
 | `browser(_:shouldProceedDespite:) async` (certificate errors) | `false`: the load is cancelled |
 | `browser(_:decideDestinationFor:suggestedName:) async` | `.allow(destination: nil)`: `~/Downloads` |
 | `browser(_:decidePasskeyRequest:) async` | Native passkey sheet; see [Passkeys](#passkeys) |
@@ -755,6 +756,38 @@ the delegate), `browser(_:didFinishLoadWithStatus:)`,
 
 `CefDialogPresenter` provides the native sheets behind the defaults, so your
 delegate can keep them for some cases.
+
+### HTTP authentication
+
+When a site or proxy asks for a user name and password (Basic, Digest,
+NTLM), Chromium asks the browser's delegate, in both runtime styles:
+
+```swift
+func browser(_ browser: CefBrowser, credentialFor challenge: CefAuthenticationChallenge) async -> CefCredential? {
+    guard challenge.isProxy else { return await CefDialogPresenter.requestCredential(for: challenge, in: browser.hostWindow) }
+    return CefCredential(username: proxyUser, password: proxyPassword)
+}
+```
+
+`challenge` names the address (`origin`), the server or proxy (`host`,
+`port`, `isProxy`), the `realm` and the `scheme` (`"basic"`, `"digest"`,
+…). Returning `nil` cancels the sign-in, and the page shows what the
+server sent with its 401 or 407. When the server refuses the credentials,
+the delegate is asked again with the same challenge. Chromium keeps
+accepted credentials for the profile and sends them again without asking.
+A request that belongs to no browser, such as a service worker's, is
+refused. A sign-in still waiting for an answer is cancelled when the page
+navigates away or the browser closes, and the default sheet dismisses
+itself.
+
+`configuration.authenticationPrompt = .chromium` shows Chromium's own
+dialog instead, for the whole app, and the delegate is not asked. In a
+Chrome-style browser the dialog is the `.signIn` surface ([Chromium's own interface](#chromiums-own-interface))
+and Chromium's password manager can fill it. In a `CefWebView` the load first
+fails with `ERR_INVALID_AUTH_CREDENTIALS`, reported to
+`browser(_:didFailLoad:)`, and Chromium shows the dialog in a window of its
+own; closing such a browser leaves the page first, which dismisses that
+window (Chromium crashes when the browser closes under it).
 
 ### Navigation and new windows
 
@@ -1172,7 +1205,7 @@ a presenter included.
 | QR code | `.qrCode` | Yes | `url`; draw it with `CefQRCodeView` or `CefQRCode.image(for:size:)` | |
 | Cast | `.cast` | Yes | `url`; `CefMediaRouter.shared` lists `sinks` and `routes` and casts Cast apps and presentation URLs | Mirroring a tab needs Chromium's dialog. |
 | Share | `.share` | No: Chromium's share menu needs its toolbar | `url`, `title` | By default the command opens macOS's share menu at the anchor. |
-| HTTP sign-in | `.signIn` | Yes | No: the credentials go to Chromium's dialog | Dismissing cancels the sign-in. |
+| HTTP sign-in | `.signIn` | Yes | No: the credentials go to Chromium's dialog | Only with `authenticationPrompt = .chromium`; by default the delegate answers. Dismissing cancels the sign-in. |
 | Status bubble | `.statusBubble` | Yes | `browser.statusText` | `setStatusBubble(_:)` or `statusBubbleView`. Not anchorable. |
 | Fullscreen notice | `.fullscreenNotice` | Yes | `browser.isFullscreen` | |
 | Downloads | `.downloads` | Yes | `browser.downloads` and the delegate's download decisions | |
@@ -1933,12 +1966,9 @@ the switches measured and not used.
   tabs.
 - Only Chrome-style browsers record history. Pages shown in a `CefWebView`
   do not appear in `profile.history`.
-- CEF 156 does not call `browser(_:credentialFor:)` for HTTP
-  authentication. Chrome-style browsers show Chromium's own sign-in dialog
-  over the page. In a `CefWebView` the load fails with
-  `ERR_INVALID_AUTH_CREDENTIALS`, reported to `browser(_:didFailLoad:)`, and
-  Chromium shows its sign-in dialog in a window of its own; closing the
-  browser leaves the page first, which dismisses that window.
+- `authenticationPrompt` applies to the whole app: Chromium's sign-in
+  dialog and the delegate cannot be chosen per browser. HTTP authentication
+  requests without a browser, such as a service worker's, are refused.
 - Chromium's own Memory Saver never discards a CefKit browser, since each
   is the active tab of its own Chromium window; use
   `CefRuntime.shared.memorySaver` instead. A `CefWebView` browser loses its

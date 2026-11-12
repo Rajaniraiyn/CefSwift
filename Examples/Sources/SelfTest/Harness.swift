@@ -178,6 +178,7 @@ extension SelfTest {
     /// the checks' own timeouts where they wait for the network.
     static let groupDeadlines: [String: Duration] = [
         "lifecycle": .seconds(180),
+        "authentication": .seconds(120),
         "internalPages": .seconds(120),
         "serviceHosts": .seconds(90),
         "protectedMedia": .seconds(120),
@@ -249,6 +250,7 @@ extension SelfTest {
         let environment = ProcessInfo.processInfo.environment
         return environment["SELFTEST_ISOLATED"] == "1"
             && environment[relaunchEnvironmentKey] == nil && environment[widevineProbeEnvironmentKey] == nil
+            && environment[probeEnvironmentKey] == nil
             && Benchmarks.requested == nil && !ServiceBenchmark.isRequested
     }
 

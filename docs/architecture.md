@@ -75,7 +75,7 @@ names at run time:
 | `cef_scheme_handler_factory_t.create` | IO | Creates the resource handler. |
 | `cef_resource_handler_t.get_response_headers`, `cancel` | IO | Read and change the handler's locked state. |
 | `cef_resource_handler_t.open`, `skip`, `read` | Chromium's thread pool (`ThreadPoolForegroundWorker`), in sequence | `open` starts the `CefSchemeHandler` in a task; `read` copies buffered bytes or waits for them. |
-| `cef_request_handler_t.get_auth_credentials` | IO | Hops to the main actor for the delegate; CEF 156 does not call it. |
+| `cef_request_handler_t.get_auth_credentials` | IO | Hops to the main actor for the delegate. CEF calls it only with `--disable-chrome-login-prompt` (`CefAuthenticationPrompt.delegate`, the default); without the switch Chromium shows its own dialog. |
 | `cef_cookie_visitor_t.visit`, `cef_download_handler_t` | UI | No hop needed. |
 | `cef_render_handler_t`, `cef_accessibility_handler_t`, everything else | UI | `MainActor.assumeIsolated`. |
 | `on_schedule_message_pump_work` | Any | Posts to the main queue. |

@@ -115,6 +115,9 @@ final class CefAppContext: @unchecked Sendable {
         if !configuration.protectedMedia.usesComponentUpdater, !commandLine.hasSwitch("disable-component-update") {
             commandLine.appendSwitch("disable-component-update")
         }
+        if configuration.authenticationPrompt == .delegate {
+            commandLine.appendSwitch(CefAuthenticationPrompt.delegateSwitch)
+        }
         if configuration.safeStorage.resolved() == .mockKeychain, !commandLine.hasSwitch("use-mock-keychain") {
             commandLine.appendSwitch("use-mock-keychain")
         }

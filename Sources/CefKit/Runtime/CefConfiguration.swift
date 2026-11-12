@@ -172,6 +172,12 @@ public struct CefConfiguration: Sendable {
     /// ``embedded`` turns it off. See ``CefProtectedMedia``.
     public var protectedMedia: CefProtectedMedia = .automatic
 
+    /// Who asks for the credentials a site or proxy wants: the browser
+    /// delegate's ``CefBrowserDelegate/browser(_:credentialFor:)`` (by
+    /// default a native sheet), or Chromium's own dialog. See
+    /// ``CefAuthenticationPrompt``.
+    public var authenticationPrompt: CefAuthenticationPrompt = .delegate
+
     /// Trims Chrome's own UI in Chrome-style windows.
     public var chromeUI = CefChromeUIConfiguration()
 

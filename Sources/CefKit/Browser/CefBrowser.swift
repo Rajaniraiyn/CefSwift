@@ -767,10 +767,10 @@ public final class CefBrowser: Identifiable {
             return
         }
         if let signInPromptURL, signInPromptURL == url {
-            // Chromium's sign-in window for an Alloy-style browser crashes
-            // the process when its browser closes under it. A navigation
-            // dismisses the window, so leave the page first and close once
-            // the window has gone.
+            // With `CefAuthenticationPrompt.chromium`, Chromium's sign-in
+            // window for an Alloy-style browser crashes the process when its
+            // browser closes under it. A navigation dismisses the window, so
+            // leave the page first and close once the window has gone.
             self.signInPromptURL = nil
             let browserWindows = Set(CefBrowserWindow.all.compactMap(\.window).map(ObjectIdentifier.init))
             let chromiumWindows = NSApp.windows.filter {
@@ -1170,8 +1170,11 @@ extension CefBrowser {
     }
 
     func mainFrameDidFailLoad(_ error: CefLoadError) {
-        // ERR_INVALID_AUTH_CREDENTIALS: Chromium asks for credentials itself.
-        if error.code == -338, !isChromeStyle { signInPromptURL = error.url }
+        // ERR_INVALID_AUTH_CREDENTIALS: with `CefAuthenticationPrompt.chromium`,
+        // Chromium asks for credentials itself, in a window of its own.
+        if error.code == -338, !isChromeStyle, CefRuntime.shared.configuration?.authenticationPrompt == .chromium {
+            signInPromptURL = error.url
+        }
         delegate?.browser(self, didFailLoad: error)
     }
 

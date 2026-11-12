@@ -42,9 +42,14 @@ enum SelfTest {
             configuration.rootCacheDirectory = URL(fileURLWithPath: widevineProbeDirectory)
             configuration.protectedMedia = .automatic
         }
+        if let probe {
+            configuration.rootCacheDirectory = ProcessInfo.processInfo.environment[probeRootEnvironmentKey]
+                .map { URL(fileURLWithPath: $0) } ?? configuration.rootCacheDirectory
+            configure(&configuration, forProbe: probe)
+        }
         // Those second instances report to this one, which counts their
         // lines; they write no results file of their own.
-        if relaunchDirectory != nil || widevineProbeDirectory != nil {
+        if relaunchDirectory != nil || widevineProbeDirectory != nil || probe != nil {
             unsetenv("SELFTEST_JSON")
             unsetenv("SELFTEST_STRICT")
         }
@@ -95,6 +100,8 @@ enum SelfTest {
                 await ServiceBenchmark.run()
             } else if widevineProbeDirectory != nil {
                 await widevineProbeChecks()
+            } else if let probe {
+                await probes[probe]?()
             } else {
                 await runChecks()
             }
@@ -149,6 +156,7 @@ enum SelfTest {
         ("profile", profileChecks),
         ("browserWindow", browserWindowChecks),
         ("behavior", browserBehaviorChecks),
+        ("authentication", authenticationChecks),
         ("favicon", faviconChecks),
         ("toolbarAndZoom", toolbarAndZoomChecks),
         ("bridgeScope", bridgeScopeChecks),

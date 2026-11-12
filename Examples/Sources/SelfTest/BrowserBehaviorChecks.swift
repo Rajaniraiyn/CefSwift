@@ -4,7 +4,7 @@ import Network
 
 /// Checks of what a browser built on `CefBrowserWindow` relies on: popups,
 /// closing in awkward moments, downloads, `beforeunload`, load errors,
-/// authentication, renderer crashes and Chromium's own pages.
+/// renderer crashes and Chromium's own pages.
 extension SelfTest {
     static func browserBehaviorChecks() async {
         CefRuntime.shared.registerSchemeHandler(scheme: "selftest", domain: "edge", handler: EdgePages())
@@ -14,7 +14,6 @@ extension SelfTest {
         await downloadChecks()
         await leavingChecks()
         await loadFailureChecks()
-        await authenticationChecks()
         await rendererCrashChecks()
         await settingsPageChecks()
         // "Hold ⌘Q to Quit" is an application-wide setting, not a profile's.
@@ -187,68 +186,6 @@ extension SelfTest {
         _ = await waitUntil { window.isClosed }
     }
 
-    // MARK: Authentication
-
-    static func authenticationChecks() async {
-        guard let server = try? await LocalServer.start() else {
-            print("SKIP [environment] authentication: could not start a local HTTP server")
-            return
-        }
-        defer { server.stop() }
-        let url = URL(string: "http://127.0.0.1:\(server.port)/private")!
-
-        let recorder = Recorder()
-        recorder.credential = CefCredential(username: "ada", password: "lovelace")
-        let browser = CefBrowser(url: url, delegate: recorder)
-        let window = CefBrowserWindow(browser: browser)
-        window.show()
-        // CEF 156 does not consult the request handler for HTTP auth: Chrome
-        // style shows Chromium's own sign-in dialog, as a child window.
-        check("authentication: Chromium's sign-in dialog appears",
-              await waitUntil { window.window?.childWindows?.isEmpty == false })
-        check("surfaces: sign-in dialog recognized",
-              await waitUntil { window.chromiumSurfaces.contains { $0.kind == .signIn } },
-              detail: "\(window.chromiumSurfaces.map { "\($0.kind) '\($0.title)'" })")
-        if let signIn = window.chromiumSurfaces.first(where: { $0.kind == .signIn }) {
-            signIn.dismiss()
-            check("surfaces: dismissing the sign-in dialog cancels it",
-                  await waitUntil { signIn.window?.isVisible != true && window.chromiumSurfaces.isEmpty && browser.title == "denied" },
-                  detail: browser.title)
-        }
-        if recorder.challenges.isEmpty {
-            print("SKIP [limitation] authentication: CEF does not call credentialFor (Chromium's dialog asks instead)")
-        } else {
-            check("authentication: delegate answers the challenge", await waitUntil { browser.title == "authorized" })
-        }
-        window.close()
-        check("authentication: window with the dialog open closes", await waitUntil { window.isClosed })
-
-        // An embedded (Alloy-style) browser: CEF 156 does not ask the
-        // delegate either. The load fails with ERR_INVALID_AUTH_CREDENTIALS
-        // and Chromium shows its sign-in window on its own.
-        let embeddedRecorder = Recorder()
-        embeddedRecorder.credential = recorder.credential
-        let embedded = CefBrowser(url: url, delegate: embeddedRecorder)
-        let view = CefWindowedBrowserView()
-        view.frame = SelfTest.window.contentView!.bounds
-        SelfTest.window.contentView!.addSubview(view)
-        view.browser = embedded
-        let failed = await waitUntil { embeddedRecorder.loadErrors.contains { $0.code == -338 } || embedded.title == "authorized" }
-        if embeddedRecorder.challenges.isEmpty {
-            check("authentication (embedded): fails with ERR_INVALID_AUTH_CREDENTIALS, delegate not asked",
-                  failed && embedded.title != "authorized", detail: "\(embeddedRecorder.loadErrors)")
-        } else {
-            check("authentication (embedded): delegate answers the challenge",
-                  await waitUntil { embedded.title == "authorized" })
-        }
-        try? await Task.sleep(for: .milliseconds(500))
-        embedded.close(force: true)
-        check("authentication (embedded): closing with Chromium's sign-in window open is clean", await waitUntil {
-            embedded.state == .closed && !NSApp.windows.contains { $0.isVisible && $0.title == "Sign in" }
-        }, detail: "\(NSApp.windows.filter(\.isVisible).map(\.title))")
-        view.removeFromSuperview()
-    }
-
     // MARK: Renderer crashes
 
     static func rendererCrashChecks() async {
@@ -362,6 +299,8 @@ final class Recorder: CefBrowserDelegate {
     var downloadDestination: URL?
     var leavesPage = true
     var credential: CefCredential?
+    /// Answers to give before ``credential``, one per challenge.
+    var credentialQueue: [CefCredential?] = []
     private(set) var leaveRequests = 0
     private(set) var loadErrors: [CefLoadError] = []
     private(set) var challenges: [CefAuthenticationChallenge] = []
@@ -382,7 +321,7 @@ final class Recorder: CefBrowserDelegate {
 
     func browser(_ browser: CefBrowser, credentialFor challenge: CefAuthenticationChallenge) async -> CefCredential? {
         challenges.append(challenge)
-        return credential
+        return credentialQueue.isEmpty ? credential : credentialQueue.removeFirst()
     }
 
     func browser(_ browser: CefBrowser, renderProcessDidTerminate reason: CefTerminationReason) {
@@ -434,6 +373,7 @@ struct EdgePages: CefSchemeHandler {
 }
 
 /// A local HTTP server. `/private` wants Basic credentials `ada:lovelace`;
+/// as a proxy, it wants `grace:hopper` for every request;
 /// `*.txt` is served as an attachment and `/page` as a plain page.
 final class LocalServer: @unchecked Sendable {
     private let listener: NWListener
@@ -453,7 +393,17 @@ final class LocalServer: @unchecked Sendable {
                 let request = data.flatMap { String(data: $0, encoding: .utf8) } ?? ""
                 let path = request.split(separator: " ").dropFirst().first.map(String.init) ?? "/"
                 let head: String, body: String
-                if path.hasPrefix("/passkeys") {
+                if path.hasPrefix("http://") {
+                    // A request sent to this server as a proxy.
+                    if request.contains("Proxy-Authorization: Basic \(Data("grace:hopper".utf8).base64EncodedString())") {
+                        head = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n"
+                        body = "<title>proxied</title>ok"
+                    } else {
+                        head = "HTTP/1.1 407 Proxy Authentication Required\r\nContent-Type: text/html\r\n"
+                            + "Proxy-Authenticate: Basic realm=\"selftest-proxy\"\r\n"
+                        body = "<title>proxy denied</title>denied"
+                    }
+                } else if path.hasPrefix("/passkeys") {
                     head = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n"
                     body = PasskeyChecks.page
                 } else if path.hasSuffix(".txt") {

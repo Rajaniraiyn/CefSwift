@@ -37,7 +37,8 @@ public final class CefChromiumSurface: Identifiable {
         /// shows it only from its own toolbar, so in a ``CefBrowserWindow``
         /// the command opens macOS's share menu unless you present your own.
         case share
-        /// The sign-in dialog for HTTP authentication.
+        /// The sign-in dialog for HTTP authentication, with
+        /// ``CefAuthenticationPrompt/chromium``.
         case signIn
         /// The status bubble showing a hovered link's address.
         case statusBubble
