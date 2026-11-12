@@ -1049,12 +1049,8 @@ extension CefBrowser {
     func applyFullscreen(_ isFullscreen: Bool) { self.isFullscreen = isFullscreen }
     func applyStatusText(_ text: String) { statusText = text }
     func applyFindResult(_ result: CefFindResult) {
-        var result = result
-        // Updates that only recount leave the active match out.
-        if result.activeMatchIndex <= 0, result.matchCount > 0, let previous = findResult?.activeMatchIndex, previous > 0 {
-            result.activeMatchIndex = min(previous, result.matchCount)
-        }
         findResult = result
+        findSession.didReceive(result)
     }
 
     func applyDownload(_ download: CefDownload, control: CefRef<cef_download_item_callback_t>?) {

@@ -16,6 +16,9 @@ extension CefBrowserWindow {
               !chromiumSurfaces.contains(where: { $0.window === child }),
               pendingSurfaces[ObjectIdentifier(child)] == nil
         else { return }
+        // A window Chromium reuses may have been hidden before; it is
+        // decided afresh.
+        CefSurfaceTracker.setHidden(child, false)
         pendingSurfaces[ObjectIdentifier(child)] = (child, child.alphaValue)
         child.alphaValue = 0
     }
@@ -86,10 +89,25 @@ extension CefBrowserWindow {
     /// asks. Status bubbles and fullscreen notices stay invisible, as
     /// Chromium reuses their windows.
     private func hide(_ surface: CefChromiumSurface, window child: NSWindow) {
-        child.alphaValue = 0
+        CefSurfaceTracker.setHidden(child, true)
         child.ignoresMouseEvents = true
         surface.isPresented = false
         CefChromiumSurface.closeNatively(child, kind: surface.kind, browser: browser)
+    }
+
+    /// Applies a changed `chromiumUI` to the surfaces on screen: places them
+    /// under their anchors, and hides those whose kind is now hidden.
+    func applyChromiumUI() {
+        for surface in chromiumSurfaces {
+            guard let child = surface.window else { continue }
+            if case .hidden = chromiumUI[surface.kind] {
+                hide(surface, window: child)
+                stopTracking(surface)
+                chromiumSurfaces.removeAll { $0 === surface }
+            } else {
+                place(surface)
+            }
+        }
     }
 
     func stopTracking(_ surface: CefChromiumSurface) {

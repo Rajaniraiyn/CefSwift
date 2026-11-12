@@ -146,12 +146,28 @@ extension SelfTest {
         let session = browser.findSession
         check("surfaces: a custom find bar starts a find session",
               presented.first?.kind == .findBar && session.isActive && visibleSurfaceWindows().isEmpty)
+        // The page has "page" three times in its text.
+        func findState(_ active: Int, of count: Int) async -> Bool {
+            await waitUntil(timeout: .seconds(5)) {
+                session.matchCount == count && session.activeMatch == active && session.isComplete
+            }
+        }
         session.text = "page"
-        check("find session: counts matches", await waitUntil(timeout: .seconds(5)) { session.matchCount >= 1 },
-              detail: "\(session.matchCount) \(session.activeMatch)")
+        check("find session: a new search highlights 1 of 3", await findState(1, of: 3),
+              detail: "\(session.activeMatch) of \(session.matchCount)")
         session.next()
-        check("find session: highlights a match", await waitUntil(timeout: .seconds(5)) { session.activeMatch >= 1 },
-              detail: "\(session.matchCount) \(session.activeMatch)")
+        check("find session: next goes to 2 of 3", await findState(2, of: 3),
+              detail: "\(session.activeMatch) of \(session.matchCount)")
+        session.next()
+        session.next()
+        check("find session: next wraps around to 1 of 3", await findState(1, of: 3),
+              detail: "\(session.activeMatch) of \(session.matchCount)")
+        session.previous()
+        check("find session: previous wraps back to 3 of 3", await findState(3, of: 3),
+              detail: "\(session.activeMatch) of \(session.matchCount)")
+        session.text = "zzqqxx"
+        check("find session: no matches is 0 of 0", await findState(0, of: 0),
+              detail: "\(session.activeMatch) of \(session.matchCount)")
         presented.first?.dismiss()
         check("find session: ends with the surface", !session.isActive && window.chromiumSurfaces.isEmpty)
 
@@ -184,10 +200,16 @@ extension SelfTest {
         _ = try? await browser.devTools.send("Input.dispatchMouseEvent", ["type": "mouseMoved", "x": 1, "y": 1])
         try? await Task.sleep(for: .milliseconds(600))
         await hoverLink()
-        check("surfaces: an app's status bubble hides Chromium's",
-              await waitUntil(timeout: .seconds(3)) { !browser.statusText.isEmpty }
-                  && visibleSurfaceWindows().isEmpty,
-              detail: "\(browser.statusText) \(visibleSurfaceWindows().map { NSStringFromRect($0.frame) })")
+        // Chromium fades its bubble in by raising its window's alpha, so
+        // sample across the fade rather than once.
+        let shown = await waitUntil(timeout: .seconds(3)) { !browser.statusText.isEmpty }
+        var leaks: [String] = []
+        for _ in 0..<25 {
+            leaks += visibleSurfaceWindows().map { "alpha \($0.alphaValue) \(NSStringFromRect($0.frame))" }
+            try? await Task.sleep(for: .milliseconds(40))
+        }
+        check("surfaces: an app's status bubble keeps Chromium's hidden throughout its fade",
+              shown && leaks.isEmpty, detail: "\(browser.statusText) \(leaks.prefix(3))")
         window.statusBubbleView = nil
 
         // CefSwiftUI's find bar: a title-bar accessory while the session runs.
