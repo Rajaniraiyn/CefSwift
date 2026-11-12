@@ -45,12 +45,34 @@ import Testing
 }
 
 @Suite @MainActor struct CefBridgeTests {
-    @Test func shimDefinesTheNamedGlobalAndItsPlumbing() {
-        let shim = CefBridge(name: "app").shim
-        #expect(shim.contains("globalThis.__cefswift_app"))
-        #expect(shim.contains("hidden('app'"))
-        #expect(shim.contains("__cefswift_app_reply"))
-        #expect(shim.contains("__cefswift_app_emit"))
+    @Test func describesItselfToTheRenderer() {
+        let bridge = CefBridge(name: "app")
+        #expect(bridge.rendererConfiguration == ["name": "app", "access": "mainFrame"])
+        bridge.access = .origins(["https://b.example", "app://start"])
+        #expect(bridge.rendererConfiguration == [
+            "name": "app", "access": "origins", "origins": ["app://start", "https://b.example"],
+        ])
+    }
+
+    @Test func checksTheReportedOriginAgainstTheFrameAddress() {
+        let page = URL(string: "https://example.com:8443/page")
+        #expect(CefBridge.origin("https://example.com:8443", isConsistentWith: page))
+        #expect(!CefBridge.origin("https://other.example", isConsistentWith: page))
+        // A sandboxed document's origin is opaque.
+        #expect(CefBridge.origin("null", isConsistentWith: page))
+        // Documents that inherit their origin.
+        #expect(CefBridge.origin("https://example.com", isConsistentWith: URL(string: "about:blank")))
+        #expect(CefBridge.origin("https://example.com", isConsistentWith: URL(string: "data:text/html,x")))
+    }
+
+    @Test func userScriptsDescribeWhenAndWhereTheyRun() {
+        let script = CefUserScript(source: "x", matching: "https://*", injectionTime: .documentEnd, frames: .mainFrame)
+        #expect(script.rendererConfiguration == [
+            "source": "x", "urlPattern": "https://*", "atDocumentEnd": true, "mainFrameOnly": true,
+        ])
+        #expect(CefUserScript(source: "y").rendererConfiguration == [
+            "source": "y", "atDocumentEnd": false, "mainFrameOnly": false,
+        ])
     }
 
     @Test func defaultsToMainFrameAccess() {
@@ -73,6 +95,22 @@ import Testing
         let configuration = CefConfiguration.embedded
         #expect(configuration.extraCommandLineSwitches.keys.contains("disable-background-networking"))
         #expect(configuration.disabledFeatures.contains("Translate"))
+    }
+
+    /// Chromium sets `navigator.webdriver` for these; no preset may.
+    @Test func noPresetMarksTheBrowserAsAutomated() {
+        let automation: Set<String> = ["enable-automation", "headless", "remote-debugging-pipe", "remote-debugging-port"]
+        for configuration in [CefConfiguration.default, .embedded, .browser] {
+            #expect(automation.isDisjoint(with: configuration.extraCommandLineSwitches.keys))
+            #expect(configuration.remoteDebuggingPort == nil)
+        }
+    }
+
+    @Test func userAgentChoicesMapToCEFSettings() {
+        #expect(CefUserAgent.chromium.product == nil && CefUserAgent.chromium.fullString == nil)
+        #expect(CefUserAgent.replacingProduct("Orbit/1").product == "Orbit/1")
+        #expect(CefUserAgent.custom("UA").fullString == "UA" && CefUserAgent.custom("UA").product == nil)
+        #expect(CefConfiguration.default.userAgent == .chromium)
     }
 
     @Test func browserPresetKeepsSessions() {

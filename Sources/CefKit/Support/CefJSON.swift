@@ -1,5 +1,6 @@
 import CCef
 import Foundation
+import CefBase
 
 /// A JSON value: the currency type for everything that crosses the
 /// Swift ↔ Chromium boundary as structured data — DevTools protocol messages,

@@ -63,9 +63,6 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
     /// mouse moves, so it is re-applied from `cursorUpdate(with:)`.
     private var currentCursor: NSCursor = .arrow
 
-    /// Requests a frame from Chromium on every display refresh while the view
-    /// is visible.
-    private var displayLink: CADisplayLink?
     /// Whether the browser was last told it is visible.
     private var isDisplaying = false
 
@@ -141,9 +138,6 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
     public override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         removeWindowObservers()
-        // A display link follows the display of the window it was made for.
-        displayLink?.invalidate()
-        displayLink = nil
         if window != nil {
             hostBrowserIfPossible()
             updateScale()
@@ -227,29 +221,17 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
         return window.occlusionState.contains(.visible)
     }
 
-    /// Starts or stops requesting frames to match whether the view can be
-    /// seen, and tells the browser when that changes — or regardless, when
-    /// `notifyingBrowser` is set because the browser has just been hosted.
+    /// Tells the browser when whether the view can be seen changes — or
+    /// regardless, when `notifyingBrowser` is set because the browser has
+    /// just been hosted. A hidden browser stops painting.
     private func updateVisibility(notifyingBrowser: Bool = false) {
         let visible = canBeSeen
-        if visible, displayLink == nil {
-            let link = displayLink(target: self, selector: #selector(displayLinkDidFire))
-            link.add(to: .main, forMode: .common)
-            displayLink = link
-        } else if !visible {
-            displayLink?.invalidate()
-            displayLink = nil
-        }
         guard visible != isDisplaying || notifyingBrowser else { return }
         isDisplaying = visible
         // A browser that has moved to another view is that view's to manage.
         if let browser, browser.hostView === self {
             if visible { browser.hostViewDidUnhide() } else { browser.hostViewDidHide() }
         }
-    }
-
-    @objc private func displayLinkDidFire() {
-        browser?.displayIfNeeded()
     }
 
     // MARK: Window observation
@@ -270,6 +252,10 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
             center.addObserver(forName: NSWindow.didChangeOcclusionStateNotification, object: window, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.updateVisibility() }
             },
+            // Pages read the window's position (window.screenX and the like).
+            center.addObserver(forName: NSWindow.didMoveNotification, object: window, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.windowDidMove() }
+            },
         ]
     }
 
@@ -280,6 +266,11 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
         windowObservers = []
     }
 
+    private func windowDidMove() {
+        guard let browser, browser.hostView === self else { return }
+        browser.hostViewDidMove()
+    }
+
     private func windowKeyStateDidChange(isKey: Bool) {
         guard window?.firstResponder === self else { return }
         if isKey { browser?.hostViewDidBecomeKey() } else { browser?.hostViewDidResignKey() }
@@ -287,22 +278,27 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
 
     // MARK: CefOffscreenHost
 
+    /// The view, its window and its screen, as a windowed browser in the
+    /// same window would report them.
     public var offscreenViewInfo: CefOffscreenViewInfo {
-        var origin = CGPoint.zero
-        var screenRect = CGRect(x: 0, y: 0, width: 1, height: 1)
-        if let window, let screen = window.screen ?? NSScreen.main {
-            // Chromium uses top-left screen coordinates; AppKit's are bottom-left.
-            let onScreen = window.convertToScreen(convert(bounds, to: nil))
-            let screenFrame = screen.frame
-            origin = CGPoint(x: onScreen.minX, y: screenFrame.maxY - onScreen.maxY)
-            screenRect = CGRect(origin: .zero, size: screenFrame.size)
-        }
-        return CefOffscreenViewInfo(
+        var info = CefOffscreenViewInfo(
             size: bounds.size == .zero ? CGSize(width: 1, height: 1) : bounds.size,
-            deviceScaleFactor: window?.backingScaleFactor ?? 2,
-            screenOrigin: origin,
-            screenFrame: screenRect
-        )
+            deviceScaleFactor: window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2)
+        guard let window, let screen = window.screen ?? NSScreen.main else { return info }
+        // Chromium's screen coordinates have their origin at the top-left
+        // corner of the primary display; AppKit's at its bottom-left.
+        let primaryHeight = NSScreen.screens.first?.frame.height ?? screen.frame.maxY
+        func chromium(_ rect: CGRect) -> CGRect {
+            CGRect(x: rect.minX, y: primaryHeight - rect.maxY, width: rect.width, height: rect.height)
+        }
+        let onScreen = chromium(window.convertToScreen(convert(bounds, to: nil)))
+        info.screenOrigin = onScreen.origin
+        info.screenFrame = chromium(screen.frame)
+        info.screenVisibleFrame = chromium(screen.visibleFrame)
+        info.windowFrame = chromium(window.frame)
+        // As Chromium reports a windowed browser's screen (ui/display/mac).
+        info.screenColorDepth = screen.canRepresent(.p3) ? 30 : 24
+        return info
     }
 
     public func offscreenDidPaint(_ frame: CefOffscreenFrame, element: CefOffscreenPaintElement) {

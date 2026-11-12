@@ -80,8 +80,10 @@ public struct CefConfiguration: Sendable {
     /// UI locale, e.g. `"en-US"`. Defaults to the system locale.
     public var locale: String?
 
-    /// Product portion of the User-Agent string, e.g. `"MyApp/1.0"`.
-    public var userAgentProduct: String?
+    /// How the browser names itself to sites: the `User-Agent` header and
+    /// `navigator.userAgent`. Chromium's own by default. See
+    /// ``CefUserAgent`` for what each choice does to client hints.
+    public var userAgent: CefUserAgent = .chromium
 
     /// Log verbosity for CEF's log file.
     public var logSeverity: CefLogSeverity = .default
@@ -121,10 +123,6 @@ public struct CefConfiguration: Sendable {
     /// GPU, …). Declare schemes here, then serve them with
     /// ``CefRuntime/registerSchemeHandler(scheme:domain:handler:)``.
     public var customSchemes: [CefCustomScheme] = []
-
-    /// The complete User-Agent string. `nil` keeps Chromium's, optionally
-    /// with ``userAgentProduct`` substituted.
-    public var userAgent: String?
 
     /// Preferred languages for `Accept-Language`, most preferred first,
     /// e.g. `["en-US", "en"]`. Empty uses the system's.

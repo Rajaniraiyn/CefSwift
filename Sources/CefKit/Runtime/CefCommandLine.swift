@@ -1,5 +1,6 @@
 import CCef
 import Foundation
+import CefBase
 
 /// The command line Chromium is about to process, passed to
 /// ``CefConfiguration/onBeforeCommandLineProcessing``. Valid only during

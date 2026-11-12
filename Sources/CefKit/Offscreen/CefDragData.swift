@@ -1,6 +1,7 @@
 import AppKit
 import CCef
 import Foundation
+import CefBase
 
 /// The operations a drag allows, mirroring `cef_drag_operations_mask_t`.
 public struct CefDragOperation: OptionSet, Sendable {

@@ -46,8 +46,8 @@ public final class CefSystemBrowser {
         /// pages and players. The engine is the one Safari uses. Off leaves
         /// WebKit's default, which names no browser.
         public var identifiesAsSafari = true
-        /// Scripts added to every page. ``CefUserScript/isolatedWorldName``
-        /// maps to a WebKit content world of that name.
+        /// Scripts added to every page, with their URL pattern, injection
+        /// time and frames honored.
         public var userScripts: [CefUserScript] = []
         /// Two-finger swipes go back and forward.
         public var allowsBackForwardNavigationGestures = true
@@ -256,8 +256,10 @@ public final class CefSystemBrowser {
             let literal = String(decoding: (try? JSONEncoder().encode(regex)) ?? Data("\"\"".utf8), as: UTF8.self)
             source = "if (new RegExp(\(literal)).test(location.href)) (function () {\n\(source)\n})();"
         }
-        let world = script.isolatedWorldName.map(WKContentWorld.world(name:)) ?? .page
-        return WKUserScript(source: source, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: world)
+        return WKUserScript(
+            source: source,
+            injectionTime: script.injectionTime == .documentEnd ? .atDocumentEnd : .atDocumentStart,
+            forMainFrameOnly: script.frames == .mainFrame, in: .page)
     }
 
     private func observe() {

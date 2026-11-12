@@ -28,8 +28,8 @@ Since CEF 138 the macOS sandbox ships as a library inside the framework,
    Without `--no-sandbox` among the helper's arguments, it calls
    `cef_sandbox_initialize(argc, argv)` from `libcef_sandbox.dylib` to seal
    the process. If sealing fails, the helper prints an error and exits with
-   status 125 rather than run unsandboxed. The sources are in
-   `Plugins/CefPlugin/Helper/`.
+   status 125 rather than run unsandboxed. The library is CefSwift's
+   `cefswift_helper_startup` product (`Sources/CefHelperStartup`).
 3. This is the order CEF requires (`cef_sandbox_mac.h`: initialize the
    sandbox before the framework loads), reached with the framework linked
    at launch instead of loaded with `dlopen` afterwards. See

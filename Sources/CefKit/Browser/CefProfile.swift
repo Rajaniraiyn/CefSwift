@@ -1,6 +1,7 @@
 import AppKit
 import CCef
 import Foundation
+import CefBase
 import WebKit
 
 /// A browsing profile: its own cookies, storage, cache, preferences,

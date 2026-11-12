@@ -12,8 +12,13 @@ CefKit       CefRuntime, CefBrowser, CefBrowserWindow, CefBrowserDelegate, CefBr
     │        CefDevTools, CefProfile, configuration and policy types
 CCef         vendored CEF C headers, the generated bridge, the runtime loader (C)
 
-CefPlugin    swift package cef download | bundle | info | clean; compiles the
-             helper-process executable (C, Plugins/CefPlugin/Helper)
+CefBase      reference counting, strings and process messages, shared by
+             CefKit and the helper (no Foundation, no AppKit)
+CefRenderer  renderer-side features on the V8 API, run by the helper
+CefHelper    the helper-process executable (cefswift-helper)
+
+CefPlugin    swift package cef download | bundle | info | clean; builds the
+             helper products and assembles the app
 ```
 
 ## The C bridge
@@ -226,28 +231,86 @@ the main frame's process. Nodes in frames are clicked instead.
 When the browser closes or the tree is turned off, the tree is emptied
 and the view posts `AXUIElementDestroyed` for every element it handed out.
 
-## DevTools, JavaScript and the bridge
+## Page-facing features
 
-`CefDevTools` attaches a DevTools message observer to the browser and speaks
-the Chrome DevTools Protocol in-process. `evaluateJavaScript`, user scripts,
-`snapshot` and `CefBridge` are built on it:
+A page can tell a browser apart from a stock one by what it can observe:
+globals it did not define, scripts it did not load, a debugger that stops
+it, or a DevTools session that changes how `console` behaves. So features
+that reach into pages run in the renderer, through the helper's own code,
+and the DevTools Protocol is used only for what nothing else offers.
 
-- `evaluateJavaScript` is `Runtime.evaluate` with `awaitPromise`.
-- User scripts are `Page.addScriptToEvaluateOnNewDocument`. Chromium does
-  not run those in its `chrome://` pages, so there CefSwift evaluates them as
-  each page starts loading.
-- The bridge registers a binding (`Runtime.addBinding`) and injects its
-  JavaScript half, a shim, at document start. Chromium adds the binding to
-  every document's global object; the shim removes it from there and, only
-  in documents that `access` permits, keeps it privately and defines the
-  bridge's global. Calls arrive as `Runtime.bindingCalled` events that carry
-  the execution context, whose origin and frame Chromium reports; Swift
-  checks them against `access` again. Replies and events go back through
-  `Runtime.evaluate`. Changing `access` replaces the shim, so it applies
-  from the next document.
+**The renderer side.** The helper executable is Swift
+(`Sources/CefHelper`, `Sources/CefRenderer`). It gives `cef_execute_process`
+an app whose render process handler drives a list of
+`CefRendererExtension`s, each with hooks for a browser's arrival in the
+process (with the `extra_info` it was created with), each JavaScript
+context created and released, and process messages whose names start with
+its prefix. Everything runs on the renderer's main thread, which on macOS
+is the process's main thread, so extensions are `@MainActor` and CEF's
+callbacks enter it with `MainActor.assumeIsolated`. `V8Value`, `V8Context`
+and `V8Exception` wrap the V8 C API; `CefProcessMessage` (in `CefBase`,
+shared with the browser process) is a message's name and plain arguments.
+A later renderer-side feature is one more extension type.
 
-Browsers with bridges or user scripts are created on `about:blank`, set up,
-and then navigated, so the first real document already has them.
+`PageScripting` is the extension behind bridges, user scripts and
+`evaluateJavaScript`:
+
+- A browser's bridges and user scripts travel as JSON in the `extra_info`
+  of its creation (`cef_browser_host_create_browser`,
+  `cef_browser_view_create`, and `on_before_popup` for popups). CEF hands
+  `extra_info` to every renderer process that shows a frame of the
+  browser, before that frame's first document starts, so nothing waits on
+  a message and no first document runs on `about:blank`.
+- When a context is created in a frame's main world, the user scripts that
+  match run with `cef_v8_context_t.eval`, as scripts without a URL; scripts
+  for document end run from a `DOMContentLoaded` listener added first.
+- A bridge is a global object whose named-property interceptor answers
+  `invoke`, `on`, `off` and any other name with a native function. A call
+  creates a promise, sends `cefswift.page.call` with the arguments as JSON
+  and the document's origin, and the reply resolves or rejects it. V8 values
+  are converted to JSON through the V8 API, so no page script, `JSON`
+  object or prototype takes part. The browser process checks the caller's
+  frame and origin against `access`, and the origin against the frame's
+  address, before a handler runs. Cross-site frames run in other renderer
+  processes, which get the configuration with the browser, so `access`
+  decides for them as for any frame.
+- `evaluateJavaScript` sends `cefswift.page.evaluate` to the main frame,
+  whose renderer runs the script in the main world and sends the value
+  back as JSON. A returned promise is awaited through its `then`.
+- Changes after creation (`addUserScript`, `CefBridge.access`) go as a
+  `cefswift.page.configure` message to every frame of the browser. A
+  renderer process reports its configuration generation the first time it
+  sees one of the browser's documents, and gets the current one if it is
+  older.
+
+Two CEF 156 behaviors shape this code. A message from the browser process
+is handled inside a scope that defers promise jobs, and Blink does not run
+them at the end of that task, so after settling a promise the renderer
+enters the context again from a task of its own, whose exit runs them. And
+a native function created outside a V8 callback, as in a message handler,
+never reaches its Swift side when called; such functions are looked up
+through an interceptor on each call (`V8Context.durableFunction`).
+
+**What still uses the DevTools Protocol.** `CefDevTools` attaches a DevTools
+message observer to the browser and speaks the protocol in-process. CEF
+attaches the session on the first message and keeps it until the browser
+closes. An attached session with no domain enabled changes nothing a page
+can measure; enabled domains do (see the guide's "Compatibility with bot
+protection"). These use it:
+
+| Feature | Protocol use |
+|---|---|
+| `browser.devTools` | Whatever the app sends. |
+| `evaluateJavaScript(_:userGesture: true)` | `Runtime.evaluate` with `userGesture`, the only way to grant a user activation. |
+| `snapshot()` | `Page.captureScreenshot`. |
+| `CefPasskeyMode.app` and `.disabled` | `WebAuthn`, `Debugger`, `Page` and `Runtime` enabled for the browser's lifetime; see [Passkeys](#passkeys). |
+| `discard()` | `Runtime.evaluate` and `DOMDebugger.getEventListeners` on the page's window, to find a `beforeunload` listener, which JavaScript cannot list. |
+| Offscreen accessibility actions | `Accessibility.enable` for the length of one lookup, then `DOM.focus`, `DOM.scrollIntoViewIfNeeded`, `Input.insertText`. |
+| Internal-page services | Service hosts only, which show Chromium's own pages, never yours. |
+
+A browser created again after a discard enables the domains its session
+had enabled before, before its page loads; a session that was never used
+stays unattached.
 
 ## Internal-page services
 
@@ -481,24 +544,36 @@ callback.
 ## Processes
 
 The app is Chromium's browser process. Renderer, GPU and utility processes
-run from the helper apps inside the bundle, all the same executable, which
-`cef bundle` compiles from `Plugins/CefPlugin/Helper/helper_main.c`. It
-checks the API hash, registers the custom URL schemes it receives on its
-command line (`--cefswift-schemes`), so every process registers the same
-list, and calls `cef_execute_process`. With the sandbox on, each helper
-seals itself before any framework code runs ([sandbox](sandbox.md)).
+run from the helper apps inside the bundle, all the same executable,
+CefSwift's `cefswift-helper` product, which `cef bundle` builds with the
+app. It finds the framework dyld loaded with it, checks the API hash,
+registers the custom URL schemes it receives on its command line
+(`--cefswift-schemes`), so every process registers the same list, and
+calls `cef_execute_process`; in renderers, with the render process handler
+described in [Page-facing features](#page-facing-features). With the
+sandbox on, each helper seals itself before any framework code runs
+([sandbox](sandbox.md)).
 
 ### Loading the framework at launch
 
-The helper is a small C program that links two libraries, in this order:
+The helper links two libraries, in this order:
 
-1. `Contents/Frameworks/libcefswift_helper_startup.dylib`
-   (`helper_startup.c`). Its initializer calls `cef_sandbox_initialize`
-   from CEF's `libcef_sandbox.dylib` unless the helper was started with
+1. `Contents/Frameworks/libcefswift_helper_startup.dylib`, CefSwift's
+   `cefswift_helper_startup` product (`Sources/CefHelperStartup`, a few
+   lines of C). Its initializer opens CEF's `libcef_sandbox.dylib` and
+   calls `cef_sandbox_initialize` unless the helper was started with
    `--no-sandbox`. dyld runs a library's initializers before those of the
    libraries listed after it, so the sandbox is sealed before the
-   framework's static initializers run.
+   framework's static initializers run. This part stays C: it must run
+   before the framework's initializers, which run before any of the
+   executable's own code, and must not load the Swift runtime.
 2. The CEF framework.
+
+The plugin links the helper with `-needed_library` and `-needed_framework`
+for these two, in that order, and `-dead_strip_dylibs`, which drops
+libraries the helper does not use, such as Foundation, which SwiftPM's
+build system links into executables by default. The helper uses the Swift
+standard library and the C API, not Foundation.
 
 A library that dyld loads at launch is fixed up by the kernel as its pages
 are read in (page-in linking), so the framework's `__DATA_CONST` segment,
@@ -520,3 +595,30 @@ it on with `--enable-features=AperitifHelpers` makes Chromium launch helper
 apps that the bundle does not contain. CefSwift's helper keeps CEF's
 classic helper names and gets the memory saving without the feature.
 
+
+## Swift and C++
+
+CEF's binary distribution exports its C API from the framework: about 240
+`cef_*` functions, which return the structs of function pointers the rest
+of the API is made of (`nm -gU` on the framework lists 2,548 symbols; the
+others are V8's debugger helpers (`_As_*`), Chrome's app-mode entry points
+and allocator shims). CEF's C++ API (`CefRefPtr`, `CefV8Value` and the
+rest) is a set of headers and the `libcef_dll_wrapper` static library,
+which wraps that same C API. Chromium's own C++ (`content/`, `chrome/`,
+Blink, V8's API) is neither exported nor shipped as headers. So Swift's
+C++ interoperability would reach nothing that importing the C API does not,
+and would add the wrapper's build; CefSwift imports the C API directly.
+
+What reaches further into Chromium is, in the renderer, the V8 and DOM
+APIs (`cef_v8*`, `cef_domdocument_t`, `cef_frame_t`) through the helper's
+render process handler; in the browser process, Chromium's Objective-C
+classes ([Chromium's AppKit classes](#chromiums-appkit-classes)), the Mojo
+interfaces of its WebUI pages ([Internal-page services](#internal-page-services)),
+the DevTools Protocol, and preferences and command-line switches.
+
+The renderer side makes these possible without the DevTools Protocol, each
+as a `CefRendererExtension`: native bridges in every frame, cross-site ones
+included; JavaScript functions that call Swift synchronously; reading a
+document through `cef_domdocument_t` visitors without running script; a
+context's V8 heap statistics; and per-frame features that start before a
+document's first script.

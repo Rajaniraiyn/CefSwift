@@ -1,6 +1,6 @@
 # Examples
 
-Four apps built on CefSwift, in a package of their own that depends on the
+Five apps built on CefSwift, in a package of their own that depends on the
 checkout above it. They need macOS 15. Bundle and run one from the
 repository root:
 
@@ -74,6 +74,24 @@ another page, `-cacheDirectory <path>` keeps Chromium's data there,
 `-sandbox YES` runs its helpers in Chromium's sandbox, and
 `-memoryPolicy standard|reduced|minimal` chooses a `CefMemoryPolicy`, and
 `-protectedMedia YES` lets Chromium fetch Widevine.
+
+## Compat
+
+One page in one kind of host with chosen CefSwift features on
+(`Sources/Compat`), for the web-compatibility matrix that
+`Scripts/compat-matrix.py` runs: what pages can observe about each host
+and feature, next to stock Google Chrome. `-host window|windowed|offscreen`
+picks a `CefBrowserWindow` or a view, `-preset default|browser|embedded`
+the configuration, and `-features` a comma-separated list of `devtools`,
+`runtime`, `page`, `bridge`, `anyframe`, `userscript`, `evaluate`,
+`passkeys` and `accessibility`. The script's documentation lists the rest.
+
+```sh
+swift package --package-path Examples --allow-writing-to-package-directory \
+    --allow-network-connections all cef bundle --product Compat
+Scripts/compat-matrix.py probe --out /tmp/compat
+Scripts/compat-matrix.py table --out /tmp/compat
+```
 
 ## SelfTest
 

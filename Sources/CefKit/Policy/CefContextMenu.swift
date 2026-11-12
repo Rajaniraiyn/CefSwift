@@ -1,6 +1,7 @@
 import AppKit
 import CCef
 import Foundation
+import CefBase
 
 /// The kind of media element a context menu was invoked on.
 public enum CefContextMenuMediaType: Sendable, Equatable {
