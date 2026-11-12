@@ -171,6 +171,19 @@ private func profile(
         #expect(plan.helperEntitlements[.base] == [:])
     }
 
+    @Test func teamlessHardenedRuntimeTurnsLibraryValidationOff() throws {
+        var settings = DistributionSettings(bundleIdentifier: "b", identity: .adHoc)
+        settings.hardenedRuntime = true
+        let plan = try settings.plan()
+        let key = "com.apple.security.cs.disable-library-validation"
+        #expect(plan.appEntitlements[key] == .bool(true))
+        for helper in HelperKind.allCases { #expect(plan.helperEntitlements[helper]?[key] == .bool(true)) }
+        // A team signature keeps library validation.
+        let team = try DistributionSettings(bundleIdentifier: "b", identity: developerID).plan()
+        #expect(team.appEntitlements[key] == nil)
+        #expect(team.helperEntitlements[.renderer]?[key] == nil)
+    }
+
     @Test func capabilitiesExpandToKeysAndEntitlements() throws {
         var settings = DistributionSettings(bundleIdentifier: "com.example.browser", identity: .adHoc)
         settings.capabilities = ["camera", "microphone", "localNetwork", "defaultBrowser"]
@@ -339,9 +352,12 @@ private func profile(
 @Suite struct DoctorTests {
     private func facts(kind: SignatureKind, team: String?, runtime: Bool,
                        entitlements: PlistDictionary = [:], info: PlistDictionary = [:]) -> BundleFacts {
+        // cef bundle turns library validation off for team-less hardened builds.
+        let extra: PlistDictionary = runtime && team == nil
+            ? ["com.apple.security.cs.disable-library-validation": .bool(true)] : [:]
         func part(_ name: String, _ entitlements: PlistDictionary = [:]) -> BundleFacts.Part {
             .init(name: name, path: "/x/\(name)", kind: kind, teamIdentifier: team, isHardenedRuntime: runtime,
-                  hasSecureTimestamp: kind == .developerID, entitlements: entitlements)
+                  hasSecureTimestamp: kind == .developerID, entitlements: Plist.merge(entitlements, extra))
         }
         var app = part("Browser.app", entitlements)
         app.infoPlist = Plist.merge(["CFBundleIdentifier": .string("com.example.browser")], info)
@@ -379,6 +395,13 @@ private func profile(
         var facts = facts(kind: .adHoc, team: nil, runtime: true)
         facts.helpers[.renderer]?.entitlements = [:]
         #expect(Doctor.evaluate(facts).errorCount == 1)
+    }
+
+    @Test func teamlessHardenedRuntimeNeedsLibraryValidationOff() {
+        var facts = facts(kind: .adHoc, team: nil, runtime: true)
+        facts.app.entitlements = [:]
+        facts.helpers[.gpu]?.entitlements["com.apple.security.cs.disable-library-validation"] = nil
+        #expect(Doctor.evaluate(facts).errorCount == 2)
     }
 
     @Test func mismatchedLibrarySignatureIsAnError() {

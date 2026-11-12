@@ -175,6 +175,15 @@ enum Doctor {
         } else {
             signature.append(.init(status: .ok, title: "codesign --verify", detail: "valid, nested code included."))
         }
+        let disableLibraryValidation = "com.apple.security.cs.disable-library-validation"
+        if runtime, team == nil, !granted(disableLibraryValidation) {
+            signature.append(.init(
+                status: .error, title: "library validation",
+                detail: "the app has the hardened runtime and a signature without a team, so library validation " +
+                    "refuses to load the framework.",
+                fix: "bundle again with cef bundle (it adds \(disableLibraryValidation) to such builds), or sign " +
+                    "with an Apple team identity."))
+        }
         signature.append(runtime
             ? .init(status: .ok, title: "hardened runtime", detail: "on.")
             : .init(status: app.kind == .developerID ? .error : .info, title: "hardened runtime",
@@ -215,6 +224,11 @@ enum Doctor {
             if runtime, [.renderer, .gpu].contains(helper), !granted("com.apple.security.cs.allow-jit", in: part) {
                 problems.append("missing com.apple.security.cs.allow-jit, which V8 and the shader compilers need " +
                                 "under the hardened runtime")
+                status = .error
+            }
+            if part.isHardenedRuntime, part.teamIdentifier == nil, !granted(disableLibraryValidation, in: part) {
+                problems.append("library validation refuses the framework: the signature has no team to match " +
+                                "and \(disableLibraryValidation) is missing")
                 status = .error
             }
             if let key = part.entitlements.keys.sorted().first(where: { Entitlements.isRestricted($0) && granted($0, in: part) }) {

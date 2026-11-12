@@ -280,10 +280,25 @@ struct DistributionSettings: Sendable {
                 "docs/bundling.md#app-sandbox).")
         }
 
+        // Library validation accepts a library only from the process's own
+        // team (or Apple). A signature without a team matches nothing, so
+        // under the hardened runtime such a build turns it off; a team
+        // signature never needs to, since every library carries the team.
+        let disableLibraryValidation = "com.apple.security.cs.disable-library-validation"
+        let teamless = plan.hardenedRuntime && !identity.kind.hasAppleTeam
+        if teamless {
+            appEntitlements[disableLibraryValidation] = appEntitlements[disableLibraryValidation] ?? .bool(true)
+            plan.warnings.append(
+                "the hardened runtime with \(identity.kind.displayName) signing: library validation cannot " +
+                "match a signature without a team, so \(disableLibraryValidation) is added to the app and " +
+                "helpers. Team-signed builds do not need it.")
+        }
+
         // 5. Helpers: built-in templates, what capabilities add, then the
         // overrides.
         for helper in HelperKind.allCases {
             var entitlements = Plist.merge(helper.baseEntitlements, helperEntitlements[helper] ?? [:])
+            if teamless { entitlements[disableLibraryValidation] = appEntitlements[disableLibraryValidation] }
             if identity.kind == .development { entitlements[getTaskAllow] = appEntitlements[getTaskAllow] }
             if appEntitlements["com.apple.security.app-sandbox"]?.isGranting == true {
                 entitlements["com.apple.security.app-sandbox"] = .bool(true)
