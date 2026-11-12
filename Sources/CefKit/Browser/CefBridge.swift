@@ -1,3 +1,5 @@
+import CCef
+import CefBase
 import Foundation
 
 /// A typed, promise-based API your Swift code exposes to JavaScript.
@@ -23,9 +25,15 @@ import Foundation
 /// app.on("themeChanged", theme => applyTheme(theme));
 /// ```
 ///
-/// The global exists before any page script runs. Arguments and results
-/// travel as JSON, so any `Codable` type works on the Swift side. A handler
-/// that throws rejects the promise.
+/// The global exists before any page script runs, in every document
+/// ``access`` permits, cross-site frames and popups included. Arguments and
+/// results travel as JSON, so any `Codable` type works on the Swift side. A
+/// handler that throws rejects the promise.
+///
+/// The helper's renderer code defines the global with the V8 API as each
+/// document's JavaScript context is created: native functions, no injected
+/// script and no DevTools session, so a page sees the global and nothing
+/// else.
 ///
 /// **Who may call.** Handlers run with your app's privileges, so the bridge
 /// only exists where ``access`` permits — by default in the top-level page,
@@ -37,9 +45,10 @@ import Foundation
 /// bridge.access = .origins(["app://start"])
 /// ```
 ///
-/// Calls are checked again in Swift against the caller's origin and frame
-/// as Chromium reports them, which a page cannot forge; each handler can
-/// also inspect ``CefBridgeCall/origin``.
+/// Calls are checked again in Swift against the caller's origin and frame,
+/// which a page cannot forge: the renderer reads the origin from the
+/// document, and the browser process checks it against the frame's address.
+/// Each handler can also inspect ``CefBridgeCall/origin``.
 @MainActor
 public final class CefBridge {
 
@@ -64,14 +73,19 @@ public final class CefBridge {
     public var access: Access = .mainFrame {
         didSet {
             guard access != oldValue else { return }
-            sessions = sessions.filter { $0.value.browser?.state == .live }
-            for session in sessions.values { Task { await reinject(into: session) } }
+            for browser in browsers { browser.pageScripting.configurationDidChange() }
         }
     }
 
     private typealias Handler = @MainActor (CefJSON, CefBridgeCall) async throws -> CefJSON
     private var handlers: [String: Handler] = [:]
-    private var sessions: [ObjectIdentifier: Session] = [:]
+    /// The browsers whose options list this bridge.
+    private var attachedBrowsers: [WeakBrowser] = []
+
+    private var browsers: [CefBrowser] {
+        attachedBrowsers.removeAll { $0.browser == nil || $0.browser?.state == .closed }
+        return attachedBrowsers.compactMap(\.browser)
+    }
 
     /// - Parameter name: A JavaScript identifier for the global object.
     public init(name: String = "native") {
@@ -136,103 +150,70 @@ public final class CefBridge {
             CefLog.error("CefBridge.emit(\(event)): payload is not JSON-encodable")
             return
         }
-        let expression = "globalThis.\(emitFunction)?.(\(CefJSON.string(event).text), \(payload.text))"
-        sessions = sessions.filter { $0.value.browser?.state == .live }
+        let message = CefProcessMessage(
+            CefPageScriptingMessage.emit, [.string(name), .string(event), .string(payload.text)])
         // A discarded page is gone; its next document starts afresh.
-        for session in sessions.values where (browser == nil || session.browser === browser)
-            && session.browser?.isDiscarded == false {
-            session.browser?.executeJavaScript(expression)
+        for target in browsers where (browser == nil || target === browser) && !target.isDiscarded {
+            target.withMainFrame { message.send(from: $0, to: PID_RENDERER) }
         }
     }
 
     // MARK: Installation
 
-    /// Wires the bridge into `browser`. Called while the browser bootstraps,
-    /// before its first real navigation.
-    func install(in browser: CefBrowser) async throws {
-        let session = Session(browser: browser)
-        sessions[ObjectIdentifier(browser)] = session
-        let devTools = browser.devTools
-
-        devTools.addListener(for: "Runtime.executionContextCreated") { [weak session] event in
-            let context = event["context"]
-            guard let id = context["id"].intValue else { return }
-            session?.contexts[id] = Session.Context(
-                origin: context["origin"].stringValue ?? "",
-                frameID: context["auxData"]["frameId"].stringValue ?? "",
-                isDefault: context["auxData"]["isDefault"].boolValue ?? false)
-        }
-        devTools.addListener(for: "Runtime.executionContextDestroyed") { [weak session] event in
-            if let id = event["executionContextId"].intValue { session?.contexts[id] = nil }
-        }
-        devTools.addListener(for: "Runtime.executionContextsCleared") { [weak session] _ in
-            session?.contexts = [:]
-        }
-        devTools.addListener(for: "Page.frameNavigated") { [weak session] event in
-            let frame = event["frame"]
-            if frame["parentId"].isNull, let id = frame["id"].stringValue { session?.mainFrameID = id }
-        }
-        devTools.addListener(for: "Runtime.bindingCalled") { [weak self, weak session] event in
-            guard let self, let session, event["name"].stringValue == self.bindingName else { return }
-            self.received(event, in: session)
-        }
-
-        try await devTools.send("Page.enable")
-        session.mainFrameID = try await devTools.send("Page.getFrameTree")["frameTree"]["frame"]["id"].stringValue ?? ""
-        try await devTools.send("Runtime.enable")
-        try await devTools.send("Runtime.addBinding", ["name": .string(bindingName)])
-        session.scriptID = try await devTools.send(
-            "Page.addScriptToEvaluateOnNewDocument", ["source": .string(shim)])["identifier"].stringValue
+    /// Attaches the bridge to a browser whose options list it, as the
+    /// browser is created. Its configuration reaches the renderer through
+    /// the browser's `extra_info`.
+    func attach(to browser: CefBrowser) {
+        guard !browsers.contains(where: { $0 === browser }) else { return }
+        attachedBrowsers.append(WeakBrowser(browser: browser))
     }
 
-    /// Replaces the document-start script after ``access`` changed.
-    private func reinject(into session: Session) async {
-        guard let browser = session.browser else { return }
-        if let scriptID = session.scriptID {
-            _ = try? await browser.devTools.send("Page.removeScriptToEvaluateOnNewDocument", ["identifier": .string(scriptID)])
+    /// The bridge as the renderer reads it.
+    var rendererConfiguration: CefJSON {
+        switch access {
+        case .mainFrame:
+            return ["name": .string(name), "access": "mainFrame"]
+        case .anyFrame:
+            return ["name": .string(name), "access": "anyFrame"]
+        case .origins(let origins):
+            return ["name": .string(name), "access": "origins", "origins": .array(origins.sorted().map(CefJSON.string))]
         }
-        session.scriptID = try? await browser.devTools.send(
-            "Page.addScriptToEvaluateOnNewDocument", ["source": .string(shim)])["identifier"].stringValue
     }
 
     // MARK: Dispatch
 
-    private func received(_ event: CefJSON, in session: Session) {
-        guard let contextID = event["executionContextId"].intValue,
-              let payload = event["payload"].stringValue,
-              let message = try? CefJSON(data: Data(payload.utf8)),
-              let callID = message["id"].intValue,
-              let method = message["method"].stringValue,
-              let browser = session.browser
-        else { return }
-
-        func reply(ok: Bool, _ value: CefJSON) {
-            let expression = "globalThis.\(replyFunction)?.(\(callID), \(ok), \(value.text))"
-            Task {
-                _ = try? await browser.devTools.send(
-                    "Runtime.evaluate", ["expression": .string(expression), "contextId": .number(Double(contextID))])
-            }
+    /// A call from a page, `[bridge, context, call, method, arguments,
+    /// origin]`, sent by `frame`'s renderer.
+    func received(_ message: CefProcessMessage, in browser: CefBrowser, from frame: CefRef<cef_frame_t>) {
+        let method = message.string(3)
+        let context = message.int(1), callID = message.int(2)
+        let reply: (Bool, CefJSON) -> Void = { [name] ok, value in
+            _ = CefProcessMessage(CefPageScriptingMessage.reply, [
+                .string(name), .int(Int32(context)), .int(Int32(callID)), .bool(ok),
+                .string(ok ? value.text : (value.stringValue ?? value.text)),
+            ]).send(from: frame.pointer, to: PID_RENDERER)
         }
+        let isMainFrame = frame.pointer.pointee.is_main(frame.pointer) != 0
+        let url = CefStringUtil.takingUserFree(frame.pointer.pointee.get_url(frame.pointer)).flatMap(URL.init(string:))
+        let origin = message.string(5)
+        let call = CefBridgeCall(browser: browser, method: method, origin: origin, isMainFrame: isMainFrame)
 
-        // An unknown context means the frame is already gone; nothing to answer.
-        guard let context = session.contexts[contextID] else { return }
-        let call = CefBridgeCall(
-            browser: browser, method: method, origin: context.origin,
-            isMainFrame: context.frameID == session.mainFrameID)
-
-        guard context.isDefault, isPermitted(call) else {
-            reply(ok: false, .string("\(name).\(method): caller is not permitted to use this bridge"))
+        // The renderer reports the document's origin; the browser process
+        // knows the frame and its address, which must agree with it.
+        guard Self.origin(origin, isConsistentWith: url), isPermitted(call) else {
+            reply(false, .string("\(name).\(method): caller is not permitted to use this bridge"))
             return
         }
         guard let handler = handlers[method] else {
-            reply(ok: false, .string("\(name).\(method) is not defined"))
+            reply(false, .string("\(name).\(method) is not defined"))
             return
         }
+        let arguments = (try? CefJSON(data: Data(message.string(4).utf8))) ?? .null
         Task {
             do {
-                reply(ok: true, try await handler(message["args"], call))
+                reply(true, try await handler(arguments, call))
             } catch {
-                reply(ok: false, .string(String(describing: error)))
+                reply(false, .string(String(describing: error)))
             }
         }
     }
@@ -245,99 +226,20 @@ public final class CefBridge {
         }
     }
 
-    // MARK: JavaScript side
-
-    private var bindingName: String { "__cefswift_\(name)" }
-    private var replyFunction: String { "__cefswift_\(name)_reply" }
-    private var emitFunction: String { "__cefswift_\(name)_emit" }
-
-    /// Whether a document gets the global, by the same rule as
-    /// ``isPermitted(_:)``; a JavaScript expression.
-    private var installCondition: String {
-        switch access {
-        case .mainFrame:
-            return "globalThis === globalThis.top"
-        case .origins(let allowed):
-            return "\(CefJSON.array(allowed.sorted().map(CefJSON.string)).text).includes(location.origin)"
-        case .anyFrame:
-            return "true"
-        }
+    /// Whether a document at `url` can have `origin`: the address's own
+    /// origin for an address with a host, or an opaque origin (`"null"`,
+    /// a sandboxed document's); any origin for an address that inherits
+    /// its document's origin (`about:blank`, `data:`, `blob:` and the like).
+    static func origin(_ origin: String, isConsistentWith url: URL?) -> Bool {
+        guard let url, let scheme = url.scheme?.lowercased(), let host = url.host, !host.isEmpty else { return true }
+        var expected = "\(scheme)://\(host.lowercased())"
+        if let port = url.port { expected += ":\(port)" }
+        return origin == expected || origin == "null"
     }
+}
 
-    /// The page-side half of the bridge, injected at document start.
-    ///
-    /// Chromium adds the binding it calls to every document; the shim takes
-    /// it off the global object, so pages only ever see the bridge itself,
-    /// and only where ``access`` allows.
-    var shim: String {
-        """
-        (() => {
-          const send = globalThis.\(bindingName);
-          if (typeof send !== 'function') return;
-          delete globalThis.\(bindingName);
-          if (!(\(installCondition)) || globalThis.\(name)) return;
-          let sequence = 0;
-          const pending = new Map();
-          const listeners = new Map();
-          const hidden = (key, value) => Object.defineProperty(globalThis, key, { value });
-          hidden('\(replyFunction)', (id, ok, value) => {
-            const call = pending.get(id);
-            if (!call) return;
-            pending.delete(id);
-            ok ? call.resolve(value) : call.reject(new Error(value));
-          });
-          hidden('\(emitFunction)', (event, payload) => {
-            for (const listener of [...(listeners.get(event) ?? [])]) {
-              try { listener(payload); } catch (error) { console.error(error); }
-            }
-          });
-          const api = {
-            invoke(method, args) {
-              return new Promise((resolve, reject) => {
-                const id = ++sequence;
-                pending.set(id, { resolve, reject });
-                send(JSON.stringify({ id, method, args: args === undefined ? null : args }));
-              });
-            },
-            on(event, listener) {
-              if (!listeners.has(event)) listeners.set(event, new Set());
-              listeners.get(event).add(listener);
-              return () => api.off(event, listener);
-            },
-            off(event, listener) {
-              listener ? listeners.get(event)?.delete(listener) : listeners.delete(event);
-            },
-          };
-          hidden('\(name)', new Proxy(api, {
-            get(target, key) {
-              if (typeof key !== 'string' || key === 'then') return undefined;
-              return key in target ? target[key] : (args) => target.invoke(key, args);
-            },
-          }));
-        })();
-        """
-    }
-
-    /// Per-browser bookkeeping: which JavaScript contexts exist and where
-    /// they came from, as reported by Chromium.
-    @MainActor
-    private final class Session {
-        struct Context {
-            var origin: String
-            var frameID: String
-            var isDefault: Bool
-        }
-
-        weak var browser: CefBrowser?
-        var contexts: [Int: Context] = [:]
-        var mainFrameID = ""
-        /// The document-start script's identifier, for replacing it.
-        var scriptID: String?
-
-        init(browser: CefBrowser) {
-            self.browser = browser
-        }
-    }
+private struct WeakBrowser {
+    weak var browser: CefBrowser?
 }
 
 /// Describes one JavaScript → Swift bridge call.
@@ -347,8 +249,8 @@ public struct CefBridgeCall {
     public let browser: CefBrowser
     /// The method being called.
     public let method: String
-    /// The calling document's origin (`"https://example.com"`), as reported
-    /// by Chromium.
+    /// The calling document's origin (`"https://example.com"`), as the
+    /// renderer reads it from the document.
     public let origin: String
     /// Whether the caller is the top-level document.
     public let isMainFrame: Bool

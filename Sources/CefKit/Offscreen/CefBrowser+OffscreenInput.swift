@@ -1,6 +1,7 @@
 import AppKit
 import CCef
 import Foundation
+import CefBase
 
 /// A mouse button, for forwarding clicks to an offscreen browser.
 public enum CefMouseButton: Sendable {
@@ -177,6 +178,12 @@ extension CefBrowser {
         withHost { $0.pointee.was_resized($0) }
     }
 
+    /// Tells Chromium the host view's window moved, so the page's
+    /// `window.screenX` and the like follow it.
+    public func hostViewDidMove() {
+        withHost { $0.pointee.notify_screen_info_changed($0) }
+    }
+
     /// Tells Chromium the host view's scale factor or screen changed.
     public func hostViewDidChangeBackingProperties() {
         withHost { $0.pointee.notify_screen_info_changed($0) }
@@ -198,16 +205,10 @@ extension CefBrowser {
     }
 
     /// Marks the whole view as needing to be repainted. The repaint arrives
-    /// with the next frame (``displayIfNeeded()``).
+    /// with the next frame, at the browser's frame rate
+    /// (``CefRendering/offscreen(frameRate:)``).
     public func setNeedsDisplay() {
         withHost { $0.pointee.invalidate($0, PET_VIEW) }
-    }
-
-    /// Asks Chromium for a frame, which it paints if anything changed.
-    /// Offscreen browsers are created with external begin frames, so the
-    /// host view calls this on every display refresh while it can be seen.
-    public func displayIfNeeded() {
-        withHost { $0.pointee.send_external_begin_frame($0) }
     }
 
     // MARK: Text input

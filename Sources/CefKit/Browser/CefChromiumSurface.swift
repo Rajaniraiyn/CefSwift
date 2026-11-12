@@ -2,6 +2,7 @@ import AppKit
 import CCef
 import Foundation
 import Observation
+import CefBase
 
 /// A piece of Chromium's own interface over a ``CefBrowserWindow``: a
 /// bubble such as the QR code generator or Cast, a dialog such as the HTTP

@@ -1,5 +1,6 @@
 import CCef
 import Foundation
+import CefBase
 
 /// The state of a download, as listed in ``CefBrowser/downloads`` and
 /// passed to ``CefBrowserDelegate``.

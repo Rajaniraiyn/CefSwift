@@ -60,7 +60,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let browser = browsers.last, launch.script != nil || launch.focusesAddressBar {
             Task {
                 await controller.waitUntilLoaded(browser)
-                if let script = launch.script { _ = try? await browser.evaluateJavaScript(script) }
+                if let script = launch.script { _ = try? await browser.evaluateJavaScript(script, userGesture: true) }
                 if launch.focusesAddressBar {
                     // Focus goes to the key window, so wait for the app to be active.
                     // Chromium focuses the page as the window becomes key.

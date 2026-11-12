@@ -71,6 +71,17 @@ its window cannot be seen. CI runs it on every pull request. Add a check in
 (`SelfTest.checkGroups` lists them), which is quicker while you work on one
 area.
 
+## Measure web compatibility
+
+`Scripts/compat-matrix.py` loads a local probe page, and with `sites` a few
+public bot-detection test pages, in each kind of host with each CefSwift
+feature on by itself, and in Google Chrome for comparison. Run it after a
+CEF update and after changing anything a page can observe; the guide's
+[Compatibility with bot protection](docs/guide.md#compatibility-with-bot-protection)
+records what it shows. SelfTest's `compatibility` group checks the same
+readings on a local page. Load public pages a handful of times, not in a
+loop.
+
 ## Regenerate the C bridge
 
 `Scripts/generate-bindings.py` writes `ccef_capi.h` and `ccef_symbols.h` in

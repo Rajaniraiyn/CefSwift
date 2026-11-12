@@ -1,5 +1,6 @@
 import CCef
 import Foundation
+import CefBase
 
 /// An error reply from the Chrome DevTools Protocol.
 public struct CefDevToolsError: Error, Sendable, Equatable, CustomStringConvertible {
@@ -25,6 +26,15 @@ public struct CefDevToolsError: Error, Sendable, Equatable, CustomStringConverti
 /// ```
 ///
 /// Reference: <https://chromedevtools.github.io/devtools-protocol/>
+///
+/// The session attaches to the browser on the first message and stays
+/// attached until the browser closes. An attached session with no domain
+/// enabled changes nothing a page can see; enabled domains can be seen:
+/// `Runtime.enable` makes every `console` call serialize its arguments,
+/// which a page can time, and `Debugger.enable` stops the page at its
+/// `debugger` statements. Enable what you need and disable it when done.
+/// The guide's "Compatibility with bot protection" lists which CefKit
+/// features use the protocol.
 @MainActor
 public final class CefDevTools {
     private weak var browser: CefBrowser?
@@ -53,6 +63,7 @@ public final class CefDevTools {
         guard let browser else { throw CefError.browserClosed }
         try await browser.ready()
         await enableDomainsAgain(in: browser)
+        attachIfNeeded(to: browser)
         let result = try await deliver(method, params, to: browser)
         recordDomainState(method, params)
         return result
@@ -67,8 +78,10 @@ public final class CefDevTools {
     }
 
     private func enableDomainsAgain(in browser: CefBrowser) async {
+        // A session that was never used stays unattached.
+        guard needsDomainReplay else { return }
         attachIfNeeded(to: browser)
-        guard needsDomainReplay, registration != nil else { return }
+        guard registration != nil else { return }
         needsDomainReplay = false
         for domain in enabledDomains {
             _ = try? await deliver(domain.method, domain.params, to: browser)
@@ -89,7 +102,17 @@ public final class CefDevTools {
         }
     }
 
+    /// How many protocol messages this session has sent: zero for a browser
+    /// that nothing has used the protocol in.
+    @_spi(Testing) public private(set) var sentMessageCount = 0
+
+    /// Whether the session is attached to the browser. Once attached, it
+    /// stays attached until the browser closes; CEF offers no way to
+    /// detach it.
+    @_spi(Testing) public var isAttached: Bool { registration != nil }
+
     private func deliver(_ method: String, _ params: CefJSON, to browser: CefBrowser) async throws -> CefJSON {
+        sentMessageCount += 1
         nextMessageID += 1
         let id = nextMessageID
         let message = CefJSON.object(["id": .number(Double(id)), "method": .string(method), "params": params]).data

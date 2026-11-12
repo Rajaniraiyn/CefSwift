@@ -1,5 +1,6 @@
 import CCef
 import Foundation
+import CefBase
 
 /// Owner of the `cef_app_t` and process-level handlers passed to
 /// `cef_initialize`. Immutable after `makeApp()`, so safe to call from any

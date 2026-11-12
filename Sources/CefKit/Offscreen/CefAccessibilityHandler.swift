@@ -1,5 +1,6 @@
 import CCef
 import Foundation
+import CefBase
 
 extension CefBrowserClient {
     /// Builds the `cef_accessibility_handler_t` that the render handler

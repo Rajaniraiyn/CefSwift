@@ -2,6 +2,7 @@ import AppKit
 import CCef
 import Foundation
 import Observation
+import CefBase
 
 // MARK: - Settings mapping
 
@@ -42,8 +43,8 @@ final class MappedCefSettings {
         CefStringUtil.set((configuration.cacheDirectory ?? rootCache).path, into: &raw.cache_path)
 
         CefStringUtil.set(configuration.locale, into: &raw.locale)
-        CefStringUtil.set(configuration.userAgentProduct, into: &raw.user_agent_product)
-        CefStringUtil.set(configuration.userAgent, into: &raw.user_agent)
+        CefStringUtil.set(configuration.userAgent.product, into: &raw.user_agent_product)
+        CefStringUtil.set(configuration.userAgent.fullString, into: &raw.user_agent)
         CefStringUtil.set(configuration.acceptLanguages.joined(separator: ","), into: &raw.accept_language_list)
         CefStringUtil.set(configuration.logFile?.path, into: &raw.log_file)
         CefStringUtil.set(frameworkDirectory?.path, into: &raw.framework_dir_path)

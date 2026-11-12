@@ -2,6 +2,7 @@ import AppKit
 import CCef
 import Foundation
 import Observation
+import CefBase
 
 /// A top-level window hosting one **Chrome-style** browser — the full Chrome
 /// runtime, with `chrome://settings`, `chrome://extensions`, history,

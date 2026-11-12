@@ -8,6 +8,10 @@ let package = Package(
         .library(name: "CefKit", targets: ["CefKit"]),
         .library(name: "CefSwiftUI", targets: ["CefSwiftUI"]),
         .plugin(name: "CefPlugin", targets: ["CefPlugin"]),
+        // The helper processes' executable and its startup library, which
+        // `swift package cef bundle` builds and puts in the app bundle.
+        .executable(name: "cefswift-helper", targets: ["CefHelper"]),
+        .library(name: "cefswift_helper_startup", type: .dynamic, targets: ["CefHelperStartup"]),
     ],
     targets: [
         // Vendored CEF C API headers + runtime dlopen/dlsym loader.
@@ -21,10 +25,31 @@ let package = Package(
             publicHeadersPath: "include",
             cSettings: [.headerSearchPath("include")]
         ),
+        // Reference counting and strings for CEF objects, shared by every
+        // process: no Foundation, no AppKit.
+        .target(
+            name: "CefBase",
+            dependencies: ["CCef"]
+        ),
+        // Renderer-side features (bridges, user scripts, evaluation) on the
+        // V8 API, run by the helper processes. No Foundation, no AppKit.
+        .target(
+            name: "CefRenderer",
+            dependencies: ["CCef", "CefBase"]
+        ),
+        // The helper executable: a few lines calling CefRenderer.
+        .executableTarget(
+            name: "CefHelper",
+            dependencies: ["CefRenderer"]
+        ),
+        // Seals the sandbox in a helper before the framework's code runs.
+        .target(
+            name: "CefHelperStartup"
+        ),
         // Core Swift wrapper over the CEF C API.
         .target(
             name: "CefKit",
-            dependencies: ["CCef"],
+            dependencies: ["CCef", "CefBase"],
             linkerSettings: [.linkedFramework("AppKit")]
         ),
         // First-class SwiftUI integration.
@@ -32,9 +57,8 @@ let package = Package(
             name: "CefSwiftUI",
             dependencies: ["CefKit"]
         ),
-        // `swift package cef <download|bundle|info|clean>`
-        // Also compiles the helper executable from the C sources in
-        // Plugins/CefPlugin/Helper when bundling.
+        // `swift package cef <download|bundle|info|clean|doctor|notarize>`
+        // Also builds the helper products when bundling.
         .plugin(
             name: "CefPlugin",
             capability: .command(
@@ -47,11 +71,10 @@ let package = Package(
                     .allowNetworkConnections(scope: .all(ports: []), reason: "Download CEF binaries from cef-builds.spotifycdn.com"),
                 ]
             ),
-            exclude: ["Helper"]
         ),
         .testTarget(
             name: "CefKitTests",
-            dependencies: ["CefKit"]
+            dependencies: ["CefKit", "CefBase", "CefRenderer"]
         ),
         // Compiles the plugin's pure logic (Plugins/CefPlugin/Distribution,
         // linked in as a directory symlink) so it can be unit-tested.
