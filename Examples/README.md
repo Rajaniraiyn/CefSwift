@@ -44,11 +44,16 @@ A tabbed browser (`Sources/Browser`). Each tab is a Chrome-style
   toolbar, tab strip and bookmarks bar), and an About page of its own in
   place of Chromium's.
 - Tabs that Chromium opens itself, shown as the app's own tabs.
+- Streaming services (Netflix, Disney+ and others) in tabs shown by the
+  system's WebKit, which plays FairPlay-protected video, marked with a
+  WebKit badge; View › Open in WebKit moves any page there, and the tab's
+  "Open in Chromium" button moves it back.
 - A single instance: launching the app again while it runs opens a new tab,
   or a tab for each URL or file path passed on the command line.
 
 `browser://playground/` has popups, a download, a page that asks before
-leaving, and an unreachable site to try.
+leaving, an unreachable site, a Widevine-protected test stream that plays in
+Chromium, and a link to a FairPlay test player to open in WebKit.
 
 ## Showcase
 
@@ -67,7 +72,8 @@ The smallest CefSwift app (`Sources/Minimal`): one window with one
 `CefWebView`, on the `.embedded` configuration. `-url <address>` shows
 another page, `-cacheDirectory <path>` keeps Chromium's data there,
 `-sandbox YES` runs its helpers in Chromium's sandbox, and
-`-memoryPolicy standard|reduced|minimal` chooses a `CefMemoryPolicy`.
+`-memoryPolicy standard|reduced|minimal` chooses a `CefMemoryPolicy`, and
+`-protectedMedia YES` lets Chromium fetch Widevine.
 
 ## SelfTest
 

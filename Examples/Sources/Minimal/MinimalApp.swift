@@ -12,6 +12,8 @@ import SwiftUI
 /// - `-sandbox YES` runs the helper processes in Chromium's sandbox.
 /// - `-memoryPolicy standard|reduced|minimal` overrides the preset's
 ///   ``CefMemoryPolicy``.
+/// - `-protectedMedia YES` lets Chromium fetch Widevine
+///   (``CefProtectedMedia/automatic``).
 /// - `-benchmark YES` prints `cefswift-benchmark loaded <seconds since 1970>
 ///   <address>` each time a page finishes loading, and quits when standard
 ///   input closes. `Scripts/measure-footprint.py` drives it.
@@ -23,6 +25,7 @@ struct MinimalApp: CefSwiftApp {
             configuration.rootCacheDirectory = URL(fileURLWithPath: path, isDirectory: true)
         }
         configuration.isSandboxEnabled = UserDefaults.standard.bool(forKey: "sandbox")
+        if UserDefaults.standard.bool(forKey: "protectedMedia") { configuration.protectedMedia = .automatic }
         switch UserDefaults.standard.string(forKey: "memoryPolicy") {
         case "standard": configuration.memoryPolicy = .standard
         case "reduced": configuration.memoryPolicy = .reduced

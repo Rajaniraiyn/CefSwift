@@ -273,7 +273,7 @@ Each part's entitlements are built from:
 |---|---|---|
 | App | None | Each capability's; the `entitlements` file's; with a profile, `com.apple.application-identifier` and `com.apple.developer.team-identifier` from it, as Xcode adds them |
 | Renderer, GPU helpers | `com.apple.security.cs.allow-jit` | `helperEntitlements` |
-| Base helper | None | `device.camera` and `device.audio-input` from those capabilities (Chromium can run its video capture and audio services there); `helperEntitlements` |
+| Base helper | None | `device.camera` and `device.audio-input` from those capabilities (Chromium can run its video capture and audio services there); `cs.disable-library-validation` from `protectedMedia`, for Widevine; `helperEntitlements` |
 | Alerts, Plugin helpers | None | `helperEntitlements` |
 
 The built-in ones follow CEF's
@@ -287,7 +287,13 @@ Library validation, part of the hardened runtime, loads a library only when
 it carries the process's team identifier (or Apple's). With a team
 signature that holds for every library, since the plugin signs each one,
 the startup library and CEF's own included, with the app's identity; no part
-needs `com.apple.security.cs.disable-library-validation`. A signature without
+needs `com.apple.security.cs.disable-library-validation`, except for
+Google's Widevine CDM. Chromium downloads the CDM at run time, Google's team
+signs it, and it loads into the base helper (`<App> Helper.app`, in the
+utility process `media.mojom.CdmServiceBroker`), where a team signature's
+library validation refuses it. The `protectedMedia` capability adds
+`disable-library-validation` to that helper only. Chrome needs no such
+entitlement because Google signs both Chrome and the CDM. A signature without
 a team (ad hoc or self-signed) matches nothing, and the framework fails to
 load with "mapping process and mapped file (non-platform) have different
 Team IDs". With the hardened runtime on such a signature, the plugin adds
@@ -385,6 +391,9 @@ bundle identifier with the capabilities enabled.
 - [ ] `swift package … cef doctor dist/MyApp.app` reports no errors, and
   `spctl --assess --type execute -vv dist/MyApp.app` prints
   `source=Notarized Developer ID`.
+- [ ] For Widevine, with `"protectedMedia"` in `capabilities`: the
+  Browser example's `browser://playground/widevine.html` plays and says
+  "Playing with com.widevine.alpha". (Not yet run with a team signature.)
 
 ### SwiftPM's plugin sandbox
 
@@ -420,6 +429,7 @@ Each capability adds what its feature needs. Usage descriptions come from
 | `passkeys` | `NSWebBrowserPublicKeyCredentialUsageDescription` (optional); includes `bluetooth` | `com.apple.developer.web-browser.public-key-credential` (restricted) | Apple, on request, to web browsers; in a provisioning profile | iCloud Keychain passkeys through AuthenticationServices. Request it from Apple with the [passkey entitlement request form](https://developer.apple.com/contact/request/macos-browsers-passkeys/); Apple then enables it for the App ID as a managed capability. |
 | `defaultBrowser` | `CFBundleURLTypes` (`http`, `https`), `CFBundleDocumentTypes` (`public.html`, `public.xhtml`) | None | Any signature | The app can be chosen as the default browser, and can ask with `NSWorkspace.setDefaultApplication(at:toOpenURLsWithScheme:)`. `com.apple.developer.web-browser` is an iOS entitlement; macOS needs none. |
 | `handoff` | `NSUserActivityTypes` (`NSUserActivityTypeBrowsingWeb`) | None | Any signature | Handoff of web pages. |
+| `protectedMedia` | None | `com.apple.security.cs.disable-library-validation` (base helper) | Any signature | Lets a team-signed, hardened helper load Google's Widevine CDM, which Chromium downloads when `CefConfiguration.protectedMedia` is `.automatic`. Ad hoc builds without the hardened runtime load it without the capability. It does not give the app Verified Media Path: see [Playing streaming services](guide.md#playing-streaming-services). |
 
 Under the hardened runtime, a missing resource entitlement makes the access
 fail silently; without it, the entitlements are not enforced. The usage
@@ -436,6 +446,8 @@ Other features:
 | Screen sharing (`getDisplayMedia`) | Nothing in the bundle; macOS asks the user for Screen Recording permission. |
 | Notifications | Nothing in the bundle; macOS asks the user. The Alerts helper gets `NSUserNotificationAlertStyle`. |
 | `NSAppTransportSecurity` | Nothing: Chromium does its own networking, which App Transport Security does not cover. |
+| FairPlay in `CefSystemBrowser` (WebKit) | Nothing: no entitlement, capability or team signature. |
+| Widevine Verified Media Path | Not available with stock CEF: CEF 156 gives the CDM no host binary to verify, so no signature of yours is checked. See [Playing streaming services](guide.md#playing-streaming-services). |
 
 ### App Sandbox
 
@@ -466,8 +478,11 @@ It reads the bundle with `codesign`, `security`, `spctl`, `stapler` and
 - the embedded profile and its checks;
 - Gatekeeper's verdict, the stapled ticket and the quarantine attribute;
 - per feature, whether it works and what is missing; the safe-storage
-  policy `.automatic` picks; and the passkey authenticators Chromium can
-  offer.
+  policy `.automatic` picks; the passkey authenticators Chromium can
+  offer; whether the base helper can load the Widevine CDM; and that the
+  build has no Verified Media Path, so services that require it refuse
+  Widevine playback. Whether Chromium has downloaded the CDM is known only
+  at run time (`CefRuntime.shared.widevine`).
 
 It exits non-zero when it finds an error, something that stops the app from
 launching, from loading a part, or from passing notarization. `--json`

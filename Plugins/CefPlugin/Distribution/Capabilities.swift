@@ -85,6 +85,7 @@ struct Capability: Sendable {
     /// authorize it, and the authenticator needs a CEF build with another
     /// team and bundle identifier.
     static let cefWebAuthnKeychainGroup = ".org.chromium.Chromium.webauthn"
+    static let disableLibraryValidation = "com.apple.security.cs.disable-library-validation"
     static let publicKeyCredentialEntitlement = "com.apple.developer.web-browser.public-key-credential"
 
     static let all: [Capability] = [
@@ -134,6 +135,14 @@ struct Capability: Sendable {
             restrictedEntitlements: [publicKeyCredentialEntitlement: .bool(true)],
             restrictedEffect: "iCloud Keychain passkeys are unavailable; security keys and phones (hybrid) "
                 + "still work"),
+        Capability(
+            name: "protectedMedia",
+            summary: "protected (DRM) media with Google's Widevine CDM, which Chromium downloads at run time and "
+                + "loads into the base helper",
+            // The CDM is signed by Google's team. Under the hardened runtime
+            // library validation lets a process load only its own team's
+            // libraries (or Apple's), so a team-signed helper refuses it.
+            helperEntitlements: [.base: [Capability.disableLibraryValidation: .bool(true)]]),
         Capability(
             name: "defaultBrowser",
             summary: "being chosen as the default web browser",

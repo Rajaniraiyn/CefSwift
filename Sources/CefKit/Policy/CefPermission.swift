@@ -18,6 +18,10 @@ public struct CefPermissionKind: OptionSet, Sendable, Hashable {
     public static let windowManagement = CefPermissionKind(rawValue: 1 << 9)
     /// Downloading several files at once.
     public static let multipleDownloads = CefPermissionKind(rawValue: 1 << 10)
+    /// A page asking to identify this device to a protected-media
+    /// (DRM) licence server. Chromium asks for it only on Android,
+    /// ChromeOS and Windows; on macOS, Widevine plays without it.
+    public static let protectedMediaIdentifier = CefPermissionKind(rawValue: 1 << 11)
     /// A permission with no more specific kind.
     public static let other = CefPermissionKind(rawValue: 1 << 31)
 
@@ -35,6 +39,7 @@ public struct CefPermissionKind: OptionSet, Sendable, Hashable {
         (CEF_PERMISSION_TYPE_SENSORS, .sensors),
         (CEF_PERMISSION_TYPE_WINDOW_MANAGEMENT, .windowManagement),
         (CEF_PERMISSION_TYPE_MULTIPLE_DOWNLOADS, .multipleDownloads),
+        (CEF_PERMISSION_TYPE_PROTECTED_MEDIA_IDENTIFIER, .protectedMediaIdentifier),
     ]
 
     /// Maps the `cef_permission_request_types_t` mask passed to

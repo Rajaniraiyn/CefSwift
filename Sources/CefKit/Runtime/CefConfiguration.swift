@@ -159,6 +159,11 @@ public struct CefConfiguration: Sendable {
     /// ``CefRuntime/setPreference(_:to:)``.
     public var preferences: [String: CefJSON] = [:]
 
+    /// Whether Chromium fetches Google's Widevine CDM, so pages can play
+    /// protected (DRM) media. ``CefProtectedMedia/automatic`` by default;
+    /// ``embedded`` turns it off. See ``CefProtectedMedia``.
+    public var protectedMedia: CefProtectedMedia = .automatic
+
     /// Trims Chrome's own UI in Chrome-style windows.
     public var chromeUI = CefChromeUIConfiguration()
 
@@ -195,15 +200,18 @@ public struct CefConfiguration: Sendable {
     /// A lean configuration for showing your own web content — an editor, a
     /// preview pane, an app UI. Turns off the parts of Chromium that only a
     /// general-purpose browser needs: background networking, component
-    /// updates, sync, translation, default-browser checks and first-run UI;
-    /// and starts renderer processes only when a page needs one
+    /// updates (and with them Widevine, ``protectedMedia``), sync,
+    /// translation, default-browser checks and first-run UI; and starts
+    /// renderer processes only when a page needs one
     /// (``CefMemoryPolicy/reduced``). Fewer background tasks, fewer network
-    /// requests, lower idle cost.
+    /// requests, lower idle cost. Set ``protectedMedia`` to
+    /// ``CefProtectedMedia/automatic`` to play protected media.
     public static var embedded: CefConfiguration {
         var configuration = CefConfiguration()
         configuration.memoryPolicy = .reduced
+        configuration.protectedMedia = .disabled
         for name in [
-            "disable-background-networking", "disable-component-update", "disable-sync",
+            "disable-background-networking", "disable-sync",
             "disable-default-apps", "disable-domain-reliability", "disable-client-side-phishing-detection",
             "no-first-run", "no-default-browser-check", "no-pings", "disable-breakpad",
         ] {
@@ -218,8 +226,8 @@ public struct CefConfiguration: Sendable {
 
     /// A configuration for building a full web browser: persistent session
     /// state, and none of Chromium's first-run or default-browser prompts.
-    /// Everything else — extensions, internal pages, sync-free profiles —
-    /// stays on.
+    /// Everything else — extensions, internal pages, Widevine
+    /// (``CefProtectedMedia/automatic``), sync-free profiles — stays on.
     public static var browser: CefConfiguration {
         var configuration = CefConfiguration()
         configuration.persistsSessionCookies = true

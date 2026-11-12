@@ -65,6 +65,14 @@ public struct CefAppCapabilities: Sendable, Equatable {
     public let usageDescriptions: Set<String>
     /// The authenticators Chromium can offer with ``CefPasskeyMode/chromium``.
     public let passkeyAuthenticators: Set<PasskeyAuthenticator>
+    /// Whether the helper that runs Chromium's content decryption module
+    /// (`<App> Helper.app`) can load Google's Widevine CDM. Under the
+    /// hardened runtime, library validation refuses a library signed by
+    /// another team, so a team-signed helper needs
+    /// `com.apple.security.cs.disable-library-validation` (the
+    /// `protectedMedia` capability in `cefapp.json`). Whether Chromium has
+    /// downloaded the CDM is ``CefRuntime/widevine``.
+    public let canLoadWidevine: Bool
 
     /// The keychain access group Chromium's Touch ID authenticator checks
     /// for in CEF 156, without a team prefix.
@@ -73,11 +81,15 @@ public struct CefAppCapabilities: Sendable, Equatable {
     /// The running app's capabilities.
     public static let current = CefAppCapabilities(
         signingInformation: Self.signingInformationOfSelf(),
-        infoDictionary: Bundle.main.infoDictionary ?? [:])
+        infoDictionary: Bundle.main.infoDictionary ?? [:],
+        baseHelperSigningInformation: Self.signingInformationOfBaseHelper())
 
     /// Evaluates a code signature's information, as
     /// `SecCodeCopySigningInformation` returns it, and an Info.plist.
-    init(signingInformation info: [String: Any]?, infoDictionary: [String: Any]) {
+    /// `baseHelperSigningInformation` is the base helper's; the app's
+    /// stands in for it when nil.
+    init(signingInformation info: [String: Any]?, infoDictionary: [String: Any],
+         baseHelperSigningInformation helperInfo: [String: Any]? = nil) {
         let flags = (info?[kSecCodeInfoFlags as String] as? NSNumber)?.uint32Value ?? 0
         let certificates = info?[kSecCodeInfoCertificates as String] as? [SecCertificate] ?? []
         let team = info?[kSecCodeInfoTeamIdentifier as String] as? String
@@ -115,6 +127,14 @@ public struct CefAppCapabilities: Sendable, Equatable {
             authenticators.insert(.iCloudKeychain)
         }
         passkeyAuthenticators = authenticators
+
+        let helper = helperInfo ?? info
+        let helperFlags = (helper?[kSecCodeInfoFlags as String] as? NSNumber)?.uint32Value ?? 0
+        let helperEntitlements = helper?[kSecCodeInfoEntitlementsDict as String] as? [String: Any] ?? [:]
+        let helperHasTeam = helper?[kSecCodeInfoTeamIdentifier as String] != nil && helperFlags & 0x2 == 0
+        let validatesLibraries = helperFlags & 0x10000 != 0
+            && (helperEntitlements["com.apple.security.cs.disable-library-validation"] as? Bool) != true
+        canLoadWidevine = !(validatesLibraries && helperHasTeam)
     }
 
     /// Whether ``CefSafeStoragePolicy/automatic`` uses the keychain: only
@@ -164,6 +184,21 @@ public struct CefAppCapabilities: Sendable, Equatable {
             return .appStore
         }
         return .other
+    }
+
+    /// The signing information of `Contents/Frameworks/<App> Helper.app`.
+    private static func signingInformationOfBaseHelper() -> [String: Any]? {
+        guard let executable = Bundle.main.executableURL?.lastPathComponent else { return nil }
+        let helper = Bundle.main.bundleURL
+            .appendingPathComponent("Contents/Frameworks/\(executable) Helper.app", isDirectory: true)
+        var staticCode: SecStaticCode?
+        var information: CFDictionary?
+        guard FileManager.default.fileExists(atPath: helper.path),
+              SecStaticCodeCreateWithPath(helper as CFURL, [], &staticCode) == errSecSuccess, let staticCode,
+              SecCodeCopySigningInformation(staticCode, SecCSFlags(rawValue: kSecCSSigningInformation), &information)
+                == errSecSuccess
+        else { return nil }
+        return information as? [String: Any]
     }
 
     private static func signingInformationOfSelf() -> [String: Any]? {

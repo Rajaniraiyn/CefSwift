@@ -11,6 +11,17 @@ final class BrowserController: CefBrowserDelegate {
     static let tabbingIdentifier = "browser"
 
     private(set) var windows: [CefBrowserWindow] = []
+    /// Tabs shown by WebKit (`SystemEngineTabs.swift`).
+    private(set) var systemTabs: [SystemEngineTab] = []
+
+    /// Chromium tabs the user moved out of WebKit, which keep streaming
+    /// sites in Chromium.
+    @ObservationIgnored private var keptInChromium: Set<ObjectIdentifier> = []
+
+    /// The WebKit tab in front, if the frontmost tab is one.
+    var currentSystemTab: SystemEngineTab? {
+        systemTabs.first { $0.window.isKeyWindow }
+    }
 
     /// The browser in the frontmost tab.
     var current: CefBrowser? { keyBrowser ?? windows.last?.browser }
@@ -226,10 +237,66 @@ final class BrowserController: CefBrowserDelegate {
     }
 
     func browser(_ browser: CefBrowser, decidePolicyFor navigation: CefNavigationAction) -> CefNavigationDecision {
+        // Streaming services play in WebKit, which has FairPlay.
+        if let url = navigation.url, SystemEngineTab.opensStreamingSitesAutomatically,
+           !keptInChromium.contains(ObjectIdentifier(browser)), CefSystemBrowser.prefersSystemEngine(for: url) {
+            openSystemTab(url: url, profile: browser.options.profile ?? .default, replacing: browser)
+            return .cancel
+        }
         // Show this app's pages in place of some of Chromium's.
         guard let replacement = BrowserPages.replacement(for: navigation.url) else { return .allow }
         browser.load(replacement)
         return .cancel
+    }
+
+    /// Opens `url` in a WebKit tab beside the frontmost tab, carrying the
+    /// Chromium profile's cookies for the site over. With `replacing`, a
+    /// Chromium tab that has shown nothing else yet closes, so the WebKit
+    /// tab takes its place.
+    func openSystemTab(url: URL, profile: CefProfile, replacing source: CefBrowser? = nil) {
+        let tab = SystemEngineTab(url: url, profile: profile, controller: self)
+        systemTabs.append(tab)
+        NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification, object: tab.window, queue: .main
+        ) { [weak self, weak tab] _ in
+            MainActor.assumeIsolated {
+                tab?.browser.close()
+                self?.systemTabs.removeAll { $0 === tab }
+            }
+        }
+        let anchor = NSApp.keyWindow?.tabbingIdentifier == Self.tabbingIdentifier ? NSApp.keyWindow : nil
+        if let anchor {
+            tab.window.setFrame(anchor.frame, display: false)
+            anchor.addTabbedWindow(tab.window, ordered: .above)
+        } else {
+            tab.window.center()
+        }
+        tab.window.makeKeyAndOrderFront(nil)
+        if let source, !source.canGoBack, let window = windows.first(where: { $0.browser === source }) {
+            window.close()
+        }
+        Task {
+            await tab.browser.importCookies(from: profile, for: url)
+            tab.browser.load(url)
+        }
+    }
+
+    /// "Open in Chromium" from a WebKit tab: a Chromium tab that keeps the
+    /// page in Chromium even if it is a streaming site.
+    func openTabInChromium(url: URL, isPrivate: Bool) {
+        // Chromium asks about the first navigation only once the browser
+        // exists, after this returns.
+        keptInChromium.insert(ObjectIdentifier(openTab(url: url, isPrivate: isPrivate)))
+    }
+
+    /// View > Open in WebKit: shows the frontmost Chromium tab's page in a
+    /// WebKit tab instead.
+    func openCurrentTabInSystemEngine() {
+        guard let browser = current, let url = browser.url, url.scheme == "https" || url.scheme == "http",
+              let window = windows.first(where: { $0.browser === browser })
+        else { return }
+        openSystemTab(url: url, profile: browser.options.profile ?? .default)
+        window.close()
     }
 
     func browser(_ browser: CefBrowser, decideWindowOpenFor request: CefWindowOpenRequest) -> CefWindowOpenAction {

@@ -1,6 +1,7 @@
 import AppKit
 import CCef
 import Foundation
+import WebKit
 
 /// A browsing profile: its own cookies, storage, cache, preferences,
 /// extensions and theme. Browsers sharing a profile share all of it.
@@ -21,6 +22,8 @@ public final class CefProfile {
 
     let kind: Kind
     private var context: CefRef<cef_request_context_t>?
+    /// The profile's WebKit data store, for ``CefSystemBrowser``.
+    var webKitDataStore: WKWebsiteDataStore?
 
     private init(kind: Kind) {
         self.kind = kind

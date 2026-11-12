@@ -37,6 +37,17 @@ import Testing
         #expect(summary.contains("mock keychain"))
     }
 
+    @Test func teamSignedHardenedHelperNeedsLibraryValidationOffForWidevine() {
+        let app = signing(flags: 0x10000, team: "A1B2C3D4E5")
+        #expect(CefAppCapabilities(signingInformation: signing(flags: 0x2), infoDictionary: [:]).canLoadWidevine)
+        #expect(!CefAppCapabilities(signingInformation: app, infoDictionary: [:],
+                                    baseHelperSigningInformation: app).canLoadWidevine)
+        let helper = signing(flags: 0x10000, team: "A1B2C3D4E5",
+                             entitlements: ["com.apple.security.cs.disable-library-validation": true])
+        #expect(CefAppCapabilities(signingInformation: app, infoDictionary: [:],
+                                   baseHelperSigningInformation: helper).canLoadWidevine)
+    }
+
     @Test func bluetoothUsageEnablesHybrid() {
         let info = ["NSBluetoothAlwaysUsageDescription": "Phones as passkeys"]
         let plain = CefAppCapabilities(signingInformation: signing(flags: 0x2), infoDictionary: info)

@@ -282,8 +282,9 @@ struct DistributionSettings: Sendable {
 
         // Library validation accepts a library only from the process's own
         // team (or Apple). A signature without a team matches nothing, so
-        // under the hardened runtime such a build turns it off; a team
-        // signature never needs to, since every library carries the team.
+        // under the hardened runtime such a build turns it off. A team
+        // signature needs to only for Google's Widevine CDM, which the
+        // protectedMedia capability turns it off for, in the base helper.
         let disableLibraryValidation = "com.apple.security.cs.disable-library-validation"
         let teamless = plan.hardenedRuntime && !identity.kind.hasAppleTeam
         if teamless {
@@ -291,7 +292,7 @@ struct DistributionSettings: Sendable {
             plan.warnings.append(
                 "the hardened runtime with \(identity.kind.displayName) signing: library validation cannot " +
                 "match a signature without a team, so \(disableLibraryValidation) is added to the app and " +
-                "helpers. Team-signed builds do not need it.")
+                "helpers. Team-signed builds need it only in the base helper, for Widevine (capability protectedMedia).")
         }
 
         // 5. Helpers: built-in templates, what capabilities add, then the

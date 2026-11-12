@@ -38,6 +38,7 @@ final class MappedCefSettings {
             rootCache = Self.defaultRootCacheDirectory()
         }
         try? FileManager.default.createDirectory(at: rootCache, withIntermediateDirectories: true)
+        configuration.protectedMedia.installPreinstalledCDM(rootCache: rootCache)
         CefStringUtil.set(rootCache.path, into: &raw.root_cache_path)
         CefStringUtil.set((configuration.cacheDirectory ?? rootCache).path, into: &raw.cache_path)
 
@@ -137,6 +138,9 @@ public final class CefRuntime {
     @ObservationIgnored private var settings: MappedCefSettings?
     @ObservationIgnored private var browsersByIdentifier: [Int32: CefBrowser] = [:]
     @ObservationIgnored private var isTerminationRequested = false
+    @ObservationIgnored private var hasRequestedWidevine = false
+    /// The Widevine fetch in progress; ``installWidevine()`` callers share it.
+    @ObservationIgnored var widevineInstallation: Task<CefWidevineState, Never>?
 
     private init() {}
 
@@ -357,6 +361,13 @@ public final class CefRuntime {
             serviceBrowsers.append(browser)
         } else if !browsers.contains(where: { $0 === browser }) {
             browsers.append(browser)
+        }
+        // Chromium's update service starts fetching once a browser exists;
+        // ask for Widevine then rather than at its first scheduled run, a
+        // minute after launch.
+        if !hasRequestedWidevine, configuration?.protectedMedia.usesComponentUpdater == true {
+            hasRequestedWidevine = true
+            if !widevine.isInstalled { Task { await installWidevine() } }
         }
     }
 

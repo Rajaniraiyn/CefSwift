@@ -367,6 +367,29 @@ enum Doctor {
             : .init(status: .info, title: "defaultBrowser", detail: "does not declare http and https URL types.",
                     fix: "add \"defaultBrowser\" to capabilities."))
 
+        // Protected media: Widevine runs in the base helper.
+        if let helper = facts.helpers[.base] {
+            let validates = helper.isHardenedRuntime && !granted(disableLibraryValidation, in: helper)
+            if validates, helper.teamIdentifier != nil {
+                features.append(.init(
+                    status: .info, title: "protectedMedia",
+                    detail: "Widevine cannot load: \(helper.name) has the hardened runtime and library validation, " +
+                        "which refuses the CDM because Google's team signs it. Clear Key works.",
+                    fix: "add \"protectedMedia\" to capabilities if pages need Widevine."))
+            } else {
+                features.append(.init(
+                    status: .ok, title: "protectedMedia",
+                    detail: "Widevine can load in \(helper.name) once Chromium has downloaded it " +
+                        "(CefConfiguration.protectedMedia = .automatic; CefRuntime.widevine reports it)."))
+            }
+            features.append(.init(
+                status: .info, title: "protectedMedia: Verified Media Path",
+                detail: "unverified. Stock CEF gives the Widevine CDM no signed host binary to verify, so " +
+                    "licence servers see an unverified software (L3) client: services that require VMP, such as " +
+                    "Netflix, refuse Widevine playback here. CefSystemBrowser plays them with WebKit and FairPlay.",
+                fix: nil))
+        }
+
         // Passkeys, as Chromium decides at run time.
         var authenticators = ["security keys (USB/NFC)"]
         let hybrid = usage("NSBluetoothAlwaysUsageDescription") && (!runtime || granted("com.apple.security.device.bluetooth"))
