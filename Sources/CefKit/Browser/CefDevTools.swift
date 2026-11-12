@@ -52,15 +52,27 @@ public final class CefDevTools {
     public func send(_ method: String, _ params: CefJSON = [:]) async throws -> CefJSON {
         guard let browser else { throw CefError.browserClosed }
         try await browser.ready()
-        if attachIfNeeded(to: browser), needsDomainReplay {
-            needsDomainReplay = false
-            for domain in enabledDomains {
-                _ = try? await deliver(domain.method, domain.params, to: browser)
-            }
-        }
+        await enableDomainsAgain(in: browser)
         let result = try await deliver(method, params, to: browser)
         recordDomainState(method, params)
         return result
+    }
+
+    /// In the session of a browser created again after a discard, enables
+    /// the domains enabled before. The browser does this before it loads
+    /// its page; ``send(_:_:)`` does it for a session used earlier.
+    func enableDomainsAgain() async {
+        guard let browser else { return }
+        await enableDomainsAgain(in: browser)
+    }
+
+    private func enableDomainsAgain(in browser: CefBrowser) async {
+        attachIfNeeded(to: browser)
+        guard needsDomainReplay, registration != nil else { return }
+        needsDomainReplay = false
+        for domain in enabledDomains {
+            _ = try? await deliver(domain.method, domain.params, to: browser)
+        }
     }
 
     private func recordDomainState(_ method: String, _ params: CefJSON) {
@@ -159,6 +171,7 @@ public final class CefDevTools {
 
     /// Attaches the observer unless it is attached already. Returns whether
     /// it attached now.
+    @discardableResult
     private func attachIfNeeded(to browser: CefBrowser) -> Bool {
         guard registration == nil else { return false }
         let observer = DevToolsObserver(devTools: self).makeObserver()
