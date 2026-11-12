@@ -1218,8 +1218,7 @@ driver crash cannot end the app.
   authenticator (`.chromium`, with the entitlement). The app's
   authenticator is a platform authenticator: a request that asks for a
   cross-platform one (`authenticatorAttachment: "cross-platform"`) waits
-  until its timeout. A call made by a document's first scripts, before
-  CefKit has set up its watch on the new document, also waits until its
-  timeout without reaching the delegate, and so do calls from cross-site
-  iframes. The app's mode uses the browser's DevTools `Debugger` and
+  until its timeout. Calls from cross-site iframes, which run in a
+  DevTools target of their own, also wait until their timeout without
+  reaching the delegate. The app's mode uses the browser's DevTools `Debugger` and
   `WebAuthn` domains; do not use those domains yourself in such a browser.
