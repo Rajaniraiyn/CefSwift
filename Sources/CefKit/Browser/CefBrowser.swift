@@ -46,6 +46,10 @@ public struct CefBrowserOptions {
     /// (Offscreen only) Forward raw trackpad touches to Chromium instead of
     /// translating gestures natively.
     public var forwardsRawTouchEvents = false
+    /// (Offscreen only) When Chromium builds the page's accessibility tree,
+    /// which VoiceOver and other assistive apps read. Building it costs
+    /// time and memory, so by default it starts on first demand.
+    public var offscreenAccessibility: CefOffscreenAccessibility = .automatic
 
     public init() {}
 }
@@ -263,6 +267,20 @@ public final class CefBrowser: Identifiable {
     /// The view hosting this browser: the parent of a windowed browser's
     /// native view, or the offscreen host.
     @ObservationIgnored public internal(set) weak var hostView: NSView?
+
+    /// Whether Chromium is building the page's accessibility tree for an
+    /// offscreen browser. See ``CefBrowserOptions/offscreenAccessibility``.
+    public internal(set) var isAccessibilityEnabled = false
+    /// The page's accessibility tree, for offscreen browsers while
+    /// ``isAccessibilityEnabled`` is on; empty otherwise.
+    @ObservationIgnored public private(set) lazy var accessibilityTree = CefAccessibilityTree()
+    /// Whether the tree was asked for before the browser was created.
+    @ObservationIgnored var wantsAccessibility = false
+    /// Whether the DevTools `Accessibility` domain, which accessibility
+    /// actions use to find a node's DOM node, is enabled.
+    @ObservationIgnored var isDevToolsAccessibilityEnabled = false
+    /// Whether a read of the document's scroll position is scheduled.
+    @ObservationIgnored var isAccessibilityScrollRefreshPending = false
 
     /// Creates a browser model. Nothing is created in Chromium until the
     /// browser is hosted.
@@ -776,6 +794,7 @@ extension CefBrowser {
         readyWaiters.forEach { $0.resume() }
         readyWaiters = []
         refreshZoomLevel()
+        applyInitialAccessibilityState()
         delegate?.browserDidCreate(self)
         if isBootstrapping {
             Task { await bootstrap() }
@@ -930,6 +949,7 @@ extension CefBrowser {
         canGoBack = false
         canGoForward = false
         downloadControls = [:]
+        accessibilityDidClose()
         devTools.invalidate()
         readyWaiters.forEach { $0.resume(throwing: CefError.browserClosed) }
         readyWaiters = []
