@@ -1,6 +1,7 @@
 import AppKit
 @_spi(Testing) import CefKit
 import CefSwiftUI
+import SwiftUI
 
 /// Checks of what CefSwift does through Chromium's AppKit classes: presenting
 /// Chromium's surfaces as the app asks, and swipe navigation with
@@ -37,6 +38,13 @@ extension SelfTest {
         window.show()
         _ = await waitUntil { browser.title == "page" && !browser.isLoading }
         guard let nsWindow = window.window else { return }
+
+        // A SwiftUI view in the toolbar registers itself as an anchor (and
+        // SwiftUI keeps updating: no update loop).
+        window.setToolbar { Text("QR").chromiumSurfaceAnchor([.qrCode]) }
+        check("surfaces: a SwiftUI toolbar view becomes an anchor",
+              await waitUntil(timeout: .seconds(5)) { window.chromiumUI.anchors[.qrCode] != nil })
+        window.chromiumUI.anchors[.qrCode] = nil
 
         /// The visible surface windows Chromium has attached.
         func visibleSurfaceWindows() -> [NSWindow] {
@@ -181,6 +189,17 @@ extension SelfTest {
                   && visibleSurfaceWindows().isEmpty,
               detail: "\(browser.statusText) \(visibleSurfaceWindows().map { NSStringFromRect($0.frame) })")
         window.statusBubbleView = nil
+
+        // CefSwiftUI's find bar: a title-bar accessory while the session runs.
+        window.setFindBar { _ in Text("Find").padding() }
+        func findBarShows() -> Bool {
+            nsWindow.titlebarAccessoryViewControllers.contains { !$0.isHidden && $0.view.frame.height > 0 }
+        }
+        browser.execute(.find)
+        check("surfaces: SwiftUI find bar shows under the toolbar", await waitUntil(timeout: .seconds(3)) { findBarShows() })
+        browser.findSession.end()
+        check("surfaces: SwiftUI find bar hides when the session ends",
+              await waitUntil(timeout: .seconds(3)) { !findBarShows() && window.chromiumSurfaces.isEmpty })
 
         window.close()
         _ = await waitUntil { window.isClosed }
