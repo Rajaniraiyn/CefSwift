@@ -219,13 +219,17 @@ final class CefPasskeyAuthenticator {
         // one unasked.
         await removeAuthenticator()
         guard let browser, browser.state == .live else { return }
-        let delegate = browser.delegate ?? CefDefaultBrowserDelegate.shared
-        let decision = await Self.decide(request, mode: mode) { request in
-            await delegate.browser(browser, decidePasskeyRequest: request)
-        } failed: { error in
-            delegate.browser(browser, passkeyStoreDidFail: error)
+        // A tracked decision: a navigation or closing ends it, which
+        // dismisses the default sheet, and its answer is then dropped.
+        let mode = mode
+        let decided = await browser.decision(.page) { delegate in
+            await Self.decide(request, mode: mode) { request in
+                await delegate.browser(browser, decidePasskeyRequest: request)
+            } failed: { error in
+                delegate.browser(browser, passkeyStoreDidFail: error)
+            }
         }
-        guard browser.state == .live else { return }
+        guard let decision = decided, browser.state == .live else { return }
 
         switch (decision, request.kind) {
         case (.ignore, _):

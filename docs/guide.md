@@ -736,6 +736,12 @@ final class Policy: CefBrowserDelegate {
 | `browser(_:configureContextMenu:for:)`, `browser(_:handleContextMenuCommand:for:)` | No change |
 | `browser(_:handleChromeCommand:disposition:)` | `false`: Chrome runs the command |
 
+An `async` decision that stops mattering before you answer is cancelled:
+a dialog, permission, certificate or passkey decision when the page
+navigates away, and every decision when the browser closes. The task
+running your method is cancelled and its answer is ignored; the default
+sheets dismiss themselves.
+
 Events: `browserDidCreate(_:)`, `browserDidClose(_:)`, `browser(_:didOpen:)`
 (a popup or DevTools browser opened on this browser's behalf, which inherits
 the delegate), `browser(_:didFinishLoadWithStatus:)`,

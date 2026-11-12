@@ -1,4 +1,5 @@
 import AppKit
+@_spi(Testing) import CefKit
 import CefSwiftUI
 
 /// Passkeys answered by the app (`CefPasskeyMode.app`), in both browser
@@ -20,6 +21,7 @@ extension SelfTest {
         _ = await waitUntil { CefRuntime.shared.browsers.isEmpty }
         await disabledPasskeyChecks(url: url)
         await passkeyStoreFailureChecks(url: url)
+        await passkeyDecisionCancellationChecks(url: url)
         check("passkeys: Chromium's WebAuthn dialog never appears", !watcher.sawDialog, detail: watcher.titles.joined(separator: ", "))
         watcher.stop()
         await passkeySettingsChecks()
@@ -160,6 +162,61 @@ extension SelfTest {
               detail: "\(result) after \(ContinuousClock.now - start), \(policy.requests.count) asked")
         window.close()
         _ = await waitUntil { window.isClosed }
+    }
+
+    /// A passkey decision is a tracked one: leaving the page or closing the
+    /// browser ends it, and the default sheet goes with it.
+    private static func passkeyDecisionCancellationChecks(url: URL) async {
+        var options = CefBrowserOptions()
+        options.passkeys = .app(CefInMemoryPasskeyStore())
+        let delegate = StallingDelegate()
+        let browser = CefBrowser(url: url, options: options, delegate: delegate)
+        let view = CefWindowedBrowserView()
+        view.frame = window.contentView!.bounds
+        window.contentView!.addSubview(view)
+        view.browser = browser
+        defer { view.removeFromSuperview() }
+        if await waitUntil(timeout: .seconds(20), { browser.title == "passkeys" && !browser.isLoading }) {
+            browser.executeJavaScript("register()")
+            let asked = await waitUntil(timeout: .seconds(5)) { delegate.started == 1 && browser.pendingDecisionCount == 1 }
+            browser.load(URL(string: "selftest://app/second.html")!)
+            let ended = await waitUntil(timeout: .seconds(10)) {
+                delegate.cancelled == 1 && browser.pendingDecisionCount == 0 && browser.title == "second"
+            }
+            check("passkeys: leaving the page cancels a pending passkey decision", asked && ended,
+                  detail: "asked \(asked), cancelled \(delegate.cancelled), pending \(browser.pendingDecisionCount), "
+                      + "title \(browser.title)")
+        } else {
+            check("passkeys (cancellation): page loads", false, detail: browser.title)
+        }
+        browser.close(force: true)
+        _ = await waitUntil { browser.state == .closed }
+
+        // The default delegate's sheet, for a click's sign-in with no
+        // saved passkey, goes when the browser closes.
+        let sheetBrowser = CefBrowser(url: url, options: options)
+        view.browser = sheetBrowser
+        guard await waitUntil(timeout: .seconds(20), { sheetBrowser.title == "passkeys" && !sheetBrowser.isLoading }) else {
+            check("passkeys (sheet): page loads", false, detail: sheetBrowser.title)
+            return
+        }
+        // Not awaited: the release's reply waits for the page, which stays
+        // stopped before its call while the sheet is up.
+        Task {
+            for type in ["mousePressed", "mouseReleased"] {
+                _ = try? await sheetBrowser.devTools.send("Input.dispatchMouseEvent", [
+                    "type": .string(type), "x": 40, "y": 40, "button": "left", "clickCount": 1,
+                ])
+            }
+        }
+        let shown = await waitUntil(timeout: .seconds(5)) { window.attachedSheet != nil }
+        sheetBrowser.close(force: true)
+        let gone = await waitUntil(timeout: .seconds(5)) {
+            window.attachedSheet == nil && sheetBrowser.state == .closed && sheetBrowser.pendingDecisionCount == 0
+        }
+        check("passkeys: closing dismisses the default passkey sheet", shown && gone,
+              detail: "shown \(shown), sheet \(String(describing: window.attachedSheet)), state \(sheetBrowser.state)")
+        if let sheet = window.attachedSheet { window.endSheet(sheet) }
     }
 
     /// A store that cannot be read refuses the call before the delegate is

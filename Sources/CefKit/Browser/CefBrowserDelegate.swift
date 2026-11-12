@@ -91,7 +91,8 @@ public protocol CefBrowserDelegate: AnyObject {
     ///
     /// The page stays stopped at its `navigator.credentials` call until you
     /// answer, as it does for `alert()`; JavaScript you evaluate in it
-    /// meanwhile waits too.
+    /// meanwhile waits too. When the page navigates away or the browser
+    /// closes first, the call's task is cancelled and its answer ignored.
     func browser(_ browser: CefBrowser, decidePasskeyRequest request: CefPasskeyRequest) async -> CefPasskeyDecision
     /// The passkey store failed while a WebAuthn request was answered. A
     /// failed availability check or read refuses the page's call; a failed

@@ -91,6 +91,15 @@ struct PasskeyTests {
 
     // MARK: Failing closed
 
+    @Test func cancellingVerificationEndsTheSystemPrompt() async {
+        let context = FakeAuthenticationContext(waitsForInvalidation: true)
+        let verification = Task { await CefPasskeyPresenter.verifyUser(reason: "test", with: context) }
+        while context.evaluated == 0 { await Task.yield() }
+        verification.cancel()
+        #expect(await verification.value == .failed)
+        #expect(context.invalidated)
+    }
+
     @Test func unavailableVerificationIsNotSuccess() async {
         let none = FakeAuthenticationContext(canEvaluate: false)
         #expect(await CefPasskeyPresenter.verifyUser(reason: "test", with: none) == .unavailable("no biometry"))
@@ -163,11 +172,19 @@ final class FailingPasskeyStore: CefPasskeyStore {
 final class FakeAuthenticationContext: CefLocalAuthenticationContext, @unchecked Sendable {
     let canEvaluate: Bool
     let result: Result<Bool, any Error>
-    private(set) var evaluated = 0
+    /// Whether an evaluation lasts until `invalidate()`, as a system prompt
+    /// the user leaves open does.
+    let waitsForInvalidation: Bool
+    private let lock = NSLock()
+    private var evaluations = 0
+    private var wasInvalidated = false
+    var evaluated: Int { lock.withLock { evaluations } }
+    var invalidated: Bool { lock.withLock { wasInvalidated } }
 
-    init(canEvaluate: Bool = true, result: Result<Bool, any Error> = .success(true)) {
+    init(canEvaluate: Bool = true, result: Result<Bool, any Error> = .success(true), waitsForInvalidation: Bool = false) {
         self.canEvaluate = canEvaluate
         self.result = result
+        self.waitsForInvalidation = waitsForInvalidation
     }
 
     func canEvaluatePolicy(_ policy: LAPolicy, error: NSErrorPointer) -> Bool {
@@ -178,7 +195,16 @@ final class FakeAuthenticationContext: CefLocalAuthenticationContext, @unchecked
     }
 
     func evaluatePolicy(_ policy: LAPolicy, localizedReason: String) async throws -> Bool {
-        evaluated += 1
+        lock.withLock { evaluations += 1 }
+        if waitsForInvalidation {
+            // Not cancellation: only `invalidate()` ends the prompt.
+            while !invalidated { try? await Task.sleep(for: .milliseconds(5)) }
+            throw LAError(.appCancel)
+        }
         return try result.get()
+    }
+
+    func invalidate() {
+        lock.withLock { wasInvalidated = true }
     }
 }

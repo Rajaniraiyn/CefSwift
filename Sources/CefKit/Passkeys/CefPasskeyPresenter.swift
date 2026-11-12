@@ -21,6 +21,11 @@ public enum CefPasskeyPresenter {
     /// ``CefUserVerification/verified``. A Mac that cannot verify its user
     /// (``CefUserVerification/unavailable(_:)``) gets a refusal; pass a
     /// verifier of your own to decide otherwise.
+    ///
+    /// Cancelling the calling task dismisses the sheet, or ends the user
+    /// verification, and returns ``CefPasskeyDecision/deny``. CefKit
+    /// cancels the default delegate's call when the page navigates or the
+    /// browser closes.
     public static func present(
         _ request: CefPasskeyRequest, in window: NSWindow?, verifier: CefUserVerifier = .deviceOwner
     ) async -> CefPasskeyDecision {
@@ -56,8 +61,9 @@ public enum CefPasskeyPresenter {
         }
         alert.addButton(withTitle: "Cancel")
 
-        guard await run(alert, in: window) == .alertFirstButtonReturn else { return .deny }
+        guard await run(alert, in: window) == .alertFirstButtonReturn, !Task.isCancelled else { return .deny }
         let verification = await verifier.verify(reason(for: request))
+        guard !Task.isCancelled else { return .deny }
         return decision(for: request, choosing: picker?.indexOfSelectedItem ?? 0, after: verification)
     }
 
@@ -67,13 +73,20 @@ public enum CefPasskeyPresenter {
         await verifyUser(reason: reason, with: LAContext())
     }
 
-    static func verifyUser(reason: String, with context: sending some CefLocalAuthenticationContext) async -> CefUserVerification {
+    static func verifyUser(reason: String, with context: sending any CefLocalAuthenticationContext) async -> CefUserVerification {
         var error: NSError?
         guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) else {
             return .unavailable(error?.localizedDescription ?? "User verification is not available.")
         }
+        // Cancelling the task invalidates the context, which ends the
+        // system prompt with an error.
+        nonisolated(unsafe) let evaluating = context
         do {
-            return try await context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason) ? .verified : .failed
+            return try await withTaskCancellationHandler {
+                try await evaluating.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason) ? .verified : .failed
+            } onCancel: {
+                evaluating.invalidate()
+            }
         } catch {
             return .failed
         }
@@ -97,11 +110,10 @@ public enum CefPasskeyPresenter {
         request.kind == .registration ? "save a passkey for \(request.host)" : "sign in to \(request.host)"
     }
 
+    /// Shows `alert` until the user answers or the task is cancelled, which
+    /// dismisses it.
     private static func run(_ alert: NSAlert, in window: NSWindow?) async -> NSApplication.ModalResponse {
-        if let window, window.isVisible {
-            return await alert.beginSheetModal(for: window)
-        }
-        return alert.runModal()
+        await CefDialogPresenter.run(alert, in: window)
     }
 }
 
@@ -151,6 +163,8 @@ public struct CefUserVerifier: Sendable {
 protocol CefLocalAuthenticationContext {
     func canEvaluatePolicy(_ policy: LAPolicy, error: NSErrorPointer) -> Bool
     func evaluatePolicy(_ policy: LAPolicy, localizedReason: String) async throws -> Bool
+    /// Ends an evaluation in progress; called from any thread.
+    func invalidate()
 }
 
 extension LAContext: CefLocalAuthenticationContext {}

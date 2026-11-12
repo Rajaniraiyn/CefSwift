@@ -282,6 +282,11 @@ final class StallingDelegate: CefBrowserDelegate {
         await stall()
         return .allow
     }
+
+    func browser(_ browser: CefBrowser, decidePasskeyRequest request: CefPasskeyRequest) async -> CefPasskeyDecision {
+        await stall()
+        return .createPasskey
+    }
 }
 
 /// Runs `body`, giving up after `timeout`.

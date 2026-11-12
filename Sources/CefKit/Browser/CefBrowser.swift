@@ -1233,7 +1233,7 @@ extension CefBrowser {
 
     struct PendingDecision {
         var scope: DecisionScope
-        var task: Task<Void, Never>
+        var cancel: () -> Void
     }
 
     /// Asks the delegate an asynchronous question and applies the answer.
@@ -1248,23 +1248,41 @@ extension CefBrowser {
         _ ask: @escaping @MainActor (CefBrowserDelegate) async -> Decision,
         then apply: @escaping @MainActor (Decision) -> Void
     ) {
+        let task = startDecision(scope, ask)
+        Task {
+            if let decision = await task.value { apply(decision) }
+        }
+    }
+
+    /// Asks the delegate as ``decide(_:_:then:)`` does and returns the
+    /// answer, or `nil` when the decision ended first.
+    func decision<Decision: Sendable>(
+        _ scope: DecisionScope, _ ask: @escaping @MainActor (CefBrowserDelegate) async -> Decision
+    ) async -> Decision? {
+        await startDecision(scope, ask).value
+    }
+
+    private func startDecision<Decision: Sendable>(
+        _ scope: DecisionScope, _ ask: @escaping @MainActor (CefBrowserDelegate) async -> Decision
+    ) -> Task<Decision?, Never> {
         let delegate = delegate ?? CefDefaultBrowserDelegate.shared
         nextDecisionID += 1
         let id = nextDecisionID
         // Runs after this returns, so the decision is registered first.
-        let task = Task {
+        let task = Task { () -> Decision? in
             let decision = await ask(delegate)
-            guard pendingDecisions.removeValue(forKey: id) != nil else { return }
-            apply(decision)
+            guard pendingDecisions.removeValue(forKey: id) != nil else { return nil }
+            return decision
         }
-        pendingDecisions[id] = PendingDecision(scope: scope, task: task)
+        pendingDecisions[id] = PendingDecision(scope: scope, cancel: task.cancel)
+        return task
     }
 
     /// Ends the pending decisions whose scope matches.
     func cancelDecisions(where matches: (DecisionScope) -> Bool) {
         for (id, decision) in pendingDecisions where matches(decision.scope) {
             pendingDecisions[id] = nil
-            decision.task.cancel()
+            decision.cancel()
         }
     }
 
