@@ -46,6 +46,16 @@ final class CefAppContext: @unchecked Sendable {
                 CefCustomScheme.childProcessSwitchName,
                 value: CefCustomScheme.serialize(owner.customSchemes))
         }
+        process.pointee.on_already_running_app_relaunch = { s, commandLine, currentDirectory in
+            defer { cefRelease(commandLine) }
+            let arguments = commandLine.map { Array(CefCommandLine(raw: $0).argv.dropFirst()) } ?? []
+            let path = CefStringUtil.string(from: currentDirectory)
+            let directory = path.isEmpty ? nil : URL(fileURLWithPath: path, isDirectory: true)
+            // Handled either way: Chromium's default would open a window of
+            // Chrome's design, or show one of CefKit's hidden ones.
+            MainActor.assumeIsolated { CefRuntime.shared.handleRelaunch(arguments: arguments, workingDirectory: directory) }
+            return 1
+        }
         process.pointee.get_default_client = { s in
             cefRetained(cefOwner(CefAppContext.self, s)?.defaultClient)
         }

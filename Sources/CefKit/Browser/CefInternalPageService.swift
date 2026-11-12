@@ -14,8 +14,11 @@ import Foundation
 /// finish in time, or a renderer that dies (Chromium kills a page that sends
 /// a malformed Mojo message), discards the browser; the next call starts a
 /// fresh one. Service browsers are listed in neither
-/// ``CefRuntime/browsers`` nor ``CefBrowserWindow/all``, and are closed when
-/// the app quits.
+/// ``CefRuntime/browsers`` nor ``CefBrowserWindow/all``. They are closed
+/// when the app quits, and — except for the default profile's — when the
+/// last browser of their profile closes (``CefProfile/lastBrowserDidClose()``);
+/// a service browser holds its profile, so this is what lets an incognito
+/// profile, and its data, go.
 ///
 /// Service pages are loaded with the ``addressMarker`` fragment. Chromium
 /// saves every Chrome-style window in its session, service windows
@@ -43,6 +46,9 @@ final class CefInternalPageService {
     /// delivered to ``onNotification``.
     let notificationBinding: String?
     var onNotification: ((String) -> Void)?
+    /// Keeps the browser running while its profile has no browsers, for
+    /// a service whose notifications someone is waiting for.
+    var keepsRunning = false
 
     private var window: CefBrowserWindow?
     /// Discarded windows, kept until Chromium has finished closing them.
@@ -52,12 +58,29 @@ final class CefInternalPageService {
     private var notifications: Task<Void, Never>?
     private let delegate = ServiceBrowserDelegate()
 
-    init(profile: CefProfile, page: String, setup: String, notificationBinding: String? = nil) {
+    /// Whether Chromium can show the page in an incognito profile. Chromium
+    /// stops the process when asked to open one that it cannot there
+    /// (`chrome://history`, for instance).
+    let isAvailableInIncognito: Bool
+
+    init(
+        profile: CefProfile, page: String, setup: String, notificationBinding: String? = nil,
+        isAvailableInIncognito: Bool = true
+    ) {
         self.profile = profile
+        self.isAvailableInIncognito = isAvailableInIncognito
         self.page = page
         self.setup = setup
         self.notificationBinding = notificationBinding
         delegate.onTerminated = { [weak self] browser in self?.discard(browser) }
+        profile.register(self)
+    }
+
+    /// Closes the browser unless ``keepsRunning``; the next call starts a
+    /// new one.
+    func stopIfIdle() {
+        guard !keepsRunning, let browser else { return }
+        discard(browser)
     }
 
     /// Evaluates `function` — a JavaScript expression of the form
@@ -104,6 +127,9 @@ final class CefInternalPageService {
         if let browser, browser.state == .live { return browser }
         guard CefRuntime.shared.isInitialized, !CefRuntime.shared.isTerminating else {
             throw CefError.notInitialized
+        }
+        guard isAvailableInIncognito || profile.kind != .incognito else {
+            throw CefError.operationFailed("\(page) is not available in an incognito profile")
         }
         let task = Task { try await launch() }
         starting = task
@@ -170,7 +196,13 @@ final class CefInternalPageService {
         guard browser === self.browser else { return }
         self.browser = nil
         retiredWindows.removeAll(where: \.isClosed)
-        if let window { retiredWindows.append(window) }
+        if let window {
+            retiredWindows.append(window)
+            // A closed window still holds its browser, and so the profile.
+            window.onClose = { [weak self, weak window] in
+                self?.retiredWindows.removeAll { $0 === window || $0.isClosed }
+            }
+        }
         window = nil
         notifications?.cancel()
         notifications = nil

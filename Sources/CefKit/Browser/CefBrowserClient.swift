@@ -268,7 +268,7 @@ final class CefBrowserClient {
         }
         h.pointee.on_favicon_urlchange = { s, browser, iconURLs in
             let urls = cefStrings(from: iconURLs).compactMap(URL.init(string:))
-            CefBrowserClient.run(s, browser, default: ()) { _, b in b.applyFavicon(urls.first) }
+            CefBrowserClient.run(s, browser, default: ()) { _, b in b.applyFavicon(urls) }
         }
         h.pointee.on_fullscreen_mode_change = { s, browser, fullscreen in
             CefBrowserClient.run(s, browser, default: ()) { _, b in b.applyFullscreen(fullscreen != 0) }

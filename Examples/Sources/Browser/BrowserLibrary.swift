@@ -125,6 +125,8 @@ final class BrowserLibrary {
         struct Site: Encodable {
             var url: String
             var title: String
+            /// The site's icon as a `data:` URL, when Chromium has one.
+            var icon: String?
         }
         var isPrivate: Bool
         var frequentlyVisited: [Site]
@@ -134,12 +136,25 @@ final class BrowserLibrary {
     private func startPageContent(isPrivate: Bool) async -> StartPageContent {
         let topSites = isPrivate ? [] : (try? await profile.history.mostVisited()) ?? []
         let recent = (try? await profile.bookmarks.recent(limit: 12)) ?? []
-        return StartPageContent(
-            isPrivate: isPrivate,
-            frequentlyVisited: topSites.filter { !BrowserPages.isInternal($0.url) }.prefix(8)
-                .map { .init(url: $0.url.absoluteString, title: $0.title) },
-            bookmarks: recent.compactMap { bookmark in
-                bookmark.url.map { .init(url: $0.absoluteString, title: bookmark.title) }
-            })
+        var frequentlyVisited: [StartPageContent.Site] = []
+        for site in topSites.filter({ !BrowserPages.isInternal($0.url) }).prefix(8) {
+            frequentlyVisited.append(.init(url: site.url.absoluteString, title: site.title, icon: await iconURL(for: site.url)))
+        }
+        var bookmarks: [StartPageContent.Site] = []
+        for bookmark in recent {
+            guard let url = bookmark.url else { continue }
+            bookmarks.append(.init(url: url.absoluteString, title: bookmark.title, icon: await iconURL(for: url)))
+        }
+        return StartPageContent(isPrivate: isPrivate, frequentlyVisited: frequentlyVisited, bookmarks: bookmarks)
+    }
+
+    /// The icon Chromium keeps for a page, as a `data:` URL the start page
+    /// can show (it cannot load Chromium's `chrome://favicon2` itself).
+    private func iconURL(for url: URL) async -> String? {
+        guard let image = try? await profile.history.favicon(for: url, size: 32),
+              let bitmap = image.representations.first as? NSBitmapImageRep,
+              let png = bitmap.representation(using: .png, properties: [:])
+        else { return nil }
+        return "data:image/png;base64," + png.base64EncodedString()
     }
 }

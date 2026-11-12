@@ -26,6 +26,8 @@ final class AddressSuggestions {
     @ObservationIgnored var setFieldText: (String) -> Void = { _ in }
     /// Opens a suggestion.
     @ObservationIgnored var choose: (CefAutocompleteSuggestion) -> Void = { _ in }
+    /// The icon of an open tab showing a URL, for "Switch to Tab" rows.
+    @ObservationIgnored var favicon: (URL) -> NSImage? = { _ in nil }
 
     /// The view the list hangs under.
     @ObservationIgnored weak var anchor: NSView?
@@ -206,7 +208,9 @@ private struct SuggestionsList: View {
     var body: some View {
         VStack(spacing: 0) {
             ForEach(Array(suggestions.items.enumerated()), id: \.element.id) { index, suggestion in
-                SuggestionRow(suggestion: suggestion, isSelected: suggestions.selection == index)
+                SuggestionRow(
+                    suggestion: suggestion, isSelected: suggestions.selection == index,
+                    icon: suggestion.kind == .openTab ? suggestion.url.flatMap(suggestions.favicon) : nil)
                     .contentShape(.rect)
                     .onHover { if $0 { suggestions.highlight(index) } }
                     .onTapGesture { suggestions.choose(suggestion) }
@@ -224,13 +228,22 @@ private struct SuggestionsList: View {
 private struct SuggestionRow: View {
     let suggestion: CefAutocompleteSuggestion
     let isSelected: Bool
+    /// The page's own icon, when there is one to show.
+    var icon: NSImage?
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: symbol)
-                .font(.system(size: 13))
-                .frame(width: 20)
-                .foregroundStyle(isSelected ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
+            Group {
+                if let icon {
+                    Image(nsImage: icon).resizable().interpolation(.high).aspectRatio(contentMode: .fit)
+                        .frame(width: 16, height: 16)
+                } else {
+                    Image(systemName: symbol)
+                        .font(.system(size: 13))
+                        .foregroundStyle(isSelected ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
+                }
+            }
+            .frame(width: 20)
             VStack(alignment: .leading, spacing: 1) {
                 Text(title)
                     .lineLimit(1)

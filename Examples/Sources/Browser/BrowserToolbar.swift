@@ -66,12 +66,8 @@ struct TabIcon: View {
         Group {
             if browser.isLoading {
                 ProgressView().controlSize(.mini)
-            } else if let favicon = browser.faviconURL {
-                AsyncImage(url: favicon) { image in
-                    image.resizable().interpolation(.high).aspectRatio(contentMode: .fit)
-                } placeholder: {
-                    PageSymbol(url: browser.url)
-                }
+            } else if let favicon = browser.favicon {
+                Image(nsImage: favicon).resizable().interpolation(.high).aspectRatio(contentMode: .fit)
             } else {
                 PageSymbol(url: browser.url)
             }
@@ -166,6 +162,7 @@ struct AddressBar: View {
         .animation(.easeOut(duration: 0.15), value: isFocused)
         .onAppear {
             suggestions.setFieldText = { [$text] in $text.wrappedValue = $0 }
+            suggestions.favicon = { [controller] url in controller.tab(showing: url)?.favicon }
             suggestions.choose = { [browser, controller, $isFocused] suggestion in
                 $isFocused.wrappedValue = false
                 Self.open(suggestion, in: browser, controller: controller)

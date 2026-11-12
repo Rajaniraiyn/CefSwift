@@ -123,7 +123,34 @@ public final class CefBrowserWindow: Identifiable {
     /// ``all``.
     @ObservationIgnored var isService = false {
         didSet {
-            if isService { Self.all.removeAll { $0 === self } }
+            guard isService else { return }
+            Self.all.removeAll { $0 === self }
+            keepOffScreen()
+        }
+    }
+
+    @ObservationIgnored private var serviceWindowObserver: NSObjectProtocol?
+
+    /// Keeps a service window from ever being seen. Chromium shows and
+    /// activates its own windows on occasion — restoring a session,
+    /// handling a relaunch, bringing the app forward — and would show this
+    /// one with them; it is made transparent and taken off screen again as
+    /// soon as it appears.
+    private func keepOffScreen() {
+        guard let window else { return }
+        window.alphaValue = 0
+        window.ignoresMouseEvents = true
+        window.isExcludedFromWindowsMenu = true
+        window.tabbingMode = .disallowed
+        window.collectionBehavior.formUnion([.transient, .ignoresCycle])
+        serviceWindowObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didUpdateNotification, object: window, queue: .main
+        ) { notification in
+            let window = notification.object as? NSWindow
+            MainActor.assumeIsolated {
+                guard let window, window.isVisible else { return }
+                window.orderOut(nil)
+            }
         }
     }
 
@@ -288,6 +315,8 @@ public final class CefBrowserWindow: Identifiable {
     }
 
     fileprivate func windowDestroyed() {
+        serviceWindowObserver.map(NotificationCenter.default.removeObserver)
+        serviceWindowObserver = nil
         accessoryController = nil
         cefWindow = nil
         browserView = nil
