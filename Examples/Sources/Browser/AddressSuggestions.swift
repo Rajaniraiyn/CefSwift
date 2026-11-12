@@ -5,11 +5,17 @@ import SwiftUI
 /// What the address field suggests while you type: Chromium's ranked
 /// omnibox matches for the tab's profile, shown in a list under the field.
 ///
-/// Each keystroke cancels the query before it. Up and Down move through the
-/// list, putting the selected suggestion's text in the field, Return opens
-/// it and Escape closes the list. Keys are read with a local event monitor,
-/// since the field (a SwiftUI `TextField` inside a toolbar item) keeps
-/// keyboard focus throughout; the list is a panel that never becomes key.
+/// Each keystroke cancels the query before it. When the top match completes
+/// what you typed, the rest of its address is added after the caret and
+/// selected, as Safari and Chrome do: typing on replaces it, keeping what
+/// still matches; Delete removes it and leaves the next suggestions
+/// uncompleted; Return opens the completed match; Escape goes back to what
+/// you typed. Up and Down move through the list, putting the selected
+/// suggestion's text in the field, Return opens it and Escape closes the
+/// list. Keys are read with a local event monitor, since the field (a
+/// SwiftUI `TextField` inside a toolbar item) keeps keyboard focus
+/// throughout; the list is a panel that never becomes key. Text being
+/// composed with an input method is never completed.
 @MainActor
 @Observable
 final class AddressSuggestions {
@@ -18,8 +24,11 @@ final class AddressSuggestions {
     /// The highlighted suggestion; `nil` means the typed text itself.
     private(set) var selection: Int?
     /// What the user typed, as opposed to a suggestion's text put into the
-    /// field by moving the selection.
+    /// field by moving the selection or completing inline.
     private(set) var typedText = ""
+    /// The text shown selected after ``typedText``, completing it to the
+    /// top suggestion; `nil` when the field shows only what was typed.
+    private(set) var inlineCompletion: String?
 
     /// The text field, set by `AddressBar`. Called with replacement text
     /// when the selection moves.
@@ -35,6 +44,9 @@ final class AddressSuggestions {
     @ObservationIgnored private var query: Task<Void, Never>?
     @ObservationIgnored private var appliedText: String?
     @ObservationIgnored private var keyMonitor: Any?
+    /// Whether the last key deleted text, which turns off inline completion
+    /// for the edit it makes.
+    @ObservationIgnored private var lastKeyDeleted = false
     @ObservationIgnored private lazy var panel = SuggestionsPanel(suggestions: self)
 
     var selectedSuggestion: CefAutocompleteSuggestion? {
@@ -65,22 +77,80 @@ final class AddressSuggestions {
     func fieldTextChanged(to text: String, profile: CefProfile, currentURL: URL?) {
         if text == appliedText { return }
         appliedText = nil
+        let allowsInline = !lastKeyDeleted
+        lastKeyDeleted = false
+        let previous = (typed: typedText, completion: inlineCompletion)
         typedText = text
+        inlineCompletion = nil
         selection = nil
         query?.cancel()
         guard !text.trimmingCharacters(in: .whitespaces).isEmpty else {
             dismiss()
             return
         }
+        // Typing the next character of the completion keeps the rest of it
+        // in place until the new suggestions arrive.
+        if allowsInline, let completion = previous.completion, completion.count > 1,
+           text.lowercased() == (previous.typed + completion.prefix(1)).lowercased() {
+            completeInline(with: String(completion.dropFirst()))
+        }
         query = Task {
             // A short pause, so a burst of keystrokes asks only once.
             try? await Task.sleep(for: .milliseconds(30))
             guard !Task.isCancelled else { return }
             let results = try? await profile.autocomplete.suggestions(
-                for: text, currentURL: currentURL, allowsInlineCompletion: false)
-            guard !Task.isCancelled, let results else { return }
+                for: text, currentURL: currentURL, allowsInlineCompletion: allowsInline)
+            guard !Task.isCancelled, let results, typedText == text else { return }
             show(Array(results.prefix(Self.limit)))
+            if allowsInline, let top = results.first, top.canBeDefault, !top.inlineCompletion.isEmpty {
+                completeInline(with: top.inlineCompletion)
+            } else {
+                removeInlineCompletion()
+            }
         }
+    }
+
+    // MARK: Inline completion
+
+    /// The field's editor while it edits.
+    private var fieldEditor: NSTextView? {
+        guard let window = anchor?.window, let editor = window.firstResponder as? NSTextView,
+              editor.delegate is NSTextField
+        else { return nil }
+        return editor
+    }
+
+    /// Shows `completion` selected after the typed text, if the field
+    /// still holds just that text (or it with the current completion) with
+    /// the caret at its end, and no input method is composing.
+    private func completeInline(with completion: String) {
+        guard let editor = fieldEditor, !editor.hasMarkedText() else { return }
+        let typedLength = (typedText as NSString).length
+        let current = editor.string as NSString
+        let shown = inlineCompletion ?? ""
+        let shownRange = NSRange(location: typedLength, length: (shown as NSString).length)
+        let isUntouched = editor.string == typedText + shown
+            && editor.selectedRange() == (shown.isEmpty ? NSRange(location: typedLength, length: 0) : shownRange)
+        guard isUntouched else { return }
+        guard completion != shown else {
+            selection = items.isEmpty ? nil : 0
+            return
+        }
+        appliedText = typedText + completion
+        // Typed into the field editor, so the field and its binding follow.
+        editor.insertText(completion, replacementRange: NSRange(location: typedLength, length: current.length - typedLength))
+        editor.setSelectedRange(NSRange(location: typedLength, length: (completion as NSString).length))
+        inlineCompletion = completion
+        // The completed match is the one Return opens.
+        selection = items.isEmpty ? nil : 0
+    }
+
+    /// Takes the completion out of the field, leaving what was typed.
+    private func removeInlineCompletion() {
+        guard inlineCompletion != nil else { return }
+        inlineCompletion = nil
+        if selection == 0 { selection = nil }
+        setField(typedText)
     }
 
     /// Closes the list without changing the field.
@@ -88,6 +158,7 @@ final class AddressSuggestions {
         query?.cancel()
         items = []
         selection = nil
+        inlineCompletion = nil
         panel.hide()
     }
 
@@ -104,9 +175,12 @@ final class AddressSuggestions {
     /// Handles a key pressed while the field edits. Returns whether the
     /// key was used.
     private func handle(_ event: NSEvent) -> Bool {
-        guard let window = anchor?.window, event.window === window, window.firstResponder is NSTextView,
-              event.modifierFlags.isDisjoint(with: [.command, .control, .option])
-        else { return false }
+        guard let window = anchor?.window, event.window === window, window.firstResponder is NSTextView else {
+            return false
+        }
+        // Delete and Forward Delete, with or without modifiers.
+        lastKeyDeleted = event.keyCode == 51 || event.keyCode == 117
+        guard event.modifierFlags.isDisjoint(with: [.command, .control, .option]) else { return false }
         switch event.keyCode {
         case 125:  // Down
             guard !items.isEmpty else { return false }
@@ -120,8 +194,8 @@ final class AddressSuggestions {
             guard let suggestion = selectedSuggestion else { return false }
             choose(suggestion)
             return true
-        case 53:  // Escape: close the list first, leave the field next time.
-            guard !items.isEmpty else { return false }
+        case 53:  // Escape: back to what was typed, then leave the field.
+            guard !items.isEmpty || inlineCompletion != nil else { return false }
             setField(typedText)
             dismiss()
             return true
@@ -134,6 +208,7 @@ final class AddressSuggestions {
     /// text in the field, as Safari does.
     func select(_ index: Int?) {
         selection = index
+        inlineCompletion = nil
         setField(selectedSuggestion.map(Self.fieldText(for:)) ?? typedText)
     }
 

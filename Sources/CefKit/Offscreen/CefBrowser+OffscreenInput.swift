@@ -180,6 +180,7 @@ extension CefBrowser {
     /// Tells Chromium the host view's scale factor or screen changed.
     public func hostViewDidChangeBackingProperties() {
         withHost { $0.pointee.notify_screen_info_changed($0) }
+        syncAccessibilityScale()
     }
 
     /// Tells Chromium the host view can no longer be seen — hidden,
@@ -260,12 +261,6 @@ extension CefBrowser {
         withHost { $0.pointee.ime_cancel_composition($0) }
     }
 
-    // MARK: Accessibility
-
-    /// Turns Chromium's accessibility tree on or off.
-    public func setAccessibilityEnabled(_ enabled: Bool) {
-        withHost { $0.pointee.set_accessibility_state($0, enabled ? STATE_ENABLED : STATE_DISABLED) }
-    }
 }
 
 // MARK: - Editing

@@ -258,6 +258,8 @@ struct BrowserCommands: Commands {
             Button("Passwords") { controller.openTab(url: URL(string: "chrome://password-manager")!) }
             Button("Chromium Settings") { controller.openTab(url: URL(string: "chrome://settings")!) }
             Button("Flags") { controller.openTab(url: URL(string: "chrome://flags")!) }
+            Divider()
+            Button("Cast…") { controller.current?.execute(.castMedia) }
             Button("Version Details") { controller.openTab(url: URL(string: "chrome://version")!) }
             Divider()
             Button("Playground") { controller.openTab(url: BrowserPages.playground) }
@@ -332,6 +334,7 @@ private struct BookmarkMenuItem: View {
 struct SettingsView: View {
     @AppStorage("newTabPage") private var newTabPage = BrowserController.defaultNewTabPage
     @AppStorage("appearance") private var appearance = Appearance.system.rawValue
+    @AppStorage(ChromiumPanels.customPanelsKey) private var customPanels = false
     @AppStorage("memorySaver") private var memorySaver = MemorySaver.current.rawValue
 
     var body: some View {
@@ -343,6 +346,8 @@ struct SettingsView: View {
                 Text("Dark").tag(Appearance.dark.rawValue)
             }
             .onChange(of: appearance) { Appearance.current.apply() }
+            Toggle("Use the browser's QR code and Cast panels", isOn: $customPanels)
+                .help("Applies to tabs opened from now on. Off: Chromium's own bubbles.")
             Picker(selection: $memorySaver) {
                 ForEach(MemorySaver.allCases, id: \.self) { Text($0.title).tag($0.rawValue) }
             } label: {
@@ -350,6 +355,7 @@ struct SettingsView: View {
                 Text("Sleeping tabs free their memory and reload when you return to them.")
             }
             .onChange(of: memorySaver) { MemorySaver.current.apply() }
+            PasskeySettings()
         }
         .formStyle(.grouped)
         .frame(width: 420)
