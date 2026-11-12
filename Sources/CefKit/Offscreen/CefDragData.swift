@@ -158,7 +158,7 @@ extension CefBrowser {
     // MARK: Dragging out of the page
 
     /// Tells the page that the drag it started — see
-    /// ``CefOffscreenHost/offscreenStartDragging(_:allowedOperations:at:)``
+    /// ``CefOffscreenHost/offscreenBeginDraggingSession(_:allowedOperations:at:)``
     /// — ended at `point`, in view points, with `operation`.
     public func draggingSessionEnded(at point: CGPoint, operation: CefDragOperation) {
         withHost {

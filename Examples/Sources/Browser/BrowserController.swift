@@ -8,14 +8,13 @@ import SwiftUI
 @Observable
 final class BrowserController: CefBrowserDelegate {
     static let defaultHomePage = "https://duckduckgo.com"
+    static let tabbingIdentifier = "browser"
 
     private(set) var windows: [CefBrowserWindow] = []
-    /// Incremented to ask the frontmost address bar to take focus.
-    private(set) var addressBarFocusRequest = 0
 
     /// The browser in the frontmost tab.
     var current: CefBrowser? {
-        windows.first { $0.nsWindow?.isKeyWindow == true }?.browser ?? windows.last?.browser
+        windows.first { $0.window?.isKeyWindow == true }?.browser ?? windows.last?.browser
     }
 
     private var homePage: URL {
@@ -24,15 +23,20 @@ final class BrowserController: CefBrowserDelegate {
     }
 
     @discardableResult
-    func openTab(url: URL? = nil, isPrivate: Bool = false, inBackground: Bool = false) -> CefBrowser {
+    func openTab(
+        url: URL? = nil, isPrivate: Bool = false, inBackground: Bool = false, sharingProfileOf source: CefBrowser? = nil
+    ) -> CefBrowser {
         var options = CefBrowserOptions()
-        options.profile = isPrivate ? .incognito() : .default
+        // Tabs opened from a private tab stay in its private session.
+        let profile = source?.options.profile ?? (isPrivate ? .incognito() : .default)
+        let isPrivate = profile !== CefProfile.default
+        options.profile = profile
         options.userScripts = Self.internalPageStyles
         options.contextMenu.showsInspectElement = true
         options.contextMenu.hiddenCommands = [.viewSource]
         options.contextMenu.items = [
-            CefContextMenuItem("Open Link in New Tab", isVisible: { $0.linkURL != nil }) { [weak self] _, target in
-                self?.openTab(url: target.linkURL, inBackground: true)
+            CefContextMenuItem("Open Link in New Tab", isVisible: { $0.linkURL != nil }) { [weak self] browser, target in
+                self?.openTab(url: target.linkURL, inBackground: true, sharingProfileOf: browser)
             },
             CefContextMenuItem("Create QR Code for This Page", isVisible: { $0.linkURL == nil && !$0.isEditable }) { browser, _ in
                 browser.execute(.createQRCode)
@@ -41,8 +45,8 @@ final class BrowserController: CefBrowserDelegate {
         let browser = CefBrowser(url: url ?? homePage, options: options, delegate: self)
 
         var configuration = CefBrowserWindow.Configuration()
-        configuration.tabbingIdentifier = "browser"
-        configuration.frame = windows.last?.nsWindow?.frame
+        configuration.tabbingIdentifier = Self.tabbingIdentifier
+        configuration.frame = windows.last?.window?.frame
         let window = CefBrowserWindow(browser: browser, configuration: configuration)
         window.setToolbar {
             NavigationButtons(browser: browser)
@@ -52,20 +56,21 @@ final class BrowserController: CefBrowserDelegate {
             TrailingButtons(browser: browser, controller: self)
         }
         window.setTabAccessory { TabIcon(browser: browser) }
+        window.window?.contentMinSize = NSSize(width: 560, height: 320)
         // Frame the page as a rounded card inset from the window edges.
         window.contentInsets = NSEdgeInsets(top: 0, left: 6, bottom: 6, right: 6)
         window.contentCornerRadius = 10
-        window.onPopup = { [weak window] popup in
-            guard let window else { return }
-            Self.present(popup, over: window)
-        }
+        PopupPresenter.hostPopups(of: window)
         window.onClose = { [weak self, weak window] in
             self?.windows.removeAll { $0 === window }
         }
         windows.append(window)
 
-        if let key = NSApp.keyWindow, let new = window.nsWindow, key.tabbingIdentifier == "browser" {
-            key.addTabbedWindow(new, ordered: .above)
+        // Join the frontmost browser window's tab group.
+        let group = NSApp.keyWindow?.tabbingIdentifier == Self.tabbingIdentifier
+            ? NSApp.keyWindow : windows.dropLast().last { $0.window?.isVisible == true }?.window
+        if let group, let new = window.window {
+            group.addTabbedWindow(new, ordered: .above)
             if !inBackground { new.makeKeyAndOrderFront(nil) }
         } else {
             window.show()
@@ -73,68 +78,67 @@ final class BrowserController: CefBrowserDelegate {
         return browser
     }
 
-    /// Trims Chromium's settings to what this browser supports: its About
-    /// entry is replaced by the app's own page, so the built-in one and its
-    /// updater status are hidden.
+    /// Trims Chromium's settings to what this browser supports. Its About
+    /// entry is replaced by the app's own page; sign-in, sync, "default
+    /// browser" and the updater do not exist in an embedded Chromium. The
+    /// rules apply inside the settings components' shadow roots.
     private static let internalPageStyles: [CefUserScript] = [
         .styleSheet(
-            "#about-menu, settings-about-page #updateStatusMessage { display: none !important }",
+            """
+            /* Sidebar: About (replaced by browser://about), You and Google, Default browser. */
+            #about-menu, a[href="/people"], a[href="/syncSetup"], a[href="/defaultBrowser"],
+            /* Their pages: Google sign-in and sync; making this the default browser. */
+            settings-people-page-index, settings-default-browser-page,
+            /* About page leftovers, should it be reached directly. */
+            settings-about-page #updateStatusMessage, settings-about-page #relaunch
+            { display: none !important }
+            """,
             matching: "chrome://settings/*"),
     ]
 
-    /// Shows a page's popup (a sign-in window, say) as a panel layered over
-    /// the window that opened it: centered, always above it, moving with it.
-    private static func present(_ popup: CefBrowserWindow, over opener: CefBrowserWindow) {
-        guard let parent = opener.nsWindow, let panel = popup.nsWindow else {
-            popup.show()
-            return
-        }
-        let size = CGSize(width: min(560, parent.frame.width - 80), height: min(680, parent.frame.height - 80))
-        panel.setFrame(
-            CGRect(
-                x: parent.frame.midX - size.width / 2, y: parent.frame.midY - size.height / 2,
-                width: size.width, height: size.height),
-            display: false)
-        panel.tabbingMode = .disallowed
-        parent.addChildWindow(panel, ordered: .above)
-        popup.show()
-    }
-
-    /// Chromium sometimes opens a window of its own — following a link from
-    /// `chrome://settings` to the password manager, for instance. Those
-    /// arrive with Chrome's tab strip and toolbar; reopen them as tabs here.
-    func adoptWindowsOpenedByChromium() {
-        CefRuntime.shared.onBrowserCreated = { [weak self] browser in
-            // Popups and DevTools have an opener and keep their own windows.
-            guard browser.opener == nil else { return }
-            Task {
-                for _ in 0..<80 where browser.url == nil {
-                    try? await Task.sleep(for: .milliseconds(25))
-                }
-                let url = browser.url
-                browser.close(force: true)
-                self?.openTab(url: url)
-            }
+    /// Chromium sometimes opens a tab of its own — following a link from
+    /// `chrome://settings` to the password manager, for instance. Show those
+    /// as tabs here instead of in Chrome's window.
+    func adoptTabsOpenedByChromium() {
+        CefRuntime.shared.onChromiumOpensTab = { [weak self] url in
+            self?.openTab(url: url)
         }
     }
 
+    /// Puts the frontmost tab's address field into editing.
     func focusAddressBar() {
-        addressBarFocusRequest += 1
+        guard let window = (windows.first { $0.window?.isKeyWindow == true } ?? windows.last)?.window else { return }
+        let field = window.toolbar?.items.lazy.compactMap { $0.view?.firstSubview(of: NSTextField.self) }.first
+        window.makeKeyAndOrderFront(nil)
+        if let field { window.makeFirstResponder(field) }
+    }
+
+    /// Waits until `browser` has loaded its first page.
+    func waitUntilLoaded(_ browser: CefBrowser) async {
+        try? await browser.ready()
+        // The page is created on about:blank and then navigated.
+        for _ in 0..<200 where browser.state == .live {
+            let location = try? await browser.evaluateJavaScript(
+                "document.readyState === 'complete' ? location.href : ''").stringValue
+            if let location, !location.isEmpty, location != "about:blank" { break }
+            try? await Task.sleep(for: .milliseconds(50))
+        }
     }
 
     // MARK: CefBrowserDelegate
 
     func browser(_ browser: CefBrowser, decidePolicyFor navigation: CefNavigationAction) -> CefNavigationDecision {
-        // Show this app's About page in place of Chromium's.
-        guard BrowserPages.replacesChromiumPage(navigation.url) else { return .allow }
-        browser.load(BrowserPages.about)
+        // Show this app's pages in place of some of Chromium's.
+        guard let replacement = BrowserPages.replacement(for: navigation.url) else { return .allow }
+        browser.load(replacement)
         return .cancel
     }
 
     func browser(_ browser: CefBrowser, decideWindowOpenFor request: CefWindowOpenRequest) -> CefWindowOpenAction {
-        // Real popups (sign-in windows and the like) keep Chromium's handling.
+        // Real popups (sign-in windows and the like) keep Chromium's handling
+        // and arrive through the window's onPopup.
         guard request.disposition != .newPopup, let url = request.targetURL else { return .allowNativePopup }
-        openTab(url: url, inBackground: request.disposition == .newBackgroundTab)
+        openTab(url: url, inBackground: request.disposition == .newBackgroundTab, sharingProfileOf: browser)
         return .handled
     }
 
@@ -158,6 +162,77 @@ final class BrowserController: CefBrowserDelegate {
         alert.addButton(withTitle: "Don’t Allow")
         guard let window = browser.hostWindow else { return .deny }
         return await alert.beginSheetModal(for: window) == .alertFirstButtonReturn ? .allow : .deny
+    }
+}
+
+/// Shows the popups a page opens (sign-in windows, `window.open` with
+/// features) as panels layered over the window that opened them: at the
+/// size the page asked for, centered over the page, moving with the window,
+/// and closed along with it.
+@MainActor
+enum PopupPresenter {
+    static func hostPopups(of window: CefBrowserWindow) {
+        window.onPopup = { [weak window] popup in
+            guard let window else { return }
+            present(popup, over: window)
+        }
+    }
+
+    private static func present(_ popup: CefBrowserWindow, over opener: CefBrowserWindow) {
+        guard let parent = opener.window, let panel = popup.window else {
+            popup.show()
+            return
+        }
+        // Popups of popups are layered the same way.
+        hostPopups(of: popup)
+        panel.tabbingMode = .disallowed
+        panel.standardWindowButton(.miniaturizeButton)?.isHidden = true
+        panel.standardWindowButton(.zoomButton)?.isHidden = true
+
+        let available = parent.contentLayoutRect.size
+        let requested = popup.browser.popupFeatures?.size ?? .zero
+        let pageSize = CGSize(
+            width: min(requested.width > 0 ? requested.width : 520, available.width - 48),
+            height: min(requested.height > 0 ? requested.height : 640, available.height - 48))
+        var frame = panel.frameRect(forContentRect: CGRect(origin: .zero, size: pageSize))
+        let page = parent.convertToScreen(parent.contentLayoutRect)
+        frame.origin = CGPoint(x: page.midX - frame.width / 2, y: page.midY - frame.height / 2)
+        panel.setFrame(frame, display: false)
+        parent.addChildWindow(panel, ordered: .above)
+
+        // Closing the opener closes its popups; a closed popup leaves its
+        // parent's child windows.
+        let closeWithOpener = opener.onClose
+        opener.onClose = { [weak popup] in
+            closeWithOpener?()
+            popup?.close()
+        }
+        popup.onClose = { [weak parent, weak panel] in
+            if let panel { parent?.removeChildWindow(panel) }
+        }
+        showSite(of: popup)
+        popup.show()
+    }
+
+    /// Keeps the site a popup shows in its title bar, as browsers must: a
+    /// sign-in popup's page could claim to be anyone.
+    private static func showSite(of popup: CefBrowserWindow) {
+        guard !popup.isClosed else { return }
+        let host = withObservationTracking {
+            popup.browser.url?.host()
+        } onChange: { [weak popup] in
+            Task { @MainActor in popup.map(showSite(of:)) }
+        }
+        popup.window?.subtitle = host ?? ""
+    }
+}
+
+extension NSView {
+    func firstSubview<View: NSView>(of type: View.Type) -> View? {
+        for subview in subviews {
+            if let match = subview as? View ?? subview.firstSubview(of: type) { return match }
+        }
+        return nil
     }
 }
 

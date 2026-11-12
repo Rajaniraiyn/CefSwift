@@ -131,11 +131,12 @@ extension CefBrowser {
         }
     }
 
-    /// Forwards a scroll. Deltas are in points.
-    public func sendMouseWheel(at point: CGPoint, deltaX: CGFloat, deltaY: CGFloat, modifiers: CefEventModifiers = []) {
+    /// Forwards a scroll at `point`. `delta` is in points, positive toward
+    /// the top and left of the page, as `NSEvent.scrollingDeltaX/Y` report.
+    public func sendScrollWheel(at point: CGPoint, delta: CGVector, modifiers: CefEventModifiers = []) {
         withHost { host in
             var event = cef_mouse_event_t(point, modifiers: modifiers)
-            host.pointee.send_mouse_wheel_event(host, &event, Int32(deltaX.rounded()), Int32(deltaY.rounded()))
+            host.pointee.send_mouse_wheel_event(host, &event, Int32(delta.dx.rounded()), Int32(delta.dy.rounded()))
         }
     }
 
@@ -157,14 +158,18 @@ extension CefBrowser {
         }
     }
 
-    // MARK: Focus
+    // MARK: Hosting
 
-    /// Gives the page keyboard focus or takes it away.
-    public func setFocus(_ focused: Bool) {
-        withHost { $0.pointee.set_focus($0, focused ? 1 : 0) }
+    /// Tells Chromium the host view became the key view — first responder
+    /// in the key window — so the page shows focus and takes keystrokes.
+    public func hostViewDidBecomeKey() {
+        withHost { $0.pointee.set_focus($0, 1) }
     }
 
-    // MARK: Hosting
+    /// Tells Chromium the host view stopped being the key view.
+    public func hostViewDidResignKey() {
+        withHost { $0.pointee.set_focus($0, 0) }
+    }
 
     /// Tells Chromium the host view's size changed, so it reads
     /// ``CefOffscreenHost/offscreenViewInfo`` and repaints.

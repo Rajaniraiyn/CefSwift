@@ -26,7 +26,7 @@ extension CefBrowserWindow {
         @ViewBuilder principal: () -> some View,
         @ViewBuilder trailing: () -> some View
     ) {
-        guard let nsWindow else { return }
+        guard let nsWindow = window else { return }
         let provider = ToolbarItemProvider(
             leading: NSHostingView(rootView: leading()),
             principal: NSHostingView(rootView: principal()),
@@ -37,9 +37,14 @@ extension CefBrowserWindow {
         toolbar.centeredItemIdentifiers = [ToolbarItemProvider.principal]
         // NSToolbar holds its delegate weakly; tie its lifetime to the toolbar.
         objc_setAssociatedObject(toolbar, &ToolbarItemProvider.associationKey, provider, .OBJC_ASSOCIATION_RETAIN)
+        WindowButtonCentering.apply(to: nsWindow)
+        // AppKit makes room for a new toolbar by growing the window; keep
+        // the frame the window was given instead.
+        let frame = nsWindow.frame
         nsWindow.toolbar = toolbar
         nsWindow.toolbarStyle = .unifiedCompact
         nsWindow.titleVisibility = .hidden
+        nsWindow.setFrame(frame, display: false)
     }
 
     /// A toolbar with only a centered view.
@@ -52,7 +57,7 @@ extension CefBrowserWindow {
     public func setTabAccessory(@ViewBuilder _ content: () -> some View) {
         let hosting = NSHostingView(rootView: content())
         hosting.sizingOptions = [.intrinsicContentSize]
-        nsWindow?.tab.accessoryView = hosting
+        window?.tab.accessoryView = hosting
     }
 }
 
@@ -97,5 +102,31 @@ private final class ToolbarItemProvider: NSObject, NSToolbarDelegate {
         let item = NSToolbarItem(itemIdentifier: itemIdentifier)
         item.view = view
         return item
+    }
+}
+
+/// Centers the window buttons vertically in the toolbar, as in any unified
+/// AppKit window.
+///
+/// AppKit centers them only when the window's frame view is exactly
+/// `NSThemeFrame`; Chromium's windows use a subclass, so the buttons stay at
+/// the top of a title bar the toolbar has made taller. The subclass is given
+/// the (private) answer `NSThemeFrame` would give for windows with a
+/// toolbar. Nothing changes if the class answers itself or AppKit stops
+/// asking.
+@MainActor
+private enum WindowButtonCentering {
+    private static var adjustedClasses: Set<ObjectIdentifier> = []
+
+    static func apply(to window: NSWindow) {
+        guard let frameView = window.contentView?.superview, let frameClass = object_getClass(frameView),
+              frameClass != NSClassFromString("NSThemeFrame"),
+              adjustedClasses.insert(ObjectIdentifier(frameClass)).inserted
+        else { return }
+        let answer: @convention(block) (NSView) -> Bool = { view in view.window?.toolbar != nil }
+        // Adds the method to this class only; fails harmlessly if it has one.
+        class_addMethod(
+            frameClass, NSSelectorFromString("_shouldCenterTrafficLights"),
+            imp_implementationWithBlock(answer), "B@:")
     }
 }

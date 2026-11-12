@@ -2,8 +2,8 @@ import CefSwiftUI
 import SwiftUI
 
 /// Embedding web content in a SwiftUI app: the lean `.embedded`
-/// configuration, both rendering modes, a typed JavaScript bridge, and app
-/// content served from a custom scheme.
+/// configuration, both rendering modes, and a typed JavaScript bridge to a
+/// page served from a custom scheme.
 @main
 struct ShowcaseApp: CefSwiftApp {
     static var cefConfiguration: CefConfiguration {
@@ -13,10 +13,14 @@ struct ShowcaseApp: CefSwiftApp {
         return configuration
     }
 
+    init() {
+        // Chromium is running by now; register before any view loads a page.
+        CefRuntime.shared.registerSchemeHandler(scheme: "showcase", handler: ShowcasePages())
+    }
+
     var body: some Scene {
         WindowGroup {
             ShowcaseView()
-                .task { CefRuntime.shared.registerSchemeHandler(scheme: "showcase", handler: ShowcasePages()) }
         }
         .defaultSize(width: 1100, height: 720)
     }
@@ -27,7 +31,6 @@ struct ShowcaseView: View {
         case webView = "Web View"
         case overlay = "Native Overlay"
         case bridge = "JavaScript Bridge"
-        case editor = "Code Preview"
 
         var id: Self { self }
         var symbol: String {
@@ -35,7 +38,6 @@ struct ShowcaseView: View {
             case .webView: "globe"
             case .overlay: "square.2.layers.3d"
             case .bridge: "arrow.left.arrow.right"
-            case .editor: "chevron.left.forwardslash.chevron.right"
             }
         }
     }
@@ -54,7 +56,6 @@ struct ShowcaseView: View {
             case .webView, nil: WebViewDemo()
             case .overlay: OverlayDemo()
             case .bridge: BridgeDemo()
-            case .editor: CodePreviewDemo()
             }
         }
     }
@@ -157,24 +158,6 @@ struct BridgeDemo: View {
             CefWebView(counter.browser)
         }
         .navigationTitle("JavaScript Bridge")
-    }
-}
-
-// MARK: - A source preview pane
-
-struct CodePreviewDemo: View {
-    @State private var browser = CefBrowser(url: URL(string: "showcase://app/editor.html")!)
-    @State private var isWrapping = false
-
-    var body: some View {
-        CefWebView(browser)
-            .navigationTitle("Code Preview")
-            .toolbar {
-                Toggle("Wrap Lines", systemImage: "text.word.spacing", isOn: $isWrapping)
-            }
-            .onChange(of: isWrapping) { _, wrap in
-                browser.executeJavaScript("document.body.classList.toggle('wrap', \(wrap))")
-            }
-            .onDisappear { browser.close(force: true) }
+        .onDisappear { counter.browser.close(force: true) }
     }
 }

@@ -33,7 +33,7 @@ public struct CefCommandLine: @unchecked Sendable, CustomStringConvertible {
 
     /// The value of `--name=value`, or `nil` when the switch is absent or
     /// has no value.
-    public func switchValue(_ name: String) -> String? {
+    public func value(forSwitch name: String) -> String? {
         CefStringUtil.withCefString(name) { cefName in
             CefStringUtil.takingUserFree(raw.pointee.get_switch_value(raw, cefName))
                 .flatMap { $0.isEmpty ? nil : $0 }
@@ -42,9 +42,9 @@ public struct CefCommandLine: @unchecked Sendable, CustomStringConvertible {
 
     /// Adds `values` to a comma-separated list switch such as
     /// `--enable-features`, keeping whatever is already there.
-    public func mergeList(_ name: String, adding values: Set<String>) {
+    public func appendValues(_ values: Set<String>, toListSwitch name: String) {
         guard !values.isEmpty else { return }
-        let existing = switchValue(name)?.split(separator: ",").map(String.init) ?? []
+        let existing = value(forSwitch: name)?.split(separator: ",").map(String.init) ?? []
         let merged = existing + values.subtracting(existing).sorted()
         appendSwitch(name, value: merged.joined(separator: ","))
     }
@@ -59,5 +59,35 @@ public struct CefCommandLine: @unchecked Sendable, CustomStringConvertible {
     /// The whole command line as one string, for diagnostics.
     public var description: String {
         CefStringUtil.takingUserFree(raw.pointee.get_command_line_string(raw)) ?? ""
+    }
+}
+
+extension CefCommandLine {
+    /// The process arguments Chromium should see. Cocoa reads `-Name value`
+    /// pairs into `UserDefaults` (Xcode passes `-NSDocumentRevisionsDebugMode
+    /// YES`, for instance); Chromium would take each value for a URL to open
+    /// in a window of its own, so both halves of such pairs are left out.
+    /// Chromium's own `--switches` and anything after `--` pass through.
+    static func chromiumArguments(from arguments: [String]) -> [String] {
+        guard let executable = arguments.first else { return [] }
+        var kept = [executable]
+        var index = 1
+        while index < arguments.count {
+            let argument = arguments[index]
+            index += 1
+            if argument == "--" {
+                kept += arguments[(index - 1)...]
+                break
+            }
+            guard argument.hasPrefix("-"), !argument.hasPrefix("--"), argument.count > 1 else {
+                kept.append(argument)
+                continue
+            }
+            // A Cocoa argument: skip its value too.
+            if index < arguments.count, !arguments[index].hasPrefix("-") {
+                index += 1
+            }
+        }
+        return kept
     }
 }

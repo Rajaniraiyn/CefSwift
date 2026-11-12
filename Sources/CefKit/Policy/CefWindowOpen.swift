@@ -81,31 +81,29 @@ public enum CefWindowOpenDisposition: Sendable, Equatable {
 /// The window features a page requested for a popup, as in
 /// `window.open(url, name, "width=400,height=300")`.
 public struct CefPopupFeatures: Sendable, Equatable {
-    /// The requested horizontal position on screen.
-    public var x: Int?
-    /// The requested vertical position on screen.
-    public var y: Int?
-    /// The requested content width.
-    public var width: Int?
-    /// The requested content height.
-    public var height: Int?
+    /// The requested position of the window on screen, in points from the
+    /// top-left corner of the main screen as the web measures it (`left`,
+    /// `top`). `nil` when the page did not ask for one; an axis it left out
+    /// is 0.
+    public var origin: CGPoint?
+    /// The requested size of the page area (`width`, `height`). `nil` when
+    /// the page did not ask for one; a dimension it left out is 0.
+    public var size: CGSize?
     /// Whether the page asked for a popup without browser controls.
     public var isPopup: Bool
 
-    public init(x: Int? = nil, y: Int? = nil, width: Int? = nil, height: Int? = nil, isPopup: Bool = false) {
-        self.x = x
-        self.y = y
-        self.width = width
-        self.height = height
+    public init(origin: CGPoint? = nil, size: CGSize? = nil, isPopup: Bool = false) {
+        self.origin = origin
+        self.size = size
         self.isPopup = isPopup
     }
 
     init(raw: cef_popup_features_t) {
         self.init(
-            x: raw.xSet != 0 ? Int(raw.x) : nil,
-            y: raw.ySet != 0 ? Int(raw.y) : nil,
-            width: raw.widthSet != 0 ? Int(raw.width) : nil,
-            height: raw.heightSet != 0 ? Int(raw.height) : nil,
+            origin: raw.xSet != 0 || raw.ySet != 0
+                ? CGPoint(x: raw.xSet != 0 ? Int(raw.x) : 0, y: raw.ySet != 0 ? Int(raw.y) : 0) : nil,
+            size: raw.widthSet != 0 || raw.heightSet != 0
+                ? CGSize(width: raw.widthSet != 0 ? Int(raw.width) : 0, height: raw.heightSet != 0 ? Int(raw.height) : 0) : nil,
             isPopup: raw.isPopup != 0
         )
     }

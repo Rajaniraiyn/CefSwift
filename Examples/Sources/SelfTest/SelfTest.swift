@@ -19,6 +19,7 @@ enum SelfTest {
         configuration.isOffscreenRenderingEnabled = true
         configuration.productName = "SelfTestBrowser"
         configuration.preferences["webkit.webprefs.default_font_size"] = 21
+        configuration.preferences["browser.confirm_to_quit"] = false
         configuration.customSchemes = [CefCustomScheme(name: "selftest")]
         configuration.rootCacheDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("cefswift-selftest-\(ProcessInfo.processInfo.processIdentifier)")
@@ -39,14 +40,24 @@ enum SelfTest {
         window.makeKeyAndOrderFront(nil)
         NSApp.activate()
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 90) {
-            print("FAIL watchdog: checks did not finish in 90s")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 180) {
+            print("FAIL watchdog: checks did not finish in 180s")
             exit(124)
         }
         Task {
             await runChecks()
-            print(failures == 0 ? "ALL CHECKS PASSED" : "\(failures) CHECK(S) FAILED")
-            exit(Int32(failures))
+            // Quit as an app does, through terminate: and cef_shutdown(). A
+            // crash there ends the process with a signal instead.
+            NotificationCenter.default.addObserver(
+                forName: NSApplication.willTerminateNotification, object: nil, queue: nil
+            ) { _ in
+                MainActor.assumeIsolated {
+                    check("quit: Chromium shuts down cleanly", !CefRuntime.shared.isInitialized)
+                    print(failures == 0 ? "ALL CHECKS PASSED" : "\(failures) CHECK(S) FAILED")
+                    exit(Int32(failures))
+                }
+            }
+            NSApp.terminate(nil)
         }
         NSApp.run()
     }
@@ -58,6 +69,7 @@ enum SelfTest {
         await offscreenBrowserChecks()
         await profileChecks()
         await browserWindowChecks()
+        await browserBehaviorChecks()
         await chromeWindowChecks()
     }
 
@@ -225,7 +237,7 @@ enum SelfTest {
         browserWindow.show()
 
         check("browser window: chrome:// page loads", await waitUntil { browser.state == .live && !browser.isLoading && !browser.title.isEmpty }, detail: browser.title)
-        check("browser window: has NSWindow", browserWindow.nsWindow != nil)
+        check("browser window: has NSWindow", browserWindow.window != nil)
         await expect("browser window: product name override") {
             let text = try await browser.evaluateJavaScript("document.body.innerText").stringValue ?? ""
             return text.contains("SelfTestBrowser")
@@ -249,7 +261,7 @@ enum SelfTest {
         await expect("browser window: popup is hosted by the app") {
             try await browser.evaluateJavaScript("window.open('about:blank', '_blank', 'width=320,height=240'); 0")
             let arrived = await waitUntil(timeout: .seconds(5)) { !popups.isEmpty }
-            return arrived && popups[0].nsWindow != nil && popups[0].browser.opener === browser
+            return arrived && popups[0].window != nil && popups[0].browser.opener === browser
         }
         for popup in popups { popup.close() }
         check("browser window: popup closes", await waitUntil { popups.allSatisfy(\.isClosed) })

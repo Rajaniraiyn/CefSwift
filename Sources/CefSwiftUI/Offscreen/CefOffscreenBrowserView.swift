@@ -266,7 +266,7 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
 
     private func windowKeyStateDidChange(isKey: Bool) {
         guard window?.firstResponder === self else { return }
-        browser?.setFocus(isKey)
+        if isKey { browser?.hostViewDidBecomeKey() } else { browser?.hostViewDidResignKey() }
     }
 
     // MARK: CefOffscreenHost

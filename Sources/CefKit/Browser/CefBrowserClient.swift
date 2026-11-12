@@ -31,6 +31,10 @@ final class CefBrowserClient {
     private var liveBrowserCount = 0
     private let isDefaultClient: Bool
 
+    /// Features of the popup Chromium is about to create, from
+    /// `on_before_popup` until the popup's browser is wrapped.
+    private var pendingPopupFeatures: CefPopupFeatures?
+
     /// The most recent context-menu target, for commands that arrive later.
     private var contextMenuTarget = CefContextMenuTarget()
 
@@ -91,11 +95,17 @@ final class CefBrowserClient {
         let isPopup = browser.pointee.is_popup(browser) != 0
         let opener = isPopup ? primary : nil
         let wrapper = CefBrowser(adopting: CefRef(adopting: browser), client: self, opener: opener)
+        if isPopup {
+            wrapper.popupFeatures = pendingPopupFeatures
+            pendingPopupFeatures = nil
+        }
         if let opener {
             wrapper.delegate = opener.delegate
             opener.delegate?.browser(opener, didOpen: wrapper)
         }
-        CefRuntime.shared.onBrowserCreated?(wrapper)
+        if !CefRuntime.shared.redirectChromiumTab(wrapper) {
+            CefRuntime.shared.onBrowserCreated?(wrapper)
+        }
         return wrapper
     }
 
@@ -181,7 +191,7 @@ final class CefBrowserClient {
             let frameName = CefStringUtil.string(from: targetFrameName)
             let popupFeatures = features.map { CefPopupFeatures(raw: $0.pointee) } ?? CefPopupFeatures()
             // Non-zero cancels CEF's own popup.
-            return CefBrowserClient.run(s, browser, default: 0) { _, b in
+            return CefBrowserClient.run(s, browser, default: 0) { client, b in
                 let request = CefWindowOpenRequest(
                     targetURL: url,
                     frameName: frameName,
@@ -191,7 +201,9 @@ final class CefBrowserClient {
                     isSourceOffscreen: b.isOffscreen,
                     isSourceChromeStyle: b.isChromeStyle
                 )
-                return b.route(request) ? 1 : 0
+                let isHandled = b.route(request)
+                client.pendingPopupFeatures = isHandled ? nil : popupFeatures
+                return isHandled ? 1 : 0
             }
         }
         return h
@@ -292,6 +304,13 @@ final class CefBrowserClient {
 
     private func makeDownloadHandler() -> UnsafeMutablePointer<cef_download_handler_t> {
         let h = cefAllocate(cef_download_handler_t.self, owner: self)
+        // CEF treats a missing callback as "no": without this, every link or
+        // navigation that turns into a download is cancelled before
+        // on_before_download, where the delegate decides.
+        h.pointee.can_download = { _, browser, _, _ in
+            cefRelease(browser)
+            return 1
+        }
         h.pointee.on_before_download = { s, browser, item, suggestedName, callback in
             let download = item.map { CefDownload(item: $0) }
             cefRelease(item)
@@ -358,6 +377,8 @@ final class CefBrowserClient {
             }
             return CefBrowserClient.run(s, browser, default: 0) { _, b in
                 b.decide { await $0.browser(b, confirmLeavingPage: isReload != 0) } then: { leave in
+                    // Staying on the page also stays a quit in progress.
+                    if !leave { CefRuntime.shared.cancelTermination() }
                     callback.pointer.pointee.cont(callback.pointer, leave ? 1 : 0, nil)
                 }
                 return 1

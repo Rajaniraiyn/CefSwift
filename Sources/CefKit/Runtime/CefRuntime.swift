@@ -137,7 +137,11 @@ public final class CefRuntime {
             frameworkDirectory: frameworkBinary.deletingLastPathComponent()
         )
 
-        var mainArgs = cef_main_args_t(argc: CommandLine.argc, argv: CommandLine.unsafeArgv)
+        // Kept for the life of the process, as the real argv is.
+        let arguments = CefCommandLine.chromiumArguments(from: CommandLine.arguments)
+        let argv = UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>.allocate(capacity: arguments.count + 1)
+        argv.initialize(from: arguments.map { strdup($0) } + [nil], count: arguments.count + 1)
+        var mainArgs = cef_main_args_t(argc: Int32(arguments.count), argv: argv)
         guard cef_initialize(&mainArgs, &mapped.raw, context.makeApp(), nil) != 0 else {
             let exitCode = cef_get_exit_code()
             if exitCode == CEF_RESULT_CODE_NORMAL_EXIT_PROCESS_NOTIFIED.rawValue {
@@ -152,6 +156,7 @@ public final class CefRuntime {
         messagePump = pump
         pump.start()
         isInitialized = true
+        applyApplicationWidePreferences(configuration.preferences)
     }
 
     /// Opens a window drawn entirely by Chrome — tab strip, omnibox, menus,
@@ -367,10 +372,23 @@ public final class CefRuntime {
     func unregister(_ browser: CefBrowser) {
         browsersByIdentifier[browser.identifier] = nil
         browsers.removeAll { $0 === browser }
-        if isTerminationRequested && browsers.isEmpty {
-            // Re-enter terminate:; with no browsers left it now proceeds.
-            NSApp.terminate(nil)
-        }
+        continueTerminationIfReady()
+    }
+
+    /// Resumes a quit that was waiting for browsers and their windows to
+    /// close. Chromium finishes destroying a window after its browser has
+    /// gone, and shutting down before that, or from inside one of its
+    /// callbacks, crashes in `cef_shutdown()`; so `terminate:` is retried
+    /// from the run loop once nothing is left.
+    func continueTerminationIfReady() {
+        guard isTerminationRequested, browsers.isEmpty, CefBrowserWindow.all.isEmpty else { return }
+        DispatchQueue.main.async { NSApp.terminate(nil) }
+    }
+
+    /// A page asked to stay open while quitting: the quit is abandoned, so
+    /// closing the last window later does not end the app.
+    func cancelTermination() {
+        isTerminationRequested = false
     }
 
     func browser(withIdentifier identifier: Int32) -> CefBrowser? {
@@ -382,11 +400,18 @@ public final class CefRuntime {
     /// then terminates once the last one is gone.
     func handleTerminationRequest() -> Bool {
         guard isInitialized else { return true }
+        isTerminationRequested = true
         if browsers.isEmpty {
+            // Not from inside Chromium's message loop work, where a Chrome
+            // command or a page may have asked to quit.
+            guard CefBrowserWindow.all.isEmpty, messagePump?.isPerformingWork != true else {
+                CefBrowserWindow.all.forEach { $0.close() }
+                continueTerminationIfReady()
+                return false
+            }
             shutdown()
             return true
         }
-        isTerminationRequested = true
         for browser in browsers {
             browser.close()
         }
