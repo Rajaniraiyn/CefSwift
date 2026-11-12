@@ -76,35 +76,42 @@ enum SelfTest {
 
     // MARK: Checks
 
+    /// Every group of checks, in the order they run.
+    /// `SELFTEST_ONLY=<name>[,<name>…]` runs only the named groups, such as
+    /// `SELFTEST_ONLY=passkeys`; `accessibility-external` is a session for an
+    /// outside accessibility client instead of checks.
+    static let checkGroups: [(name: String, run: @MainActor () async -> Void)] = [
+        ("windowed", windowedBrowserChecks),
+        ("offscreen", offscreenBrowserChecks),
+        ("accessibility", offscreenAccessibilityChecks),
+        ("profile", profileChecks),
+        ("browserWindow", browserWindowChecks),
+        ("behavior", browserBehaviorChecks),
+        ("favicon", faviconChecks),
+        ("toolbarAndZoom", toolbarAndZoomChecks),
+        ("bridgeScope", bridgeScopeChecks),
+        ("internalPages", internalPageDataChecks),
+        ("serviceLifetime", serviceLifetimeChecks),
+        // After the history checks: the pages these visit would crowd the
+        // probe out of the most-visited tiles.
+        ("nativeUI", nativeUIChecks),
+        ("relaunch", relaunchChecks),
+        ("passkeys", passkeyChecks),
+        ("chromeWindow", chromeWindowChecks),
+        // Last: it leaves discarded browsers open for the quit.
+        ("discard", discardChecks),
+    ]
+
     static func runChecks() async {
-        // SELFTEST_ONLY=accessibility runs one group while working on it;
-        // accessibility-external shows the page for an outside AX client.
-        switch ProcessInfo.processInfo.environment["SELFTEST_ONLY"] {
-        case "accessibility":
-            await offscreenAccessibilityChecks()
-            return
-        case "accessibility-external":
+        let only = ProcessInfo.processInfo.environment["SELFTEST_ONLY"]
+            .map { Set($0.split(separator: ",").map(String.init)) }
+        if only?.contains("accessibility-external") == true {
             await accessibilityExternalClientSession()
             return
-        default:
-            break
         }
-        await windowedBrowserChecks()
-        await offscreenBrowserChecks()
-        await offscreenAccessibilityChecks()
-        await profileChecks()
-        await browserWindowChecks()
-        await browserBehaviorChecks()
-        await faviconChecks()
-        await toolbarAndZoomChecks()
-        await bridgeScopeChecks()
-        await internalPageDataChecks()
-        await serviceLifetimeChecks()
-        await relaunchChecks()
-        await passkeyChecks()
-        await chromeWindowChecks()
-        // Last: it leaves discarded browsers open for the quit.
-        await discardChecks()
+        for group in checkGroups where only?.contains(group.name) ?? true {
+            await group.run()
+        }
     }
 
     static func windowedBrowserChecks() async {

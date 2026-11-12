@@ -59,6 +59,107 @@ extension CefBrowserWindow {
     }
 }
 
+extension View {
+    /// Makes this view the anchor of Chromium's surfaces in the
+    /// ``CefBrowserWindow`` it is in, such as a view of the window's
+    /// toolbar: Chromium's bubbles appear beneath it instead of where
+    /// Chrome's toolbar would be.
+    ///
+    /// Without `kinds`, the view becomes the window's
+    /// ``CefChromiumUI/anchor``, which every surface that hangs from Chrome's
+    /// toolbar follows; with them, it is the anchor of those kinds in
+    /// ``CefChromiumUI/anchors``, Chromium's surfaces and your own interface
+    /// for them alike. The anchor is removed when the view leaves the
+    /// window.
+    ///
+    /// ```swift
+    /// AddressField(browser: browser)
+    ///     .chromiumSurfaceAnchor(alignment: .trailing)
+    /// Button("QR Code", systemImage: "qrcode") { browser.execute(.createQRCode) }
+    ///     .chromiumSurfaceAnchor([.qrCode])
+    /// ```
+    public func chromiumSurfaceAnchor(
+        _ kinds: Set<CefChromiumSurface.Kind>? = nil,
+        alignment: CefSurfaceAnchor.Alignment = .center,
+        spacing: CGFloat = 4
+    ) -> some View {
+        background(SurfaceAnchorRepresentable(kinds: kinds, alignment: alignment, spacing: spacing))
+    }
+}
+
+private struct SurfaceAnchorRepresentable: NSViewRepresentable {
+    let kinds: Set<CefChromiumSurface.Kind>?
+    let alignment: CefSurfaceAnchor.Alignment
+    let spacing: CGFloat
+
+    func makeNSView(context: Context) -> SurfaceAnchorView {
+        SurfaceAnchorView()
+    }
+
+    func updateNSView(_ view: SurfaceAnchorView, context: Context) {
+        view.configure(kinds: kinds, alignment: alignment, spacing: spacing)
+    }
+}
+
+/// An invisible view that registers itself as a surface anchor with the
+/// browser window it is in.
+private final class SurfaceAnchorView: NSView {
+    private var kinds: Set<CefChromiumSurface.Kind>?
+    private var alignment = CefSurfaceAnchor.Alignment.center
+    private var spacing: CGFloat = 4
+    private weak var registeredWindow: CefBrowserWindow?
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    /// Called from `updateNSView`, where SwiftUI tracks what is read: the
+    /// window's `chromiumUI` is touched only when something changed, and
+    /// outside the update, so writing it does not start another update.
+    func configure(kinds: Set<CefChromiumSurface.Kind>?, alignment: CefSurfaceAnchor.Alignment, spacing: CGFloat) {
+        guard kinds != self.kinds || alignment != self.alignment || spacing != self.spacing || !isConfigured else { return }
+        isConfigured = true
+        self.kinds = kinds
+        self.alignment = alignment
+        self.spacing = spacing
+        DispatchQueue.main.async { [weak self] in
+            self?.unregister()
+            self?.register()
+        }
+    }
+
+    private var isConfigured = false
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        DispatchQueue.main.async { [weak self] in
+            self?.unregister()
+            self?.register()
+        }
+    }
+
+    private func register() {
+        guard let window, let owner = CefBrowserWindow.owning(window) else { return }
+        let anchor = CefSurfaceAnchor.view(self, alignment: alignment, spacing: spacing)
+        if let kinds {
+            for kind in kinds { owner.chromiumUI.anchors[kind] = anchor }
+        } else {
+            owner.chromiumUI.anchor = anchor
+        }
+        registeredWindow = owner
+    }
+
+    private func unregister() {
+        guard let owner = registeredWindow else { return }
+        registeredWindow = nil
+        // Wherever this view anchors, whatever kinds it was set up with.
+        for (kind, anchor) in owner.chromiumUI.anchors where anchor.isAnchored(to: self) {
+            owner.chromiumUI.anchors[kind] = nil
+        }
+        if owner.chromiumUI.anchor?.isAnchored(to: self) == true {
+            owner.chromiumUI.anchor = nil
+        }
+    }
+}
+
 extension ToolbarItemProvider {
     /// Makes a toolbar of this provider's items the window's toolbar.
     func install(in nsWindow: NSWindow) {
