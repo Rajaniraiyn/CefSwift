@@ -76,9 +76,10 @@ enum SelfTest {
 
     // MARK: Checks
 
-    /// Every group of checks, in the order they run. Launch with
-    /// `-only <name>[,<name>…]` to run some of them, such as
-    /// `-only passkeys` while working on passkeys.
+    /// Every group of checks, in the order they run.
+    /// `SELFTEST_ONLY=<name>[,<name>…]` runs only the named groups, such as
+    /// `SELFTEST_ONLY=passkeys`; `accessibility-external` is a session for an
+    /// outside accessibility client instead of checks.
     static let checkGroups: [(name: String, run: @MainActor () async -> Void)] = [
         ("windowed", windowedBrowserChecks),
         ("offscreen", offscreenBrowserChecks),
@@ -93,12 +94,21 @@ enum SelfTest {
         ("relaunch", relaunchChecks),
         ("passkeys", passkeyChecks),
         ("chromeWindow", chromeWindowChecks),
+        // After the history checks: discarding an offscreen browser once the
+        // DevTools protocol has been used makes Chromium's most-visited
+        // sites miss later visits.
+        ("accessibility", offscreenAccessibilityChecks),
         // Last: it leaves discarded browsers open for the quit.
         ("discard", discardChecks),
     ]
 
     static func runChecks() async {
-        let only = UserDefaults.standard.string(forKey: "only").map { Set($0.split(separator: ",").map(String.init)) }
+        let only = ProcessInfo.processInfo.environment["SELFTEST_ONLY"]
+            .map { Set($0.split(separator: ",").map(String.init)) }
+        if only?.contains("accessibility-external") == true {
+            await accessibilityExternalClientSession()
+            return
+        }
         for group in checkGroups where only?.contains(group.name) ?? true {
             await group.run()
         }

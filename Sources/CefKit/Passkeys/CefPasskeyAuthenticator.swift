@@ -66,7 +66,6 @@ final class CefPasskeyAuthenticator {
     /// browser loads its first page.
     func start() async throws {
         guard let browser else { throw CefError.browserClosed }
-        passkeyTrace("start \(ObjectIdentifier(self)) browser \(browser.identifier)")
         let devTools = browser.devTools
         listen(devTools, "Runtime.executionContextCreated") { $0.contextCreated($1["context"]) }
         listen(devTools, "Runtime.executionContextDestroyed") { $0.contextDestroyed($1["executionContextId"].intValue) }
@@ -116,7 +115,6 @@ final class CefPasskeyAuthenticator {
 
     private func contextCreated(_ context: CefJSON) {
         guard let id = context["id"].intValue, context["auxData"]["isDefault"].boolValue == true else { return }
-        passkeyTrace("context \(id) \(context["origin"].stringValue ?? "") frame \(context["auxData"]["frameId"].stringValue ?? "")")
         contexts[id] = Context(
             origin: context["origin"].stringValue ?? "",
             frameID: context["auxData"]["frameId"].stringValue ?? "")
@@ -135,7 +133,6 @@ final class CefPasskeyAuthenticator {
     }
 
     private func contextsCleared() {
-        passkeyTrace("contexts cleared")
         contexts = [:]
         scriptContexts = [:]
         holdScripts = []
@@ -171,9 +168,7 @@ final class CefPasskeyAuthenticator {
                 }
                 breakpointKinds[id] = kind
                 contexts[context]?.breakpoints.append(id)
-                passkeyTrace("armed \(context) \(name) \(id)")
             } catch {
-                passkeyTrace("arm \(context) failed \(error)")
                 // The context went away first, as a document that navigates
                 // on at once does.
                 return
@@ -188,7 +183,6 @@ final class CefPasskeyAuthenticator {
         let frame = event["callFrames"][0]
         let kind = (event["hitBreakpoints"].arrayValue ?? []).compactMap { $0.stringValue.flatMap { breakpointKinds[$0] } }.first
         let contextID = scriptContexts[frame["location"]["scriptId"].stringValue ?? ""]
-        passkeyTrace("paused \(event["reason"].stringValue ?? "") url=\(frame["url"].stringValue ?? "") hit=\(event["hitBreakpoints"].text) kind=\(String(describing: kind)) ctx=\(String(describing: contextID)) known=\(contextID.map { contexts[$0] != nil } ?? false) contexts=\(contexts.keys.sorted())")
         if kind == nil, holdScripts.contains(frame["location"]["scriptId"].stringValue ?? "") {
             // A document is starting. Its main-world context was reported
             // before this pause; arm it, and any other not armed yet, while
@@ -348,9 +342,3 @@ extension CefPasskey {
         ]
     }
 }
-
-// TRACE-BEGIN
-@MainActor func passkeyTrace(_ message: @autoclosure () -> String) {
-    if ProcessInfo.processInfo.environment["CEFSWIFT_PASSKEY_TRACE"] != nil { print("TRACE \(Date().timeIntervalSince1970) \(message())") }
-}
-// TRACE-END
