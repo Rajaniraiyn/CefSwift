@@ -1,13 +1,7 @@
 import Foundation
 import PackagePlugin
 
-#if arch(arm64)
-private let hostCefPlatform = "macosarm64"
-#else
-private let hostCefPlatform = "macosx64"
-#endif
-
-/// `swift package cef <download|bundle|doctor|package|notarize|info|clean>`.
+/// `swift package cef <bundle|embed|doctor|package|notarize|info>`.
 ///
 /// Pre-approve the needed sandbox permissions on the command line:
 ///   swift package --allow-writing-to-package-directory \
@@ -26,14 +20,12 @@ struct CefPlugin: CommandPlugin {
         var extractor = ArgumentExtractor(Array(arguments.dropFirst()))
 
         switch subcommand {
-        case "download":
-            try download(context: context, extractor: &extractor)
         case "bundle":
             try await bundle(context: context, extractor: &extractor)
+        case "embed":
+            try embed(context: context, extractor: &extractor)
         case "info":
             try info(context: context, extractor: &extractor)
-        case "clean":
-            try clean(context: context)
         case "doctor":
             try doctor(context: context, extractor: &extractor)
         case "package":
@@ -43,8 +35,8 @@ struct CefPlugin: CommandPlugin {
         default:
             print(Self.usage)
             throw CefPluginError(
-                "Unknown subcommand '\(subcommand)'. Expected one of: download, bundle, doctor, package, " +
-                "notarize, info, clean."
+                "Unknown subcommand '\(subcommand)'. Expected one of: bundle, embed, doctor, package, " +
+                "notarize, info."
             )
         }
     }
@@ -53,16 +45,8 @@ struct CefPlugin: CommandPlugin {
     USAGE: swift package [--allow-writing-to-package-directory --allow-network-connections all] cef <subcommand>
 
     SUBCOMMANDS:
-      download [--platform macosarm64|macosx64] [--flavor minimal|standard]
-               [--cef-version <V>] [--manifest <path>]
-          Download the pinned CEF distribution into .cef/, verify, extract, and
-          convert the framework to the versioned bundle layout. Idempotent.
-          --cef-version must match the manifest; to use another version, pass
-          --manifest with a manifest pinned to it.
-
-      bundle --product <Name> [--configuration debug|release] [--flavor minimal|standard]
-             [--platform macosarm64|macosx64] [--output <dir>] [--bundle-id <id>]
-             [--name <DisplayName>] [--manifest <path>] [--version <1.2.3>] [--build <42>]
+      bundle --product <Name> [--configuration debug|release] [--output <dir>] [--bundle-id <id>]
+             [--name <DisplayName>] [--version <1.2.3>] [--build <42>]
              [--config <cefapp.json>] [--sign <identity|->] [--team-id <ID>] [--keychain <file>]
              [--capability <name>]... [--info-plist <file>]... [--entitlements <file>]
              [--provisioning-profile <file>] [--[no-]hardened-runtime] [--[no-]timestamp]
@@ -77,6 +61,17 @@ struct CefPlugin: CommandPlugin {
           --capability adds to cefapp.json "capabilities": \(Capability.all.map(\.name).joined(separator: ", ")).
           --package and --notarize run the commands below on the result.
           Default output: <packageDir>/dist/<Name>.app.
+
+      embed <App.app> [--configuration debug|release] [--config <cefapp.json>]
+            [--sign <identity|->] [--team-id <ID>] [--keychain <file>] [--capability <name>]...
+            [--info-plist <file>]... [--[no-]hardened-runtime] [--[no-]timestamp] [--sign-app]
+            [--entitlements <file>] [--provisioning-profile <file>]
+          Add the framework, the helpers' startup library and the five helper
+          apps to an app another tool built, such as an Xcode app target (run
+          it from a Run Script build phase; see docs/bundling.md), and sign
+          them. Names and identifiers come from the app's Info.plist. The app
+          itself is signed only with --sign-app; Xcode signs it after the
+          build phases.
 
       doctor <App.app> | --product <Name> [--json]
           Inspect a built bundle: signature, hardened runtime, each helper's
@@ -95,44 +90,15 @@ struct CefPlugin: CommandPlugin {
           cefapp.json "notarization": {"keychainProfile", "format"} sets defaults.
 
       info
-          Print the pinned CEF version and the state of the .cef/ cache.
-
-      clean
-          Remove the .cef/ cache directory.
+          Print the CEF framework the package graph resolved: its version,
+          where SwiftPM got it, and its architectures.
     """
-
-    // MARK: - download
-
-    private func download(context: PluginContext, extractor: inout ArgumentExtractor) throws {
-        let manifestPath = extractor.extractOption(named: "manifest").last
-        let platform = extractor.extractOption(named: "platform").last ?? hostCefPlatform
-        let flavor = extractor.extractOption(named: "flavor").last ?? "minimal"
-        let cefVersionOverride = extractor.extractOption(named: "cef-version").last
-        try rejectLeftovers(extractor)
-
-        let manifest = try CefManifest.resolve(context: context, explicitPath: manifestPath)
-        // A manifest only has checksums for the version it pins.
-        if let cefVersionOverride, cefVersionOverride != manifest.cef {
-            throw CefPluginError(
-                "--cef-version \(cefVersionOverride) does not match the version \(manifest.cef) pinned by " +
-                "\(manifest.sourceURL.path). Pass --manifest with a manifest pinned to \(cefVersionOverride), " +
-                "or update CEF_VERSION.json with Scripts/update-cef.py."
-            )
-        }
-
-        let downloader = Downloader(cacheRoot: cacheRoot(context: context))
-        let dist = try downloader.ensure(manifest: manifest, platform: platform, flavor: flavor)
-        print("[cef] Framework: \(downloader.frameworkURL(in: dist).path)")
-    }
 
     // MARK: - bundle
 
     private func bundle(context: PluginContext, extractor: inout ArgumentExtractor) async throws {
-        let manifestPath = extractor.extractOption(named: "manifest").last
         let productName = extractor.extractOption(named: "product").last
         let configurationName = extractor.extractOption(named: "configuration").last ?? "release"
-        let platform = extractor.extractOption(named: "platform").last ?? hostCefPlatform
-        let flavor = extractor.extractOption(named: "flavor").last ?? "minimal"
         let outputPath = extractor.extractOption(named: "output").last
         let bundleIDOption = extractor.extractOption(named: "bundle-id").last
         let nameOption = extractor.extractOption(named: "name").last
@@ -164,13 +130,7 @@ struct CefPlugin: CommandPlugin {
                 "--allow-network-connections all cef bundle --product Browser"
             )
         }
-        let configuration: PackageManager.BuildConfiguration
-        switch configurationName {
-        case "debug": configuration = .debug
-        case "release": configuration = .release
-        default:
-            throw CefPluginError("Invalid --configuration '\(configurationName)'. Use 'debug' or 'release'.")
-        }
+        let configuration = try Self.configuration(configurationName)
 
         // 1. Settings, checked before anything slow runs. cefapp.json sits
         // beside the target's sources.
@@ -183,6 +143,207 @@ struct CefPlugin: CommandPlugin {
         let bundleID = bundleIDOption
             ?? appConfig?.bundleIdentifier
             ?? "com.cefswift.\(productName.lowercased())"
+        let signing = try signingSetup(
+            config: appConfig, context: context, bundleIdentifier: bundleID, signOption: signOption,
+            teamOption: teamOption, keychainOption: keychainOption, capabilityOptions: capabilityOptions,
+            infoPlistOptions: infoPlistOptions, entitlementsOption: entitlementsOption,
+            profileOption: profileOption, hardenedRuntime: hardenedRuntime, timestamp: timestamp)
+        let (identity, plan) = (signing.identity, signing.plan)
+        let notarization = try notarizationSettings(
+            notarize: notarize, keychainProfile: keychainProfileOption, format: packageFormat,
+            config: appConfig, identity: identity, plan: plan)
+
+        // 2. The framework SwiftPM fetched for the binary target.
+        let artifact = try FrameworkArtifact.find(in: context.package)
+        print("[cef] Framework: \(artifact.framework.path)")
+
+        // 3. Build the product. If it depends on the ChromiumEmbeddedFramework
+        // product, it links the framework, so dyld loads it at launch.
+        let mainExecutable: URL
+        if let testExe {
+            mainExecutable = URL(fileURLWithPath: testExe)
+            print("[cef] Bundling prebuilt \(mainExecutable.path)")
+        } else {
+            mainExecutable = try buildProduct(
+                named: productName, kind: .executable, configuration: configuration, context: context,
+                linkerFlags: [], forceCLIBuild: forceCLIBuild
+            )
+        }
+        warnIfNotLinked(mainExecutable, target: productName)
+        let minimumSystemVersion = appConfig?.minimumSystemVersion
+            ?? MachOVersion.minimumSystemVersion(of: mainExecutable) ?? "14.0"
+
+        // 4. Build the helper against the framework.
+        let helper = try buildHelper(
+            artifact: artifact, configuration: configuration, context: context,
+            prebuilt: testHelperExe, forceCLIBuild: forceCLIBuild)
+
+        let outputDirectory = outputPath.map { packageRelative($0, context: context) }
+            ?? context.package.directoryURL.appendingPathComponent("dist")
+        try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
+
+        // 5. Assemble and sign.
+        signing.printSummary()
+        let bundler = AppBundler(
+            appURL: outputDirectory.appendingPathComponent("\(appName).app"),
+            appName: appName,
+            displayName: displayName,
+            bundleIdentifier: bundleID,
+            minimumSystemVersion: minimumSystemVersion,
+            version: versionOption ?? appConfig?.version ?? "1.0",
+            build: buildOption ?? appConfig?.build ?? "1",
+            mainExecutable: mainExecutable,
+            helperExecutable: helper.executable,
+            helperStartupLibrary: helper.startupLibrary,
+            frameworkSource: artifact.framework,
+            architectures: FrameworkArtifact.architectures(of: mainExecutable),
+            identity: identity,
+            plan: plan,
+            provisioningProfile: identity.kind.hasAppleTeam ? signing.distribution.profileURL : nil,
+            signingKeychain: signing.keychain,
+            workDirectory: signing.workDirectory
+        )
+        let app = try bundler.assemble()
+        let keychain = signing.keychain
+
+        print("")
+        print("[cef] Created \(app.path)")
+        print("[cef] Run it with: open \"\(app.path)\"")
+        print("[cef] Check it with: swift package cef doctor \"\(app.path)\"")
+
+        if let notarization {
+            let archive = try Notarizer.package(app, format: notarization.format, output: nil,
+                                                identity: identity.name, keychain: keychain)
+            if let keychainProfile = notarization.keychainProfile {
+                try Notarizer.notarize(archive: archive, app: app, keychainProfile: keychainProfile)
+            }
+        }
+    }
+
+    // MARK: - embed
+
+    /// Adds Chromium's parts to an app built elsewhere. From an Xcode Run
+    /// Script phase, with the identity Xcode signs with:
+    ///   swift package --package-path <CefSwift> --allow-writing-to-directory "$TARGET_BUILD_DIR" \
+    ///       --allow-network-connections all cef embed "$CODESIGNING_FOLDER_PATH" \
+    ///       --sign "${EXPANDED_CODE_SIGN_IDENTITY:--}"
+    private func embed(context: PluginContext, extractor: inout ArgumentExtractor) throws {
+        let configurationName = extractor.extractOption(named: "configuration").last ?? "release"
+        let configPath = extractor.extractOption(named: "config").last
+        let signOption = extractor.extractOption(named: "sign").last
+        let teamOption = extractor.extractOption(named: "team-id").last
+        let keychainOption = extractor.extractOption(named: "keychain").last
+        let capabilityOptions = extractor.extractOption(named: "capability")
+        let infoPlistOptions = extractor.extractOption(named: "info-plist")
+        let entitlementsOption = extractor.extractOption(named: "entitlements").last
+        let profileOption = extractor.extractOption(named: "provisioning-profile").last
+        let hardenedRuntime = try Self.toggle(&extractor, "hardened-runtime")
+        let timestamp = try Self.toggle(&extractor, "timestamp")
+        let signApp = extractor.extractFlag(named: "sign-app") > 0
+        let testHelperExe = extractor.extractOption(named: "_test-helper-exe").last
+        let forceCLIBuild = extractor.extractFlag(named: "_force-cli-build") > 0
+        let positional = extractor.remainingArguments.filter { !$0.hasPrefix("--") }
+        guard positional.count == 1, let appPath = positional.first else {
+            throw CefPluginError("Pass one app: swift package cef embed <App.app> [options].")
+        }
+        extractor = ArgumentExtractor(extractor.remainingArguments.filter { $0 != appPath })
+        try rejectLeftovers(extractor)
+        let configuration = try Self.configuration(configurationName)
+
+        let app = packageRelative(appPath, context: context)
+        let info = try Plist.read(app.appendingPathComponent("Contents/Info.plist"))
+        guard let executableName = info["CFBundleExecutable"]?.stringValue,
+              let bundleID = info["CFBundleIdentifier"]?.stringValue else {
+            throw CefPluginError("\(app.path) needs CFBundleExecutable and CFBundleIdentifier in its Info.plist. " +
+                                 "Run the phase after Xcode has written the app's Info.plist.")
+        }
+        let executable = app.appendingPathComponent("Contents/MacOS/\(executableName)")
+        let appConfig = try configPath.map { try CefAppConfig.decode(Data(contentsOf: packageRelative($0, context: context)),
+                                                                     source: packageRelative($0, context: context)) }
+        let signing = try signingSetup(
+            config: appConfig, context: context, bundleIdentifier: bundleID, signOption: signOption,
+            teamOption: teamOption, keychainOption: keychainOption, capabilityOptions: capabilityOptions,
+            infoPlistOptions: infoPlistOptions, entitlementsOption: entitlementsOption,
+            profileOption: profileOption, hardenedRuntime: hardenedRuntime, timestamp: timestamp)
+
+        let artifact = try FrameworkArtifact.find(in: context.package)
+        print("[cef] Framework: \(artifact.framework.path)")
+        if FileManager.default.fileExists(atPath: executable.path) {
+            warnIfNotLinked(executable, target: executableName)
+        }
+        let helper = try buildHelper(
+            artifact: artifact, configuration: configuration, context: context,
+            prebuilt: testHelperExe, forceCLIBuild: forceCLIBuild)
+        let appArchitectures = FrameworkArtifact.architectures(of: executable)
+        let missing = appArchitectures.subtracting(FrameworkArtifact.architectures(of: helper.executable))
+        if !missing.isEmpty {
+            print("[cef] warning: the app is built for \(missing.sorted().joined(separator: ", ")) as well, but the " +
+                  "helper only for this Mac's architecture; Chromium cannot start its processes there.")
+        }
+
+        signing.printSummary()
+        let bundler = AppBundler(
+            appURL: app,
+            appName: executableName,
+            displayName: info["CFBundleDisplayName"]?.stringValue ?? executableName,
+            bundleIdentifier: bundleID,
+            minimumSystemVersion: info["LSMinimumSystemVersion"]?.stringValue
+                ?? MachOVersion.minimumSystemVersion(of: executable) ?? "14.0",
+            version: info["CFBundleShortVersionString"]?.stringValue ?? "1.0",
+            build: info["CFBundleVersion"]?.stringValue ?? "1",
+            mainExecutable: nil,
+            helperExecutable: helper.executable,
+            helperStartupLibrary: helper.startupLibrary,
+            frameworkSource: artifact.framework,
+            architectures: appArchitectures,
+            identity: signing.identity,
+            plan: signing.plan,
+            provisioningProfile: nil,
+            signingKeychain: signing.keychain,
+            workDirectory: signing.workDirectory
+        )
+        try bundler.embed(signApp: signApp)
+        print("[cef] Added the framework, the startup library and five helper apps to \(app.path)")
+        if !signApp, !signing.plan.appEntitlements.isEmpty {
+            print("[cef] The app's own signature needs these entitlements (CODE_SIGN_ENTITLEMENTS in Xcode): " +
+                  signing.plan.appEntitlements.keys.sorted().joined(separator: ", "))
+        }
+    }
+
+    // MARK: - shared steps
+
+    private static func configuration(_ name: String) throws -> PackageManager.BuildConfiguration {
+        switch name {
+        case "debug": return .debug
+        case "release": return .release
+        default: throw CefPluginError("Invalid --configuration '\(name)'. Use 'debug' or 'release'.")
+        }
+    }
+
+    private struct SigningSetup {
+        var identity: SigningIdentity
+        var keychain: String?
+        var workDirectory: URL
+        var distribution: ResolvedDistribution
+        var plan: DistributionPlan
+
+        func printSummary() {
+            print("[cef] Signing \(identity.kind.displayName)" +
+                  (identity.teamIdentifier.map { ", team \($0)" } ?? "") +
+                  (plan.hardenedRuntime ? ", hardened runtime" : "") +
+                  (plan.secureTimestamp ? ", secure timestamp" : "") +
+                  (distribution.profileURL.map { ", with \($0.lastPathComponent)" } ?? ""))
+        }
+    }
+
+    /// The identity, the entitlements and Info.plist keys, and the
+    /// provisioning profile's checks, before anything slow runs.
+    private func signingSetup(
+        config appConfig: CefAppConfig?, context: PluginContext, bundleIdentifier bundleID: String,
+        signOption: String?, teamOption: String?, keychainOption: String?, capabilityOptions: [String],
+        infoPlistOptions: [String], entitlementsOption: String?, profileOption: String?,
+        hardenedRuntime: Bool?, timestamp: Bool?
+    ) throws -> SigningSetup {
         let keychain = (keychainOption.map { packageRelative($0, context: context) }
             ?? appConfig?.signingKeychain.map { appConfig!.resolve($0) })?.path
         let workDirectory = context.pluginWorkDirectoryURL.appendingPathComponent("signing")
@@ -212,92 +373,39 @@ struct CefPlugin: CommandPlugin {
                                      errors.joined(separator: "\n  "))
             }
         }
-        let notarization = try notarizationSettings(
-            notarize: notarize, keychainProfile: keychainProfileOption, format: packageFormat,
-            config: appConfig, identity: identity, plan: plan)
+        return SigningSetup(identity: identity, keychain: keychain, workDirectory: workDirectory,
+                            distribution: distribution, plan: plan)
+    }
 
-        // 2. The CEF distribution, downloaded on first use.
-        let manifest = try CefManifest.resolve(context: context, explicitPath: manifestPath)
-        let downloader = Downloader(cacheRoot: cacheRoot(context: context))
-        let dist = try downloader.ensure(manifest: manifest, platform: platform, flavor: flavor)
-        let framework = downloader.frameworkURL(in: dist)
-
-        // 3. Build the product, linked to the framework (see
-        // frameworkLinkerFlags).
-        let mainExecutable: URL
-        if let testExe {
-            mainExecutable = URL(fileURLWithPath: testExe)
-            print("[cef] Bundling prebuilt \(mainExecutable.path)")
-        } else {
-            mainExecutable = try buildProduct(
-                named: productName, kind: .executable, configuration: configuration, context: context,
-                manifest: manifest, linkerFlags: Self.frameworkLinkerFlags(framework),
-                forceCLIBuild: forceCLIBuild
-            )
-        }
-        let minimumSystemVersion = appConfig?.minimumSystemVersion
-            ?? MachOVersion.minimumSystemVersion(of: mainExecutable) ?? "14.0"
-
-        // 4. Build the helper against the framework.
-        let helper: HelperBuilder.Products
-        if let testHelperExe {
-            helper = .init(
-                executable: URL(fileURLWithPath: testHelperExe),
-                startupLibrary: URL(fileURLWithPath: testHelperExe).deletingLastPathComponent()
+    private func buildHelper(
+        artifact: FrameworkArtifact, configuration: PackageManager.BuildConfiguration, context: PluginContext,
+        prebuilt: String?, forceCLIBuild: Bool
+    ) throws -> HelperBuilder.Products {
+        if let prebuilt {
+            return .init(
+                executable: URL(fileURLWithPath: prebuilt),
+                startupLibrary: URL(fileURLWithPath: prebuilt).deletingLastPathComponent()
                     .appendingPathComponent(HelperBuilder.startupLibraryName))
-        } else {
-            helper = try HelperBuilder(
-                framework: framework,
-                workDirectory: context.pluginWorkDirectoryURL.appendingPathComponent("helper")
-            ).build { product, kind, linkerFlags in
-                try buildProduct(
-                    named: product, kind: kind, configuration: configuration, context: context,
-                    manifest: manifest, linkerFlags: linkerFlags, forceCLIBuild: forceCLIBuild)
-            }
         }
-
-        let outputDirectory = outputPath.map { packageRelative($0, context: context) }
-            ?? context.package.directoryURL.appendingPathComponent("dist")
-        try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
-
-        // 5. Assemble and sign.
-        print("[cef] Signing \(identity.kind.displayName)" +
-              (identity.teamIdentifier.map { ", team \($0)" } ?? "") +
-              (plan.hardenedRuntime ? ", hardened runtime" : "") +
-              (plan.secureTimestamp ? ", secure timestamp" : "") +
-              (distribution.profileURL != nil ? ", with \(distribution.profileURL!.lastPathComponent)" : ""))
-        let bundler = AppBundler(
-            appName: appName,
-            displayName: displayName,
-            bundleIdentifier: bundleID,
-            minimumSystemVersion: minimumSystemVersion,
-            version: versionOption ?? appConfig?.version ?? "1.0",
-            build: buildOption ?? appConfig?.build ?? "1",
-            mainExecutable: mainExecutable,
-            helperExecutable: helper.executable,
-            helperStartupLibrary: helper.startupLibrary,
-            frameworkSource: framework,
-            outputDirectory: outputDirectory,
-            identity: identity,
-            plan: plan,
-            provisioningProfile: identity.kind.hasAppleTeam ? distribution.profileURL : nil,
-            signingKeychain: keychain,
-            workDirectory: workDirectory
-        )
-        let app = try bundler.assemble()
-
-        print("")
-        print("[cef] Created \(app.path)")
-        print("[cef] Run it with: open \"\(app.path)\"")
-        print("[cef] Check it with: swift package cef doctor \"\(app.path)\"")
-
-        if let notarization {
-            let archive = try Notarizer.package(app, format: notarization.format, output: nil,
-                                                identity: identity.name, keychain: keychain)
-            if let keychainProfile = notarization.keychainProfile {
-                try Notarizer.notarize(archive: archive, app: app, keychainProfile: keychainProfile)
-            }
+        return try HelperBuilder(
+            framework: artifact.framework,
+            workDirectory: context.pluginWorkDirectoryURL.appendingPathComponent("helper")
+        ).build { product, kind, linkerFlags in
+            try buildProduct(
+                named: product, kind: kind, configuration: configuration, context: context,
+                linkerFlags: linkerFlags, forceCLIBuild: forceCLIBuild)
         }
+    }
+
+    /// An app that does not link the framework still runs (CefKit loads it
+    /// with `dlopen`), but holds about 12 MB of the framework's pointers as
+    /// private memory (docs/architecture.md).
+    private func warnIfNotLinked(_ executable: URL, target: String) {
+        guard !FrameworkArtifact.isLinked(by: executable) else { return }
+        print("[cef] warning: \(executable.lastPathComponent) does not link the CEF framework, so it loads it " +
+              "after launch and keeps about 12 MB more private memory. Add " +
+              ".product(name: \"\(FrameworkArtifact.targetName)\", package: \"CefSwift\") to the dependencies " +
+              "of \(target) (in Xcode: add the \(FrameworkArtifact.targetName) package product to the app target).")
     }
 
     /// `--name` / `--no-name`: true, false, or nil when neither is given.
@@ -466,28 +574,15 @@ struct CefPlugin: CommandPlugin {
         try Notarizer.notarize(archive: archive, app: app, keychainProfile: profile)
     }
 
-    /// Links the app to the framework, weakly, so that dyld loads it at
-    /// launch. A library loaded at launch has its pointers fixed up by the
-    /// kernel as pages are read in, which keeps about 12 MB of the
-    /// framework's data clean, shared memory; one loaded later with
-    /// `dlopen` holds it as private memory. CefKit's own `dlopen` of the
-    /// framework then returns the library already loaded. The link is weak,
-    /// so an executable run outside the bundle still starts and finds the
-    /// framework the usual way.
-    static func frameworkLinkerFlags(_ framework: URL) -> [String] {
-        ["-F", framework.deletingLastPathComponent().path, "-weak_framework", "Chromium Embedded Framework"]
-    }
-
     /// Builds a product through SwiftPM and returns the built file. A
     /// product SwiftPM cannot build that way, such as one from a
-    /// dependency, falls back to `swift build` in the package holding the
-    /// manifest.
+    /// dependency, falls back to `swift build` in the package that
+    /// declares it.
     private func buildProduct(
         named productName: String,
         kind: PackageManager.BuildResult.BuiltArtifact.Kind,
         configuration: PackageManager.BuildConfiguration,
         context: PluginContext,
-        manifest: CefManifest,
         linkerFlags: [String],
         forceCLIBuild: Bool
     ) throws -> URL {
@@ -520,8 +615,8 @@ struct CefPlugin: CommandPlugin {
         // A product of a dependency, such as CefSwift's helper, builds in the
         // package that declares it.
         let providerRoot = HelperBuilder.isHelperProduct(productName)
-            ? (HelperBuilder.cefSwiftPackageDirectory(in: context.package) ?? manifest.sourceURL.deletingLastPathComponent())
-            : manifest.sourceURL.deletingLastPathComponent()
+            ? (HelperBuilder.cefSwiftPackageDirectory(in: context.package) ?? context.package.directoryURL)
+            : context.package.directoryURL
         let configName = configuration == .release ? "release" : "debug"
         let scratch = context.pluginWorkDirectoryURL.appendingPathComponent("fallback-build")
         print("[cef] PackageManager build of '\(productName)' did not yield a binary; " +
@@ -554,62 +649,23 @@ struct CefPlugin: CommandPlugin {
     // MARK: - info
 
     private func info(context: PluginContext, extractor: inout ArgumentExtractor) throws {
-        let manifestPath = extractor.extractOption(named: "manifest").last
         try rejectLeftovers(extractor)
-
-        let manifest = try CefManifest.resolve(context: context, explicitPath: manifestPath)
-        let downloader = Downloader(cacheRoot: cacheRoot(context: context))
-        let fm = FileManager.default
-
-        print("CefSwift — pinned CEF distribution")
-        print("  CEF version:      \(manifest.cef)")
-        print("  Chromium version: \(manifest.chromium)")
-        print("  Channel:          \(manifest.channel)")
-        print("  Manifest:         \(manifest.sourceURL.path)")
-        print("  Cache root:       \(downloader.cacheRoot.path)")
-        print("")
-        print("  Platforms / flavors:")
-        for (platform, flavors) in manifest.platforms.sorted(by: { $0.key < $1.key }) {
-            for (flavor, artifact) in flavors.sorted(by: { $0.key < $1.key }) {
-                let dist = downloader.distURL(cefVersion: manifest.cef, platform: platform, flavor: flavor)
-                let tarball = downloader.downloadsDirectory.appendingPathComponent(artifact.name)
-                let state: String
-                if downloader.isPrepared(dist: dist) {
-                    state = "prepared"
-                } else if fm.fileExists(atPath: dist.path) {
-                    state = "incomplete (run download again)"
-                } else if fm.fileExists(atPath: tarball.path) {
-                    state = "downloaded (not extracted)"
-                } else {
-                    state = "not downloaded"
-                }
-                print("    \(platform)/\(flavor)  (\(artifact.size / 1_000_000) MB)  —  \(state)")
-            }
+        let artifact = try FrameworkArtifact.find(in: context.package)
+        let info = (try? Plist.read(artifact.framework.appendingPathComponent("Resources/Info.plist"))) ?? [:]
+        print("CefSwift — CEF framework")
+        if let directory = HelperBuilder.cefSwiftPackageDirectory(in: context.package),
+           let data = try? Data(contentsOf: directory.appendingPathComponent("CEF_VERSION.json")),
+           let pin = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            print("  CEF version:      \(pin["cef"] as? String ?? "?")")
+            print("  Chromium version: \(pin["chromium"] as? String ?? "?")")
         }
-        print("")
-        print("  Download with: swift package --allow-writing-to-package-directory " +
-              "--allow-network-connections all cef download")
-    }
-
-    // MARK: - clean
-
-    private func clean(context: PluginContext) throws {
-        let root = cacheRoot(context: context)
-        if FileManager.default.fileExists(atPath: root.path) {
-            try FileManager.default.removeItem(at: root)
-            print("[cef] Removed \(root.path)")
-        } else {
-            print("[cef] Nothing to clean (\(root.path) does not exist).")
-        }
+        print("  Framework:        \(info["CFBundleShortVersionString"]?.stringValue ?? "?") (CFBundleShortVersionString)")
+        print("  From:             \(artifact.origin)")
+        print("  XCFramework:      \(artifact.xcframework.path)")
+        print("  Architectures:    \(FrameworkArtifact.architectures(of: artifact.binary).sorted().joined(separator: ", "))")
     }
 
     // MARK: - shared
-
-    /// `.cef/` in the invoking package, the one directory the plugin may
-    /// write to.
-    private func cacheRoot(context: PluginContext) -> URL {
-        context.package.directoryURL.appendingPathComponent(".cef")
-    }
 
     private func rejectLeftovers(_ extractor: ArgumentExtractor) throws {
         guard extractor.remainingArguments.isEmpty else {

@@ -1,9 +1,13 @@
 // CefSwift — runtime loader for the Chromium Embedded Framework.
 //
-// CefSwift never links against CEF. The framework binary is dlopen'd at
-// runtime and every cef_* global declared by the vendored headers is defined
-// here as a trampoline that binds itself with dlsym on first call (the list
-// is generated; see ccef_symbols.h). Swift calls the C API by its real names.
+// The CefSwift libraries do not link against CEF, so they build, and their
+// tests run, without the framework. An app links it through the
+// ChromiumEmbeddedFramework product, so dyld has loaded it at launch, and
+// ccef_load_framework's dlopen returns that copy; a process that has not
+// linked it, such as a test, loads it here. Every cef_* global declared by
+// the vendored headers is defined as a trampoline that binds itself with
+// dlsym on first call (the list is generated; see ccef_symbols.h). Swift
+// calls the C API by its real names.
 
 #ifndef CCEF_LOADER_H_
 #define CCEF_LOADER_H_

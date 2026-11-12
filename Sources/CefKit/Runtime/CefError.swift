@@ -44,9 +44,9 @@ extension CefError: CustomStringConvertible {
             return """
             CEF API hash mismatch (expected \(expected), got \(actual)). The \
             framework binary on disk is not ABI-compatible with the CEF \
-            headers this package was built against. Re-run `swift package \
-            cef download` so the bundled framework matches the pinned CEF \
-            version.
+            headers this package was built against. Bundle the app again \
+            with `swift package cef bundle`, which copies the framework this \
+            package pins.
             """
         case .initializationFailed(let exitCode):
             return """

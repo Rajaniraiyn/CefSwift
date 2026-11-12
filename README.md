@@ -28,6 +28,7 @@ let package = Package(
     targets: [
         .executableTarget(name: "MyApp", dependencies: [
             .product(name: "CefSwiftUI", package: "CefSwift"),
+            .product(name: "ChromiumEmbeddedFramework", package: "CefSwift"),
         ]),
     ]
 )
@@ -35,6 +36,11 @@ let package = Package(
 
 `CefSwiftUI` re-exports `CefKit`, the core library. Depend on `CefKit` alone
 only if you host browsers without the views `CefSwiftUI` provides.
+`ChromiumEmbeddedFramework` is the official CEF framework, which SwiftPM
+downloads (about 265 MB, both architectures) and verifies when it resolves
+the package; the app's executable target links it, and library and test
+targets leave it out. In Xcode, add both products to the app target and
+follow [Xcode](docs/bundling.md#xcode).
 
 ### Show a web page
 
@@ -134,8 +140,7 @@ swift package --allow-writing-to-package-directory --allow-network-connections a
 open dist/MyApp.app
 ```
 
-The first run downloads the pinned CEF build (about 135 MB) into `.cef/`.
-Add `.cef/` and `dist/` to `.gitignore`. [Bundling](docs/bundling.md)
+Add `dist/` to `.gitignore`. [Bundling](docs/bundling.md)
 covers identifiers, signing, entitlements, notarization and the bundle layout;
 `swift package cef doctor <App.app>` reports what a built bundle can do.
 

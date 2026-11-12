@@ -5,18 +5,26 @@ import Foundation
 /// one binary; then signs them inside out: the framework's libraries, the
 /// framework, the startup library, each helper, the app. See
 /// docs/bundling.md.
+///
+/// ``embed(signApp:)`` does the same for an app another tool built, such as
+/// Xcode: it adds the framework, the startup library and the helper apps to
+/// the existing bundle and signs them, and by default leaves the app's own
+/// signature to that tool.
 struct AppBundler {
-    let appName: String              // bundle + executable name, e.g. "Browser"
+    let appURL: URL                  // <output>/<Name>.app, or the app to embed into
+    let appName: String              // the main executable's name, e.g. "Browser"
     let displayName: String
     let bundleIdentifier: String
     let minimumSystemVersion: String
     let version: String              // CFBundleShortVersionString
     let build: String                // CFBundleVersion
-    let mainExecutable: URL          // built product binary
+    let mainExecutable: URL?         // built product binary; nil when embedding
     let helperExecutable: URL        // compiled helper binary (HelperBuilder)
     let helperStartupLibrary: URL    // the helper's startup library (HelperBuilder)
-    let frameworkSource: URL         // converted framework inside .cef/dist
-    let outputDirectory: URL
+    let frameworkSource: URL         // the framework in the XCFramework (FrameworkArtifact)
+    /// The app executable's architectures; the framework is thinned to
+    /// them. Empty keeps every architecture.
+    let architectures: Set<String>
     let identity: SigningIdentity
     /// Info.plist keys and entitlements from cefapp.json (DistributionPlan).
     let plan: DistributionPlan
@@ -27,22 +35,17 @@ struct AppBundler {
     /// Where the entitlements files passed to codesign are written.
     let workDirectory: URL
 
-    var appURL: URL { outputDirectory.appendingPathComponent("\(appName).app") }
+    var contents: URL { appURL.appendingPathComponent("Contents") }
 
     func assemble() throws -> URL {
         let fm = FileManager.default
-        try FrameworkLayout.validate(framework: frameworkSource)
-
+        guard let mainExecutable else { throw CefPluginError("No main executable to bundle.") }
         if fm.fileExists(atPath: appURL.path) {
             try fm.removeItem(at: appURL)
         }
 
-        let contents = appURL.appendingPathComponent("Contents")
         let macOS = contents.appendingPathComponent("MacOS")
-        let frameworks = contents.appendingPathComponent("Frameworks")
         try fm.createDirectory(at: macOS, withIntermediateDirectories: true)
-        try fm.createDirectory(at: frameworks, withIntermediateDirectories: true)
-
         try fm.copyItem(at: mainExecutable, to: macOS.appendingPathComponent(appName))
 
         try Plist.write(mainInfoPlist(), to: contents.appendingPathComponent("Info.plist"))
@@ -51,21 +54,49 @@ struct AppBundler {
             try fm.copyItem(at: provisioningProfile, to: contents.appendingPathComponent("embedded.provisionprofile"))
         }
 
+        try addChromiumParts()
+        try codesign(appURL, entitlements: plan.appEntitlements, name: "app")
+        return appURL
+    }
+
+    /// Adds the framework, the startup library and the helper apps to the
+    /// app at `appURL`, replacing earlier copies, signs them, and merges
+    /// the keys Chromium and the capabilities need into its Info.plist.
+    /// With `signApp`, signs the app too.
+    func embed(signApp: Bool) throws {
+        let infoPlist = contents.appendingPathComponent("Info.plist")
+        let merged = Plist.merge(Plist.merge(try Plist.read(infoPlist), Self.chromiumInfoPlist), plan.appInfoPlist)
+        try Plist.write(merged, to: infoPlist)
+        try addChromiumParts()
+        if signApp {
+            try codesign(appURL, entitlements: plan.appEntitlements, name: "app")
+        }
+    }
+
+    /// Copies the parts in and signs them inside out, each item before
+    /// what contains it, and without --deep. Every library a helper loads
+    /// carries the app's identity, which library validation under the
+    /// hardened runtime requires; CEF ships its libraries linker-signed
+    /// ad hoc.
+    private func addChromiumParts() throws {
+        let fm = FileManager.default
+        let frameworks = contents.appendingPathComponent("Frameworks")
+        try fm.createDirectory(at: frameworks, withIntermediateDirectories: true)
+
         // `cp -R` keeps the framework's symlinks.
         let frameworkDest = frameworks.appendingPathComponent(frameworkSource.lastPathComponent)
+        if fm.fileExists(atPath: frameworkDest.path) { try fm.removeItem(at: frameworkDest) }
         try Shell.runChecked(
             "/bin/cp", ["-R", frameworkSource.path, frameworkDest.path],
             hint: "Could not copy the CEF framework into the app bundle. Check disk space and permissions."
         )
+        try thin(frameworkDest)
 
         let startupLibrary = frameworks.appendingPathComponent(HelperBuilder.startupLibraryName)
+        if fm.fileExists(atPath: startupLibrary.path) { try fm.removeItem(at: startupLibrary) }
         try fm.copyItem(at: helperStartupLibrary, to: startupLibrary)
         let helperApps = try HelperKind.allCases.map { ($0, try makeHelperApp(in: frameworks, kind: $0)) }
 
-        // Inside out, each item before what contains it, and without
-        // --deep. Every library a helper loads carries the app's identity,
-        // which library validation under the hardened runtime requires;
-        // CEF ships its libraries linker-signed ad hoc.
         try fm.createDirectory(at: workDirectory, withIntermediateDirectories: true)
         for library in try Self.machOFiles(in: frameworkDest.appendingPathComponent("Versions/A/Libraries")) {
             try codesign(library, entitlements: [:], isLibrary: true)
@@ -75,9 +106,33 @@ struct AppBundler {
         for (kind, helperApp) in helperApps {
             try codesign(helperApp, entitlements: plan.helperEntitlements[kind] ?? [:], name: kind.rawValue)
         }
-        try codesign(appURL, entitlements: plan.appEntitlements, name: "app")
+    }
 
-        return appURL
+    /// Keeps only the app's architectures in the framework's Mach-O files
+    /// and drops the other architectures' V8 snapshots. A one-architecture
+    /// app gets that architecture's official files back, byte for byte, and
+    /// half the framework's size.
+    private func thin(_ framework: URL) throws {
+        let version = framework.appendingPathComponent("Versions/A")
+        let binary = version.appendingPathComponent(FrameworkArtifact.frameworkName)
+        let available = FrameworkArtifact.architectures(of: binary)
+        let keep = architectures.intersection(available)
+        guard !keep.isEmpty, keep != available else { return }
+        let files = [binary] + (try Self.machOFiles(in: version.appendingPathComponent("Libraries")))
+        for file in files {
+            let thinned = file.appendingPathExtension("thin")
+            let selection = keep.count == 1
+                ? ["-thin", keep.first!]
+                : keep.sorted().flatMap { ["-extract", $0] }
+            try Shell.runChecked(
+                "/usr/bin/xcrun", ["lipo", file.path] + selection + ["-output", thinned.path],
+                hint: "Could not thin \(file.lastPathComponent) to \(keep.sorted().joined(separator: ", ")).")
+            _ = try FileManager.default.replaceItemAt(file, withItemAt: thinned)
+        }
+        for arch in available.subtracting(keep) {
+            let snapshot = version.appendingPathComponent("Resources/v8_context_snapshot.\(arch).bin")
+            try? FileManager.default.removeItem(at: snapshot)
+        }
     }
 
     // MARK: - Helpers
@@ -87,6 +142,7 @@ struct AppBundler {
         // Chromium finds helpers by these exact names.
         let helperName = kind.appName(for: appName)
         let helperApp = frameworks.appendingPathComponent("\(helperName).app")
+        if fm.fileExists(atPath: helperApp.path) { try fm.removeItem(at: helperApp) }
         let contents = helperApp.appendingPathComponent("Contents")
         let macOS = contents.appendingPathComponent("MacOS")
         try fm.createDirectory(at: macOS, withIntermediateDirectories: true)
@@ -114,12 +170,16 @@ struct AppBundler {
             "LSMinimumSystemVersion": .string(minimumSystemVersion),
             "NSPrincipalClass": .string("NSApplication"),
             "NSHighResolutionCapable": .bool(true),
-            "NSSupportsAutomaticGraphicsSwitching": .bool(true),
-            // Chromium's allocator does not work with the nano malloc zone.
-            "LSEnvironment": .dictionary(["MallocNanoZone": .string("0")]),
         ]
-        return Plist.merge(base, plan.appInfoPlist)
+        return Plist.merge(Plist.merge(base, Self.chromiumInfoPlist), plan.appInfoPlist)
     }
+
+    /// The app's Info.plist keys that Chromium needs, whoever builds the app.
+    static let chromiumInfoPlist: PlistDictionary = [
+        "NSSupportsAutomaticGraphicsSwitching": .bool(true),
+        // Chromium's allocator does not work with the nano malloc zone.
+        "LSEnvironment": .dictionary(["MallocNanoZone": .string("0")]),
+    ]
 
     private func helperInfoPlist(helperName: String, kind: HelperKind) -> PlistDictionary {
         let base: PlistDictionary = [
@@ -180,7 +240,7 @@ struct AppBundler {
             "/usr/bin/codesign", arguments + [path.path],
             hint: identity.isAdHoc
                 ? "Ad-hoc signing needs no certificate, so the bundle layout is likely invalid. Run " +
-                  "'swift package cef clean', then bundle again to re-download the framework."
+                  "'swift package reset' to fetch the framework again, then bundle again."
                 : "Check that the identity '\(identity.name)' is valid ('security find-identity -v -p codesigning') " +
                   "and that its private key is accessible, or pass '--sign -' for ad-hoc signing." +
                   (signingKeychain == nil ? "" : " SwiftPM's plugin sandbox can hide keychains that are not in " +

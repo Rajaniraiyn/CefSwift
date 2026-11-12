@@ -17,14 +17,19 @@ CefBase      reference counting, strings and process messages, shared by
 CefRenderer  renderer-side features on the V8 API, run by the helper
 CefHelper    the helper-process executable (cefswift-helper)
 
-CefPlugin    swift package cef download | bundle | info | clean; builds the
-             helper products and assembles the app
+CefPlugin    swift package cef bundle | embed | doctor | package | notarize | info;
+             builds the helper products and assembles and signs the app
+
+ChromiumEmbeddedFramework
+             the official CEF framework as an XCFramework binary target, which
+             an app's executable target links (Scripts/package-cef.py)
 ```
 
 ## The C bridge
 
 CefSwift calls CEF through its C API and resolves every function at run
-time, so the Swift modules build without the framework.
+time, so the Swift modules build, and their tests run, without the
+framework.
 
 - `Scripts/generate-bindings.py` runs the C preprocessor over the vendored
   headers at the `CEF_API_VERSION` pinned in `ccef_config.h` and writes two
@@ -38,9 +43,16 @@ time, so the Swift modules build without the framework.
   compares `cef_api_hash` with the hash the headers define for the pinned
   version. A framework that does not match fails with
   `CefError.apiHashMismatch` instead of misbehaving.
-- In a bundle from `cef bundle`, the app executable also links the
-  framework, weakly, so dyld loads it at launch and `dlopen` returns the
-  library already loaded. See [Loading the framework at launch](#loading-the-framework-at-launch).
+- The app's executable target depends on the `ChromiumEmbeddedFramework`
+  product, so it links the framework, dyld loads it at launch, and `dlopen`
+  returns the library already loaded. See
+  [Loading the framework at launch](#loading-the-framework-at-launch).
+
+The trampolines stay although apps link the framework. Calling `cef_*`
+symbols directly would make every module that uses CCef link the framework,
+and the framework's install name, `@executable_path/../Frameworks/…`,
+resolves only from an app's executable, so test bundles under `swift test`
+could not load. A trampoline costs one atomic load per call once bound.
 
 Because the API version is pinned, CEF binaries update without changes to
 the Swift code. Adopting newer C APIs is a separate step that moves the pin
@@ -573,14 +585,17 @@ The plugin links the helper with `-needed_library` and `-needed_framework`
 for these two, in that order, and `-dead_strip_dylibs`, which drops
 libraries the helper does not use, such as Foundation, which SwiftPM's
 build system links into executables by default. The helper uses the Swift
-standard library and the C API, not Foundation.
+standard library and the C API, not Foundation. The helper target does not
+depend on the framework's binary target: SwiftPM would then put the
+framework first in the link, ahead of every flag the plugin adds, in both
+of its build systems.
 
 A library that dyld loads at launch is fixed up by the kernel as its pages
 are read in (page-in linking), so the framework's `__DATA_CONST` segment,
 about 12 MB of pointers, stays clean memory that every process shares. A
 library loaded with `dlopen` has the same segment fixed up in the process,
 which makes all of it private, dirty memory. The app executable gets the
-same benefit from its weak link. Across the six processes of the Minimal
+same benefit by linking the `ChromiumEmbeddedFramework` product. Across the six processes of the Minimal
 example this takes the idle footprint from 185 MB to 101 MB
 ([guide](guide.md#footprint-and-launch-time)).
 
