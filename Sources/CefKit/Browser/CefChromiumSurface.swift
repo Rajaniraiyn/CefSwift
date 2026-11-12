@@ -135,8 +135,6 @@ public final class CefChromiumSurface: Identifiable {
 
     /// Called once when the surface is dismissed.
     @ObservationIgnored var onDismiss: (() -> Void)?
-    /// The window's alpha before CefSwift hid it while deciding.
-    @ObservationIgnored var restoredAlpha: CGFloat = 1
 
     init(
         kind: Kind, title: String, browser: CefBrowser, url: URL?,

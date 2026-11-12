@@ -42,8 +42,9 @@ extension CefBrowserWindow {
         withWindow { window in
             accessory.install(in: window)
         }
-        setCustomPresentation(for: .findBar) { [weak accessory] surface in
-            accessory?.show(for: surface)
+        // The window keeps the accessory through its presenter.
+        setCustomPresentation(for: .findBar) { surface in
+            accessory.show(for: surface)
         }
     }
 
@@ -222,6 +223,10 @@ private final class FindBarAccessory {
     private func update() {
         let isActive = session.isActive
         guard controller.isHidden == isActive else { return }
+        if isActive {
+            // Title-bar accessories take their height from the view's frame.
+            hosting.setFrameSize(NSSize(width: hosting.frame.width, height: hosting.fittingSize.height))
+        }
         controller.isHidden = !isActive
         if isActive {
             // SwiftUI focus does not reach title-bar accessories; focus the

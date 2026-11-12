@@ -33,7 +33,6 @@ extension CefBrowserWindow {
         let surface = CefChromiumSurface(
             kind: kind, title: recognized.title, browser: browser, url: url,
             window: child, browserWindow: self)
-        surface.restoredAlpha = pending.alpha
         let presentation = presentationForSurface?(surface) ?? chromiumUI[kind]
         surface.presentation = presentation
         switch presentation {
@@ -166,6 +165,19 @@ extension CefBrowserWindow {
     /// Runs a command that opens a surface the app replaces or hides,
     /// without Chromium showing its own. Returns whether it was handled.
     func handleSurfaceCommand(_ command: CefChromeCommand) -> Bool {
+        // ⌘G and ⇧⌘G move through a custom find bar's matches.
+        if case .custom = chromiumUI[.findBar], browser.findSession.isActive {
+            switch command.rawValue {
+            case Int(IDC_FIND_NEXT):
+                browser.findSession.next()
+                return true
+            case Int(IDC_FIND_PREVIOUS):
+                browser.findSession.previous()
+                return true
+            default:
+                break
+            }
+        }
         guard let kind = Self.surfaceKind(for: command) else { return false }
         switch chromiumUI[kind] {
         case .hidden:

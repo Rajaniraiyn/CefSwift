@@ -111,18 +111,29 @@ private final class SurfaceAnchorView: NSView {
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
+    /// Called from `updateNSView`, where SwiftUI tracks what is read: the
+    /// window's `chromiumUI` is touched only when something changed, and
+    /// outside the update, so writing it does not start another update.
     func configure(kinds: Set<CefChromiumSurface.Kind>?, alignment: CefSurfaceAnchor.Alignment, spacing: CGFloat) {
-        unregister()
+        guard kinds != self.kinds || alignment != self.alignment || spacing != self.spacing || !isConfigured else { return }
+        isConfigured = true
         self.kinds = kinds
         self.alignment = alignment
         self.spacing = spacing
-        register()
+        DispatchQueue.main.async { [weak self] in
+            self?.unregister()
+            self?.register()
+        }
     }
+
+    private var isConfigured = false
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        unregister()
-        register()
+        DispatchQueue.main.async { [weak self] in
+            self?.unregister()
+            self?.register()
+        }
     }
 
     private func register() {
@@ -139,11 +150,11 @@ private final class SurfaceAnchorView: NSView {
     private func unregister() {
         guard let owner = registeredWindow else { return }
         registeredWindow = nil
-        if let kinds {
-            for kind in kinds where owner.chromiumUI.anchors[kind]?.isAnchored(to: self) == true {
-                owner.chromiumUI.anchors[kind] = nil
-            }
-        } else if owner.chromiumUI.anchor?.isAnchored(to: self) == true {
+        // Wherever this view anchors, whatever kinds it was set up with.
+        for (kind, anchor) in owner.chromiumUI.anchors where anchor.isAnchored(to: self) {
+            owner.chromiumUI.anchors[kind] = nil
+        }
+        if owner.chromiumUI.anchor?.isAnchored(to: self) == true {
             owner.chromiumUI.anchor = nil
         }
     }
