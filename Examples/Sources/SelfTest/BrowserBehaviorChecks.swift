@@ -322,8 +322,8 @@ extension SelfTest {
         // The password manager link opens a tab Chromium creates itself.
         var opened: [URL] = []
         var sawChromiumWindow = false
-        CefRuntime.shared.onChromiumOpensTab = { opened.append($0) }
-        defer { CefRuntime.shared.onChromiumOpensTab = nil }
+        CefRuntime.shared.onOpenBrowser = { opened.append($0.url); return .close }
+        defer { CefRuntime.shared.onOpenBrowser = nil }
         browser.load(URL(string: "chrome://settings/autofill")!)
         _ = await waitUntil { browser.title.contains("Autofill") && !browser.isLoading }
         _ = await waitUntilAsync {

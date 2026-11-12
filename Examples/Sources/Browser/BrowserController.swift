@@ -200,10 +200,16 @@ final class BrowserController: CefBrowserDelegate {
 
     /// Chromium sometimes opens a tab of its own — following a link from
     /// `chrome://settings` to the password manager, for instance. Show those
-    /// as tabs here instead of in Chrome's window.
+    /// as tabs here, in the same profile, instead of in Chrome's window.
     func adoptTabsOpenedByChromium() {
-        CefRuntime.shared.onChromiumOpensTab = { [weak self] url in
-            self?.openTab(url: url)
+        CefRuntime.shared.onOpenBrowser = { [weak self] request in
+            // A profile Chromium made itself, such as its own incognito
+            // one, stays in Chromium's window.
+            guard let self, request.profile != nil else { return .showInChromium }
+            self.openTab(
+                url: request.url, inBackground: !request.disposition.prefersForeground,
+                sharingProfileOf: request.opener ?? request.browser)
+            return .close
         }
     }
 

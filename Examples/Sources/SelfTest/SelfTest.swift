@@ -131,6 +131,7 @@ enum SelfTest {
         ("protectedMedia", protectedMediaChecks),
         ("systemEngine", systemEngineChecks),
         ("passkeys", passkeyChecks),
+        ("chromiumTabs", chromiumTabChecks),
         ("chromeWindow", chromeWindowChecks),
         // Last: it leaves discarded browsers open for the quit.
         ("discard", discardChecks),
