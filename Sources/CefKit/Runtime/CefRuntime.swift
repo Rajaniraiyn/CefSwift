@@ -186,6 +186,22 @@ public final class CefRuntime {
         pump.start()
         isInitialized = true
         applyApplicationWidePreferences(configuration.preferences)
+        logCapabilities()
+    }
+
+    /// Logs one line naming what the app's signature leaves out, such as
+    /// passkeys beyond security keys; at info level when nothing is.
+    private func logCapabilities() {
+        let capabilities = CefAppCapabilities.current
+        if let summary = capabilities.limitationsSummary(passkeysUseChromium: true) {
+            CefLog.notice(summary)
+        } else {
+            CefLog.info("CefSwift: signed \(capabilities.signature.rawValue), team " +
+                        "\(capabilities.teamIdentifier ?? "none"); passkeys: " +
+                        CefAppCapabilities.PasskeyAuthenticator.allCases
+                            .filter(capabilities.passkeyAuthenticators.contains).map(\.description)
+                            .joined(separator: ", "))
+        }
     }
 
     /// Opens a window drawn entirely by Chrome — tab strip, omnibox, menus,
