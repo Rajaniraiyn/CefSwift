@@ -366,12 +366,19 @@ public final class CefRuntime {
 
     func register(_ browser: CefBrowser) {
         browsersByIdentifier[browser.identifier] = browser
-        browsers.append(browser)
+        // Internal-page service browsers stay out of the public list.
+        if serviceBrowserIDs.contains(browser.id) {
+            serviceBrowsers.append(browser)
+        } else {
+            browsers.append(browser)
+        }
     }
 
     func unregister(_ browser: CefBrowser) {
         browsersByIdentifier[browser.identifier] = nil
         browsers.removeAll { $0 === browser }
+        serviceBrowsers.removeAll { $0 === browser }
+        serviceBrowserIDs.remove(browser.id)
         continueTerminationIfReady()
     }
 
@@ -381,9 +388,11 @@ public final class CefRuntime {
     /// callbacks, crashes in `cef_shutdown()`; so `terminate:` is retried
     /// from the run loop once nothing is left.
     func continueTerminationIfReady() {
-        guard isTerminationRequested, browsers.isEmpty, CefBrowserWindow.all.isEmpty else { return }
+        guard isTerminationRequested, hasNoBrowsers, CefBrowserWindow.liveCount == 0 else { return }
         DispatchQueue.main.async { NSApp.terminate(nil) }
     }
+
+    private var hasNoBrowsers: Bool { browsers.isEmpty && serviceBrowsers.isEmpty }
 
     /// A page asked to stay open while quitting: the quit is abandoned, so
     /// closing the last window later does not end the app.
@@ -401,10 +410,10 @@ public final class CefRuntime {
     func handleTerminationRequest() -> Bool {
         guard isInitialized else { return true }
         isTerminationRequested = true
-        if browsers.isEmpty {
+        if hasNoBrowsers {
             // Not from inside Chromium's message loop work, where a Chrome
             // command or a page may have asked to quit.
-            guard CefBrowserWindow.all.isEmpty, messagePump?.isPerformingWork != true else {
+            guard CefBrowserWindow.liveCount == 0, messagePump?.isPerformingWork != true else {
                 CefBrowserWindow.all.forEach { $0.close() }
                 continueTerminationIfReady()
                 return false
@@ -415,6 +424,24 @@ public final class CefRuntime {
         for browser in browsers {
             browser.close()
         }
+        for browser in serviceBrowsers {
+            browser.close(force: true)
+        }
         return false
     }
+
+    // MARK: Service browsers (internal-page data APIs)
+
+    /// Live service browsers: hidden, created by CefKit itself, and left out
+    /// of ``browsers``.
+    @ObservationIgnored private var serviceBrowsers: [CefBrowser] = []
+    @ObservationIgnored private var serviceBrowserIDs: Set<CefBrowser.ID> = []
+
+    /// Marks `browser` as a service browser. Call before it is created.
+    func registerServiceBrowser(_ browser: CefBrowser) {
+        serviceBrowserIDs.insert(browser.id)
+    }
+
+    /// Whether the app is quitting, so no new service browsers should start.
+    var isTerminating: Bool { isTerminationRequested }
 }

@@ -342,6 +342,35 @@ let cookies = await profile.cookies(for: url)
 Preferences are the settings behind `chrome://settings`; browse them with
 `profile.allPreferences()`.
 
+### Bookmarks, history and suggestions
+
+A profile gives you the data behind Chromium's own bookmarks, history and
+address bar:
+
+```swift
+let bookmark = try await profile.bookmarks.add(url, title: "CefSwift")
+let folders = try await profile.bookmarks.tree()
+for await _ in profile.bookmarks.changes { /* refresh your UI */ }
+
+let visits = try await profile.history.search("swift", limit: 20)
+let topSites = try await profile.history.mostVisited()
+try await profile.history.remove(visits)
+
+let suggestions = try await profile.autocomplete.suggestions(for: "cef")
+```
+
+`suggestions(for:)` returns what Chrome's address bar would show, ranked,
+with `relevance` and `inlineCompletion`.
+
+CEF has no API for any of this. CefKit asks the same services Chromium's
+own pages use, from a hidden browser that it opens on first use and closes
+at quit: bookmarks through the `chrome.bookmarks` interface of the bookmarks
+page, history and most-visited sites through those pages' Mojo handlers, and
+suggestions through the handler of `chrome://omnibox`. The last is a
+debugging interface and the likeliest to change between Chromium versions,
+so `autocomplete` is marked experimental. The SelfTest example exercises all
+of them, so a CEF update that breaks one fails CI.
+
 ## DevTools Protocol
 
 ```swift
@@ -372,8 +401,8 @@ CefRuntime.shared.registerSchemeHandler(
   Views embedded with `CefWebView` use the lighter Alloy style.
 - One Chrome-style browser per window; use native window tabs for tabbed UIs.
 - Offscreen pages are exposed to VoiceOver as a single element.
-- CEF does not expose Chromium's history, bookmarks or omnibox ranking to
-  embedders; keep those in your app.
+- Only Chrome-style browsers (`CefBrowserWindow`) record history; pages in
+  a `CefWebView` do not appear in `profile.history`.
 - CEF 156 does not ask `browser(_:credentialFor:)` about HTTP authentication:
   Chrome-style browsers show Chromium's own sign-in dialog, and in
   `CefWebView` the request fails with `ERR_INVALID_AUTH_CREDENTIALS`.
