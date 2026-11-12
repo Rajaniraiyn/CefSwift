@@ -77,6 +77,7 @@ enum SelfTest {
     // MARK: Checks
 
     static func runChecks() async {
+        capabilityChecks()
         await windowedBrowserChecks()
         await offscreenBrowserChecks()
         await profileChecks()
@@ -92,6 +93,19 @@ enum SelfTest {
         await chromeWindowChecks()
         // Last: it leaves discarded browsers open for the quit.
         await discardChecks()
+    }
+
+    /// What the bundle's signature allows, as CefKit reads it.
+    static func capabilityChecks() {
+        let capabilities = CefRuntime.shared.capabilities
+        let consistent = capabilities.signature.hasAppleTeam == (capabilities.teamIdentifier != nil)
+            && capabilities.passkeyAuthenticators.contains(.securityKey)
+            && (capabilities.teamIdentifier != nil
+                || capabilities.resolvedSafeStorage(.automatic) == .mockKeychain)
+        check("capabilities: signature (\(capabilities.signature.rawValue)" +
+              (capabilities.isHardenedRuntime ? ", hardened runtime" : "") + ") and passkey authenticators (" +
+              capabilities.passkeyAuthenticators.map(\.description).sorted().joined(separator: ", ") + ")",
+              consistent && capabilities.signature != .unsigned)
     }
 
     static func windowedBrowserChecks() async {
