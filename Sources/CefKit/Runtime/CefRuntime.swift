@@ -335,12 +335,22 @@ public final class CefRuntime {
 
     func register(_ browser: CefBrowser) {
         browsersByIdentifier[browser.identifier] = browser
-        // Internal-page service browsers stay out of the public list.
+        // Internal-page service browsers stay out of the public list. A
+        // browser restored after a discard is listed already.
         if serviceBrowserIDs.contains(browser.id) {
             serviceBrowsers.append(browser)
-        } else {
+        } else if !browsers.contains(where: { $0 === browser }) {
             browsers.append(browser)
         }
+    }
+
+    /// A browser discarded by closing its Chromium browser: Chromium's
+    /// identifier goes, the browser stays in ``browsers``.
+    func forgetIdentifier(of browser: CefBrowser) {
+        if browsersByIdentifier[browser.identifier] === browser {
+            browsersByIdentifier[browser.identifier] = nil
+        }
+        continueTerminationIfReady()
     }
 
     func unregister(_ browser: CefBrowser) {
@@ -385,6 +395,10 @@ public final class CefRuntime {
     func handleTerminationRequest() -> Bool {
         guard isInitialized else { return true }
         isTerminationRequested = true
+        // Browsers discarded by closing them have nothing left in Chromium.
+        for browser in browsers where browser.isDiscarded && browser.raw == nil {
+            browser.handleClosed()
+        }
         if hasNoBrowsers {
             // Not from inside Chromium's message loop work, where a Chrome
             // command or a page may have asked to quit.
@@ -419,4 +433,29 @@ public final class CefRuntime {
 
     /// Whether the app is quitting, so no new service browsers should start.
     var isTerminating: Bool { isTerminationRequested }
+
+    // MARK: Memory Saver
+
+    /// When CefKit discards browsers on its own to free memory. `.off`, the
+    /// default, leaves discarding to ``CefBrowser/discard()``.
+    ///
+    /// ```swift
+    /// // Discard tabs hidden for 30 minutes, and hidden tabs whenever
+    /// // macOS runs low on memory.
+    /// CefRuntime.shared.memorySaver = .after(.minutes(30))
+    /// ```
+    ///
+    /// Only hidden browsers are discarded, and only those
+    /// ``CefBrowser/discardBlockers()`` lets through: not one playing audio,
+    /// holding unsaved form input, or with ``CefBrowser/allowsDiscarding``
+    /// turned off.
+    public var memorySaver: CefMemorySaver {
+        get { memorySaverMonitor.policy }
+        set { memorySaverMonitor.policy = newValue }
+    }
+
+    @ObservationIgnored private(set) lazy var memorySaverMonitor = CefMemorySaverMonitor()
+
+    /// Discards Chrome-style browsers through Chromium's own tab discarding.
+    @ObservationIgnored private(set) lazy var tabDiscarder = CefTabDiscarder()
 }

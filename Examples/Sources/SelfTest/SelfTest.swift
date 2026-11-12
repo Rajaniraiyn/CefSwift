@@ -89,6 +89,8 @@ enum SelfTest {
         await serviceLifetimeChecks()
         await relaunchChecks()
         await chromeWindowChecks()
+        // Last: it leaves discarded browsers open for the quit.
+        await discardChecks()
     }
 
     static func windowedBrowserChecks() async {
