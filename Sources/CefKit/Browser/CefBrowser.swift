@@ -620,26 +620,6 @@ public final class CefBrowser: Identifiable {
         withHost { $0.pointee.print($0) }
     }
 
-    /// Renders the page to a PDF file.
-    public func printToPDF(at destination: URL) async throws {
-        try await ready()
-        let succeeded: Bool = await withCheckedContinuation { continuation in
-            let callback = PDFPrintCallback(continuation: continuation).makeCallback()
-            var settings = cef_pdf_print_settings_t()
-            settings.size = MemoryLayout<cef_pdf_print_settings_t>.stride
-            settings.print_background = 1
-            let started: Void? = withHost { host in
-                CefStringUtil.withCefString(destination.path) {
-                    host.pointee.print_to_pdf(host, $0, &settings, callback)
-                }
-            }
-            if started == nil {
-                cefRelease(callback)
-            }
-        }
-        guard succeeded else { throw CefError.operationFailed("print_to_pdf did not produce \(destination.path)") }
-    }
-
     /// Captures the visible page as PNG data.
     ///
     /// CEF has no capture API for windowed browsers, so this uses the
@@ -1436,7 +1416,7 @@ private final class FaviconDownload: @unchecked Sendable {
 
 /// Bridges `cef_pdf_print_callback_t` to a continuation, which resumes with
 /// `false` if CEF drops the callback without calling it.
-private final class PDFPrintCallback: @unchecked Sendable {
+final class PDFPrintCallback: @unchecked Sendable {
     private var continuation: CheckedContinuation<Bool, Never>?
 
     init(continuation: CheckedContinuation<Bool, Never>) {

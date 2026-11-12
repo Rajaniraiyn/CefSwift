@@ -217,5 +217,6 @@ struct CapabilityPages: CefSchemeHandler {
             <style>@page { size: A5; } body { font: 14px sans-serif; } h1 { break-before: page; }</style>
             <h1>One</h1><p>first</p><h1>Two</h1><p>second</p><h1>Three</h1><p>third</p>
             """,
+        "/plain.html": "<h1>Plain</h1><p>No page rules.</p>",
     ]
 }

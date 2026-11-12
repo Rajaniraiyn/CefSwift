@@ -10,6 +10,7 @@ are `@MainActor`.
   - [Preferences](#preferences)
   - [Relaunching](#relaunching)
 - [Browsers](#browsers)
+  - [PDF](#pdf)
 - [Showing a browser](#showing-a-browser)
   - [Offscreen rendering](#offscreen-rendering)
   - [Swipe navigation](#swipe-navigation)
@@ -273,7 +274,7 @@ when it is first shown.
 |---|---|
 | State | `url`, `title`, `isLoading`, `estimatedProgress`, `canGoBack`, `canGoForward`, `favicon`, `faviconURL`, `zoomLevel`, `isFullscreen`, `statusText`, `downloads`, `findResult`, `state` (`.pending`, `.live`, `.closed`) |
 | Navigation | `load(_:)`, `goBack()`, `goForward()`, `reload(ignoringCache:)`, `stopLoading()` |
-| Page | `isAudioMuted`, `find(_:backwards:caseSensitive:)`, `stopFinding(clearingSelection:)`, `findSession` (an observable find-bar model), `print()`, `printToPDF(at:)`, `snapshot()` |
+| Page | `isAudioMuted`, `find(_:backwards:caseSensitive:)`, `stopFinding(clearingSelection:)`, `findSession` (an observable find-bar model), `print()`, `pdf(configuration:)`, `printToPDF(at:configuration:)` ([PDF](#pdf)), `snapshot()` |
 | JavaScript | `evaluateJavaScript(_:)`, `evaluateJavaScript(_:as:)`, `executeJavaScript(_:)`, `addUserScript(_:)` |
 | DevTools | `devTools`, `showDevTools(inspecting:)`, `closeDevTools()`, `isShowingDevTools` |
 | Lifetime | `ready()`, `close(force:)` |
@@ -338,6 +339,36 @@ released at once and the browser falls back to the default decisions.
 A browser you create lives until you call `close()`. Unless you pass
 `force: true`, the page's `beforeunload` handler can ask the user to stay.
 After `state` becomes `.closed`, create a new `CefBrowser` to browse again.
+
+### PDF
+
+`pdf(configuration:)` renders the page as PDF data, and
+`printToPDF(at:configuration:)` writes it to a file. A
+`CefBrowser.PDFConfiguration` starts from the user's Page Setup: the paper
+size of `NSPrintInfo.shared`, portrait, Chromium's default margins,
+backgrounds printed, and a tagged PDF, which assistive apps read in order,
+with an outline made from the page's headings.
+
+```swift
+var configuration = CefBrowser.PDFConfiguration()
+configuration.isLandscape = true
+configuration.margins = .uniform(36)                     // points
+configuration.pageRanges = [1...2, 5...5]
+configuration.footerTemplate = """
+    <div style="font-size: 9px; margin: auto">
+      <span class=pageNumber></span> / <span class=totalPages></span>
+    </div>
+    """
+let data = try await browser.pdf(configuration: configuration)
+```
+
+Sizes and margins are in points. `prefersCSSPageSize` uses the size a
+page's `@page` rule asks for instead of `paperSize`; a page whose rule
+gives a size keeps that size's orientation whatever `isLandscape` says.
+Header and footer templates fill in elements with the classes `date`,
+`title`, `url`, `pageNumber` and `totalPages`; give them a font size, since
+Chromium sets none. A page range past the last page, or ranges that leave
+no page, make the call throw.
 
 ## Showing a browser
 
