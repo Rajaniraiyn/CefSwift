@@ -217,18 +217,36 @@ public final class CefBrowserWindow: Identifiable {
     /// hierarchy, so focus, key equivalents and menus behave as in any
     /// AppKit window. Size it with Auto Layout or a fixed frame height.
     public var topAccessory: NSView? {
-        get { accessoryController?.view }
-        set {
-            if let accessoryController {
-                accessoryController.removeFromParent()
-                self.accessoryController = nil
+        didSet {
+            guard topAccessory !== oldValue else { return }
+            accessoryController?.removeFromParent()
+            accessoryController = nil
+            guard let view = topAccessory else { return }
+            withWindow { [weak self] window in
+                guard let self, self.topAccessory === view else { return }
+                let controller = NSTitlebarAccessoryViewController()
+                controller.view = view
+                controller.layoutAttribute = .bottom
+                window.addTitlebarAccessoryViewController(controller)
+                self.accessoryController = controller
             }
-            guard let newValue, let window else { return }
-            let controller = NSTitlebarAccessoryViewController()
-            controller.view = newValue
-            controller.layoutAttribute = .bottom
-            window.addTitlebarAccessoryViewController(controller)
-            accessoryController = controller
+        }
+    }
+
+    @ObservationIgnored private var windowWaiters: [@MainActor (NSWindow) -> Void] = []
+
+    /// Runs `body` with the AppKit ``window``: at once when it exists,
+    /// otherwise as soon as Chromium has created it. Does nothing once the
+    /// window has closed.
+    ///
+    /// Use it for setup that needs the `NSWindow`, such as a toolbar.
+    public func withWindow(_ body: @escaping @MainActor (NSWindow) -> Void) {
+        if let window {
+            body(window)
+        } else if isClosed {
+            CefLog.error("CefBrowserWindow: the window has closed; its setup is ignored")
+        } else {
+            windowWaiters.append(body)
         }
     }
 
@@ -311,6 +329,9 @@ public final class CefBrowserWindow: Identifiable {
             if let identifier = configuration.tabbingIdentifier {
                 nsWindow.tabbingIdentifier = identifier
             }
+            let waiters = windowWaiters
+            windowWaiters = []
+            waiters.forEach { $0(nsWindow) }
         }
     }
 
@@ -318,6 +339,7 @@ public final class CefBrowserWindow: Identifiable {
         serviceWindowObserver.map(NotificationCenter.default.removeObserver)
         serviceWindowObserver = nil
         accessoryController = nil
+        windowWaiters = []
         cefWindow = nil
         browserView = nil
         isClosed = true

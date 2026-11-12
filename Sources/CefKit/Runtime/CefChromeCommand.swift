@@ -61,6 +61,9 @@ public struct CefChromeCommand: RawRepresentable, Hashable, Sendable {
     public static let clearBrowsingData = Self(rawValue: Int(IDC_CLEAR_BROWSING_DATA))
     public static let showTaskManager = Self(rawValue: Int(IDC_TASK_MANAGER))
     public static let showDevTools = Self(rawValue: Int(IDC_DEV_TOOLS))
+
+    /// Whether the command changes the page's zoom level.
+    var isZoomCommand: Bool { self == .zoomIn || self == .zoomOut || self == .resetZoom }
 }
 
 /// Trims Chrome's own UI in Chrome-style windows. Set on

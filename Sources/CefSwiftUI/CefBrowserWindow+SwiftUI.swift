@@ -10,7 +10,14 @@ extension CefBrowserWindow {
     /// system's toolbar appearance, and the native tab bar appears beneath
     /// it when the window joins a tab group.
     ///
-    /// The views observe state as usual; bind them to ``browser``.
+    /// Each closure runs once, when you call this method, to build its view.
+    /// The views it builds stay live: SwiftUI re-renders them as the
+    /// observable state they read changes, so bind them to ``browser`` or
+    /// your own models rather than passing values captured at call time.
+    /// Call the method again to replace the toolbar.
+    ///
+    /// The toolbar is installed as soon as the window exists — immediately
+    /// for any window you create.
     ///
     /// ```swift
     /// window.setToolbar {
@@ -26,11 +33,36 @@ extension CefBrowserWindow {
         @ViewBuilder principal: () -> some View,
         @ViewBuilder trailing: () -> some View
     ) {
-        guard let nsWindow = window else { return }
         let provider = ToolbarItemProvider(
             leading: NSHostingView(rootView: leading()),
             principal: NSHostingView(rootView: principal()),
             trailing: NSHostingView(rootView: trailing()))
+        withWindow { provider.install(in: $0) }
+    }
+
+    /// A toolbar with only a centered view.
+    public func setToolbar(@ViewBuilder principal: () -> some View) {
+        setToolbar(leading: { EmptyView() }, principal: principal, trailing: { EmptyView() })
+    }
+
+    /// Shows a small SwiftUI view inside this window's tab in the native tab
+    /// bar — a favicon, a loading spinner, an audio indicator.
+    ///
+    /// `content` runs once; the view it builds updates with the observable
+    /// state it reads, such as ``CefBrowser/favicon`` and
+    /// ``CefBrowser/isLoading``. The accessory is installed as soon as the
+    /// window exists.
+    public func setTabAccessory(@ViewBuilder _ content: () -> some View) {
+        let hosting = NSHostingView(rootView: content())
+        hosting.sizingOptions = [.intrinsicContentSize]
+        withWindow { $0.tab.accessoryView = hosting }
+    }
+}
+
+extension ToolbarItemProvider {
+    /// Makes a toolbar of this provider's items the window's toolbar.
+    func install(in nsWindow: NSWindow) {
+        let provider = self
         let toolbar = NSToolbar(identifier: "CefBrowserWindow.toolbar")
         toolbar.delegate = provider
         toolbar.displayMode = .iconOnly
@@ -45,19 +77,6 @@ extension CefBrowserWindow {
         nsWindow.toolbarStyle = .unifiedCompact
         nsWindow.titleVisibility = .hidden
         nsWindow.setFrame(frame, display: false)
-    }
-
-    /// A toolbar with only a centered view.
-    public func setToolbar(@ViewBuilder principal: () -> some View) {
-        setToolbar(leading: { EmptyView() }, principal: principal, trailing: { EmptyView() })
-    }
-
-    /// Shows a small SwiftUI view inside this window's tab in the native tab
-    /// bar — a favicon, a loading spinner, an audio indicator.
-    public func setTabAccessory(@ViewBuilder _ content: () -> some View) {
-        let hosting = NSHostingView(rootView: content())
-        hosting.sizingOptions = [.intrinsicContentSize]
-        window?.tab.accessoryView = hosting
     }
 }
 

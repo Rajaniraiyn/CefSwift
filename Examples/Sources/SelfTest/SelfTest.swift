@@ -83,6 +83,7 @@ enum SelfTest {
         await browserWindowChecks()
         await browserBehaviorChecks()
         await faviconChecks()
+        await toolbarAndZoomChecks()
         await bridgeScopeChecks()
         await internalPageDataChecks()
         await serviceLifetimeChecks()

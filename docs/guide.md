@@ -8,6 +8,7 @@ are `@MainActor`.
   - [Configuration](#configuration)
   - [Keychain access](#keychain-access)
   - [Preferences](#preferences)
+  - [Relaunching](#relaunching)
 - [Browsers](#browsers)
 - [Showing a browser](#showing-a-browser)
   - [Offscreen rendering](#offscreen-rendering)
@@ -51,14 +52,16 @@ struct MyApp: CefSwiftApp {
         // Chromium is running here; register scheme handlers before any page loads.
     }
 
-    var body: some Scene { … }
+    var body: some Scene {
+        WindowGroup { ContentView() }
+    }
 }
 ```
 
 If Chromium cannot start, `CefSwiftApp` prints the reason and exits with
 status 1. If another instance of the app already uses the same data
 directory, Chromium hands the launch to it and this process exits with
-status 0.
+status 0; see [Relaunching](#relaunching).
 
 An AppKit app initializes the runtime first thing in `main`, before anything
 touches `NSApp`:
@@ -163,6 +166,25 @@ throws `CefError.operationFailed` for an unknown name or a value of the wrong
 type, and restores the default when passed `nil`. Values are `CefJSON`,
 which accepts Swift literals.
 
+### Relaunching
+
+Only one process can use a data directory, so an app runs as a single
+instance. When it is launched again while running, from the command line or
+by another app, the new process hands its arguments to the running one and
+exits. The running app is brought to the front and
+`CefRuntime.shared.onRelaunch` receives the new launch's arguments, without
+the program path, and its working directory:
+
+```swift
+CefRuntime.shared.onRelaunch = { arguments, workingDirectory in
+    let urls = arguments.compactMap(URL.init(string:)).filter { $0.scheme != nil }
+    if urls.isEmpty { openTab(nil) } else { urls.forEach(openTab) }
+}
+```
+
+Resolve relative file paths against `workingDirectory`. Without a handler,
+a relaunch only brings the app to the front.
+
 ## Browsers
 
 `CefBrowser` is the model of one browser: an `@Observable` object with the
@@ -172,9 +194,9 @@ when it is first shown.
 
 | Kind | Members |
 |---|---|
-| State | `url`, `title`, `isLoading`, `estimatedProgress`, `canGoBack`, `canGoForward`, `faviconURL`, `isFullscreen`, `statusText`, `downloads`, `findResult`, `state` (`.pending`, `.live`, `.closed`) |
+| State | `url`, `title`, `isLoading`, `estimatedProgress`, `canGoBack`, `canGoForward`, `favicon`, `faviconURL`, `zoomLevel`, `isFullscreen`, `statusText`, `downloads`, `findResult`, `state` (`.pending`, `.live`, `.closed`) |
 | Navigation | `load(_:)`, `goBack()`, `goForward()`, `reload(ignoringCache:)`, `stopLoading()` |
-| Page | `zoomLevel`, `isAudioMuted`, `find(_:backwards:caseSensitive:)`, `stopFinding(clearingSelection:)`, `print()`, `printToPDF(at:)`, `snapshot()` |
+| Page | `isAudioMuted`, `find(_:backwards:caseSensitive:)`, `stopFinding(clearingSelection:)`, `print()`, `printToPDF(at:)`, `snapshot()` |
 | JavaScript | `evaluateJavaScript(_:)`, `evaluateJavaScript(_:as:)`, `executeJavaScript(_:)`, `addUserScript(_:)` |
 | DevTools | `devTools`, `showDevTools(inspecting:)`, `closeDevTools()`, `isShowingDevTools` |
 | Lifetime | `ready()`, `close(force:)` |
@@ -196,7 +218,24 @@ A `requestFilter` sees every network request and returns `.allow`, `.block`,
 `.redirect(_:)` or `.setHeaders(_:)`. It runs on Chromium's IO thread, so it
 must be fast and must not touch main-actor state.
 
-A browser holds its `delegate` weakly; keep the delegate alive yourself.
+`favicon` is the page's icon as an `NSImage`, downloaded at up to 32 points
+from the address in `faviconURL`. Both are `nil` until the page reports an
+icon, and become `nil` again when a new main-frame document starts loading.
+For pages that are not open, use
+[`profile.history.favicon(for:size:)`](#bookmarks-history-and-suggestions).
+
+`zoomLevel` is 0 for 100%, and each step of 1 scales the page by 20%. You can
+set it, and it follows the zoom Chromium applies: the level it remembers for
+each site, restored as the browser moves between sites, and Chrome's zoom
+commands. CEF does not report zoom changes, so CefKit reads the level back
+after navigations, zoom commands and changes made through `zoomLevel`; other
+changes show up at the next navigation. In a windowed browser, pinching
+magnifies the page without changing `zoomLevel`.
+
+A browser holds its `delegate` weakly, as `WKWebView` does. Keep a strong
+reference to the delegate for as long as the browser lives; a delegate
+created inline, as in `CefBrowser(url: url, delegate: Policy())`, is
+released at once and the browser falls back to the default decisions.
 
 A browser you create lives until you call `close()`. Unless you pass
 `force: true`, the page's `beforeunload` handler can ask the user to stay.
@@ -376,11 +415,23 @@ const stop = app.on("themeChanged", theme => apply(theme));
   `isMainFrame`. Chromium reports the origin and frame, so a page cannot
   forge them.
 
-Handlers run with your app's privileges. By default only top-level
-documents may use the bridge. `bridge.access` widens that to documents from
-listed origins in any frame (`.origins(["https://app.example.com"])`) or to
-every frame (`.anyFrame`, only for browsers that show nothing but your own
-content).
+Handlers run with your app's privileges, so `bridge.access` decides where
+the global exists:
+
+| Access | Documents that get the bridge |
+|---|---|
+| `.mainFrame` (default) | Top-level documents. |
+| `.origins(["https://app.example.com"])` | Documents from the listed origins, in any frame. |
+| `.anyFrame` | Every document. Use it only for browsers that show nothing but your own content. |
+
+A document outside `access` has no global and no way to reach the bridge's
+underlying binding. Calls are checked again in Swift against the origin and
+frame Chromium reports. A change to `access` applies to calls at once and to
+the global from the next document load:
+
+```swift
+bridge.access = .origins(["app://start"])   // only your start page
+```
 
 ## Decisions
 
@@ -407,7 +458,7 @@ final class Policy: CefBrowserDelegate {
 | `browser(_:runJavaScriptDialog:) async` | Native sheet |
 | `browser(_:confirmLeavingPage:) async` (`beforeunload`) | Native sheet |
 | `browser(_:decidePermissionFor:) async` | `.deny` |
-| `browser(_:credentialFor:) async` (HTTP authentication) | Native sign-in sheet; see [Known limits](#known-limits) |
+| `browser(_:credentialFor:) async` (HTTP authentication) | Native sign-in sheet. CEF 156 does not call it; see [Known limits](#known-limits) |
 | `browser(_:shouldProceedDespite:) async` (certificate errors) | `false`: the load is cancelled |
 | `browser(_:decideDestinationFor:suggestedName:) async` | `.allow(destination: nil)`: `~/Downloads` |
 | `browser(_:decidePolicyFor:)` | `.allow` |
@@ -528,6 +579,23 @@ window.setTabAccessory { TabIcon(browser: browser) }   // in the native tab
 window.show()
 ```
 
+A tab accessory is a small view shown in the window's native tab, such as
+the page's icon:
+
+```swift
+struct TabIcon: View {
+    let browser: CefBrowser
+
+    var body: some View {
+        if let favicon = browser.favicon {
+            Image(nsImage: favicon).resizable().frame(width: 16, height: 16)
+        } else {
+            Image(systemName: "globe")
+        }
+    }
+}
+```
+
 The window starts hidden; call `show()`. `CefBrowserWindow.all` lists the
 open windows and keeps them alive, `close()` closes one (its page's
 `beforeunload` handler may keep it open), and `onClose` runs after it is
@@ -557,9 +625,17 @@ native toolbar item, and the native tab bar appears beneath the toolbar when
 the window joins a tab group. `setToolbar(principal:)` sets only the
 centered view. Installing a toolbar keeps the window's frame.
 
-The builder closures run once. Put views that read browser state in a `View`
-type of their own, such as `NavigationButtons` above, so they read the state
-in `body` and update when it changes.
+The builder closures run once, when you call the method, and the views they
+build stay live: SwiftUI updates them as the observable state they read
+changes. Put views that read browser state in a `View` type of their own,
+such as `NavigationButtons` above, so they read the state in `body`; a value
+read in the closure itself is captured once. Call `setToolbar` again to
+replace the toolbar.
+
+`setToolbar`, `setTabAccessory(_:)` and `topAccessory` take effect as soon
+as the `NSWindow` exists, which is immediately for a window you create. For
+other setup that needs the `NSWindow`, `withWindow(_:)` runs a closure at
+the same moment. All of them do nothing once the window has closed.
 
 Around the page:
 
@@ -613,7 +689,8 @@ opener closes unless you close it, for example from the opener's `onClose`.
 `.find`, `.print`, `.showHistory`, `.showDownloads`, `.showSettings`,
 `.createQRCode`, `.zoomIn`, `.bookmarkThisTab`, `.showDevTools` and more.
 `canExecute(_:)` says whether one is available. Chrome-style browsers
-only.
+only. `zoomLevel` follows `.zoomIn`, `.zoomOut` and `.resetZoom`, whether you
+run them or the user chooses them in Chrome's UI.
 
 Before Chrome runs a command chosen from its menus or keyboard shortcuts, it
 calls the delegate's `browser(_:handleChromeCommand:disposition:)`. Return
@@ -642,7 +719,8 @@ affected. Leave `onChromiumOpensTab` unset in apps that use
 
 Every other browser Chromium creates on its own, popups and DevTools
 included, is passed to `CefRuntime.shared.onBrowserCreated`. Assign a
-delegate there to manage it. `CefRuntime.shared.browsers` lists every live
+delegate there to manage it. Tabs that `onChromiumOpensTab` takes over do
+not reach `onBrowserCreated`. `CefRuntime.shared.browsers` lists every live
 browser.
 
 ## Customizing Chromium's own pages
@@ -746,6 +824,12 @@ let suggestions = try await profile.autocomplete.suggestions(for: "cef")
   this API and in Chrome's UI.
 - `history` groups visits by day, as `chrome://history` does. It records
   only visits made in Chrome-style browsers.
+- `history.favicon(for:size:)` returns the icon Chromium keeps for a page
+  that is not open, such as a history entry, bookmark or most-visited site,
+  or `nil` when it has none. For an open page, use `browser.favicon`.
+- An incognito profile keeps no history: its `history` methods throw. It
+  shares the default profile's bookmarks, as Chrome's incognito windows do,
+  so `incognito.bookmarks` is `CefProfile.default.bookmarks`.
 - `autocomplete.suggestions(for:currentURL:allowsInlineCompletion:)` returns
   what Chrome's address bar would show, ranked, each with a `kind` (history,
   bookmark, open tab, search, …), `detail` (a page's title), `relevance`,
@@ -757,9 +841,13 @@ let suggestions = try await profile.autocomplete.suggestions(for: "cef")
   `kind` to keep only local results.
 
 CEF has no API for any of this. CefKit uses the services Chromium's own
-pages use, from hidden browsers that it opens on first use and closes by
-the time the app quits: `chrome.bookmarks` on the bookmarks page, and the Mojo handlers of the
-history, new tab and `chrome://omnibox` pages. These interfaces are internal
+pages use, from hidden browsers that it opens on first use:
+`chrome.bookmarks` on the bookmarks page, and the Mojo handlers of the
+history, new tab and `chrome://omnibox` pages. Their windows stay
+invisible, even when Chromium brings its windows forward. The default
+profile's hidden browsers stay open until the app quits. Those of any other
+profile close when the profile's last browser closes, which lets an
+incognito profile and its data go, and start again on the next call. These interfaces are internal
 to Chromium and more likely than the rest of CefKit to change with a
 Chromium update; `chrome://omnibox` is a debugging page, so `autocomplete`
 is experimental. SelfTest exercises all three, so a CEF update that breaks
@@ -849,8 +937,15 @@ secure, CORS-enabled and fetchable; pass `options:` to change them.
 - Only Chrome-style browsers record history. Pages shown in a `CefWebView`
   do not appear in `profile.history`.
 - CEF 156 does not call `browser(_:credentialFor:)` for HTTP
-  authentication. Chrome-style browsers show Chromium's own sign-in dialog;
-  in a `CefWebView` the request fails with `ERR_INVALID_AUTH_CREDENTIALS`.
+  authentication. Chrome-style browsers show Chromium's own sign-in dialog
+  over the page. In a `CefWebView` the load fails with
+  `ERR_INVALID_AUTH_CREDENTIALS`, reported to `browser(_:didFailLoad:)`, and
+  Chromium shows its sign-in dialog in a window of its own; closing the
+  browser leaves the page first, which dismisses that window.
+- Tab discarding (Memory Saver) is unavailable. Each browser is the active
+  tab of its own Chromium window, and once CefKit's DevTools connection is
+  in use (JavaScript evaluation, user scripts, bridges) it stays attached,
+  so Chromium never discards a browser. Close browsers you do not need.
 - DevTools opens in a window of its own; there is no docked DevTools.
 - Offscreen pages appear to VoiceOver as a single element.
 - Offscreen browsers always use the Alloy style and cannot open native

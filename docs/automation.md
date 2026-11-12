@@ -37,6 +37,9 @@ From <old version>.
 Co-authored-by: <CEF_UPDATE_COAUTHOR>
 ```
 
+The `Co-authored-by:` line is present only when a co-author is configured
+(see [Attribution](#attribution)).
+
 ### Failure reports
 
 - **CI fails on an update branch.** CI for `cef-update` and `cef-api-update`
@@ -52,12 +55,12 @@ Co-authored-by: <CEF_UPDATE_COAUTHOR>
 
 ### Attribution
 
-Update commits are authored by `github-actions[bot]` and carry a
-`Co-authored-by:` trailer, so a person is credited as well. Set the
-repository variable `CEF_UPDATE_COAUTHOR` to `Name <email>` to choose who;
-without it, the workflow uses the default written in `cef-update.yml`. Use
-an address GitHub associates with the account, such as its `noreply`
-address.
+Update commits are authored by `github-actions[bot]`. To credit a person
+as well, set the repository variable `CEF_UPDATE_COAUTHOR` to
+`Name <email>`, using an address GitHub associates with the account, such
+as its `noreply` address; the commits then carry a `Co-authored-by:`
+trailer. Without the variable, `Rajaniraiyn/CefSwift` credits its
+maintainer and any other repository, a fork included, adds no trailer.
 
 ### One-time repository setup
 
@@ -66,7 +69,7 @@ address.
   auto-merge would merge before CI has run.
 - Settings → Actions → General: allow GitHub Actions to create pull
   requests.
-- Optional: set the `CEF_UPDATE_COAUTHOR` variable.
+- Optional: set the `CEF_UPDATE_COAUTHOR` variable to credit a co-author.
 
 ## Moving `CEF_API_VERSION`
 

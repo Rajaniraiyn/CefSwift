@@ -34,6 +34,8 @@ Options of `bundle`:
 | `--bundle-id <id>` | `cefapp.json`, else `com.cefswift.<name>` | The app's bundle identifier. |
 | `--name <Name>` | The product name | The app, executable and display name. |
 | `--sign <identity\|->` | `cefapp.json`, else detected | Code-signing identity; `-` signs ad hoc. See [Code signing](#code-signing). |
+| `--version <version>` | `cefapp.json`, else `1.0` | `CFBundleShortVersionString`, the version users see. |
+| `--build <number>` | `cefapp.json`, else `1` | `CFBundleVersion`, the build number. |
 | `--flavor minimal\|standard` | `minimal` | Which CEF distribution to download. See [Flavors](#flavors). |
 | `--platform macosarm64\|macosx64` | The build machine's | Which architecture's CEF to bundle. |
 | `--manifest <path>` | `CEF_VERSION.json` | A different CEF manifest. |
@@ -60,12 +62,17 @@ command-line options override:
 {
   "bundleIdentifier": "com.example.myapp",
   "displayName": "My App",
+  "version": "2.1",
+  "build": "214",
   "minimumSystemVersion": "15.0",
   "signingIdentity": "Developer ID Application: Example (TEAMID)"
 }
 ```
 
-Every key is optional. `minimumSystemVersion` defaults to `14.0`. If you
+Every key is optional. `version` and `build` default to `1.0` and `1`.
+`minimumSystemVersion` defaults to the deployment target the product was
+built for — the macOS version in the package's `platforms` — or `14.0`
+when the executable does not record one. If you
 keep `cefapp.json` in the target's directory, exclude it in `Package.swift`
 (`exclude: ["cefapp.json"]`), as the examples do, so SwiftPM does not warn
 about an unhandled file.
@@ -132,11 +139,13 @@ The main app's `Info.plist` includes:
 |---|---|---|
 | `LSEnvironment` | `{ MallocNanoZone = "0" }` | Chromium's allocator does not work with the nano malloc zone; without it the app can crash inside CEF. |
 | `NSPrincipalClass` | `NSApplication` | CefSwift creates its `CefApplication` subclass at launch, before anything else uses `NSApp`. |
-| `LSMinimumSystemVersion` | `minimumSystemVersion`, default `14.0` | The package's minimum. |
+| `LSMinimumSystemVersion` | `minimumSystemVersion`, else the product's deployment target | The package's minimum. |
 | `NSHighResolutionCapable` | `true` | Retina rendering. |
 | `NSSupportsAutomaticGraphicsSwitching` | `true` | Lets Macs with two GPUs use the integrated one. |
 
-`CFBundleShortVersionString` and `CFBundleVersion` are `1.0` and `1`.
+`CFBundleShortVersionString` and `CFBundleVersion` come from `--version`
+and `--build`, or `version` and `build` in `cefapp.json`, and default to
+`1.0` and `1`. The helpers carry the same values.
 
 Each helper's `Info.plist` adds:
 

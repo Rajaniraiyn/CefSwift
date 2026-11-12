@@ -211,6 +211,31 @@ extension SelfTest {
         }
         window.close()
         check("authentication: window with the dialog open closes", await waitUntil { window.isClosed })
+
+        // An embedded (Alloy-style) browser: CEF 156 does not ask the
+        // delegate either. The load fails with ERR_INVALID_AUTH_CREDENTIALS
+        // and Chromium shows its sign-in window on its own.
+        let embeddedRecorder = Recorder()
+        embeddedRecorder.credential = recorder.credential
+        let embedded = CefBrowser(url: url, delegate: embeddedRecorder)
+        let view = CefWindowedBrowserView()
+        view.frame = SelfTest.window.contentView!.bounds
+        SelfTest.window.contentView!.addSubview(view)
+        view.browser = embedded
+        let failed = await waitUntil { embeddedRecorder.loadErrors.contains { $0.code == -338 } || embedded.title == "authorized" }
+        if embeddedRecorder.challenges.isEmpty {
+            check("authentication (embedded): fails with ERR_INVALID_AUTH_CREDENTIALS, delegate not asked",
+                  failed && embedded.title != "authorized", detail: "\(embeddedRecorder.loadErrors)")
+        } else {
+            check("authentication (embedded): delegate answers the challenge",
+                  await waitUntil { embedded.title == "authorized" })
+        }
+        try? await Task.sleep(for: .milliseconds(500))
+        embedded.close(force: true)
+        check("authentication (embedded): closing with Chromium's sign-in window open is clean", await waitUntil {
+            embedded.state == .closed && !NSApp.windows.contains { $0.isVisible && $0.title == "Sign in" }
+        }, detail: "\(NSApp.windows.filter(\.isVisible).map(\.title))")
+        view.removeFromSuperview()
     }
 
     // MARK: Renderer crashes

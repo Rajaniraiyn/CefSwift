@@ -6,6 +6,11 @@ struct CefAppConfig: Decodable {
     var bundleIdentifier: String?
     var displayName: String?
     var minimumSystemVersion: String?
+    /// `CFBundleShortVersionString`, the version users see. `--version`
+    /// takes precedence.
+    var version: String?
+    /// `CFBundleVersion`, the build number. `--build` takes precedence.
+    var build: String?
     /// The codesigning identity, or "-" for ad hoc. `--sign` takes
     /// precedence.
     var signingIdentity: String?
@@ -40,6 +45,8 @@ struct AppBundler {
     let displayName: String
     let bundleIdentifier: String
     let minimumSystemVersion: String
+    let version: String              // CFBundleShortVersionString
+    let build: String                // CFBundleVersion
     let mainExecutable: URL          // built product binary
     let helperExecutable: URL        // built cef-helper binary
     let frameworkSource: URL         // converted framework inside .cef/dist
@@ -114,8 +121,8 @@ struct AppBundler {
             "CFBundleName": appName,
             "CFBundleDisplayName": displayName,
             "CFBundlePackageType": "APPL",
-            "CFBundleShortVersionString": "1.0",
-            "CFBundleVersion": "1",
+            "CFBundleShortVersionString": version,
+            "CFBundleVersion": build,
             "LSMinimumSystemVersion": minimumSystemVersion,
             "NSPrincipalClass": "NSApplication",
             "NSHighResolutionCapable": true,
@@ -134,8 +141,8 @@ struct AppBundler {
             "CFBundleName": helperName,
             "CFBundleDisplayName": helperName,
             "CFBundlePackageType": "APPL",
-            "CFBundleShortVersionString": "1.0",
-            "CFBundleVersion": "1",
+            "CFBundleShortVersionString": version,
+            "CFBundleVersion": build,
             "LSMinimumSystemVersion": minimumSystemVersion,
             "NSSupportsAutomaticGraphicsSwitching": true,
             "LSUIElement": true,
@@ -162,5 +169,46 @@ struct AppBundler {
                 : "Check that the identity '\(signingIdentity)' is valid ('security find-identity -v -p codesigning') " +
                   "and that its private key is accessible, or pass '--sign -' for ad-hoc signing."
         )
+    }
+}
+
+/// Reads a Mach-O executable's deployment target — the `minos` of its
+/// `LC_BUILD_VERSION` (or `LC_VERSION_MIN_MACOSX`) load command, which
+/// SwiftPM sets from the package's `platforms`.
+enum MachOVersion {
+    static func minimumSystemVersion(of executable: URL) -> String? {
+        guard let data = try? Data(contentsOf: executable, options: .mappedIfSafe), data.count >= 32 else { return nil }
+        func uint32(_ offset: Int, bigEndian: Bool = false) -> UInt32? {
+            guard offset >= 0, offset + 4 <= data.count else { return nil }
+            let value = data[data.startIndex + offset ..< data.startIndex + offset + 4]
+                .withUnsafeBytes { $0.loadUnaligned(as: UInt32.self) }
+            return bigEndian ? UInt32(bigEndian: value) : UInt32(littleEndian: value)
+        }
+        var base = 0
+        // A universal binary: read the first architecture's slice.
+        if uint32(0, bigEndian: true) == 0xCAFE_BABE {
+            guard let offset = uint32(16, bigEndian: true) else { return nil }
+            base = Int(offset)
+        }
+        guard uint32(base) == 0xFEED_FACF, let commandCount = uint32(base + 16) else { return nil }
+        var offset = base + 32  // sizeof(mach_header_64)
+        for _ in 0..<commandCount {
+            guard let command = uint32(offset), let size = uint32(offset + 4), size > 0 else { return nil }
+            switch command {
+            case 0x32:  // LC_BUILD_VERSION: cmd, cmdsize, platform, minos
+                return uint32(offset + 12).map(format)
+            case 0x24:  // LC_VERSION_MIN_MACOSX: cmd, cmdsize, version
+                return uint32(offset + 8).map(format)
+            default:
+                offset += Int(size)
+            }
+        }
+        return nil
+    }
+
+    /// `xxxx.yy.zz` nibbles as "major.minor[.patch]".
+    private static func format(_ version: UInt32) -> String {
+        let major = version >> 16, minor = (version >> 8) & 0xFF, patch = version & 0xFF
+        return patch == 0 ? "\(major).\(minor)" : "\(major).\(minor).\(patch)"
     }
 }

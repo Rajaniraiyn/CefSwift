@@ -76,6 +76,12 @@ Policy callbacks that Chromium can wait on become `async` delegate methods:
 the CEF callback object is kept alive in a `Task` and completed with the
 delegate's answer.
 
+Some state has no CEF event of its own. `favicon` is downloaded with
+`download_image` when the display handler reports the page's icon
+addresses. `zoomLevel` is read back with `get_zoom_level` after each
+navigation, each zoom command and each change made through the property,
+in every browser, since Chromium keeps one level per site.
+
 ## Hosting
 
 | Host | Style | How it draws |
@@ -102,10 +108,14 @@ the Chrome DevTools Protocol in-process. `evaluateJavaScript`, user scripts,
   not run those in its `chrome://` pages, so there CefSwift evaluates them as
   each page starts loading.
 - The bridge registers a binding (`Runtime.addBinding`) and injects its
-  JavaScript half at document start. Calls arrive as `Runtime.bindingCalled`
-  events that carry the execution context, whose origin and frame Chromium
-  reports; that is the basis of the bridge's access check. Replies and
-  events go back through `Runtime.evaluate`.
+  JavaScript half, a shim, at document start. Chromium adds the binding to
+  every document's global object; the shim removes it from there and, only
+  in documents that `access` permits, keeps it privately and defines the
+  bridge's global. Calls arrive as `Runtime.bindingCalled` events that carry
+  the execution context, whose origin and frame Chromium reports; Swift
+  checks them against `access` again. Replies and events go back through
+  `Runtime.evaluate`. Changing `access` replaces the shim, so it applies
+  from the next document.
 
 Browsers with bridges or user scripts are created on `about:blank`, set up,
 and then navigated, so the first real document already has them.
@@ -122,10 +132,19 @@ out, or a renderer that dies, discards the browser; the next call starts a
 new one.
 
 Service browsers are left out of `CefRuntime.browsers` and
-`CefBrowserWindow.all`, and close when the app quits, if not before. Chromium saves every
-Chrome-style window in its session, these included, and reopens them after
-a crash; their addresses carry a marker fragment, so `CefRuntime`
-recognizes and closes them.
+`CefBrowserWindow.all`. Their windows are transparent, ignore the mouse and
+are ordered out whenever Chromium shows them, as it does when it brings its
+windows forward. A service browser holds its profile, so a non-default
+profile's service browsers close when its last browser closes, and start
+again on the next call; the default profile's stay until the app quits.
+Chromium saves every Chrome-style window in its session, these included,
+and reopens them after a crash; their addresses carry a marker fragment, so
+`CefRuntime` recognizes and closes them.
+
+`chrome://history` cannot open in an incognito profile, so `CefHistory`
+throws there instead of starting a service. An incognito profile's
+bookmarks are the default profile's `CefBookmarks`, since Chromium shares
+the original profile's bookmarks with its incognito profile.
 
 ## Quitting
 
@@ -135,6 +154,16 @@ the last browser and the last Chromium window are destroyed, it calls
 `terminate(_:)` again from the run loop, then calls `cef_shutdown()`. Calling
 `cef_shutdown()` earlier, or from inside a CEF callback, crashes. A page that
 asks to stay cancels the quit.
+
+## Relaunching
+
+Chromium allows one process per data directory. A second launch finds the
+running one, hands it its command line and working directory, and exits;
+`CefRuntime.initialize(configuration:)` throws
+`CefError.anotherInstanceRunning` in that process. The running process
+receives the launch from Chromium, activates the app and calls
+`CefRuntime.onRelaunch` on the next run-loop turn, outside Chromium's
+callback.
 
 ## Processes
 
