@@ -29,6 +29,22 @@ extension SelfTest {
         }
         if !hostsAfterReading.isEmpty { print("     hosts after reading: \(hostsAfterReading)") }
 
+        // The deadline covers starting the host: a call shorter than the
+        // start-up fails at its deadline instead of waiting for the host.
+        var deadlineCall = Duration.zero
+        var deadlineError = ""
+        do {
+            let start = ContinuousClock.now
+            defer { deadlineCall = ContinuousClock.now - start }
+            try await profile.pingHistoryService(timeout: .milliseconds(5))
+        } catch {
+            deadlineError = "\(error)"
+        }
+        check("service hosts: a call's deadline includes starting its host",
+              deadlineError.contains("no answer") && deadlineCall < .milliseconds(500),
+              detail: "\(deadlineCall), \(deadlineError.isEmpty ? "answered" : deadlineError)")
+        _ = await waitUntil { profile.runningServiceHosts.isEmpty }
+
         var elapsed = Duration.zero
         await expect("service hosts: a call starts its host quickly") {
             let start = ContinuousClock.now

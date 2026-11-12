@@ -172,11 +172,17 @@ paints everything except the page's rectangle and passes events through.
 
 The framework exports only CEF's C API, but Chromium's macOS UI is AppKit,
 and its Objective-C classes are visible to the Objective-C runtime.
-`CefObjCHook` overrides a few of their methods. Each override is looked up
-by class name, selector and type encoding; a missing one is logged, left
-out, and listed by SelfTest's "runtime hooks" check, and the feature that
-needs it falls back to Chromium's own behavior. An override added to a
-class that inherits the method stays on that class alone.
+`CefObjCHook` overrides a few of their methods, a feature at a time:
+surface tracking (`CefNSWindow` child windows and `NativeWidgetMacNSWindow`
+alpha), swipe gating (`ChromeRenderWidgetHostViewMacDelegate`) and the
+swipe indicator (`HistoryOverlayController`). Every method a feature
+overrides or calls is looked up first by class name, selector and type
+encoding, and the feature's overrides go in only when all of them are
+there; one missing method leaves the whole feature out, logged and listed
+per feature by SelfTest's "runtime hooks" check, and the feature falls
+back to Chromium's own behavior instead of running partly hooked. An
+override added to a class that inherits the method stays on that class
+alone.
 
 **Surfaces.** Chromium's bubbles, dialogs, find bar and status bubble are
 Views widgets, each in a `NativeWidgetMacNSWindow` that Chromium attaches to
@@ -533,7 +539,11 @@ its DevTools connection, before the browser loads its first page:
   assertion, or with failing user verification for a refusal, which
   rejects the call at once. The page then resumes and makes its call.
   `WebAuthn.credentialAdded` or `credentialAsserted` reports the result,
-  which goes to the store, and the authenticator is removed. An
+  which goes to the store, and the authenticator is removed. Chromium
+  reports the credential as it answers the page, so the save cannot
+  change the page's result; the store is checked before the delegate is
+  asked instead (`checkAvailability()` for a registration, the read of
+  usable passkeys for an assertion), and a failure there refuses the call. An
   authenticator left over from an earlier call is removed before the next
   decision, so no call is answered unasked.
 
@@ -680,8 +690,14 @@ Chrome-style browsers draw at the display's rate, which CEF cannot change.
 `CefApplication.terminate(_:)` asks `CefRuntime` first. The runtime closes
 every browser, so pages can run `beforeunload`, and declines the request. As
 the last browser and the last Chromium window are destroyed, it calls
-`terminate(_:)` again from the run loop, then calls `cef_shutdown()`. Calling
-`cef_shutdown()` earlier, or from inside a CEF callback, crashes. A page that
+`terminate(_:)` again from the run loop, then shuts Chromium down in a
+fixed order: service hosts, lifecycle observers and the memory saver's
+timer, the media router's registrations, every profile's request context,
+the message pump, then `cef_shutdown()` with the thread actors' jobs
+waiting it out. `CefRuntime.state` is `.stopping` meanwhile and `.stopped`
+after; `initialize` then throws `CefError.shutDown`, as Chromium cannot
+start twice in a process. Calling `cef_shutdown()` earlier, or from inside
+a CEF callback, crashes, so the shutdown is internal to this path. A page that
 asks to stay cancels the quit. A browser discarded by closing has no
 Chromium browser left and is marked closed at once.
 

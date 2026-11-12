@@ -64,7 +64,8 @@ public struct CefAutocompleteSuggestion: Sendable, Identifiable, Hashable {
 /// local results.
 @MainActor
 public final class CefAutocomplete {
-    private unowned let profile: CefProfile
+    /// Held, so the profile lives as long as this object is in use.
+    private let profile: CefProfile
 
     init(profile: CefProfile) {
         self.profile = profile

@@ -72,12 +72,12 @@ extension SelfTest {
             ofTypes: [WKWebsiteDataTypeCookies], modifiedSince: .distantPast)
 
         let privateBrowser = CefSystemBrowser(options: .init(profile: .incognito()))
-        let namedBrowser = CefSystemBrowser(options: .init(profile: .persistent(name: "SelfTest System")))
+        let namedBrowser = CefSystemBrowser(options: .init(profile: .persistent(id: "selftest-system", displayName: "SelfTest System")))
         check("system engine: profiles map to WebKit data stores",
               !privateBrowser.nativeView.configuration.websiteDataStore.isPersistent
                   && namedBrowser.nativeView.configuration.websiteDataStore.isPersistent
                   && namedBrowser.nativeView.configuration.websiteDataStore.identifier
-                      == CefSystemBrowser(options: .init(profile: .persistent(name: "SelfTest System")))
+                      == CefSystemBrowser(options: .init(profile: .persistent(id: "selftest-system", displayName: "SelfTest System")))
                           .nativeView.configuration.websiteDataStore.identifier
                   && browser.nativeView.configuration.websiteDataStore === WKWebsiteDataStore.default())
 

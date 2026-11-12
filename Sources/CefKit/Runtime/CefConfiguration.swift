@@ -77,6 +77,16 @@ public struct CefConfiguration: Sendable {
     /// a child of it. Defaults to ``rootCacheDirectory``.
     public var cacheDirectory: URL?
 
+    /// The root every profile's data lives under: ``rootCacheDirectory``;
+    /// without one, the parent of ``cacheDirectory``; without either, the
+    /// default under Application Support. Persistent profiles live in its
+    /// `Profiles` directory.
+    public var resolvedRootCacheDirectory: URL {
+        if let rootCacheDirectory { return rootCacheDirectory }
+        if let cacheDirectory { return cacheDirectory.deletingLastPathComponent() }
+        return MappedCefSettings.defaultRootCacheDirectory()
+    }
+
     /// UI locale, e.g. `"en-US"`. Defaults to the system locale.
     public var locale: String?
 

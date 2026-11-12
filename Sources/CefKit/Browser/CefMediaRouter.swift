@@ -103,6 +103,14 @@ public final class CefMediaRouter {
         isDiscovering = false
     }
 
+    /// Releases every Chromium object, before Chromium shuts down.
+    func tearDown() {
+        stopDiscovery()
+        sinkObjects = [:]
+        routeObjects = [:]
+        router = nil
+    }
+
     /// Whether `sink` can show `source`.
     public func canCast(_ source: String, to sink: CefMediaSink) -> Bool {
         guard let router, let sinkObject = sinkObjects[sink.id],

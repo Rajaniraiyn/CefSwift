@@ -139,6 +139,13 @@ final class CefLifecycleCoordinator {
         setNeedsUpdate()
     }
 
+    /// Stops following the signals, as Chromium shuts down.
+    func stop() {
+        for (center, token) in observers { center.removeObserver(token) }
+        observers = []
+        responderObservations = [:]
+    }
+
     /// Updates every browser on the next turn of the run loop, once.
     func setNeedsUpdate() {
         guard !isUpdateScheduled else { return }

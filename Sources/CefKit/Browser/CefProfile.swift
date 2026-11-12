@@ -2,6 +2,7 @@ import AppKit
 import CCef
 import Foundation
 import CefBase
+import CryptoKit
 import WebKit
 
 /// A browsing profile: its own cookies, storage, cache, preferences,
@@ -9,8 +10,11 @@ import WebKit
 ///
 /// ```swift
 /// var options = CefBrowserOptions()
-/// options.profile = .persistent(name: "Work")
+/// options.profile = .persistent(id: "work", displayName: "Work")
 /// ```
+///
+/// A profile's ``id`` is its identity: it names the profile's storage and
+/// never changes. Its ``displayName`` is what to show, and can.
 ///
 /// Use profiles after ``CefRuntime/initialize(configuration:)``.
 @MainActor
@@ -18,34 +22,60 @@ public final class CefProfile {
     enum Kind: Equatable {
         case global
         case incognito
-        case persistent(name: String)
+        case persistent(id: String)
     }
 
     let kind: Kind
+    /// The profile's stable identifier: `"default"` for the default
+    /// profile, the identifier given to ``persistent(id:displayName:)``, and
+    /// a new `"incognito-<UUID>"` for each incognito profile. Store it to
+    /// find the profile again in a later launch.
+    public let id: String
+    /// The name to show for the profile. Defaults to “Default”,
+    /// “Incognito”, or a persistent profile's identifier. Changing it moves
+    /// nothing on disk.
+    public var displayName: String
     private var context: CefRef<cef_request_context_t>?
     /// The profile's WebKit data store, for ``CefSystemBrowser``.
     var webKitDataStore: WKWebsiteDataStore?
 
-    private init(kind: Kind) {
+    private init(kind: Kind, id: String, displayName: String) {
         self.kind = kind
+        self.id = id
+        self.displayName = displayName
     }
 
     /// The default profile, stored at ``CefConfiguration/cacheDirectory``.
-    public static let `default` = CefProfile(kind: .global)
+    public static let `default` = CefProfile(kind: .global, id: "default", displayName: "Default")
 
     /// A fresh in-memory profile; nothing is written to disk and everything
     /// is discarded with the profile.
     public static func incognito() -> CefProfile {
-        CefProfile(kind: .incognito)
+        CefProfile(kind: .incognito, id: "incognito-\(UUID().uuidString)", displayName: "Incognito")
     }
 
-    /// The on-disk profile called `name`, stored under
-    /// `<rootCacheDirectory>/Profiles/<name>`. The same name always yields the
-    /// same profile.
-    public static func persistent(name: String) -> CefProfile {
-        if let existing = persistentProfiles[name] { return existing }
-        let profile = CefProfile(kind: .persistent(name: name))
-        persistentProfiles[name] = profile
+    /// The on-disk profile identified by `id`, stored under
+    /// `<rootCacheDirectory>/Profiles/`. The same identifier always yields
+    /// the same profile, and different identifiers different storage:
+    /// characters other than lowercase letters, digits, `-` and `_` are
+    /// percent-encoded in the directory name, so `"a/b"`, `"a_b"`,
+    /// `"Work"` and `"work"` are four profiles, even on a case-insensitive
+    /// volume. `"default"` is ``default``.
+    ///
+    /// - Parameter displayName: Sets ``displayName``; `nil` keeps the
+    ///   profile's current one, which starts as `id`.
+    public static func persistent(id: String, displayName: String? = nil) -> CefProfile {
+        precondition(!id.isEmpty, "A profile identifier cannot be empty.")
+        let profile: CefProfile
+        if id == CefProfile.default.id {
+            profile = .default
+        } else if let existing = persistentProfiles[id] {
+            profile = existing
+        } else {
+            profile = CefProfile(kind: .persistent(id: id), id: id, displayName: id)
+            persistentProfiles[id] = profile
+        }
+        if let displayName { profile.displayName = displayName }
         return profile
     }
 
@@ -53,6 +83,8 @@ public final class CefProfile {
 
     // MARK: Bookmarks, history, autocomplete
     // Built on Chromium's internal services; see CefInternalServices.swift.
+    // Each service object holds its profile, so a profile stays alive while
+    // a service of it is in use; the profile holds its services weakly.
 
     /// The profile's bookmarks.
     ///
@@ -61,15 +93,21 @@ public final class CefProfile {
     /// belong to: for an incognito profile this is
     /// `CefProfile.default.bookmarks`, and bookmarks added through it are
     /// kept on disk with the default profile.
-    public private(set) lazy var bookmarks: CefBookmarks =
-        kind == .incognito ? CefProfile.default.bookmarks : CefBookmarks(profile: self)
+    public var bookmarks: CefBookmarks {
+        if kind == .incognito { return CefProfile.default.bookmarks }
+        return bookmarksService.object { CefBookmarks(profile: self) }
+    }
 
     /// The profile's browsing history and most-visited sites. An incognito
     /// profile keeps no history; its ``CefHistory`` methods throw.
-    public private(set) lazy var history = CefHistory(profile: self)
+    public var history: CefHistory { historyService.object { CefHistory(profile: self) } }
 
     /// Omnibox-ranked address-bar suggestions. Experimental.
-    public private(set) lazy var autocomplete = CefAutocomplete(profile: self)
+    public var autocomplete: CefAutocomplete { autocompleteService.object { CefAutocomplete(profile: self) } }
+
+    private let bookmarksService = WeakService<CefBookmarks>()
+    private let historyService = WeakService<CefHistory>()
+    private let autocompleteService = WeakService<CefAutocomplete>()
 
     /// The hidden service hosts behind ``bookmarks``, ``history`` and
     /// ``autocomplete``.
@@ -98,6 +136,12 @@ public final class CefProfile {
         let hosts: [CefServiceHost] = [.bookmarks, .history, .mostVisited, .omnibox, .discards]
         guard let host = hosts.first(where: { $0.name == name }) else { return }
         await services.crashRenderer(of: host)
+    }
+
+    /// Calls the history service with `timeout`, starting its host if it
+    /// is not running.
+    @_spi(Testing) public func pingHistoryService(timeout: Duration) async throws {
+        _ = try await services.call(CefHistory.historyModule, "async () => true", timeout: timeout)
     }
 
     /// How long a service host stays open after its last call.
@@ -265,9 +309,8 @@ public final class CefProfile {
             var settings = cef_request_context_settings_t()
             settings.size = MemoryLayout<cef_request_context_settings_t>.stride
             let configuration = CefRuntime.shared.configuration
-            let root = configuration?.rootCacheDirectory ?? MappedCefSettings.defaultRootCacheDirectory()
             // An empty cache_path means in-memory, which is what incognito wants.
-            if let path = Self.cacheDirectory(for: kind, rootCacheDirectory: root) {
+            if let path = storage.chromiumDirectory {
                 try? FileManager.default.createDirectory(at: path, withIntermediateDirectories: true)
                 CefStringUtil.set(path.path, into: &settings.cache_path)
                 settings.persist_session_cookies = configuration?.persistsSessionCookies == true ? 1 : 0
@@ -292,6 +335,22 @@ public final class CefProfile {
     }
 
     private static var profilesWithOwnContext: [WeakProfile] = []
+
+    /// Every profile that exists: the default, the persistent ones, and
+    /// incognito ones with a request context.
+    static var all: [CefProfile] {
+        var profiles = [CefProfile.default] + persistentProfiles.values
+        for entry in profilesWithOwnContext {
+            if let profile = entry.profile, !profiles.contains(where: { $0 === profile }) { profiles.append(profile) }
+        }
+        return profiles
+    }
+
+    /// Releases every profile's request context, before Chromium shuts down.
+    static func releaseRequestContexts() {
+        for profile in all { profile.context = nil }
+        profilesWithOwnContext = []
+    }
 
     /// Adds a scheme handler registered with ``CefRuntime`` to every
     /// profile that has a request context of its own.
@@ -345,23 +404,92 @@ public final class CefProfile {
 
     // MARK: Storage layout
 
-    /// Where a profile kind lives on disk; nil for in-memory and the default
-    /// profile.
-    static func cacheDirectory(for kind: Kind, rootCacheDirectory: URL?) -> URL? {
-        guard case .persistent(let name) = kind else { return nil }
-        return rootCacheDirectory?
-            .appendingPathComponent("Profiles", isDirectory: true)
-            .appendingPathComponent(sanitize(name), isDirectory: true)
+    /// Where a profile keeps its data, for both engines.
+    struct Storage: Equatable {
+        /// The WebKit website data store a profile maps to.
+        enum WebKitStore: Equatable {
+            /// The app's default store.
+            case `default`
+            /// An in-memory store, discarded with the profile.
+            case nonPersistent
+            /// The persistent store with this identifier.
+            case persistent(UUID)
+        }
+
+        /// Chromium's directory for the profile: `nil` for the default
+        /// profile, which lives at the configuration's cache directory, and
+        /// for an in-memory one.
+        var chromiumDirectory: URL?
+        var webKitStore: WebKitStore
     }
 
-    /// Makes a profile name safe to use as a directory name.
-    static func sanitize(_ name: String) -> String {
-        let cleaned = name
-            .replacingOccurrences(of: "/", with: "_")
-            .replacingOccurrences(of: ":", with: "_")
-            .replacingOccurrences(of: "\\", with: "_")
-        let trimmed = cleaned.drop(while: { $0 == "." })
-        return trimmed.isEmpty ? "Profile" : String(trimmed)
+    /// The one storage layout for a profile kind under `rootCacheDirectory`
+    /// (``CefConfiguration/resolvedRootCacheDirectory``).
+    static func storage(for kind: Kind, rootCacheDirectory: URL) -> Storage {
+        switch kind {
+        case .global:
+            return Storage(chromiumDirectory: nil, webKitStore: .default)
+        case .incognito:
+            return Storage(chromiumDirectory: nil, webKitStore: .nonPersistent)
+        case .persistent(let id):
+            return Storage(
+                chromiumDirectory: rootCacheDirectory
+                    .appendingPathComponent("Profiles", isDirectory: true)
+                    .appendingPathComponent(directoryName(for: id), isDirectory: true),
+                webKitStore: .persistent(dataStoreIdentifier(id)))
+        }
+    }
+
+    /// The directory name for a persistent profile's identifier: lowercase
+    /// letters, digits, `-` and `_` as they are, every other UTF-8 byte as
+    /// `%XX`. The mapping is injective, also on a case-insensitive volume
+    /// (no uppercase letter is kept), and never yields `.`, `..` or a
+    /// separator. A name that would pass 200 characters is cut and ends in
+    /// `~` and the identifier's SHA-256, which no other name contains.
+    static func directoryName(for id: String) -> String {
+        var name = ""
+        for byte in id.utf8 {
+            switch byte {
+            case UInt8(ascii: "a")...UInt8(ascii: "z"), UInt8(ascii: "0")...UInt8(ascii: "9"),
+                 UInt8(ascii: "-"), UInt8(ascii: "_"):
+                name.unicodeScalars.append(Unicode.Scalar(byte))
+            default:
+                name += String(format: "%%%02X", byte)
+            }
+        }
+        guard name.count > 200 else { return name }
+        let digest = SHA256.hash(data: Data(id.utf8)).map { String(format: "%02x", $0) }.joined()
+        return String(name.prefix(130)) + "~" + digest
+    }
+
+    /// The persistent WebKit store's identifier for a profile identifier:
+    /// a UUID derived from it, the same on every launch.
+    static func dataStoreIdentifier(_ id: String) -> UUID {
+        var bytes = Array(SHA256.hash(data: Data("CefSwift profile \(id)".utf8)).prefix(16))
+        bytes[6] = (bytes[6] & 0x0F) | 0x50  // name-based UUID (version 5 layout)
+        bytes[8] = (bytes[8] & 0x3F) | 0x80  // RFC 4122 variant
+        return UUID(uuid: (bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+                           bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]))
+    }
+
+    /// This profile's storage under the running configuration's root.
+    var storage: Storage {
+        let root = (CefRuntime.shared.configuration ?? CefConfiguration()).resolvedRootCacheDirectory
+        return Self.storage(for: kind, rootCacheDirectory: root)
+    }
+}
+
+/// A service object a profile hands out, held weakly so the service can
+/// hold the profile.
+@MainActor
+private final class WeakService<Service: AnyObject> {
+    private weak var service: Service?
+
+    func object(_ make: () -> Service) -> Service {
+        if let service { return service }
+        let made = make()
+        service = made
+        return made
     }
 }
 

@@ -104,6 +104,10 @@ final class CefInternalServices {
     unowned let profile: CefProfile
 
     private var hosts: [CefServiceHost: CefServiceHostBrowser] = [:]
+
+    /// The profile's bookmark state that outlives one ``CefBookmarks``.
+    var bookmarkReadSource = CefBookmarks.ReadSource.automatic
+    var lastBookmarkWrite: ContinuousClock.Instant?
     private var subscribers: [String: [UUID: AsyncStream<CefJSON>.Continuation]] = [:]
 
     init(profile: CefProfile) {
@@ -139,10 +143,15 @@ final class CefInternalServices {
 
     /// Events `module` emits as `emit(name, payload)`, while one of its hosts
     /// runs with the module built. Subscribing starts nothing and keeps
-    /// nothing running.
-    func events(_ module: CefServiceModule, _ name: String) -> AsyncStream<CefJSON> {
+    /// nothing running. `bufferingPolicy` matches the events' meaning:
+    /// `.bufferingNewest(1)` for invalidations, where only the latest
+    /// matters.
+    func events(
+        _ module: CefServiceModule, _ name: String,
+        bufferingPolicy: AsyncStream<CefJSON>.Continuation.BufferingPolicy
+    ) -> AsyncStream<CefJSON> {
         let key = "\(module.name)/\(name)"
-        let (stream, continuation) = AsyncStream<CefJSON>.makeStream()
+        let (stream, continuation) = AsyncStream<CefJSON>.makeStream(bufferingPolicy: bufferingPolicy)
         let token = UUID()
         subscribers[key, default: [:]][token] = continuation
         continuation.onTermination = { [weak self] _ in
@@ -265,19 +274,22 @@ final class CefServiceHostBrowser {
             callsInProgress -= 1
             if callsInProgress == 0 { scheduleIdleStop() }
         }
-        let browser = try await liveBrowser()
-        let watchdog = Task { [weak self] in
-            try await Task.sleep(for: timeout)
-            CefLog.error("service \(module.name) on \(self?.host.name ?? "?"): no answer in \(timeout)")
+        // One deadline over the whole call, starting the host included: an
+        // await inside the start-up that never returns must not hold the
+        // caller past it.
+        let message = "\(module.name) on \(host.name): no answer in \(timeout)"
+        return try await withDeadline(timeout, timeoutError: CefError.operationFailed(message)) { [weak self] in
+            CefLog.error("service \(message)")
             self?.stop()
-        }
-        defer { watchdog.cancel() }
-        do {
-            return try await browser.evaluateJavaScript(Self.script(module, function, arguments))
-        } catch let error as CefJavaScriptError {
-            throw CefError.operationFailed("\(module.name): \(error.message)")
-        } catch CefError.browserClosed {
-            throw CefError.operationFailed("\(module.name): \(host.document) stopped responding")
+        } _: { [self] in
+            let browser = try await liveBrowser()
+            do {
+                return try await browser.evaluateJavaScript(Self.script(module, function, arguments))
+            } catch let error as CefJavaScriptError {
+                throw CefError.operationFailed("\(module.name): \(error.message)")
+            } catch CefError.browserClosed {
+                throw CefError.operationFailed("\(module.name): \(host.document) stopped responding")
+            }
         }
     }
 
@@ -360,7 +372,8 @@ final class CefServiceHostBrowser {
     /// Installs the event binding as a page global; the DevTools Protocol
     /// reports its calls once the Runtime domain is enabled.
     private func listenForEvents(in browser: CefBrowser) async throws {
-        let stream = browser.devTools.events("Runtime.bindingCalled")
+        // Every event is a module's, which the loop below hands on at once.
+        let stream = browser.devTools.events("Runtime.bindingCalled", bufferingPolicy: .unbounded)
         try await browser.devTools.send("Runtime.enable")
         try await browser.devTools.send("Runtime.addBinding", ["name": .string(Self.eventBinding)])
         events = Task { [weak self] in
@@ -383,7 +396,13 @@ final class CefServiceHostBrowser {
         events?.cancel()
         services?.hostDidStop(self)
         if window != nil { retain = self }
-        browser?.close(force: true)
+        if browser?.state == .live {
+            browser?.close(force: true)
+        } else {
+            // Stopped while Chromium creates the browser, as a call whose
+            // deadline passes during start-up is: the window closes it.
+            window?.close()
+        }
     }
 
     /// Kills the renderer through the DevTools Protocol.

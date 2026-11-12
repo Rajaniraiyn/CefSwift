@@ -79,7 +79,13 @@ enum SelfTest {
                 forName: NSApplication.willTerminateNotification, object: nil, queue: nil
             ) { _ in
                 MainActor.assumeIsolated {
-                    check("quit: Chromium shuts down cleanly", !CefRuntime.shared.isInitialized)
+                    check("quit: Chromium shuts down cleanly", CefRuntime.shared.state == .stopped,
+                          detail: "\(CefRuntime.shared.state)")
+                    var restart = "started"
+                    do { try CefRuntime.shared.initialize() } catch { restart = "\(error)" }
+                    check("quit: the runtime does not start again after shutting down",
+                          restart.contains("cannot be initialized again") && CefRuntime.shared.state == .stopped,
+                          detail: restart)
                     check("quit: a job sent to CefIOActor after shutdown runs", jobAfterShutdownRuns())
                     print(failures == 0 ? "ALL CHECKS PASSED" : "\(failures) CHECK(S) FAILED")
                     exit(Int32(failures))

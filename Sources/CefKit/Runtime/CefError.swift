@@ -19,6 +19,9 @@ public enum CefError: Error {
     case anotherInstanceRunning
     /// `CefRuntime.initialize` was called while already initialized.
     case alreadyInitialized
+    /// `CefRuntime.initialize` was called after Chromium shut down, or
+    /// while it shuts down. Chromium starts once per process.
+    case shutDown
     /// An operation that requires an initialized runtime was attempted
     /// before `CefRuntime.initialize` succeeded.
     case notInitialized
@@ -59,12 +62,25 @@ extension CefError: CustomStringConvertible {
             return "Another instance of this app is already running with the same profile directory."
         case .alreadyInitialized:
             return "CefRuntime.initialize was called twice. Initialize CEF exactly once per process."
+        case .shutDown:
+            return "CefRuntime has shut down. Chromium starts once per process; it cannot be initialized again."
         case .notInitialized:
             return "CefRuntime has not been initialized. Call CefRuntime.shared.initialize() first."
         case .browserClosed:
             return "The browser closed before the operation completed."
         case .operationFailed(let detail):
             return detail
+        }
+    }
+}
+
+extension CefError {
+    /// Whether the error came before `cef_initialize` ran, so starting
+    /// again can still work.
+    var isBeforeChromiumStarted: Bool {
+        switch self {
+        case .frameworkNotFound, .loadFailed, .apiHashMismatch: true
+        default: false
         }
     }
 }

@@ -83,38 +83,92 @@ struct HandlerLogicTests {
     }
 }
 
-/// Profile path-derivation tests (pure, no runtime).
+/// Profile identity and storage layout (pure, no runtime).
 @MainActor
 struct ProfilePathTests {
     let root = URL(fileURLWithPath: "/tmp/cefroot")
 
-    @Test func defaultProfileHasNoCacheDirectory() {
-        #expect(CefProfile.cacheDirectory(for: .global, rootCacheDirectory: root) == nil)
+    private func directory(_ id: String) -> String? {
+        CefProfile.storage(for: .persistent(id: id), rootCacheDirectory: root).chromiumDirectory?.path
     }
 
-    @Test func incognitoProfileHasNoCacheDirectory() {
+    @Test func defaultAndIncognitoProfilesHaveNoDirectoryOfTheirOwn() {
+        #expect(CefProfile.storage(for: .global, rootCacheDirectory: root) == .init(chromiumDirectory: nil, webKitStore: .default))
         // Empty cache_path is what puts a context in in-memory/incognito mode.
-        #expect(CefProfile.cacheDirectory(for: .incognito, rootCacheDirectory: root) == nil)
+        #expect(CefProfile.storage(for: .incognito, rootCacheDirectory: root)
+            == .init(chromiumDirectory: nil, webKitStore: .nonPersistent))
     }
 
     @Test func persistentProfileDerivesUnderProfiles() {
-        let path = CefProfile.cacheDirectory(for: .persistent(name: "Work"), rootCacheDirectory: root)
-        #expect(path?.path == "/tmp/cefroot/Profiles/Work")
+        #expect(directory("work") == "/tmp/cefroot/Profiles/work")
+        #expect(directory("Work") == "/tmp/cefroot/Profiles/%57ork")
     }
 
-    @Test func persistentProfileSanitizesName() {
-        // Path separators and leading dots can't escape the Profiles dir.
-        let path = CefProfile.cacheDirectory(for: .persistent(name: "../../etc"), rootCacheDirectory: root)
-        #expect(path != nil)
-        #expect(!(path!.path.contains("/etc")))
-        #expect(path!.path.hasPrefix("/tmp/cefroot/Profiles/"))
-
-        #expect(CefProfile.sanitize("a/b") == "a_b")
-        #expect(CefProfile.sanitize("...") == "Profile")
-        #expect(CefProfile.sanitize("") == "Profile")
+    @Test func distinctIdentifiersNeverShareADirectory() {
+        let ids = ["a/b", "a_b", "a%2Fb", "a%252Fb", "Work", "work", "WORK", "..", ".", "...", "a:b", "a\\b", "é", "e\u{301}"]
+        let names = ids.map(CefProfile.directoryName(for:))
+        // Injective, also when the volume ignores case.
+        #expect(Set(names.map { $0.lowercased() }).count == ids.count)
+        for name in names {
+            #expect(!name.contains("/") && !name.contains(":") && name != "." && name != ".." && !name.hasPrefix("."))
+        }
+        // Each maps to its own WebKit store too.
+        #expect(Set(ids.map(CefProfile.dataStoreIdentifier)).count == ids.count)
     }
 
-    @Test func persistentProfileWithNilRootYieldsNil() {
-        #expect(CefProfile.cacheDirectory(for: .persistent(name: "Work"), rootCacheDirectory: nil) == nil)
+    @Test func pathsCannotEscapeTheProfilesDirectory() {
+        let path = directory("../../etc")
+        #expect(path?.hasPrefix("/tmp/cefroot/Profiles/") == true)
+        #expect(path.map { URL(fileURLWithPath: $0).deletingLastPathComponent().path } == "/tmp/cefroot/Profiles")
+    }
+
+    @Test func longIdentifiersStayWithinNameLimits() {
+        let long = String(repeating: "Ä", count: 300)
+        let other = String(repeating: "Ä", count: 299) + "Ö"
+        #expect(CefProfile.directoryName(for: long).utf8.count <= 255)
+        #expect(CefProfile.directoryName(for: long) != CefProfile.directoryName(for: other))
+        #expect(CefProfile.directoryName(for: long) == CefProfile.directoryName(for: long))
+    }
+
+    @Test func bothEnginesUseTheRootDerivedFromAnExplicitCacheDirectory() {
+        var configuration = CefConfiguration()
+        configuration.cacheDirectory = URL(fileURLWithPath: "/tmp/app/Data/Default")
+        #expect(configuration.resolvedRootCacheDirectory.path == "/tmp/app/Data")
+        let storage = CefProfile.storage(for: .persistent(id: "work"), rootCacheDirectory: configuration.resolvedRootCacheDirectory)
+        #expect(storage.chromiumDirectory?.path == "/tmp/app/Data/Profiles/work")
+        #expect(storage.webKitStore == .persistent(CefProfile.dataStoreIdentifier("work")))
+        configuration.rootCacheDirectory = URL(fileURLWithPath: "/tmp/root")
+        #expect(configuration.resolvedRootCacheDirectory.path == "/tmp/root")
+    }
+
+    @Test func identifiersAndDisplayNamesAreSeparate() {
+        let profile = CefProfile.persistent(id: "ProfilePathTests-identity", displayName: "Work")
+        #expect(profile.id == "ProfilePathTests-identity" && profile.displayName == "Work")
+        #expect(CefProfile.persistent(id: "ProfilePathTests-identity") === profile)
+        #expect(profile.displayName == "Work")
+        profile.displayName = "Office"
+        #expect(CefProfile.persistent(id: "ProfilePathTests-identity").displayName == "Office")
+        #expect(CefProfile.persistent(id: "ProfilePathTests-identity/") !== profile)
+        #expect(CefProfile.persistent(id: "default") === CefProfile.default)
+        #expect(CefProfile.incognito().id != CefProfile.incognito().id)
+    }
+
+    @Test func aServiceKeepsItsProfileAliveWithoutACycle() {
+        weak var weakProfile: CefProfile?
+        var autocomplete: CefAutocomplete?
+        var history: CefHistory?
+        do {
+            let profile = CefProfile.incognito()
+            weakProfile = profile
+            autocomplete = profile.autocomplete
+            history = profile.history
+            #expect(profile.autocomplete === autocomplete)
+        }
+        #expect(weakProfile != nil)
+        autocomplete = nil
+        #expect(weakProfile != nil)
+        history = nil
+        #expect(weakProfile == nil)
+        _ = (autocomplete, history)
     }
 }

@@ -37,8 +37,8 @@ public final class CefSystemBrowser {
         /// Whose website data (cookies, storage, cache) the page uses. Each
         /// ``CefProfile`` has a WebKit data store of its own, separate from
         /// Chromium's: the default profile uses the app's default store, a
-        /// ``CefProfile/persistent(name:)`` profile a persistent store of
-        /// the same name, and an ``CefProfile/incognito()`` profile an
+        /// ``CefProfile/persistent(id:displayName:)`` profile a persistent
+        /// store derived from its identifier, and an ``CefProfile/incognito()`` profile an
         /// in-memory store discarded with it. `nil` is the default profile.
         public var profile: CefProfile?
         /// Whether the User-Agent ends `Version/<Safari's version>
@@ -316,26 +316,17 @@ public final class CefSystemBrowser {
 
 extension CefProfile {
     /// The WebKit website data store ``CefSystemBrowser`` uses for this
-    /// profile.
+    /// profile, from the profile's ``storage``.
     var systemWebsiteDataStore: WKWebsiteDataStore {
         if let store = webKitDataStore { return store }
         let store: WKWebsiteDataStore
-        switch kind {
-        case .global: store = .default()
-        case .incognito: store = .nonPersistent()
-        case .persistent(let name): store = WKWebsiteDataStore(forIdentifier: Self.dataStoreIdentifier(name))
+        switch storage.webKitStore {
+        case .default: store = .default()
+        case .nonPersistent: store = .nonPersistent()
+        case .persistent(let identifier): store = WKWebsiteDataStore(forIdentifier: identifier)
         }
         webKitDataStore = store
         return store
-    }
-
-    /// A UUID derived from the profile name, the same on every launch.
-    static func dataStoreIdentifier(_ name: String) -> UUID {
-        var bytes = Array(SHA256.hash(data: Data("CefSwift profile \(name)".utf8)).prefix(16))
-        bytes[6] = (bytes[6] & 0x0F) | 0x50  // name-based UUID (version 5 layout)
-        bytes[8] = (bytes[8] & 0x3F) | 0x80  // RFC 4122 variant
-        return UUID(uuid: (bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
-                           bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]))
     }
 }
 

@@ -30,14 +30,7 @@ final class MappedCefSettings {
 
         // CEF requires cache_path to equal or live under root_cache_path. When only
         // cacheDirectory is given, derive the root from it so the pair is always valid.
-        let rootCache: URL
-        if let explicitRoot = configuration.rootCacheDirectory {
-            rootCache = explicitRoot
-        } else if let cache = configuration.cacheDirectory {
-            rootCache = cache.deletingLastPathComponent()
-        } else {
-            rootCache = Self.defaultRootCacheDirectory()
-        }
+        let rootCache = configuration.resolvedRootCacheDirectory
         try? FileManager.default.createDirectory(at: rootCache, withIntermediateDirectories: true)
         configuration.protectedMedia.installPreinstalledCDM(rootCache: rootCache)
         CefStringUtil.set(rootCache.path, into: &raw.root_cache_path)
@@ -90,8 +83,36 @@ final class MappedCefSettings {
 public final class CefRuntime {
     public static let shared = CefRuntime()
 
-    /// Whether `cef_initialize` has completed successfully.
-    public private(set) var isInitialized = false
+    /// Where the runtime is in its one life per process.
+    public enum State: Sendable, Equatable {
+        /// ``initialize(configuration:)`` has not been called, or failed
+        /// before Chromium started.
+        case notStarted
+        /// ``initialize(configuration:)`` is running.
+        case starting
+        /// Chromium is running; browsers can be created.
+        case running
+        /// The app is quitting and Chromium is shutting down.
+        case stopping
+        /// Chromium has shut down. It cannot start again in this process.
+        case stopped
+
+        /// Throws unless the runtime can start from this state.
+        func checkCanStart() throws(CefError) {
+            switch self {
+            case .notStarted: return
+            case .starting, .running: throw CefError.alreadyInitialized
+            case .stopping, .stopped: throw CefError.shutDown
+            }
+        }
+    }
+
+    /// Where the runtime is in its life: ``State/running`` from a successful
+    /// ``initialize(configuration:)`` until the app quits.
+    public private(set) var state = State.notStarted
+
+    /// Whether Chromium is running (``state`` is ``State/running``).
+    public var isInitialized: Bool { state == .running }
 
     /// The configuration CEF was initialized with.
     public private(set) var configuration: CefConfiguration?
@@ -149,9 +170,27 @@ public final class CefRuntime {
     /// thread, before creating browsers and before anything else creates
     /// `NSApp` — CEF needs the application object to be a `CefApplication`,
     /// which this installs.
+    ///
+    /// Throws ``CefError/alreadyInitialized`` when Chromium is running, and
+    /// ``CefError/shutDown`` once it has shut down: Chromium starts once per
+    /// process.
     public func initialize(configuration: CefConfiguration = .default) throws(CefError) {
-        guard !isInitialized else { throw CefError.alreadyInitialized }
+        try state.checkCanStart()
+        state = .starting
+        do {
+            try start(configuration: configuration)
+        } catch {
+            // Chromium cannot start a second time once `cef_initialize` ran.
+            state = error.isBeforeChromiumStarted ? .notStarted : .stopped
+            throw error
+        }
+        state = .running
+        lifecycleCoordinator.start()
+        applyApplicationWidePreferences(configuration.preferences)
+        logCapabilities()
+    }
 
+    private func start(configuration: CefConfiguration) throws(CefError) {
         CefApplication.install()
 
         let frameworkBinary = try Self.resolveFrameworkBinary(override: configuration.frameworkDirectory)
@@ -189,10 +228,6 @@ public final class CefRuntime {
         self.configuration = configuration
         messagePump = pump
         pump.start()
-        isInitialized = true
-        lifecycleCoordinator.start()
-        applyApplicationWidePreferences(configuration.preferences)
-        logCapabilities()
     }
 
     /// Logs one line naming what the app's signature leaves out, such as
@@ -237,7 +272,7 @@ public final class CefRuntime {
     /// Registering again for the same scheme/domain replaces the handler.
     ///
     /// The handler serves every profile: the default one, and the
-    /// ``CefProfile/incognito()`` and ``CefProfile/persistent(name:)``
+    /// ``CefProfile/incognito()`` and ``CefProfile/persistent(id:displayName:)``
     /// profiles, whose request contexts Chromium keeps separately.
     public func registerSchemeHandler(scheme: String, domain: String? = nil, handler: some CefSchemeHandler) {
         precondition(
@@ -274,21 +309,37 @@ public final class CefRuntime {
     /// request context later.
     @ObservationIgnored private(set) var schemeHandlers: [RegisteredSchemeHandler] = []
 
-    /// Shuts CEF down and unloads the framework. All browsers must already
-    /// be closed. Call once, at process exit.
-    public func shutdown() {
-        guard isInitialized else { return }
+    /// Shuts Chromium down, at the end of a quit that
+    /// ``handleTerminationRequest()`` started once every browser and window
+    /// has gone. Never from inside a Chromium callback, and never with a
+    /// CEF window left, which crashes `cef_shutdown()`.
+    ///
+    /// Tears down in order: what is left of discarded browsers, service
+    /// hosts, observers and timers, media router registrations, profile
+    /// request contexts, the message pump, then Chromium itself, with jobs
+    /// for the thread actors waiting it out.
+    func shutDownChromium() {
+        guard state == .running || state == .stopping else { return }
+        guard hasNoBrowsers, CefBrowserWindow.liveCount == 0, messagePump?.isPerformingWork != true else {
+            CefLog.error("CefSwift: shutdown deferred: \(browsers.count + serviceBrowsers.count) browsers, "
+                         + "\(CefBrowserWindow.liveCount) windows still open")
+            return
+        }
+        state = .stopping
+        for profile in CefProfile.all { profile.stopServiceHosts() }
+        lifecycleCoordinator.stop()
+        memorySaverMonitor.policy = .off
+        widevineInstallation?.cancel()
+        CefMediaRouter.shared.tearDown()
+        CefProfile.releaseRequestContexts()
         messagePump?.stop()
         messagePump = nil
-        // Jobs for the thread actors wait out the shutdown, then run on
-        // their fallback queues.
         CefThreadExecutor.all.forEach { $0.willStop() }
         cef_shutdown()
         CefThreadExecutor.all.forEach { $0.didStop() }
         appContext = nil
         settings = nil
-        configuration = nil
-        isInitialized = false
+        state = .stopped
     }
 
     // MARK: Framework resolution
@@ -478,7 +529,7 @@ public final class CefRuntime {
                 return false
             }
             replyToQuitEvent(cancelled: false)
-            shutdown()
+            shutDownChromium()
             return true
         }
         suspendQuitEventIfNeeded()

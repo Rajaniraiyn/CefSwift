@@ -97,8 +97,12 @@ enum Main {
 ```
 
 Quitting through `NSApp.terminate(_:)` closes every browser first, so pages
-can run `beforeunload` handlers, and then shuts Chromium down. You do not call
-`CefRuntime.shared.shutdown()` yourself.
+can run `beforeunload` handlers, and then shuts Chromium down; there is no
+shutdown call of your own to make. `CefRuntime.shared.state` goes from
+`.notStarted` through `.starting` to `.running`, and at quit through
+`.stopping` to `.stopped`. Chromium starts once per process: `initialize`
+throws `CefError.alreadyInitialized` while it runs and `CefError.shutDown`
+after it has stopped.
 
 ### Configuration
 
@@ -252,7 +256,7 @@ Options are fixed at creation:
 
 ```swift
 var options = CefBrowserOptions()
-options.profile = .persistent(name: "Work")
+options.profile = .persistent(id: "work", displayName: "Work")
 options.backgroundColor = .windowBackgroundColor
 options.requestFilter = { request in
     request.url?.host() == "ads.example" ? .block : .allow
@@ -850,10 +854,28 @@ func browser(_ browser: CefBrowser, decidePasskeyRequest request: CefPasskeyRequ
   suits conditional requests (passkeys offered in an autofill list).
 - The page stays stopped at its call until you answer, as it does for
   `alert()`. JavaScript you evaluate in it meanwhile waits too.
-- The default, `CefPasskeyPresenter.present(_:in:)`, ignores requests
-  without a user gesture, shows a sheet naming the site (with an account
-  menu when several passkeys fit), and verifies the user with Touch ID or
-  the account password through `LAContext` before answering.
+- The default, `CefPasskeyPresenter.present(_:in:verifier:)`, ignores
+  requests without a user gesture, shows a sheet naming the site (with an
+  account menu when several passkeys fit), and verifies the user before
+  answering. The verifier, `CefUserVerifier.deviceOwner` by default, asks
+  for Touch ID or the account password through `LAContext` and returns a
+  `CefUserVerification`: `.verified`, `.failed`, or `.unavailable(_:)`
+  on a Mac that cannot verify its user. Only `.verified` answers the
+  request; anything else refuses it. Pass your own `CefUserVerifier` to
+  verify another way or to treat `.unavailable` differently, and in tests,
+  so that no system prompt appears.
+
+Store failures fail closed. Before it asks the delegate about a
+registration, CefKit calls the store's `checkAvailability()` (by default
+a read of `passkeys()`), and before an assertion it reads the usable
+passkeys; if either throws, the call rejects with `NotAllowedError`
+without asking. A save happens after Chromium has handed the page its
+answer, so a save that fails cannot reject the call: the site holds a
+credential whose key the store does not. Every store failure reaches
+`browser(_:passkeyStoreDidFail:)` as a `CefPasskeyStoreError` with its
+`operation` (`.checkAvailability`, `.read`, `.save`) and, for a save, the
+`passkey` that was not saved, so the app can keep it another way or tell
+the user; the default logs it.
 
 `CefPasskey` holds the credential ID, `relyingPartyID`, `userHandle`,
 `userName`, `userDisplayName`, the PKCS #8 `privateKey`, `signCount` and
@@ -869,8 +891,9 @@ try await store.remove(saved[0])
 | `CefInMemoryPasskeyStore` | In memory, until it is released. For tests and private browsing. |
 | `CefKeychainPasskeyStore(service:accessGroup:)` | In the data protection keychain, one item per passkey, available while the Mac is unlocked and never synced. Needs a team signature with a provisioning profile, which gives the app the `com.apple.application-identifier` entitlement the data protection keychain checks; an ad hoc signed app gets `errSecMissingEntitlement` (-34018) as `CefError.operationFailed`. It never shows a keychain password prompt. |
 
-Adopt `CefPasskeyStore` (`passkeys()`, `save(_:)`, `remove(_:)`) to keep
-them elsewhere, such as in a password manager.
+Adopt `CefPasskeyStore` (`passkeys()`, `save(_:)`, `remove(_:)`, and
+optionally `checkAvailability()`) to keep them elsewhere, such as in a
+password manager.
 
 Chrome's settings link to Chromium's password manager from Autofill and
 passwords → Passkeys. That tab arrives through
@@ -1224,11 +1247,11 @@ theme. Browsers that share a profile share all of it.
 | Profile | Storage |
 |---|---|
 | `CefProfile.default` | `cacheDirectory`, used when `options.profile` is `nil`. |
-| `CefProfile.persistent(name:)` | `<rootCacheDirectory>/Profiles/<name>`. The same name returns the same profile. |
+| `CefProfile.persistent(id:displayName:)` | `<root>/Profiles/<id>`, with characters other than lowercase letters, digits, `-` and `_` percent-encoded. The same identifier returns the same profile. |
 | `CefProfile.incognito()` | In memory only; discarded with the profile. |
 
 ```swift
-let profile = CefProfile.persistent(name: "Work")
+let profile = CefProfile.persistent(id: "work", displayName: "Work")
 try profile.setPreference("credentials_enable_service", to: false)
 let fontSize = profile.preference("webkit.webprefs.default_font_size")?.intValue
 profile.setColorScheme(.dark, accentColor: .systemIndigo)
@@ -1237,6 +1260,18 @@ let cookies = await profile.cookies(for: url)
 profile.setCookie(cookie)                        // an HTTPCookie
 profile.deleteCookies(for: url, named: "session")
 ```
+
+A profile's `id` is its identity and names its storage in both engines;
+`displayName` is what to show, and can change without moving anything.
+Store `id` to find the profile again. Identifiers map to directory names
+one to one, also on a case-insensitive volume, so `"a/b"`, `"a_b"`,
+`"Work"` and `"work"` are four profiles. `<root>` is
+`CefConfiguration.resolvedRootCacheDirectory`: `rootCacheDirectory`, or
+the parent of `cacheDirectory` when only that is set. `bookmarks`,
+`history` and `autocomplete` hold their profile, so
+`CefProfile.incognito().autocomplete` keeps its profile alive while you
+use it; the profile does not hold them back, so neither keeps the other
+alive forever.
 
 `allPreferences(includingDefaults:)` returns every preference as one JSON
 object. `setColorScheme(_:accentColor:)` themes Chrome-style UI and sets the
@@ -1263,7 +1298,8 @@ let suggestions = try await profile.autocomplete.suggestions(for: "cef")
 - `bookmarks` also has `bookmark(_:)`, `children(of:)`, `search(_:)`,
   `bookmarks(for:)`, `addFolder(_:in:at:)`, `update(_:title:url:)`,
   `move(_:to:at:)` and `remove(_:)`. `changes` yields for edits made through
-  this API and in Chrome's UI.
+  this API and in Chrome's UI; edits made while the consumer is busy are
+  reported once, as one signal to read again.
 - `history` groups visits by day, as `chrome://history` does. It records
   only visits made in Chrome-style browsers. `mostVisited()` includes visits
   made up to the call and takes up to a second.
@@ -1342,9 +1378,11 @@ for await event in browser.devTools.events("Network.responseReceived") {
 
 `send(_:_:)` waits for the browser to be created and returns the result as
 `CefJSON`; `send(_:_:as:)` decodes it. A protocol error throws
-`CefDevToolsError`. `events(_:)` streams one event's parameters until the
-browser closes or the consuming task is cancelled; enable the event's domain
-first.
+`CefDevToolsError`. `events(_:bufferingPolicy:)` streams one event's
+parameters until the browser closes or the consuming task is cancelled;
+enable the event's domain first. A consumer that falls behind keeps the
+newest 1,000 events (`CefDevTools.defaultEventBuffering`); pass
+`.unbounded` to keep every one.
 
 `browser.showDevTools()` opens the DevTools window, and
 `showDevTools(inspecting:)` inspects the element at a point in view
@@ -1718,8 +1756,8 @@ func browser(_ browser: CefBrowser, decidePolicyFor navigation: CefNavigationAct
 
 **Website data.** WebKit keeps its own cookies and storage, separate from
 Chromium's. Each `CefProfile` maps to a WebKit data store: the default
-profile to the app's default store, `.persistent(name:)` to a persistent
-store of that name, and `.incognito()` to an in-memory store discarded with
+profile to the app's default store, `.persistent(id:displayName:)` to a
+persistent store derived from its identifier, and `.incognito()` to an in-memory store discarded with
 the profile. `importCookies(from:for:)` copies the Chromium profile's
 cookies for one site into the WebKit store, when you call it and not
 otherwise.
@@ -1905,6 +1943,11 @@ driver crash cannot end the app.
   DevTools target of their own, also wait until their timeout without
   reaching the delegate. The app's mode uses the browser's DevTools `Debugger` and
   `WebAuthn` domains; do not use those domains yourself in such a browser.
+- A registration in the app's mode is saved to the store after the page
+  receives its credential; CefKit cannot withdraw it. A store that passes
+  `checkAvailability()` and then fails to save leaves the site with a
+  credential the app cannot use; `browser(_:passkeyStoreDidFail:)` gets
+  the unsaved passkey.
 - Chromium's profile passkey authenticator (Touch ID, `.chromium`) is not
   available: CEF 156 compiles in Chromium's keychain access group,
   `.org.chromium.Chromium.webauthn`, with an empty team identifier, and

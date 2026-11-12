@@ -63,12 +63,12 @@ public struct CefBookmark: Sendable, Identifiable, Hashable {
 /// ``CefProfile/bookmarks`` are the default profile's.
 @MainActor
 public final class CefBookmarks {
-    private unowned let profile: CefProfile
+    /// Held, so the profile lives as long as this object is in use.
+    private let profile: CefProfile
     private var subscribers: [UUID: AsyncStream<Void>.Continuation] = [:]
     private var liveEvents: Task<Void, Never>?
     private var fileWatch: CefFileWatch?
     private var lastLiveEvent: ContinuousClock.Instant?
-    private var lastWrite: ContinuousClock.Instant?
 
     init(profile: CefProfile) {
         self.profile = profile
@@ -79,7 +79,17 @@ public final class CefBookmarks {
     /// Where reads come from. `.automatic` reads Chromium's file while the
     /// service host is not running.
     @_spi(Testing) public enum ReadSource: Sendable { case automatic, file, service }
-    @_spi(Testing) public var readSource = ReadSource.automatic
+    @_spi(Testing) public var readSource: ReadSource {
+        get { services.bookmarkReadSource }
+        set { services.bookmarkReadSource = newValue }
+    }
+
+    /// The last change made through this API, for the profile: reads go to
+    /// the host until Chromium has saved it.
+    private var lastWrite: ContinuousClock.Instant? {
+        get { services.lastBookmarkWrite }
+        set { services.lastBookmarkWrite = newValue }
+    }
 
     // MARK: Reading
 
@@ -179,15 +189,18 @@ public final class CefBookmarks {
     ///
     /// While the service host runs, every change is reported at once;
     /// otherwise when Chromium has written its `Bookmarks` file, about 2.5
-    /// seconds later. Watching starts no service host.
+    /// seconds later. Watching starts no service host. Changes made while
+    /// the consumer is busy are reported once: each element means "read
+    /// again".
     public var changes: AsyncStream<Void> {
-        AsyncStream { continuation in
+        AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
             let token = UUID()
             subscribers[token] = continuation
             startObserving()
-            continuation.onTermination = { [weak self] _ in
+            // The stream holds this object, and so the profile, until it
+            // ends.
+            continuation.onTermination = { _ in
                 Task { @MainActor in
-                    guard let self else { return }
                     self.subscribers[token] = nil
                     if self.subscribers.isEmpty { self.stopObserving() }
                 }
@@ -197,7 +210,7 @@ public final class CefBookmarks {
 
     private func startObserving() {
         if liveEvents == nil {
-            let events = services.events(Self.module, "changed")
+            let events = services.events(Self.module, "changed", bufferingPolicy: .bufferingNewest(1))
             liveEvents = Task { [weak self] in
                 for await _ in events {
                     guard let self else { return }

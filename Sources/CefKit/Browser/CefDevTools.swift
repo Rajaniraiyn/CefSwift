@@ -136,11 +136,21 @@ public final class CefDevTools {
         try await send(method, params).decode(Result.self)
     }
 
+    /// How many undelivered events ``events(_:bufferingPolicy:)`` keeps by
+    /// default: the newest 1,000, so a consumer that falls behind a busy
+    /// domain such as `Network` holds a bounded amount of memory.
+    public static let defaultEventBuffering = AsyncStream<CefJSON>.Continuation.BufferingPolicy.bufferingNewest(1_000)
+
     /// The stream of a protocol event's parameters. Enable the event's
     /// domain first (for example `Network.enable`). The stream ends when the
     /// browser closes or the consuming task is cancelled.
-    public func events(_ method: String) -> AsyncStream<CefJSON> {
-        AsyncStream { continuation in
+    ///
+    /// Events arrive faster than a consumer may read them; `bufferingPolicy`
+    /// says which to keep meanwhile. Pass `.unbounded` to keep every event.
+    public func events(
+        _ method: String, bufferingPolicy: AsyncStream<CefJSON>.Continuation.BufferingPolicy = defaultEventBuffering
+    ) -> AsyncStream<CefJSON> {
+        AsyncStream(bufferingPolicy: bufferingPolicy) { continuation in
             let token = addListener(for: method) { continuation.yield($0) }
             continuation.onTermination = { [weak self] _ in
                 Task { @MainActor in self?.removeListener(token, for: method) }
@@ -219,7 +229,7 @@ public final class CefDevTools {
         }
     }
 
-    fileprivate func received(event method: String, params: Data) {
+    func received(event method: String, params: Data) {
         guard let handlers = listeners[method], !handlers.isEmpty else { return }
         let json = (try? CefJSON(data: params)) ?? .null
         handlers.values.forEach { $0(json) }
