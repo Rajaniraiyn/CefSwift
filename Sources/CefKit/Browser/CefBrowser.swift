@@ -197,9 +197,9 @@ public final class CefBrowser: Identifiable {
     /// The main frame's URL.
     public private(set) var url: URL?
     public private(set) var title = ""
-    public private(set) var isLoading = false
-    public private(set) var canGoBack = false
-    public private(set) var canGoForward = false
+    public internal(set) var isLoading = false
+    public internal(set) var canGoBack = false
+    public internal(set) var canGoForward = false
     /// Load progress of the current navigation, 0…1.
     public private(set) var estimatedProgress = 0.0
     /// The address of the page's icon, as the page declares it. `nil` until
@@ -215,9 +215,9 @@ public final class CefBrowser: Identifiable {
     /// ```
     public private(set) var favicon: NSImage?
     /// Whether the page is in HTML fullscreen.
-    public private(set) var isFullscreen = false
+    public internal(set) var isFullscreen = false
     /// Status text, such as the URL of the link under the pointer.
-    public private(set) var statusText = ""
+    public internal(set) var statusText = ""
     /// Downloads started by this browser, oldest first.
     public private(set) var downloads: [CefDownload] = []
     /// Progress of an in-flight swipe-to-navigate gesture: 0 at rest, toward
@@ -226,7 +226,24 @@ public final class CefBrowser: Identifiable {
     /// rendering only.
     public package(set) var navigationGestureProgress = 0.0
     /// The latest result of ``find(_:backwards:caseSensitive:)``.
-    public private(set) var findResult: CefFindResult?
+    public internal(set) var findResult: CefFindResult?
+
+    /// Whether the page has been unloaded to free its memory, by
+    /// ``discard()`` or ``CefRuntime/memorySaver``.
+    ///
+    /// A discarded browser keeps its ``url``, ``title`` and ``favicon`` and
+    /// stays in your UI; dim its tab, for instance. It loads its page again
+    /// when it is shown, navigated or used, and this turns `false` as that
+    /// load starts.
+    public internal(set) var isDiscarded = false
+    /// The page as it looked just before it was discarded, to show in its
+    /// place while it loads again. `nil` when the browser is not discarded
+    /// or the capture failed; released once the page has loaded again.
+    public internal(set) var discardSnapshot: NSImage?
+    /// Whether ``CefRuntime/memorySaver`` and ``discard()`` may discard this
+    /// browser. Turn it off for tabs the user pinned, or pages that must
+    /// keep running.
+    public var allowsDiscarding = true
 
     // MARK: Configuration
 
@@ -242,7 +259,7 @@ public final class CefBrowser: Identifiable {
     @ObservationIgnored public weak var delegate: CefBrowserDelegate?
     @ObservationIgnored public let options: CefBrowserOptions
     /// Chromium's identifier for this browser; `-1` until created.
-    @ObservationIgnored public private(set) var identifier: Int32 = -1
+    @ObservationIgnored public internal(set) var identifier: Int32 = -1
     /// The browser that opened this one, for popups.
     @ObservationIgnored public private(set) weak var opener: CefBrowser?
     /// For a popup, the window features its page asked for — the size to
@@ -256,14 +273,27 @@ public final class CefBrowser: Identifiable {
 
     // MARK: Internals
 
-    @ObservationIgnored private(set) var raw: CefRef<cef_browser_t>?
-    @ObservationIgnored private(set) var client: CefBrowserClient?
-    @ObservationIgnored private var initialURL: URL?
+    @ObservationIgnored var raw: CefRef<cef_browser_t>?
+    @ObservationIgnored var client: CefBrowserClient?
+    @ObservationIgnored private let offscreenHostBox = WeakOffscreenHost()
+    @ObservationIgnored var initialURL: URL?
     @ObservationIgnored private(set) var isBootstrapping = false
     @ObservationIgnored private var readyWaiters: [CheckedContinuation<Void, Error>] = []
-    @ObservationIgnored private var downloadControls: [UInt32: CefRef<cef_download_item_callback_t>] = [:]
+    @ObservationIgnored var downloadControls: [UInt32: CefRef<cef_download_item_callback_t>] = [:]
     @ObservationIgnored private(set) var isChromeStyle = false
-    @ObservationIgnored private var isEmbeddedView = false
+    @ObservationIgnored private(set) var isEmbeddedView = false
+    /// How far discarding has got; see `CefBrowser+Discarding.swift`.
+    @ObservationIgnored var discardPhase = DiscardPhase.none
+    /// Calls waiting for a discarded browser to load its page again.
+    @ObservationIgnored var restoreWaiters: [CheckedContinuation<Void, Error>] = []
+    /// Commands that arrived while the browser was discarded, run once its
+    /// page has loaded again.
+    @ObservationIgnored var commandsAfterRestore: [@MainActor () -> Void] = []
+    /// Scripts added with ``addUserScript(_:)``, installed again when a
+    /// browser discarded by closing it is created anew.
+    @ObservationIgnored private var addedUserScripts: [CefUserScript] = []
+    /// Whether the page uses the camera, microphone or screen capture.
+    @ObservationIgnored var isCapturingMedia = false
     /// The view hosting this browser: the parent of a windowed browser's
     /// native view, or the offscreen host.
     @ObservationIgnored public internal(set) weak var hostView: NSView?
@@ -316,6 +346,7 @@ public final class CefBrowser: Identifiable {
         guard raw != nil, !isBootstrapping else {
             initialURL = url
             self.url = url
+            if isDiscarded { restore() }
             return
         }
         withMainFrame { frame in
@@ -328,7 +359,10 @@ public final class CefBrowser: Identifiable {
     public func stopLoading() { raw.map { $0.pointer.pointee.stop_load($0.pointer) } }
 
     public func reload(ignoringCache: Bool = false) {
-        guard let raw = raw?.pointer else { return }
+        guard let raw = raw?.pointer else {
+            if isDiscarded { restore() }
+            return
+        }
         if ignoringCache {
             raw.pointee.reload_ignore_cache(raw)
         } else {
@@ -340,6 +374,10 @@ public final class CefBrowser: Identifiable {
 
     /// Runs JavaScript in the main frame without waiting for a result.
     public func executeJavaScript(_ script: String) {
+        guard !isDiscarded else {
+            whenRestored { [weak self] in self?.executeJavaScript(script) }
+            return
+        }
         withMainFrame { frame in
             CefStringUtil.withCefString(script) { code in
                 frame.pointee.execute_java_script(frame, code, nil, 0)
@@ -380,6 +418,7 @@ public final class CefBrowser: Identifiable {
             params["worldName"] = .string(world)
         }
         try await devTools.send("Page.addScriptToEvaluateOnNewDocument", .object(params))
+        addedUserScripts.append(script)
     }
 
     // MARK: Page controls
@@ -442,6 +481,10 @@ public final class CefBrowser: Identifiable {
     /// the previous search — the previous one when `backwards` is set.
     /// Results arrive in ``findResult``.
     public func find(_ text: String, backwards: Bool = false, caseSensitive: Bool = false) {
+        guard !isDiscarded else {
+            whenRestored { [weak self] in self?.find(text, backwards: backwards, caseSensitive: caseSensitive) }
+            return
+        }
         let isRepeat = text == lastFindText
         lastFindText = text
         withHost { host in
@@ -462,6 +505,10 @@ public final class CefBrowser: Identifiable {
 
     /// Opens the system print dialog for the page.
     public func print() {
+        guard !isDiscarded else {
+            whenRestored { [weak self] in self?.print() }
+            return
+        }
         withHost { $0.pointee.print($0) }
     }
 
@@ -499,6 +546,10 @@ public final class CefBrowser: Identifiable {
     /// Opens Chrome DevTools for this browser in its own window, optionally
     /// inspecting the element at `point` (view coordinates).
     public func showDevTools(inspecting point: CGPoint? = nil) {
+        guard !isDiscarded else {
+            whenRestored { [weak self] in self?.showDevTools(inspecting: point) }
+            return
+        }
         withHost { host in
             var windowInfo = cef_window_info_t()
             windowInfo.size = MemoryLayout<cef_window_info_t>.stride
@@ -534,6 +585,10 @@ public final class CefBrowser: Identifiable {
     /// Runs one of Chrome's own commands — open history, zoom, find, print,
     /// bookmark, and so on. Chrome-style browsers only.
     public func execute(_ command: CefChromeCommand, disposition: CefWindowOpenDisposition = .currentTab) {
+        guard !isDiscarded else {
+            whenRestored { [weak self] in self?.execute(command, disposition: disposition) }
+            return
+        }
         withHost { $0.pointee.execute_chrome_command($0, Int32(command.rawValue), disposition.cefValue) }
         if command.isZoomCommand { CefBrowser.refreshZoomLevels() }
     }
@@ -554,6 +609,10 @@ public final class CefBrowser: Identifiable {
 
     /// Downloads `url` as if the user had clicked a download link.
     public func startDownload(_ url: URL) {
+        guard !isDiscarded else {
+            whenRestored { [weak self] in self?.startDownload(url) }
+            return
+        }
         withHost { host in
             CefStringUtil.withCefString(url.absoluteString) { host.pointee.start_download(host, $0) }
         }
@@ -566,6 +625,9 @@ public final class CefBrowser: Identifiable {
     public func close(force: Bool = false) {
         guard raw != nil else {
             if state == .pending { state = .closed }
+            // Discarded by closing its Chromium browser: nothing is left
+            // to close.
+            if state == .live, isDiscarded { handleClosed() }
             return
         }
         if let signInPromptURL, signInPromptURL == url {
@@ -598,9 +660,13 @@ public final class CefBrowser: Identifiable {
     /// may be showing its own sign-in window for it.
     @ObservationIgnored private var signInPromptURL: URL?
 
-    /// Suspends until the browser exists in Chromium. Throws if it closes
-    /// first.
+    /// Suspends until the browser exists in Chromium, restoring it first if
+    /// it is discarded. Throws if it closes first.
     public func ready() async throws {
+        if isDiscarded, !isBootstrapping {
+            restore()
+            try await withCheckedThrowingContinuation { restoreWaiters.append($0) }
+        }
         switch state {
         case .live: return
         case .closed: throw CefError.browserClosed
@@ -640,7 +706,8 @@ extension CefBrowser {
     /// consumed by the CEF creation call it is passed to.
     private func makeBlueprint(offscreenHost: CefOffscreenHost? = nil, frameRate: Int = 0) -> Blueprint {
         precondition(CefRuntime.shared.isInitialized, "Create browsers after CefRuntime.shared.initialize().")
-        precondition(state == .pending && client == nil, "This CefBrowser has already been created.")
+        precondition(
+            (state == .pending || isDiscarded) && client == nil, "This CefBrowser has already been created.")
 
         let client = CefBrowserClient(
             browser: self,
@@ -658,7 +725,7 @@ extension CefBrowser {
 
         // Bridges and user scripts must be installed before the first real
         // document, so such browsers start blank and navigate once set up.
-        isBootstrapping = !options.bridges.isEmpty || !options.userScripts.isEmpty
+        isBootstrapping = !options.bridges.isEmpty || !options.userScripts.isEmpty || !addedUserScripts.isEmpty
         let url = isBootstrapping ? "about:blank" : (initialURL?.absoluteString ?? "about:blank")
 
         return Blueprint(
@@ -674,6 +741,8 @@ extension CefBrowser {
     public func host(windowedIn parentView: NSView) {
         guard state != .closed else { return }
         if client == nil {
+            // A browser discarded by closing it comes back when shown.
+            guard state == .pending || isDiscarded else { return }
             createWindowed(in: parentView)
         }
         guard let native = nativeView else { return }
@@ -690,7 +759,11 @@ extension CefBrowser {
     /// use, and afterwards redirects its frames and input to `host`.
     public func host(offscreenIn host: CefOffscreenHost, size: CGSize) {
         guard state != .closed else { return }
+        restoringOffscreenHost = host
         guard let client else {
+            hostView = host as? NSView
+            // A browser discarded by closing it comes back when shown.
+            guard state == .pending || isDiscarded else { return }
             createOffscreen(host: host, size: size)
             return
         }
@@ -701,7 +774,7 @@ extension CefBrowser {
         setNeedsDisplay()
     }
 
-    private func createWindowed(in parentView: NSView) {
+    func createWindowed(in parentView: NSView) {
         var blueprint = makeBlueprint()
         var windowInfo = cef_window_info_t()
         windowInfo.size = MemoryLayout<cef_window_info_t>.stride
@@ -724,7 +797,7 @@ extension CefBrowser {
         if created == nil { creationFailed() }
     }
 
-    private func createOffscreen(host: CefOffscreenHost, size: CGSize) {
+    func createOffscreen(host: CefOffscreenHost, size: CGSize) {
         precondition(
             CefRuntime.shared.configuration?.isOffscreenRenderingEnabled == true,
             "Offscreen browsers need CefConfiguration.isOffscreenRenderingEnabled = true at initialize().")
@@ -782,20 +855,33 @@ extension CefBrowser {
 
     private func creationFailed() {
         client = nil
+        discardPhase = .none
         handleClosed()
+    }
+
+    /// The offscreen host a browser discarded by closing it is created
+    /// again in.
+    var restoringOffscreenHost: CefOffscreenHost? {
+        get { offscreenHostBox.host }
+        set { offscreenHostBox.host = newValue }
     }
 
     /// Takes over the live `cef_browser_t` once Chromium has created it.
     func adopt(_ raw: CefRef<cef_browser_t>) {
         self.raw = raw
         identifier = raw.pointer.pointee.get_identifier(raw.pointer)
+        let isRestoring = isDiscarded
         state = .live
         CefRuntime.shared.register(self)
         readyWaiters.forEach { $0.resume() }
         readyWaiters = []
         refreshZoomLevel()
         applyInitialAccessibilityState()
-        delegate?.browserDidCreate(self)
+        if isRestoring {
+            discardPhase = .restoring
+        } else {
+            delegate?.browserDidCreate(self)
+        }
         if isBootstrapping {
             Task { await bootstrap() }
         }
@@ -804,7 +890,11 @@ extension CefBrowser {
     /// Installs bridges and user scripts, then performs the real first load.
     private func bootstrap() async {
         do {
-            for script in options.userScripts {
+            // Scripts added at runtime, when a discarded browser is created
+            // again, follow those of the options; only they are remembered.
+            let added = addedUserScripts
+            defer { addedUserScripts = added }
+            for script in options.userScripts + added {
                 try await addUserScript(script)
             }
             for bridge in options.bridges {
@@ -828,9 +918,14 @@ extension CefBrowser {
     /// loading instead.
     func mainFrameDidStartLoading(_ url: URL?) {
         guard !isBootstrapping else { return }
-        // The new document reports its own icon.
-        faviconURL = nil
-        favicon = nil
+        let wasDiscarded = isDiscarded
+        pageDidStartLoading()
+        // The new document reports its own icon. A restored page keeps the
+        // one it had until then, so its tab does not flash empty.
+        if !wasDiscarded {
+            faviconURL = nil
+            favicon = nil
+        }
         guard url?.scheme == "chrome", !options.userScripts.isEmpty else { return }
         Task {
             for script in options.userScripts where script.isolatedWorldName == nil {
@@ -857,6 +952,7 @@ extension CefBrowser {
         if !isLoading { estimatedProgress = 1 }
         // Chromium restores each site's own zoom level as it navigates.
         refreshZoomLevel()
+        if !isLoading { pageDidFinishLoading() }
     }
 
     func applyProgress(_ progress: Double) {
@@ -944,6 +1040,16 @@ extension CefBrowser {
 
     func handleClosed() {
         guard state != .closed else { return }
+        if discardPhase == .closing {
+            browserDidCloseForDiscard()
+            return
+        }
+        discardPhase = .none
+        isDiscarded = false
+        discardSnapshot = nil
+        commandsAfterRestore = []
+        restoreWaiters.forEach { $0.resume(throwing: CefError.browserClosed) }
+        restoreWaiters = []
         state = .closed
         isLoading = false
         canGoBack = false
@@ -1005,6 +1111,10 @@ public struct CefJavaScriptError: Error, Sendable, CustomStringConvertible {
 
 private struct WeakWindow {
     weak var window: NSWindow?
+}
+
+private final class WeakOffscreenHost {
+    weak var host: CefOffscreenHost?
 }
 
 /// Receives a favicon from `download_image` and converts it to an

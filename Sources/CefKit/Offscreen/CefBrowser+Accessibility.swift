@@ -83,6 +83,15 @@ extension CefBrowser {
         if !changes.isEmpty { client?.offscreenHost?.offscreenAccessibilityTreeDidChange(changes) }
     }
 
+    /// A browser discarded by closing it empties its tree, and builds it
+    /// again when it is created anew.
+    func accessibilityDidCloseForDiscard() {
+        isDevToolsAccessibilityEnabled = false
+        guard isAccessibilityEnabled else { return }
+        wantsAccessibility = true
+        accessibilityDidClose()
+    }
+
     // MARK: Updates from Chromium
 
     func accessibilityTreeDidChange(_ value: CefJSON) {

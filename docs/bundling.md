@@ -20,7 +20,7 @@ The two `--allow-…` options pre-approve the plugin's permissions: it writes
 | Subcommand | Does |
 |---|---|
 | `download` | Downloads the pinned CEF distribution into `.cef/`, verifies its size and SHA-1, extracts it and converts the framework to the versioned layout. Does nothing if it is already prepared. |
-| `bundle` | Builds the product and `cef-helper`, then assembles and signs `<Name>.app`. Downloads CEF first if needed. |
+| `bundle` | Builds the product, compiles the helper, then assembles and signs `<Name>.app`. Downloads CEF first if needed. |
 | `info` | Prints the pinned CEF and Chromium versions and the state of the `.cef/` cache. |
 | `clean` | Removes `.cef/`. |
 
@@ -87,10 +87,11 @@ MyApp.app/
     ├── MacOS/
     │   └── MyApp                          # your product
     └── Frameworks/
+        ├── libcefswift_helper_startup.dylib   # seals the helpers' sandbox
         ├── Chromium Embedded Framework.framework/
         │   ├── Versions/
         │   │   ├── A/
-        │   │   │   ├── Chromium Embedded Framework   # the library CefSwift dlopens
+        │   │   │   ├── Chromium Embedded Framework   # the library itself
         │   │   │   ├── Resources/                    # .pak files, locales, icudtl.dat
         │   │   │   └── Libraries/                    # ANGLE, SwiftShader, libcef_sandbox.dylib
         │   │   └── Current -> A
@@ -109,7 +110,21 @@ MyApp.app/
 Chromium runs renderers, the GPU process, plugins and notification
 ("alerts") services as separate processes. On macOS each process type is an
 app of its own, with its own bundle identifier and `Info.plist`. All five
-contain the same binary, `cef-helper`, copied and renamed.
+contain the same binary, copied and renamed.
+
+`cef bundle` compiles that binary with `xcrun clang` from
+`Plugins/CefPlugin/Helper/` in the CefSwift package, against the framework
+it bundles. The helper links `libcefswift_helper_startup.dylib` and then the
+framework, so dyld loads both at launch, and it builds the product with a
+weak link to the framework (`-weak_framework`). Libraries loaded at launch
+keep the framework's 12 MB of fixed-up pointers as shared, clean memory in
+every process; see [architecture](architecture.md#loading-the-framework-at-launch).
+An app bundled another way, for example by an Xcode project, builds its
+helper from the same two files with the same link order (see
+`HelperBuilder.swift` in the plugin for the exact commands). Its app
+executable runs without the link to the framework, since CefKit loads the
+framework with `dlopen` if dyld has not, but that process then holds the
+12 MB privately.
 
 The names matter. Chromium derives helper paths from the main executable's
 name, so each helper executable is named `<executable> Helper` or
@@ -157,7 +172,7 @@ Each helper's `Info.plist` adds:
 ## Code signing
 
 The plugin signs inside out, each nested item before its container: the
-framework, then each helper app, then the app. The identity is, in order of
+framework, the helper startup library, each helper app, then the app. The identity is, in order of
 precedence:
 
 1. `--sign <identity>`, or `--sign -` for ad hoc.

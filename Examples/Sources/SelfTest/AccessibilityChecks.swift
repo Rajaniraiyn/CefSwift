@@ -8,6 +8,7 @@ extension SelfTest {
         CefRuntime.shared.registerSchemeHandler(scheme: "selftest", domain: "ax", handler: AccessibilityPages())
         await accessibilityTreeChecks()
         await accessibilityDisabledChecks()
+        await accessibilityDiscardChecks()
         // The cost measurement loads large pages; it runs only on its own.
         if ProcessInfo.processInfo.environment["SELFTEST_ONLY"] == "accessibility" {
             await accessibilityCostChecks()
@@ -200,6 +201,36 @@ extension SelfTest {
         view.removeFromSuperview()
     }
 
+    // MARK: Discarding
+
+    static func accessibilityDiscardChecks() async {
+        var options = CefBrowserOptions()
+        options.rendering = .offscreen
+        options.offscreenAccessibility = .enabled
+        let browser = CefBrowser(url: URL(string: "selftest://ax/plain.html")!, options: options)
+        let view = CefOffscreenBrowserView()
+        view.frame = window.contentView!.bounds
+        window.contentView!.addSubview(view)
+        view.browser = browser
+        defer { view.removeFromSuperview() }
+        func hasButton() -> Bool {
+            allElements(under: view).contains { ($0.accessibilityTitle() ?? $0.accessibilityLabel()) == "Plain button" }
+        }
+        check("accessibility: .enabled builds the tree at creation", await waitUntil { browser.isAccessibilityEnabled && hasButton() })
+        view.isHidden = true
+        await expect("accessibility: a discarded browser empties its tree") {
+            _ = await waitUntil(timeout: .seconds(5)) { !browser.isLoading }
+            try await browser.discard()
+            return browser.isDiscarded && browser.accessibilityTree.isEmpty && (view.accessibilityChildren() ?? []).isEmpty
+        }
+        view.isHidden = false
+        browser.restore()
+        check("accessibility: the tree comes back after a restore", await waitUntil { !browser.isDiscarded && browser.isAccessibilityEnabled && hasButton() },
+              detail: "\(browser.accessibilityTree.nodeCount) nodes")
+        browser.close(force: true)
+        _ = await waitUntil { browser.state == .closed }
+    }
+
     // MARK: Opting out
 
     static func accessibilityDisabledChecks() async {
@@ -347,6 +378,8 @@ struct AccessibilityPages: CefSchemeHandler {
                 <button id="far">Far button</button>
                 <p id="target">target</p>
                 """
+        case "/plain.html":
+            html = "<title>plain</title><h1>Plain</h1><button>Plain button</button>"
         case "/large.html":
             let rows = (0..<1500).map { "<li><a href='#\($0)'>Item \($0)</a> <span>detail \($0)</span></li>" }.joined()
             html = "<title>large</title><h1>Large</h1><ul>\(rows)</ul>"
