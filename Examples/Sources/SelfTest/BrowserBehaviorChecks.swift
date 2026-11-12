@@ -460,7 +460,7 @@ final class LocalServer: @unchecked Sendable {
                     body = String(repeating: "CefSwift\n", count: 2048)
                 } else if path == "/page" {
                     head = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n"
-                    body = "<title>page</title><p>A page on http, which Chrome's QR code generator accepts.</p><p><a id=link href=/page>A link</a></p>"
+                    body = "<title>page</title><p>A page on http, which Chrome's QR code generator accepts.</p><p>Another page, then a third page.</p><p><a id=link href=/page>A link</a></p>"
                 } else if request.contains("Authorization: Basic \(Data("ada:lovelace".utf8).base64EncodedString())") {
                     head = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n"
                     body = "<title>authorized</title>ok"
