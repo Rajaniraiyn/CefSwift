@@ -42,6 +42,11 @@ final class V8Value {
     static func array(count: Int) -> V8Value { V8Value(adopting: cef_v8_value_create_array(Int32(count))!) }
     static func object() -> V8Value { V8Value(adopting: cef_v8_value_create_object(nil, nil)!) }
     static func promise() -> V8Value? { V8Value(adopting: cef_v8_value_create_promise()) }
+    /// An ArrayBuffer with a copy of `bytes`.
+    static func arrayBuffer(copying bytes: [UInt8]) -> V8Value? {
+        var bytes = bytes
+        return bytes.withUnsafeMutableBytes { V8Value(adopting: cef_v8_value_create_array_buffer_with_copy($0.baseAddress, $0.count)) }
+    }
 
     /// A function that runs `body` when called. `body` receives `this` and
     /// the arguments and returns the result or an exception message.
@@ -101,6 +106,13 @@ final class V8Value {
     }
 
     var arrayLength: Int { Int(raw.pointee.get_array_length(raw)) }
+
+    /// A copy of an ArrayBuffer's contents.
+    var arrayBufferBytes: [UInt8] {
+        guard isArrayBuffer, let data = raw.pointee.get_array_buffer_data(raw) else { return [] }
+        let count = raw.pointee.get_array_buffer_byte_length(raw)
+        return [UInt8](UnsafeRawBufferPointer(start: data, count: count))
+    }
 
     /// The object's own enumerable string keys.
     var keys: [String] {

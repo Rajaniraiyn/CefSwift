@@ -252,6 +252,22 @@ and `V8Exception` wrap the V8 C API; `CefProcessMessage` (in `CefBase`,
 shared with the browser process) is a message's name and plain arguments.
 A later renderer-side feature is one more extension type.
 
+`MediaShim` is the extension behind the experimental
+`CefMediaCompatibility.systemDecoders`; the browser process passes
+`--cefswift-media-shim` to helpers when it is on, and the helper registers
+the extension only then. When a document's main world is created, before
+its scripts, the extension runs `MediaShimScript`, which evaluates to a
+function, and calls it with a native object whose `decode` and `release`
+send `cefswift.media.*` messages; the page's globals gain nothing. The
+script holds an ISO BMFF demuxer, a FLAC-in-fragmented-MP4 writer and the
+`MediaSource` and media-element hooks. Packets cross to the browser
+process as binary message arguments (`CefProcessMessage.Argument.binary`),
+where `CefMediaDecoding` keeps one `CefSystemAudioDecoder` (AudioToolbox)
+per stream, keyed by frame and stream number, and answers with 16-bit
+PCM. Decoding is in the browser process because the system decoders do
+not open in a sandboxed renderer. The guide's "Experimental:
+system-decoder media shim" lists what plays and what a page can observe.
+
 `PageScripting` is the extension behind bridges, user scripts and
 `evaluateJavaScript`:
 

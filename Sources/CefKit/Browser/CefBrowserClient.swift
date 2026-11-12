@@ -164,7 +164,8 @@ final class CefBrowserClient {
             }
             let frameBox = frame
             return CefBrowserClient.run(s, browser, default: 0) { _, b in
-                b.pageScripting.received(received, from: frameBox) ? 1 : 0
+                b.pageScripting.received(received, from: frameBox)
+                    || CefMediaDecoding.shared.received(received, from: frameBox) ? 1 : 0
             }
         }
         return client
