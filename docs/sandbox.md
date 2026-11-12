@@ -57,15 +57,17 @@ does not have, fails to start the GPU process, and ends the app.
 - **Signing.** The sandbox depends on bundle identity and on consistent
   signing across the app and all five helpers. Ship sandboxed builds signed
   with a Developer ID or App Store identity, with the hardened runtime for
-  notarization ([bundling](bundling.md#distributing)). Ad hoc signed builds
+  notarization ([bundling](bundling.md#distribution)). Ad hoc signed builds
   may work, but that is not guaranteed across macOS updates.
 - **Bundle layout.** The helper finds both libraries and the framework by
   paths relative to its executable, so keep the layout that `cef bundle`
   produces.
-- **Library validation.** The helpers load the startup library and the
-  framework at launch by `@executable_path`-relative paths. Sign both with
-  the same identity as the helpers, as `cef bundle` does, so library
-  validation under the hardened runtime accepts them. Chromium reverted a
+- **Library validation.** The helpers load the startup library, the
+  framework and `libcef_sandbox.dylib` at launch by
+  `@executable_path`-relative paths. Sign all of them with the same identity
+  as the helpers, as `cef bundle` does (CEF ships its libraries
+  linker-signed ad hoc), so library validation under the hardened runtime
+  accepts them without `com.apple.security.cs.disable-library-validation`. Chromium reverted a
   2022 version of its Aperitif helpers because macOS refused such paths in
   processes with library validation disabled; on macOS 27.2 an ad hoc
   signed bundle with the hardened runtime and
@@ -74,7 +76,8 @@ does not have, fails to start the GPU process, and ends the app.
   process's command line, Chromium passes it on and helpers skip sealing.
   This is the switch Chromium itself uses.
 - The App Sandbox (the App Store entitlement) is a separate mechanism from
-  Chromium's sandbox. CefSwift does not manage entitlements.
+  Chromium's sandbox, and CefSwift does not support it
+  ([bundling](bundling.md#app-sandbox)).
 
 ## Without the sandbox
 
