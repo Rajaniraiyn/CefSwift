@@ -517,7 +517,7 @@ public final class CefRuntime {
     /// ```swift
     /// // Discard tabs hidden for 30 minutes, and hidden tabs whenever
     /// // macOS runs low on memory.
-    /// CefRuntime.shared.memorySaver = .after(.minutes(30))
+    /// CefRuntime.shared.memorySaver = .after(.seconds(30 * 60))
     /// ```
     ///
     /// Only hidden browsers are discarded, and only those

@@ -28,8 +28,10 @@ public struct CefDevToolsError: Error, Sendable, Equatable, CustomStringConverti
 /// Reference: <https://chromedevtools.github.io/devtools-protocol/>
 ///
 /// The session attaches to the browser on the first message and stays
-/// attached until the browser closes. An attached session with no domain
-/// enabled changes nothing a page can see; enabled domains can be seen:
+/// attached until the browser closes. With no domain enabled, an attached
+/// session showed no difference in the readings of
+/// `Scripts/compat/probe.html` (CEF 156.0.28, windowed and offscreen
+/// hosts). Enabled domains can be seen:
 /// `Runtime.enable` makes every `console` call serialize its arguments,
 /// which a page can time, and `Debugger.enable` stops the page at its
 /// `debugger` statements. Enable what you need and disable it when done.

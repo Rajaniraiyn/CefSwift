@@ -11,8 +11,9 @@ import WebKit
 /// streaming services such as Netflix refuse without Verified Media Path
 /// host signing, and Chromium has no FairPlay. WebKit on macOS has
 /// FairPlay Streaming through Encrypted Media Extensions, needs no
-/// entitlement or licence, and identifies as Safari, so those services
-/// serve it their Safari player. Use a system browser for such sites and
+/// entitlement or licence, and identifies as Safari, so services that
+/// look for Safari serve it their Safari player. The guide lists which
+/// services were verified. Use a system browser for such sites and
 /// Chromium (``CefBrowser``) for everything else:
 ///
 /// ```swift

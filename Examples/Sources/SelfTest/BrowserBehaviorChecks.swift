@@ -119,7 +119,7 @@ extension SelfTest {
         // Chromium downloads only from network schemes, so these come from a
         // local server.
         guard let server = try? await LocalServer.start() else {
-            print("SKIP download: could not start a local HTTP server")
+            print("SKIP [environment] download: could not start a local HTTP server")
             return
         }
         defer { server.stop() }
@@ -189,7 +189,7 @@ extension SelfTest {
 
     static func authenticationChecks() async {
         guard let server = try? await LocalServer.start() else {
-            print("SKIP authentication: could not start a local HTTP server")
+            print("SKIP [environment] authentication: could not start a local HTTP server")
             return
         }
         defer { server.stop() }
@@ -214,7 +214,7 @@ extension SelfTest {
                   detail: browser.title)
         }
         if recorder.challenges.isEmpty {
-            print("SKIP authentication: CEF does not call credentialFor (Chromium's dialog asks instead)")
+            print("SKIP [limitation] authentication: CEF does not call credentialFor (Chromium's dialog asks instead)")
         } else {
             check("authentication: delegate answers the challenge", await waitUntil { browser.title == "authorized" })
         }

@@ -116,7 +116,7 @@ extension SelfTest {
         Task { result = await CefRuntime.shared.installWidevine() }
         _ = await waitUntil(timeout: widevineDownloadLimit) { result != nil }
         guard let state = result, state.isInstalled else {
-            print("SKIP widevine: the CDM did not arrive within \(widevineDownloadLimit) (offline, or Google's " +
+            print("SKIP [environment] widevine: the CDM did not arrive within \(widevineDownloadLimit) (offline, or Google's " +
                   "update server is slow): \(result.map { "\($0)" } ?? "still \(CefRuntime.shared.widevine)")")
             return
         }
