@@ -597,10 +597,10 @@ private final class PageOverlayView: NSView {
 
 /// Owner of a `cef_browser_view_delegate_t`. Popups opened from the view get
 /// a delegate of their own showing Chrome's location bar.
-final class BrowserViewDelegate: @unchecked Sendable {
+final class BrowserViewDelegate: Sendable {
     let toolbar: CefBrowserWindow.Toolbar
     /// The window whose page may open popups; UI thread only.
-    private weak var window: CefBrowserWindow?
+    private weak let window: CefBrowserWindow?
 
     init(toolbar: CefBrowserWindow.Toolbar, window: CefBrowserWindow?) {
         self.toolbar = toolbar
