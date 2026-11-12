@@ -24,6 +24,8 @@ protocol CefRendererExtension: AnyObject {
     func contextReleased(_ context: V8Context, in frame: CefRendererFrame)
     /// A message from the browser process for this extension.
     func received(_ message: CefProcessMessage, in frame: CefRendererFrame)
+    /// A page-scripting message with a wire payload.
+    func received(_ kind: CefPageScriptingMessage.Kind, payload: CefWirePayload, in frame: CefRendererFrame)
 }
 
 extension CefRendererExtension {
@@ -32,6 +34,7 @@ extension CefRendererExtension {
     func contextCreated(_ context: V8Context, in frame: CefRendererFrame) {}
     func contextReleased(_ context: V8Context, in frame: CefRendererFrame) {}
     func received(_ message: CefProcessMessage, in frame: CefRendererFrame) {}
+    func received(_ kind: CefPageScriptingMessage.Kind, payload: CefWirePayload, in frame: CefRendererFrame) {}
 }
 
 /// A frame of a browser, as a renderer sees it.
@@ -110,16 +113,29 @@ final class CefRendererProcess {
         handler.pointee.on_process_message_received = { s, browser, frame, _, message in
             let browserID = browser.map { $0.pointee.get_identifier($0) } ?? -1
             cefRelease(browser)
-            let received = message.map(CefProcessMessage.init(reading:))
-            cefRelease(message)
-            guard let received, let frame, let process = cefOwner(CefRendererProcess.self, s) else {
+            defer { cefRelease(message) }
+            guard let message, let frame, let process = cefOwner(CefRendererProcess.self, s) else {
                 cefRelease(frame)
                 return 0
             }
+            // Page-scripting payloads are read in place; only other
+            // messages are copied into a `CefProcessMessage`.
+            let name = message.pointee.get_name(message)
+            let kind = CefPageScriptingMessage.Kind(name: name)
+            cef_string_userfree_utf16_free(name)
+            let payload = kind?.isWire == true ? CefWirePayload(message: message) : nil
+            let received = payload == nil ? CefProcessMessage(reading: message) : nil
             nonisolated(unsafe) let raw = frame
             return MainActor.assumeIsolated {
                 let frame = CefRendererFrame(adopting: raw, browserID: browserID)
-                guard let target = process.extensions.first(where: { received.name.hasPrefix($0.messagePrefix) })
+                if let kind, let payload {
+                    guard let target = process.extensions.first(where: { $0.messagePrefix == CefPageScriptingMessage.prefix.description })
+                    else { return 0 }
+                    target.received(kind, payload: payload, in: frame)
+                    return 1
+                }
+                guard let received,
+                      let target = process.extensions.first(where: { received.name.hasPrefix($0.messagePrefix) })
                 else { return 0 }
                 target.received(received, in: frame)
                 return 1

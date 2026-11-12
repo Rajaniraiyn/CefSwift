@@ -80,10 +80,13 @@ final class V8Value {
     var doubleValue: Double { raw.pointee.get_double_value(raw) }
     var stringValue: String { CefStringUtil.takingUserFree(raw.pointee.get_string_value(raw)) ?? "" }
     /// A Date's time in milliseconds since 1970.
-    var dateMilliseconds: Double {
+    var dateMilliseconds: Double { Self.milliseconds(of: raw.pointee.get_date_value(raw)) }
+
+    /// A `cef_basetime_t` in milliseconds since 1970.
+    nonisolated static func milliseconds(of basetime: cef_basetime_t) -> Double {
         var time = cef_time_t()
         var milliseconds = 0.0
-        if cef_time_from_basetime(raw.pointee.get_date_value(raw), &time) != 0 {
+        if cef_time_from_basetime(basetime, &time) != 0 {
             _ = cef_time_to_doublet(&time, &milliseconds)
             milliseconds *= 1000
         }
@@ -225,15 +228,21 @@ final class V8Context {
     }
 
     /// Compiles and runs `source` as a classic script.
-    func run(_ source: String, url: String = "") -> Result<V8Value, V8Exception> {
+    func run(_ source: String) -> Result<V8Value, V8Exception> {
+        var source = source
+        return source.withUTF8 { run(utf8: UnsafeRawBufferPointer($0)) }
+    }
+
+    /// Compiles and runs the UTF-8 `source` as a classic script, without
+    /// making a Swift string of it.
+    func run(utf8 source: UnsafeRawBufferPointer) -> Result<V8Value, V8Exception> {
         var result: UnsafeMutablePointer<cef_v8_value_t>?
         var exception: UnsafeMutablePointer<cef_v8_exception_t>?
+        var noURL = cef_string_t()
         // `eval` is CEF's name for running a script in the context; it is
         // not JavaScript's eval and is not subject to the page's CSP.
-        let ran = CefStringUtil.withCefString(source) { code in
-            CefStringUtil.withCefString(url) { scriptURL in
-                raw.pointee.eval(raw, code, scriptURL, 1, &result, &exception)
-            }
+        let ran = CefStringUtil.withCefString(utf8: source) { code in
+            raw.pointee.eval(raw, code, &noURL, 1, &result, &exception)
         }
         if ran != 0, let value = V8Value(adopting: result) { return .success(value) }
         cefRelease(result)
@@ -242,9 +251,9 @@ final class V8Context {
 }
 
 /// The Swift side of a JavaScript function.
-final class V8Function: @unchecked Sendable {
+final class V8Function: Sendable {
     /// `this`, the arguments; the result, or an exception message.
-    typealias Body = @MainActor (V8Value?, [V8Value]) -> Result<V8Value?, V8Exception>
+    typealias Body = @MainActor @Sendable (V8Value?, [V8Value]) -> Result<V8Value?, V8Exception>
 
     private let body: Body
 
@@ -283,9 +292,9 @@ final class V8Function: @unchecked Sendable {
 }
 
 /// The Swift side of an object's named-property interceptor.
-final class V8Interceptor: @unchecked Sendable {
+final class V8Interceptor: Sendable {
     /// The property's name; its value, or `nil` to look it up as usual.
-    typealias Getter = @MainActor (String) -> V8Value?
+    typealias Getter = @MainActor @Sendable (String) -> V8Value?
 
     private let getter: Getter
 

@@ -196,10 +196,7 @@ final class PageScripting: CefRendererExtension {
         }
         for (id, pending) in pendingEvaluations where pending.context.isSame(context) {
             pendingEvaluations[id] = nil
-            frame.send(CefProcessMessage(CefPageScriptingMessage.evaluated, [
-                .int(Int32(id.request)), .bool(false), .string("The document went away before the result was ready."),
-                .int(0), .int(0),
-            ]))
+            Self.sendEvaluated(Int32(id.request), from: frame, error: "The document went away before the result was ready.")
         }
     }
 
@@ -277,7 +274,7 @@ final class PageScripting: CefRendererExtension {
                     guard let method = arguments.first, method.isString else {
                         return .failure(V8Exception(message: "\(bridge).invoke: the method name must be a string"))
                     }
-                    return .success(self.call(bridge, method.stringValue, arguments.dropFirst().first, in: document))
+                    return .success(self.call(bridge, method, arguments.dropFirst().first, in: document))
                 }
             case "on":
                 return V8Value.function("on") { [weak self, weak document] _, arguments in
@@ -319,54 +316,76 @@ final class PageScripting: CefRendererExtension {
         document.listeners[bridge]?[event]?.removeAll { $0.isSame(listener) }
     }
 
-    /// Sends a call to the browser process and returns its promise.
+    /// Sends a call to the browser process and returns its promise. The
+    /// argument goes from V8 straight into the message's payload.
+    private func call(_ bridge: String, _ method: V8Value, _ argument: V8Value?, in document: Document) -> V8Value? {
+        call(bridge, method: { $0.append(utf16: method.raw) }, describe: { method.stringValue }, argument, in: document)
+    }
+
     private func call(_ bridge: String, _ method: String, _ argument: V8Value?, in document: Document) -> V8Value? {
+        call(bridge, method: { $0.append(method) }, describe: { method }, argument, in: document)
+    }
+
+    private func call(
+        _ bridge: String, method writeMethod: (inout CefWireBuffer) -> Void, describe: () -> String,
+        _ argument: V8Value?, in document: Document
+    ) -> V8Value? {
         guard let promise = V8Value.promise() else { return nil }
         guard let frame = document.context.raw.pointee.get_frame(document.context.raw) else {
-            promise.reject("\(bridge).\(method): the document is closing")
+            promise.reject("\(bridge).\(describe()): the document is closing")
             return promise
         }
-        let rendererFrame = CefRendererFrame(adopting: frame, browserID: document.browserID)
+        defer { cefRelease(frame) }
         document.nextCall += 1
         let callID = document.nextCall
         document.pendingCalls[bridge, default: [:]][callID] = promise
-        let arguments = argument.map(JSONValue.init) ?? .null
-        let sent = rendererFrame.send(CefProcessMessage(CefPageScriptingMessage.call, [
-            .string(bridge), .int(Int32(document.id)), .int(Int32(callID)), .string(method),
-            .string(arguments.text), .string(document.origin),
-        ]))
-        if !sent {
+        var payload = CefWireBuffer()
+        payload.append(header: CefWireHeader(target: Int32(document.id), call: Int32(callID)))
+        payload.append(bridge)
+        writeMethod(&payload)
+        payload.append(document.origin)
+        V8Wire.write(argument?.raw, to: &payload)
+        if !payload.send(CefPageScriptingMessage.call, from: frame, to: PID_BROWSER) {
             document.pendingCalls[bridge]?[callID] = nil
-            promise.reject("\(bridge).\(method): the document is closing")
+            promise.reject("\(bridge).\(describe()): the document is closing")
         }
         return promise
     }
 
-    private func settle(_ message: CefProcessMessage) {
-        let bridge = message.string(0)
-        guard let document = documents[message.int(1)],
-              let promise = document.pendingCalls[bridge]?.removeValue(forKey: message.int(2))
+    private func settle(_ payload: CefWirePayload) {
+        var reader = payload.reader
+        guard let header = try? reader.header() else { return }
+        reader.skipHeader()
+        guard let bridge = try? reader.readString(),
+              let document = documents[Int(header.target)],
+              let promise = document.pendingCalls[bridge]?.removeValue(forKey: Int(header.call))
         else { return }
-        let succeeded = message.bool(3), value = message.string(4)
         document.context.entered {
-            if succeeded {
-                promise.resolve((JSONValue(parsing: value) ?? .null).v8Value())
+            if header.succeeded != 0 {
+                if let value = V8Wire.read(&reader) { promise.resolve(V8Value(adopting: value)) }
             } else {
-                promise.reject(value)
+                promise.reject((try? reader.readString()) ?? "")
             }
         }
         document.context.runMicrotasksSoon()
     }
 
-    private func emit(_ message: CefProcessMessage, in frame: CefRendererFrame) {
-        guard let context = frame.mainWorldContext,
+    private func emit(_ payload: CefWirePayload, in frame: CefRendererFrame) {
+        var reader = payload.reader
+        reader.skipHeader()
+        guard let bridge = try? reader.readString(), let event = try? reader.readString(),
+              let context = frame.mainWorldContext,
               let document = documents.values.first(where: { $0.context.isSame(context) }),
-              let listeners = document.listeners[message.string(0)]?[message.string(1)], !listeners.isEmpty
+              let listeners = document.listeners[bridge]?[event], !listeners.isEmpty
         else { return }
-        let payload = JSONValue(parsing: message.string(2)) ?? .null
+        let start = reader.offset
         context.entered {
             for listener in listeners {
-                if case .failure(let error) = listener.call(this: nil, [payload.v8Value()]) {
+                // Each listener gets a value of its own.
+                var copy = reader
+                copy.offset = start
+                guard let value = V8Wire.read(&copy) else { continue }
+                if case .failure(let error) = listener.call(this: nil, [V8Value(adopting: value)]) {
                     report(error.message, in: context)
                 }
             }
@@ -376,27 +395,43 @@ final class PageScripting: CefRendererExtension {
 
     // MARK: Evaluation
 
+    /// Sends an evaluation's result: the value, from V8 straight into the
+    /// payload, or the error message.
+    private static func sendEvaluated(
+        _ request: Int32, from frame: CefRendererFrame, value: V8Value? = nil, error: String? = nil,
+        line: Int = 0, column: Int = 0
+    ) {
+        var payload = CefWireBuffer()
+        payload.append(header: CefWireHeader(
+            target: request, succeeded: error == nil, line: Int32(clamping: line), column: Int32(clamping: column)))
+        if let error {
+            payload.append(error)
+        } else {
+            V8Wire.write(value?.raw, to: &payload)
+        }
+        payload.send(CefPageScriptingMessage.evaluated, from: frame.raw, to: PID_BROWSER)
+    }
+
     /// Runs a script for `CefBrowser.evaluateJavaScript` and sends its
     /// result back; a promise is awaited first.
-    private func evaluate(_ message: CefProcessMessage, in frame: CefRendererFrame) {
-        let request = message.int(0)
-        func reply(_ succeeded: Bool, _ text: String, line: Int = 0, column: Int = 0) {
-            frame.send(CefProcessMessage(CefPageScriptingMessage.evaluated, [
-                .int(Int32(request)), .bool(succeeded), .string(text), .int(Int32(line)), .int(Int32(column)),
-            ]))
-        }
+    private func evaluate(_ payload: CefWirePayload, in frame: CefRendererFrame) {
+        var reader = payload.reader
+        guard let header = try? reader.header() else { return }
+        reader.skipHeader()
+        let request = header.target
         guard let context = frame.mainWorldContext else {
-            reply(false, "The frame has no document.")
+            Self.sendEvaluated(request, from: frame, error: "The frame has no document.")
             return
         }
+        guard let source = try? reader.readStringBytes() else { return }
         context.entered {
-            switch context.run(message.string(1)) {
+            switch context.run(utf8: source) {
             case .failure(let error):
-                reply(false, error.message, line: error.line, column: error.column)
+                Self.sendEvaluated(request, from: frame, error: error.message, line: error.line, column: error.column)
             case .success(let value) where value.isPromise:
-                awaitPromise(value, request: request, context: context, frame: frame)
+                awaitPromise(value, request: Int(request), context: context, frame: frame)
             case .success(let value):
-                reply(true, JSONValue(value).text)
+                Self.sendEvaluated(request, from: frame, value: value)
             }
         }
         // The script may have queued promise jobs of its own.
@@ -409,19 +444,18 @@ final class PageScripting: CefRendererExtension {
             context.durableFunction { [weak self] _, arguments in
                 guard let self, self.pendingEvaluations.removeValue(forKey: id) != nil else { return .success(nil) }
                 let value = arguments.first ?? .undefined
-                let text = succeeded ? JSONValue(value).text : Self.describe(rejection: value)
-                frame.send(CefProcessMessage(CefPageScriptingMessage.evaluated, [
-                    .int(Int32(request)), .bool(succeeded), .string(text), .int(0), .int(0),
-                ]))
+                if succeeded {
+                    Self.sendEvaluated(Int32(request), from: frame, value: value)
+                } else {
+                    Self.sendEvaluated(Int32(request), from: frame, error: Self.describe(rejection: value))
+                }
                 return .success(nil)
             }
         }
         guard let then = promise["then"], let fulfilled = settle(true), let rejected = settle(false),
               case .success = then.call(this: promise, [fulfilled, rejected])
         else {
-            frame.send(CefProcessMessage(CefPageScriptingMessage.evaluated, [
-                .int(Int32(request)), .bool(false), .string("The promise could not be awaited."), .int(0), .int(0),
-            ]))
+            Self.sendEvaluated(Int32(request), from: frame, error: "The promise could not be awaited.")
             return
         }
         pendingEvaluations[id] = PendingEvaluation(context: context, frame: frame)
@@ -437,7 +471,9 @@ final class PageScripting: CefRendererExtension {
         } else if value.isString {
             text = value.stringValue
         } else {
-            text = JSONValue(value).text
+            var payload = CefWireBuffer()
+            V8Wire.write(value.raw, to: &payload)
+            text = JSONValue.text(wire: payload.bytes)
         }
         return "Uncaught (in promise) " + text
     }
@@ -446,19 +482,22 @@ final class PageScripting: CefRendererExtension {
 
     func received(_ message: CefProcessMessage, in frame: CefRendererFrame) {
         switch message.name {
-        case CefPageScriptingMessage.configure:
+        case CefPageScriptingMessage.configure.text:
             guard let json = JSONValue(parsing: message.string(0)), let configuration = Configuration(json: json),
                   configuration.generation >= (configurations[frame.browserID]?.generation ?? -1)
             else { return }
             configurations[frame.browserID] = configuration
-        case CefPageScriptingMessage.reply:
-            settle(message)
-        case CefPageScriptingMessage.emit:
-            emit(message, in: frame)
-        case CefPageScriptingMessage.evaluate:
-            evaluate(message, in: frame)
         default:
             break
+        }
+    }
+
+    func received(_ kind: CefPageScriptingMessage.Kind, payload: CefWirePayload, in frame: CefRendererFrame) {
+        switch kind {
+        case .reply: settle(payload)
+        case .emit: emit(payload, in: frame)
+        case .evaluate: evaluate(payload, in: frame)
+        default: break
         }
     }
 }

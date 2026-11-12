@@ -156,7 +156,8 @@ extension Benchmarks {
     // MARK: Accessibility
 
     static func accessibilityIngest() async {
-        for run in 1...3 {
+        for run in 1...4 {
+            CefDiagnostics.accessibilityIngestion = run % 2 == 1 ? .json : .valueCopy
             var options = CefBrowserOptions()
             options.rendering = .offscreen
             options.offscreenAccessibility = .enabled
@@ -180,7 +181,7 @@ extension Benchmarks {
             let main = CefDiagnostics.counter(.accessibilityIngestMain)
             let background = CefDiagnostics.counter(.accessibilityIngestBackground)
             print(String(
-                format: "bench axingest run %d: %d nodes ready at %.0f ms; ingest on main %.1f ms in %d updates (largest share of main busy %.0f ms); background %.1f ms; peak footprint +%.0f MB",
+                format: "bench axingest run %d (\(CefDiagnostics.accessibilityIngestion)): %d nodes ready at %.0f ms; ingest on main %.1f ms in %d updates (largest share of main busy %.0f ms); background %.1f ms; peak footprint +%.0f MB",
                 run, browser.accessibilityTree.nodeCount, ready, Double(main.nanoseconds) / 1e6, main.count,
                 meter.busy.benchMilliseconds, Double(background.nanoseconds) / 1e6, memory.peakMB - memory.startMB))
             browser.close(force: true)
@@ -334,5 +335,16 @@ enum MallocCounter {
 
 extension TransportBench {
     /// The wire codec's share of ``Benchmarks/codec()``.
-    static func wireCodec(twenty: Twenty, many: [Small], measure: (String, Int, () throws -> Void) -> Void) {}
+    static func wireCodec(twenty: Twenty, many: [Small], measure: (String, Int, () throws -> Void) -> Void) {
+        let int = try! CefWireBenchmark.encode(42), twentyWire = try! CefWireBenchmark.encode(twenty)
+        let manyWire = try! CefWireBenchmark.encode(many)
+        measure("wire decode int", 20000) { _ = try CefWireBenchmark.decode(Int.self, from: int) }
+        measure("wire decode twenty", 5000) { _ = try CefWireBenchmark.decode(Twenty.self, from: twentyWire) }
+        measure("wire decode many", 10) { _ = try CefWireBenchmark.decode([Small].self, from: manyWire) }
+        measure("wire decode many as CefJSON", 10) { _ = try CefWireBenchmark.decode(CefJSON.self, from: manyWire) }
+        measure("wire encode int", 20000) { _ = try CefWireBenchmark.encode(42) }
+        measure("wire encode twenty", 5000) { _ = try CefWireBenchmark.encode(twenty) }
+        measure("wire encode many", 10) { _ = try CefWireBenchmark.encode(many) }
+        print("bench codec sizes: twenty \(twentyWire.count) bytes wire, \(try! CefJSON(encoding: twenty).text.utf8.count) JSON; many \(manyWire.count) wire, \(try! CefJSON(encoding: many).text.utf8.count) JSON")
+    }
 }

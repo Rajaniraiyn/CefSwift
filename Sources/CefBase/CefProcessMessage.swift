@@ -95,30 +95,76 @@ package struct CefProcessMessage: Sendable, Equatable {
 
 /// The page-scripting protocol between `CefBrowser`/`CefBridge` in the
 /// browser process and `PageScripting` in the helper's renderer.
+///
+/// `configure` and `sync` are ``CefProcessMessage``s, sent once per
+/// configuration change or renderer process. The others carry a wire
+/// payload (``CefWireBuffer``, ``CefWirePayload``): a ``CefWireHeader``,
+/// then values, as listed for each message.
 package enum CefPageScriptingMessage {
     /// The key in a browser's `extra_info` holding its configuration (JSON
     /// text): bridges and user scripts, so that a renderer process has
     /// them before the browser's first document starts.
     package static let configurationKey = "cefswift.page"
+    /// The start of every page-scripting message's name.
+    package static let prefix: StaticString = "cefswift.page."
 
     // Browser process → renderer.
 
     /// `[configuration JSON]`: replaces the browser's configuration.
-    package static let configure = "cefswift.page.configure"
-    /// `[request, source]`: runs a script in the frame's main world.
-    package static let evaluate = "cefswift.page.evaluate"
-    /// `[bridge, context, call, succeeded, value JSON or error message]`.
-    package static let reply = "cefswift.page.reply"
-    /// `[bridge, event, payload JSON]`: to the frame's listeners.
-    package static let emit = "cefswift.page.emit"
+    package static let configure = CefStaticString("cefswift.page.configure")
+    /// Header `target`: the request. Values: the script's source.
+    package static let evaluate = CefStaticString("cefswift.page.evaluate")
+    /// Header `target`: the document, `call`, `succeeded`. Values: the
+    /// bridge's name, then the result, or the error message.
+    package static let reply = CefStaticString("cefswift.page.reply")
+    /// Values: the bridge's name, the event, the payload. To the frame's
+    /// listeners.
+    package static let emit = CefStaticString("cefswift.page.emit")
 
     // Renderer → browser process.
 
     /// `[generation]`: a renderer process saw the browser's first document
     /// and holds that configuration generation.
-    package static let sync = "cefswift.page.sync"
-    /// `[bridge, context, call, method, arguments JSON, origin]`.
-    package static let call = "cefswift.page.call"
-    /// `[request, succeeded, value JSON or error message, line, column]`.
-    package static let evaluated = "cefswift.page.evaluated"
+    package static let sync = CefStaticString("cefswift.page.sync")
+    /// Header `target`: the document, `call`. Values: the bridge's name,
+    /// the method, the document's origin, the argument.
+    package static let call = CefStaticString("cefswift.page.call")
+    /// Header `target`: the request, `succeeded`, `line`, `column`. Values:
+    /// the result, or the error message.
+    package static let evaluated = CefStaticString("cefswift.page.evaluated")
+
+    /// The messages.
+    package enum Kind: CaseIterable, Sendable {
+        case configure, evaluate, reply, emit, sync, call, evaluated
+
+        package var name: CefStaticString {
+            switch self {
+            case .configure: CefPageScriptingMessage.configure
+            case .evaluate: CefPageScriptingMessage.evaluate
+            case .reply: CefPageScriptingMessage.reply
+            case .emit: CefPageScriptingMessage.emit
+            case .sync: CefPageScriptingMessage.sync
+            case .call: CefPageScriptingMessage.call
+            case .evaluated: CefPageScriptingMessage.evaluated
+            }
+        }
+
+        /// Whether the message carries a wire payload.
+        package var isWire: Bool { self != .configure && self != .sync }
+
+        /// The message named `name`, compared without making a Swift string.
+        package init?(name: UnsafePointer<cef_string_t>?) {
+            guard CefStringUtil.hasPrefix(name, CefPageScriptingMessage.prefix),
+                  let kind = Self.allCases.first(where: { $0.name.matches(name) })
+            else { return nil }
+            self = kind
+        }
+    }
+}
+
+extension CefProcessMessage {
+    /// A message named by a static string.
+    package init(_ name: CefStaticString, _ arguments: [Argument] = []) {
+        self.init(name.text, arguments)
+    }
 }

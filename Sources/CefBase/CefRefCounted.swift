@@ -8,7 +8,9 @@ import CCef
 /// Releases the Swift owner when an object's reference count reaches zero.
 private let cefObjectOnZero: @convention(c) (UnsafeMutableRawPointer?) -> Void = { opaque in
     guard let opaque else { return }
-    Unmanaged<AnyObject>.fromOpaque(opaque).release()
+    let owner = Unmanaged<AnyObject>.fromOpaque(opaque)
+    CefCensus.add(.implemented(String(describing: type(of: owner.takeUnretainedValue()))), -1)
+    owner.release()
 }
 
 /// Allocates a zeroed CEF struct whose first member is
@@ -16,6 +18,7 @@ private let cefObjectOnZero: @convention(c) (UnsafeMutableRawPointer?) -> Void =
 /// released. The caller holds the one initial reference.
 package func cefAllocate<T>(_ type: T.Type, owner: AnyObject) -> UnsafeMutablePointer<T> {
     let opaque = Unmanaged.passRetained(owner).toOpaque()
+    CefCensus.add(.implemented(String(describing: Swift.type(of: owner))), 1)
     guard let raw = ccef_object_alloc(MemoryLayout<T>.stride, opaque, cefObjectOnZero) else {
         Unmanaged<AnyObject>.fromOpaque(opaque).release()
         fatalError("CefSwift: out of memory allocating a CEF object")
@@ -79,15 +82,18 @@ package final class CefRef<T>: @unchecked Sendable {
     /// Takes ownership of the caller's +1 reference.
     package init(adopting pointer: UnsafeMutablePointer<T>) {
         self.pointer = pointer
+        CefCensus.add(.reference(String(describing: T.self)), 1)
     }
 
     /// Adds its own reference, leaving the caller's untouched.
     package init(retaining pointer: UnsafeMutablePointer<T>) {
         cefAddRef(pointer)
         self.pointer = pointer
+        CefCensus.add(.reference(String(describing: T.self)), 1)
     }
 
     deinit {
+        CefCensus.add(.reference(String(describing: T.self)), -1)
         cefRelease(pointer)
     }
 }

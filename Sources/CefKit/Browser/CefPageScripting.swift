@@ -21,7 +21,7 @@ final class CefPageScripting {
     /// Evaluations waiting for the renderer, by request. A request number
     /// is unique for the browser's lifetime; the renderer tells requests of
     /// different browsers apart by the browser's identifier.
-    let pendingEvaluations = CefPendingOperations<CefJSON>()
+    let pendingEvaluations = CefPendingOperations<CefWirePayload>()
 
     init(browser: CefBrowser) {
         self.browser = browser
@@ -67,17 +67,32 @@ final class CefPageScripting {
 
     // MARK: Evaluation
 
-    /// Runs `script` in the main frame's main world and returns its value.
-    /// Cancelling the calling task ends the wait with `CancellationError`;
-    /// the script itself runs on.
+    /// Runs `script` in the main frame's main world and decodes its value
+    /// as `T`, straight from the reply's payload. Cancelling the calling
+    /// task ends the wait with `CancellationError`; the script itself runs
+    /// on.
+    func evaluate<T: Decodable>(_ script: String, as type: T.Type = T.self) async throws -> T {
+        try await evaluatedPayload(script).decode(T.self, at: Self.valueOffset)
+    }
+
+    /// Runs `script` and returns its value as `CefJSON`.
     func evaluate(_ script: String) async throws -> CefJSON {
+        try await evaluate(script, as: CefJSON.self)
+    }
+
+    /// Where a reply's value starts: after the header.
+    static let valueOffset = CefWireHeader.size
+
+    private func evaluatedPayload(_ script: String) async throws -> CefWirePayload {
         guard let browser else { throw CefError.browserClosed }
         try await browser.ready()
         return try await pendingEvaluations.wait { request in
             var sent = false
+            var payload = CefWireBuffer(capacity: script.utf8.count + 64)
+            payload.append(header: CefWireHeader(target: Int32(truncatingIfNeeded: request)))
+            payload.append(script)
             browser.withMainFrame { frame in
-                sent = CefProcessMessage(CefPageScriptingMessage.evaluate, [.int(Int32(request)), .string(script)])
-                    .send(from: frame, to: PID_RENDERER)
+                sent = payload.send(CefPageScriptingMessage.evaluate, from: frame, to: PID_RENDERER)
             }
             if !sent { pendingEvaluations.complete(request, .failure(CefError.browserClosed)) }
         }
@@ -98,28 +113,39 @@ final class CefPageScripting {
 
     // MARK: Messages
 
+    /// A page-scripting message, as the client reads it.
+    enum Received: Sendable {
+        case message(CefProcessMessage)
+        case wire(CefPageScriptingMessage.Kind, CefWirePayload)
+    }
+
     /// A message from one of the browser's renderers. Returns whether it
     /// was one of page scripting's.
-    func received(_ message: CefProcessMessage, from frame: CefRef<cef_frame_t>) -> Bool {
-        switch message.name {
-        case CefPageScriptingMessage.sync:
+    func received(_ received: Received, from frame: CefRef<cef_frame_t>) -> Bool {
+        switch received {
+        case .message(let message) where message.name == CefPageScriptingMessage.sync.text:
             if message.int(0) < generation {
                 CefProcessMessage(CefPageScriptingMessage.configure, [.string(configuration.text)])
                     .send(from: frame.pointer, to: PID_RENDERER)
             }
-        case CefPageScriptingMessage.evaluated:
-            let request = message.int(0)
-            if message.bool(1) {
-                pendingEvaluations.complete(request, Result { try CefJSON(data: Data(message.string(2).utf8)) })
+        case .wire(.evaluated, let payload):
+            var reader = payload.reader
+            guard let header = try? reader.header() else { return true }
+            reader.skipHeader()
+            let request = Int(header.target)
+            if header.succeeded != 0 {
+                pendingEvaluations.complete(request, .success(payload))
             } else {
                 pendingEvaluations.complete(request, .failure(CefJavaScriptError(
-                    message: message.string(2), line: message.int(3), column: message.int(4))))
+                    message: (try? reader.readString()) ?? "", line: Int(header.line), column: Int(header.column))))
             }
-        case CefPageScriptingMessage.call:
-            guard let browser, let bridge = browser.options.bridges.first(where: { $0.name == message.string(0) }) else {
-                return true
-            }
-            bridge.received(message, in: browser, from: frame)
+        case .wire(.call, let payload):
+            var reader = payload.reader
+            reader.skipHeader()
+            guard let browser, let name = try? reader.readString(),
+                  let bridge = browser.options.bridges.first(where: { $0.name == name })
+            else { return true }
+            bridge.received(payload, reader: reader, in: browser, from: frame)
         default:
             return false
         }

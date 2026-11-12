@@ -1,3 +1,4 @@
+import os
 import AppKit
 import CCef
 import Foundation
@@ -193,17 +194,34 @@ final class CefBrowserClient {
         client.pointee.get_command_handler = { CefBrowserClient.handler($0) }
         client.pointee.get_render_handler = { CefBrowserClient.handler($0) }
         client.pointee.on_process_message_received = { s, browser, frame, _, message in
-            let received = message.map(CefProcessMessage.init(reading:))
-            cefRelease(message)
             // Adopted before anything can return early.
             let frame = CefRef(adopting: frame)
-            guard let received, let frame else {
+            defer { cefRelease(message) }
+            guard let message, let frame else {
                 cefRelease(browser)
                 return 0
             }
-            let frameBox = frame
+            // Page-scripting payloads are read in place, by name, without
+            // copying the message into Swift values first.
+            let name = message.pointee.get_name(message)
+            let kind = CefPageScriptingMessage.Kind(name: name)
+            cef_string_userfree_utf16_free(name)
+            guard let kind else {
+                cefRelease(browser)
+                return 0
+            }
+            let received: CefPageScripting.Received
+            if kind.isWire {
+                guard let payload = CefWirePayload(message: message) else {
+                    cefRelease(browser)
+                    return 0
+                }
+                received = .wire(kind, payload)
+            } else {
+                received = .message(CefProcessMessage(reading: message))
+            }
             return CefBrowserClient.run(s, browser, default: 0) { _, b in
-                b.pageScripting.received(received, from: frameBox) ? 1 : 0
+                b.pageScripting.received(received, from: frame) ? 1 : 0
             }
         }
         return client
@@ -759,19 +777,19 @@ final class CefBrowserClient {
 
 /// A thread-safe set of handler structs keyed by type, each held with one
 /// reference.
-final class HandlerTable: @unchecked Sendable {
-    private let lock = NSLock()
-    private var handlers: [ObjectIdentifier: UnsafeMutableRawPointer] = [:]
+final class HandlerTable: Sendable {
+    // Pointers to CEF objects, each held with one reference; any thread.
+    private let table = OSAllocatedUnfairLock(uncheckedState: [ObjectIdentifier: UnsafeMutableRawPointer]())
 
     /// Stores `handler`, taking over the caller's reference.
     func set<H>(_ handler: UnsafeMutablePointer<H>) {
-        let previous = lock.withLock { handlers.updateValue(UnsafeMutableRawPointer(handler), forKey: ObjectIdentifier(H.self)) }
+        let previous = table.withLockUnchecked { $0.updateValue(UnsafeMutableRawPointer(handler), forKey: ObjectIdentifier(H.self)) }
         cefRelease(previous)
     }
 
     /// The handler of type `H` with an extra reference for the caller.
     func retained<H>(_ type: H.Type) -> UnsafeMutablePointer<H>? {
-        lock.withLock {
+        table.withLockUnchecked { handlers in
             guard let raw = handlers[ObjectIdentifier(H.self)] else { return nil }
             cefAddRef(raw)
             return raw.assumingMemoryBound(to: H.self)
@@ -779,7 +797,7 @@ final class HandlerTable: @unchecked Sendable {
     }
 
     func releaseAll() {
-        let released = lock.withLock {
+        let released = table.withLockUnchecked { handlers in
             defer { handlers.removeAll() }
             return Array(handlers.values)
         }
@@ -787,7 +805,7 @@ final class HandlerTable: @unchecked Sendable {
     }
 
     deinit {
-        handlers.values.forEach { cefRelease($0) }
+        table.withLockUnchecked { $0.values.forEach { cefRelease($0) } }
     }
 }
 
@@ -797,10 +815,22 @@ final class HandlerTable: @unchecked Sendable {
 public struct CefResourceRequest: Sendable, Equatable {
     public var url: URL?
     public var method: String
-    /// The page URL that initiated the request, when known.
-    public var referrer: URL?
+    /// The page URL that initiated the request, when known. Parsed when
+    /// read: most filters never look at it.
+    public var referrer: URL? {
+        get { referrerString.flatMap(URL.init(string:)) }
+        set { referrerString = newValue?.absoluteString }
+    }
     /// Whether this is a main-frame or subframe navigation.
     public var isNavigation: Bool
+    private var referrerString: String?
+
+    init(url: URL?, method: String, referrerString: String?, isNavigation: Bool) {
+        self.url = url
+        self.method = method
+        self.referrerString = referrerString
+        self.isNavigation = isNavigation
+    }
 }
 
 /// What a ``CefRequestFilter`` does with a request.
@@ -862,7 +892,7 @@ final class ResourceRequestFilter: Sendable {
             let snapshot = CefResourceRequest(
                 url: CefStringUtil.takingUserFree(request.pointee.get_url(request)).flatMap(URL.init(string:)),
                 method: CefStringUtil.takingUserFree(request.pointee.get_method(request)) ?? "GET",
-                referrer: CefStringUtil.takingUserFree(request.pointee.get_referrer_url(request)).flatMap(URL.init(string:)),
+                referrerString: CefStringUtil.takingUserFree(request.pointee.get_referrer_url(request)),
                 isNavigation: resourceType == RT_MAIN_FRAME || resourceType == RT_SUB_FRAME
             )
             // CEF calls this on the IO thread, which the filter is isolated to.
