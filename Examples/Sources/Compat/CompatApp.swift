@@ -16,12 +16,16 @@ import CefSwiftUI
 ///   `bridge`, `anyframe` (the bridge in every frame), `userscript`,
 ///   `evaluate` (one `evaluateJavaScript` as the
 ///   page loads), `passkeys` (app-answered passkeys), `accessibility`
-///   (offscreen accessibility tree from the start).
+///   (offscreen accessibility tree from the start), `mediashim`
+///   (`CefMediaCompatibility.systemDecoders`).
 /// - `-wait <seconds>`: how long to show the page (default 12).
 /// - `-capture <path.png>`: where to save a screenshot of the window, taken
 ///   with `screencapture` from outside the page, when the time is up.
 /// - `-cacheDirectory <path>`: Chromium's data directory.
 /// - `-productToken <token>`: `CefUserAgent.appendingProduct(token)`.
+/// - `-enableFeatures <name>,…`, `-enableBlinkFeatures <name>,…`: Chromium
+///   and Blink features to switch on; `-switches name=value,…`: more
+///   Chromium switches; `-mediaShim YES`: as the `mediashim` feature.
 /// - `-printValue <script>`: evaluates the script when the time is up and
 ///   prints `compat value <JSON>`, for trying the harness out.
 ///
@@ -59,6 +63,14 @@ enum CompatApp {
         }
         if let names = defaults.string(forKey: "enableBlinkFeatures") {
             configuration.extraCommandLineSwitches["enable-blink-features"] = names
+        }
+        if defaults.bool(forKey: "mediaShim") || features.contains("mediashim") {
+            configuration.mediaCompatibility = .systemDecoders
+        }
+        // `name=value,name` pairs, such as `autoplay-policy=no-user-gesture-required`.
+        for entry in (defaults.string(forKey: "switches") ?? "").split(separator: ",") {
+            let parts = entry.split(separator: "=", maxSplits: 1).map(String.init)
+            configuration.extraCommandLineSwitches[parts[0]] = .some(parts.count > 1 ? parts[1] : nil)
         }
         if let token = defaults.string(forKey: "productToken") {
             configuration.userAgent = .appendingProduct(token)

@@ -44,8 +44,11 @@ final class CefAppContext: @unchecked Sendable {
         }
         process.pointee.on_before_child_process_launch = { s, commandLine in
             defer { cefRelease(commandLine) }
-            guard let commandLine, let owner = cefOwner(CefAppContext.self, s), !owner.customSchemes.isEmpty
-            else { return }
+            guard let commandLine, let owner = cefOwner(CefAppContext.self, s) else { return }
+            if owner.configuration.mediaCompatibility == .systemDecoders {
+                CefCommandLine(raw: commandLine).appendSwitch(CefMediaShimMessage.rendererSwitch)
+            }
+            guard !owner.customSchemes.isEmpty else { return }
             // CEF does not tell subprocesses about app-registered schemes;
             // pass them along so the helper registers the same list.
             CefCommandLine(raw: commandLine).appendSwitch(
@@ -110,6 +113,12 @@ final class CefAppContext: @unchecked Sendable {
         }
         if configuration.safeStorage.resolved() == .mockKeychain, !commandLine.hasSwitch("use-mock-keychain") {
             commandLine.appendSwitch("use-mock-keychain")
+        }
+
+        // The media shim plays AAC as lossless FLAC, about twelve times the
+        // bytes, so an audio SourceBuffer holds proportionally more.
+        if configuration.mediaCompatibility == .systemDecoders, !commandLine.hasSwitch("mse-audio-buffer-size-limit-mb") {
+            commandLine.appendSwitch("mse-audio-buffer-size-limit-mb", value: "96")
         }
 
         var (enabledFeatures, disabledFeatures) = configuration.chromiumFeatures

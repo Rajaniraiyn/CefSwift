@@ -35,6 +35,13 @@ enum SelfTest {
             configuration.rootCacheDirectory = URL(fileURLWithPath: widevineProbeDirectory)
             configuration.protectedMedia = .automatic
         }
+        // mediaShimChecks() starts this app a second time with the media shim on.
+        let mediaShimProbeDirectory = ProcessInfo.processInfo.environment[mediaShimProbeEnvironmentKey]
+        if let mediaShimProbeDirectory {
+            configuration.rootCacheDirectory = URL(fileURLWithPath: mediaShimProbeDirectory)
+            configuration.mediaCompatibility = .systemDecoders
+            configuration.extraCommandLineSwitches["autoplay-policy"] = "no-user-gesture-required"
+        }
         do {
             try CefRuntime.shared.initialize(configuration: configuration)
             if relaunchDirectory != nil {
@@ -67,6 +74,8 @@ enum SelfTest {
                 await ServiceBenchmark.run()
             } else if widevineProbeDirectory != nil {
                 await widevineProbeChecks()
+            } else if mediaShimProbeDirectory != nil {
+                await mediaShimProbeChecks()
             } else {
                 await runChecks()
             }
@@ -112,6 +121,7 @@ enum SelfTest {
         ("nativeUI", nativeUIChecks),
         ("relaunch", relaunchChecks),
         ("protectedMedia", protectedMediaChecks),
+        ("mediaShim", mediaShimChecks),
         ("systemEngine", systemEngineChecks),
         ("passkeys", passkeyChecks),
         ("chromeWindow", chromeWindowChecks),
@@ -520,8 +530,14 @@ enum SelfTest {
 /// Serves the pages the checks load.
 struct StaticPage: CefSchemeHandler {
     func response(for request: CefSchemeRequest) async -> CefSchemeResponse {
+        if let path = request.url?.path, path.hasPrefix("/media/") {
+            guard let data = SelfTest.mediaFiles[path] else { return .notFound() }
+            return CefSchemeResponse(mimeType: path.hasSuffix(".m4a") ? "audio/mp4" : "application/octet-stream", body: data)
+        }
         let html: String
         switch request.url?.path {
+        case "/media.html":
+            html = SelfTest.mediaShimPage
         case "/index.html":
             html = """
                 <title>loading</title>
