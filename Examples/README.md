@@ -55,6 +55,14 @@ It prints one line per check, quits through `cef_shutdown()`, and exits with
 the number of failures. CI runs it; [CONTRIBUTING](../CONTRIBUTING.md#verify-with-selftest)
 describes running it locally.
 
+`SELFTEST_ONLY=accessibility` runs only the offscreen accessibility
+checks, and adds `NOTE` lines measuring a large page's load with and
+without the tree. `SELFTEST_ONLY=accessibility-external` instead shows the
+accessibility test page without reading it, prints `READY <pid>`, and
+waits `SELFTEST_AX_HOLD` seconds (15 by default) for a separate process to
+read it through the `AXUIElement` API, which needs that process to have
+Accessibility permission.
+
 ## Launch arguments
 
 Browser and Showcase can start in a given state, for trying things out and

@@ -77,8 +77,21 @@ enum SelfTest {
     // MARK: Checks
 
     static func runChecks() async {
+        // SELFTEST_ONLY=accessibility runs one group while working on it;
+        // accessibility-external shows the page for an outside AX client.
+        switch ProcessInfo.processInfo.environment["SELFTEST_ONLY"] {
+        case "accessibility":
+            await offscreenAccessibilityChecks()
+            return
+        case "accessibility-external":
+            await accessibilityExternalClientSession()
+            return
+        default:
+            break
+        }
         await windowedBrowserChecks()
         await offscreenBrowserChecks()
+        await offscreenAccessibilityChecks()
         await profileChecks()
         await browserWindowChecks()
         await browserBehaviorChecks()
