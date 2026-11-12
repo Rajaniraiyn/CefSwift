@@ -400,6 +400,12 @@ struct EdgePages: CefSchemeHandler {
             return CefSchemeResponse(mimeType: "image/png", body: Self.iconPNG)
         case "/favicon.html":
             return Self.page("<title>favicon</title><link rel=icon href=icon.png><p>favicon</p>")
+        case "/heavy.html":
+            // A tall page whose `__allocate()` dirties 200 MB in its renderer.
+            return Self.page("""
+                <title>heavy</title><link rel=icon href=icon.png><div style="height: 5000px">heavy</div>
+                <script>window.__allocate = () => (window.__heavy = new Float64Array(25e6).fill(1.5)).length;</script>
+                """)
         case "/leave.html":
             return Self.page("""
                 <title>leave</title><p>leave</p>

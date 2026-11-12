@@ -188,8 +188,11 @@ extension CefBrowser {
         withHost { $0.pointee.was_hidden($0, 1) }
     }
 
-    /// Tells Chromium the host view can be seen again.
+    /// Tells Chromium the host view can be seen again, and restores a
+    /// discarded browser.
     public func hostViewDidUnhide() {
+        // A discarded browser comes back when it can be seen.
+        if isDiscarded { restore() }
         withHost { $0.pointee.was_hidden($0, 0) }
     }
 

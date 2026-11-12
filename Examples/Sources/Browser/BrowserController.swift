@@ -15,6 +15,9 @@ final class BrowserController: CefBrowserDelegate {
     /// The browser in the frontmost tab.
     var current: CefBrowser? { keyBrowser ?? windows.last?.browser }
 
+    /// Tabs Memory Saver has put to sleep.
+    var sleepingTabs: [CefBrowser] { windows.map(\.browser).filter(\.isDiscarded) }
+
     /// The browser whose window is key, tracked so that views and menus
     /// depending on the frontmost tab update when it changes.
     private var keyBrowser: CefBrowser?
@@ -210,7 +213,14 @@ final class BrowserController: CefBrowserDelegate {
         }
     }
 
+    /// Called whenever a tab's page finishes loading.
+    @ObservationIgnored var onPageLoad: ((CefBrowser) -> Void)?
+
     // MARK: CefBrowserDelegate
+
+    func browser(_ browser: CefBrowser, didFinishLoadWithStatus httpStatus: Int) {
+        onPageLoad?(browser)
+    }
 
     func browser(_ browser: CefBrowser, decidePolicyFor navigation: CefNavigationAction) -> CefNavigationDecision {
         library.historyMayHaveChanged()

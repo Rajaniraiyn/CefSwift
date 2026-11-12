@@ -22,18 +22,35 @@ Since CEF 138 the macOS sandbox ships as a library inside the framework,
 
 1. **Browser process.** `isSandboxEnabled` sets `cef_settings_t.no_sandbox`
    to 0. Chromium then stops passing `--no-sandbox` to helper processes.
-2. **Helper processes.** `CefRuntime.helperMain()` checks its arguments.
-   Without `--no-sandbox`, it calls `ccef_sandbox_initialize(argc, argv)`
-   (`Sources/CCef/ccef_sandbox.c`), which loads `libcef_sandbox.dylib` from
-   its path relative to the helper executable and calls
-   `cef_sandbox_initialize` to seal the process before the framework loads,
-   as the sandbox requires. If sealing fails, the helper prints the error and
-   exits with status 125 rather than run unsandboxed.
-3. The sandbox loader is separate from the main loader (`ccef_loader.c`),
-   as in CEF's `cef_scoped_sandbox_context_mac.mm`.
+2. **Helper processes.** The helper executable links
+   `Contents/Frameworks/libcefswift_helper_startup.dylib` ahead of the
+   framework. That library's initializer runs before any framework code.
+   Without `--no-sandbox` among the helper's arguments, it calls
+   `cef_sandbox_initialize(argc, argv)` from `libcef_sandbox.dylib` to seal
+   the process. If sealing fails, the helper prints an error and exits with
+   status 125 rather than run unsandboxed. The sources are in
+   `Plugins/CefPlugin/Helper/`.
+3. This is the order CEF requires (`cef_sandbox_mac.h`: initialize the
+   sandbox before the framework loads), reached with the framework linked
+   at launch instead of loaded with `dlopen` afterwards. See
+   [architecture](architecture.md#loading-the-framework-at-launch) for why.
 
-No other code changes are needed. Bundles from `cef bundle` already contain
-the library in the framework's `Libraries/` directory.
+No other code changes are needed. Bundles from `cef bundle` contain both
+libraries.
+
+### libcef_sandbox and Chromium's Aperitif helpers
+
+Chrome 157 ships helper apps named `Google Chrome Helper (Aperitif).app`,
+`(Aperitif Renderer)`, `(Aperitif GPU)` and `(Aperitif Alerts)`, which link
+`libaperitif.dylib` before the framework. That library is Chromium's
+counterpart of `libcef_sandbox.dylib` plus CefSwift's startup library: it
+seals the seatbelt sandbox and registers PartitionAlloc's malloc zone
+before any other code runs. Chromium launches those helpers only when its
+`AperitifHelpers` feature is on. CEF 156 ships no `libaperitif.dylib` and
+no Aperitif helpers, leaves the feature off, and asks clients to seal the
+sandbox with `libcef_sandbox.dylib`, which is what CefSwift does. Do not
+turn `AperitifHelpers` on: Chromium then looks for helper apps the bundle
+does not have, fails to start the GPU process, and ends the app.
 
 ## Requirements
 
@@ -42,8 +59,17 @@ the library in the framework's `Libraries/` directory.
   with a Developer ID or App Store identity, with the hardened runtime for
   notarization ([bundling](bundling.md#distributing)). Ad hoc signed builds
   may work, but that is not guaranteed across macOS updates.
-- **Bundle layout.** The library's path is resolved relative to the helper
-  executable, so keep the layout that `cef bundle` produces.
+- **Bundle layout.** The helper finds both libraries and the framework by
+  paths relative to its executable, so keep the layout that `cef bundle`
+  produces.
+- **Library validation.** The helpers load the startup library and the
+  framework at launch by `@executable_path`-relative paths. Sign both with
+  the same identity as the helpers, as `cef bundle` does, so library
+  validation under the hardened runtime accepts them. Chromium reverted a
+  2022 version of its Aperitif helpers because macOS refused such paths in
+  processes with library validation disabled; on macOS 27.2 an ad hoc
+  signed bundle with the hardened runtime and
+  `com.apple.security.cs.disable-library-validation` starts normally.
 - **`--no-sandbox`.** If anything adds `--no-sandbox` to the browser
   process's command line, Chromium passes it on and helpers skip sealing.
   This is the switch Chromium itself uses.

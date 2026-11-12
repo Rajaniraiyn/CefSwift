@@ -1,6 +1,6 @@
 # Examples
 
-Three apps built on CefSwift, in a package of their own that depends on the
+Four apps built on CefSwift, in a package of their own that depends on the
 checkout above it. They need macOS 15. Bundle and run one from the
 repository root:
 
@@ -59,6 +59,14 @@ Embedding web content in SwiftUI with the `.embedded` configuration
 - **JavaScript Bridge**: a typed bridge to a page served from a custom
   scheme.
 
+## Minimal
+
+The smallest CefSwift app (`Sources/Minimal`): one window with one
+`CefWebView`, on the `.embedded` configuration. `-url <address>` shows
+another page, `-cacheDirectory <path>` keeps Chromium's data there,
+`-sandbox YES` runs its helpers in Chromium's sandbox, and
+`-memoryPolicy standard|reduced|minimal` chooses a `CefMemoryPolicy`.
+
 ## SelfTest
 
 End-to-end checks against the real Chromium runtime (`Sources/SelfTest`).
@@ -96,7 +104,18 @@ Examples/dist/Browser.app/Contents/MacOS/Browser -private YES -addressBarText sw
 | `-private YES` | Opens the tabs as private tabs. |
 | `-appearance light\|dark\|system` | Overrides the appearance setting. |
 | `-customChromiumPanels YES` | Uses the browser's QR code and Cast panels, as the setting does. |
-| `-dataDirectory <path>` | Keeps profile data in that folder, which also runs an instance separate from one using the default folder. |
+| `-cacheDirectory <path>` | Keeps Chromium's data there instead of in Application Support. |
+
+Minimal and Browser also take `-benchmark YES`: the app prints
+`cefswift-benchmark loaded <seconds since 1970>` when its first page
+finishes loading, and quits when standard input closes.
+[`Scripts/measure-footprint.py`](../Scripts/measure-footprint.py) uses it to
+measure launch time, process count and memory:
+
+```sh
+Scripts/measure-footprint.py Examples/dist/Minimal.app
+Scripts/measure-footprint.py Examples/dist/Browser.app -- --js-flags=--lite-mode
+```
 
 Cocoa reads a value that starts with `(` as a list, so prefix such a script
 with `void `.

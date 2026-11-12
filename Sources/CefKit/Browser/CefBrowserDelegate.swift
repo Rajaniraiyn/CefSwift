@@ -24,6 +24,18 @@ public protocol CefBrowserDelegate: AnyObject {
     /// DevTools). It inherits this delegate; assign another to change that.
     func browser(_ browser: CefBrowser, didOpen popup: CefBrowser)
 
+    // MARK: Discarding
+
+    /// The browser is about to be discarded (``CefBrowser/discard()`` or
+    /// ``CefRuntime/memorySaver``): its page is still there, and this is the
+    /// last moment to read from it.
+    func browserWillDiscard(_ browser: CefBrowser)
+    /// The browser's page was unloaded to free its memory. The browser
+    /// keeps its URL, title and icon, and comes back when shown or used.
+    func browserDidDiscard(_ browser: CefBrowser)
+    /// A discarded browser started loading its page again.
+    func browserDidRestore(_ browser: CefBrowser)
+
     // MARK: Loading
 
     /// The main frame finished loading with the given HTTP status.
@@ -85,6 +97,10 @@ extension CefBrowserDelegate {
     public func browserDidCreate(_ browser: CefBrowser) {}
     public func browserDidClose(_ browser: CefBrowser) {}
     public func browser(_ browser: CefBrowser, didOpen popup: CefBrowser) {}
+
+    public func browserWillDiscard(_ browser: CefBrowser) {}
+    public func browserDidDiscard(_ browser: CefBrowser) {}
+    public func browserDidRestore(_ browser: CefBrowser) {}
 
     public func browser(_ browser: CefBrowser, didFinishLoadWithStatus httpStatus: Int) {}
     public func browser(_ browser: CefBrowser, didFailLoad error: CefLoadError) {}

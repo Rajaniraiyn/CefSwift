@@ -5,8 +5,8 @@ import Foundation
 ///
 /// Declare schemes in ``CefConfiguration/customSchemes``. Chromium requires
 /// every process to register the same schemes; CefSwift passes the list to
-/// helper processes on their command line and ``CefRuntime/helperMain()``
-/// registers it there. Serve content with
+/// helper processes on their command line, and the helper executable that
+/// `swift package cef bundle` builds registers it there. Serve content with
 /// ``CefRuntime/registerSchemeHandler(scheme:domain:handler:)``.
 ///
 /// ```swift
@@ -60,31 +60,13 @@ public struct CefCustomScheme: Sendable, Equatable {
 
 extension CefCustomScheme {
     /// The switch that carries the scheme list to helper processes, as
-    /// `--cefswift-schemes=name:options,name:options`.
+    /// `--cefswift-schemes=name:options,name:options`. The helper's parser
+    /// is in `Plugins/CefPlugin/Helper/helper_main.c`.
     static let childProcessSwitchName = "cefswift-schemes"
 
     /// Encodes a scheme list as the switch value.
     static func serialize(_ schemes: [CefCustomScheme]) -> String {
         schemes.map { "\($0.name):\($0.options.rawValue)" }.joined(separator: ",")
-    }
-
-    /// Decodes a switch value, skipping malformed entries.
-    static func parse(_ serialized: String) -> [CefCustomScheme] {
-        serialized.split(separator: ",").compactMap { entry in
-            let parts = entry.split(separator: ":", maxSplits: 1)
-            guard parts.count == 2,
-                  !parts[0].isEmpty,
-                  let rawOptions = Int32(parts[1])
-            else { return nil }
-            return CefCustomScheme(name: String(parts[0]), options: Options(rawValue: rawOptions))
-        }
-    }
-
-    /// The scheme list in a helper's arguments, or `[]` without the switch.
-    static func parse(fromArguments arguments: [String]) -> [CefCustomScheme] {
-        let prefix = "--\(childProcessSwitchName)="
-        guard let argument = arguments.first(where: { $0.hasPrefix(prefix) }) else { return [] }
-        return parse(String(argument.dropFirst(prefix.count)))
     }
 
     /// Registers `schemes` from `on_register_custom_schemes`. The registrar
