@@ -572,3 +572,22 @@ extension cef_basetime_t {
         Date(timeIntervalSince1970: TimeInterval(val) / 1_000_000 - Self.unixEpochOffset)
     }
 }
+
+extension CefProfile {
+    /// The profile `browser` belongs to, among the profiles made so far;
+    /// `nil` for one Chromium made itself, such as its own incognito
+    /// profile. Does not consume `browser`.
+    static func owning(contextOf browser: UnsafeMutablePointer<cef_browser_t>) -> CefProfile? {
+        guard let host = CefRef(adopting: browser.pointee.get_host(browser)),
+              let context = CefRef(adopting: host.pointer.pointee.get_request_context(host.pointer))
+        else { return nil }
+        if context.pointer.pointee.is_global(context.pointer) != 0 { return .default }
+        profilesWithOwnContext.removeAll { $0.profile == nil }
+        return profilesWithOwnContext.lazy.compactMap(\.profile).first { profile in
+            guard let own = profile.context else { return false }
+            // Arguments passed into CEF are consumed.
+            cefAddRef(own.pointer)
+            return context.pointer.pointee.is_sharing_with(context.pointer, own.pointer) != 0
+        }
+    }
+}

@@ -384,8 +384,10 @@ public final class CefBrowser: Identifiable {
     }
 
     /// Wraps a browser Chromium created on its own (popup, Chrome UI tab).
-    init(adopting raw: CefRef<cef_browser_t>, client: CefBrowserClient, opener: CefBrowser?) {
-        self.options = opener?.options ?? CefBrowserOptions()
+    init(adopting raw: CefRef<cef_browser_t>, client: CefBrowserClient, opener: CefBrowser?, profile: CefProfile?) {
+        var options = opener?.options ?? CefBrowserOptions()
+        options.profile = profile
+        self.options = options
         self.client = client
         self.opener = opener
         self.isChromeStyle = opener?.isChromeStyle ?? true

@@ -125,8 +125,8 @@ public final class CefRuntime {
     /// native popup, a DevTools window, a tab or window opened through
     /// Chrome's UI. Assign a delegate here to manage those browsers.
     ///
-    /// Tabs that ``onChromiumOpensTab`` takes over are closed and handed to
-    /// it as a URL instead, so they never reach this closure.
+    /// A browser ``onOpenBrowser`` decides about reaches this closure only
+    /// when the answer is ``CefOpenBrowserDecision/showInChromium``.
     @ObservationIgnored public var onBrowserCreated: ((CefBrowser) -> Void)?
 
     /// Called when the app is launched again while it is running — from

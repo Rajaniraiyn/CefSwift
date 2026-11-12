@@ -95,7 +95,8 @@ final class CefBrowserClient {
         // window, or a tab opened through Chrome's own UI.
         let isPopup = browser.pointee.is_popup(browser) != 0
         let opener = isPopup ? primary : nil
-        let wrapper = CefBrowser(adopting: CefRef(adopting: browser), client: self, opener: opener)
+        let profile = opener?.options.profile ?? CefProfile.owning(contextOf: browser)
+        let wrapper = CefBrowser(adopting: CefRef(adopting: browser), client: self, opener: opener, profile: profile)
         if isPopup {
             wrapper.popupFeatures = pendingPopupFeatures
             pendingPopupFeatures = nil
@@ -103,8 +104,9 @@ final class CefBrowserClient {
         if let opener {
             wrapper.delegate = opener.delegate
             opener.delegate?.browser(opener, didOpen: wrapper)
+            CefRuntime.shared.chromiumDidOpenPopup(from: opener)
         }
-        if !CefRuntime.shared.redirectChromiumTab(wrapper) {
+        if !CefRuntime.shared.routeChromiumBrowser(wrapper, profile: profile) {
             CefRuntime.shared.onBrowserCreated?(wrapper)
         }
         return wrapper
@@ -218,6 +220,7 @@ final class CefBrowserClient {
                 )
                 let isHandled = b.route(request)
                 client.pendingPopupFeatures = isHandled ? nil : popupFeatures
+                if !isHandled { CefRuntime.shared.chromiumWillOpen(url, from: b, disposition: request.disposition) }
                 // A popup gets its opener's bridges and user scripts, like
                 // the CefBrowser that wraps it.
                 if !isHandled, let extraInfo, extraInfo.pointee == nil {
@@ -543,7 +546,10 @@ final class CefBrowserClient {
                     isSourceOffscreen: b.isOffscreen,
                     isSourceChromeStyle: b.isChromeStyle
                 )
-                return b.route(request) ? 1 : 0
+                let isHandled = b.route(request)
+                // Chromium opens the URL in a tab of its own window next.
+                if !isHandled { CefRuntime.shared.chromiumWillOpen(url, from: b, disposition: request.disposition) }
+                return isHandled ? 1 : 0
             }
         }
         h.pointee.on_certificate_error = { s, browser, certError, requestURL, sslInfo, callback in
