@@ -776,7 +776,9 @@ every browser, so pages can run `beforeunload`, and declines the request. As
 the last browser and the last Chromium window are destroyed, it calls
 `terminate(_:)` again from the run loop, then shuts Chromium down in a
 fixed order: service hosts, lifecycle observers and the memory saver's
-timer, the media router's registrations, every profile's request context,
+timer, the media router's registrations, the preference and site-setting
+observer registrations (`CefObserverRegistration`, whose streams finish)
+and the task manager object, every profile's request context,
 the message pump, then `cef_shutdown()` with the thread actors' jobs
 waiting it out. `CefRuntime.state` is `.stopping` meanwhile and `.stopped`
 after; `initialize` then throws `CefError.shutDown`, as Chromium cannot
@@ -791,6 +793,22 @@ runtime suspends that event (`NSAppleEventManager.suspendCurrentAppleEvent`),
 as `NSApplication.TerminateReply.terminateLater` does, and resumes it when
 they are gone, or with `userCanceledErr` when a page asks to stay, which
 stops the logout as an app that cancels it does.
+
+## Settings, tasks and certificates
+
+Preference and site-setting streams each hold a `cef_registration_t`
+through `CefObserverRegistration`; the observation ends when the stream's
+consumer stops, on the main actor, or at shutdown. Chromium measures CPU
+and memory only while a task manager object is alive, so
+`CefTaskManager` holds one for two refresh intervals after each read and
+lets go when nothing reads; its API names no process, so tasks are grouped
+by Chromium's ordering and identical figures. Camera and microphone
+requests reach `on_request_media_access_permission` before Chromium reads
+the content settings, so the client answers them from the settings and
+asks the delegate only about the rest; prompt-based permissions are
+answered and stored by Chromium itself. Connection security is read from
+the visible navigation entry's `cef_sslstatus_t` on each address and
+loading-state change.
 
 ## Relaunching
 
