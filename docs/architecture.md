@@ -587,12 +587,28 @@ those protections. CefKit calls `DiscardById` with it on the
 `discards.mojom.DetailsProvider` of the default profile's
 `chrome://discards` service host, after its own checks. It reads Chromium's other
 protections (audio, media capture, form interaction, connected devices)
-from `GetTabDiscardsInfo` as blockers, leaving out the ones it overrides.
-That interface numbers tabs afresh on every query and describes them only
-by address and title, so each discard looks its tab up again. CEF's frame
-count for a browser drops to zero when Chromium discards its tab; when two
-hidden tabs share an address and title, that tells which one went, and a
-discard that reached the other tab reloads it and tries the next.
+from `GetTabDiscardsInfo` as blockers, leaving out the ones it overrides
+(active tab, DevTools attached, recently visible, URL scheme, notification
+permission, an earlier discard attempt); a reason it does not know is a
+blocker, `.unknown(reason)`, as is a check that fails or times out.
+
+`TabDiscardsInfo` (Chromium 156) carries a tab's last committed URL, its
+title and an `id` that `GetTabDiscardsInfo` numbers from 1 on every call;
+nothing in it, such as a process or frame identifier, maps to a CEF
+browser. CefKit therefore takes a browser's tab to be the one tab with its
+address or, when several share it, the one that also has its title, and
+treats any other outcome as a blocker. The look-up, the check of that
+tab's protections and visibility, and `DiscardById` run in one call on
+the service host, so the tab discarded is the tab just checked. CEF's
+frame count for a browser drops to zero when Chromium discards its tab;
+if another of CefKit's browsers loses its frames instead, the discard
+reloads it and fails.
+
+`discard()` records the browser's navigation generation (counted at each
+main-frame load start) and address before its checks. After the checks,
+and again after `browserWillDiscard(_:)` and the snapshot, immediately
+before unloading, it checks the browser is still hidden, idle and on the
+same document, and stops otherwise.
 `chrome.tabs`, which the bookmarks host also has, numbers tabs stably and
 discards with the same reason, but reports none of the protections other
 than audio, so discarding stays on `chrome://discards`.

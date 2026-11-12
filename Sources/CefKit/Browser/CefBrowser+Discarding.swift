@@ -3,7 +3,7 @@ import CCef
 import Foundation
 
 /// A reason a browser cannot be discarded right now.
-public enum CefDiscardBlocker: String, Sendable, Hashable, CaseIterable, CustomStringConvertible {
+public enum CefDiscardBlocker: Sendable, Hashable, CustomStringConvertible {
     /// The browser is on screen: the selected tab of a visible window, or
     /// a view in one.
     case visible
@@ -29,8 +29,28 @@ public enum CefDiscardBlocker: String, Sendable, Hashable, CaseIterable, CustomS
     case devToolsOpen
     /// A download the browser started is still in progress.
     case downloading
+    /// CefKit could not tell whether the page may be unloaded, and keeps it:
+    /// a check failed or timed out, Chromium gave a reason CefKit does not
+    /// know, or Chromium lists no tab, or more than one, that could be this
+    /// browser's. The string says which.
+    case unknown(String)
 
-    public var description: String { rawValue }
+    public var description: String {
+        switch self {
+        case .visible: "visible"
+        case .exempt: "exempt"
+        case .notLoaded: "notLoaded"
+        case .playingAudio: "playingAudio"
+        case .capturingMedia: "capturingMedia"
+        case .pictureInPicture: "pictureInPicture"
+        case .connectedToDevice: "connectedToDevice"
+        case .formInteraction: "formInteraction"
+        case .beforeUnloadHandler: "beforeUnloadHandler"
+        case .devToolsOpen: "devToolsOpen"
+        case .downloading: "downloading"
+        case .unknown(let reason): "unknown(\(reason))"
+        }
+    }
 }
 
 /// Why ``CefBrowser/discard()`` did not discard a browser.
@@ -42,7 +62,7 @@ public enum CefDiscardError: Error, Sendable, Equatable, CustomStringConvertible
 
     public var description: String {
         switch self {
-        case .blocked(let blockers): "not discardable: " + blockers.map(\.rawValue).sorted().joined(separator: ", ")
+        case .blocked(let blockers): "not discardable: " + blockers.map(\.description).sorted().joined(separator: ", ")
         case .failed(let message): message
         }
     }
@@ -62,6 +82,17 @@ enum DiscardPhase {
     case closed
     /// The page is loading again; commands that waited run when it is done.
     case restoring
+}
+
+/// The document a discard checked: unloading goes ahead only on the same one.
+struct DiscardCheckpoint: Equatable {
+    var navigationGeneration: Int
+    var url: URL?
+
+    @MainActor init(_ browser: CefBrowser) {
+        navigationGeneration = browser.navigationGeneration
+        url = browser.url
+    }
 }
 
 // MARK: - Discarding
@@ -94,15 +125,19 @@ extension CefBrowser {
     public func discard() async throws(CefDiscardError) {
         guard !isDiscarded else { return }
         guard discardPhase == .none else { throw .failed("The browser is already being discarded or restored.") }
+        let checkpoint = DiscardCheckpoint(self)
         let blockers = await discardBlockers()
         guard blockers.isEmpty else { throw .blocked(blockers) }
         // The page may have changed while the checks ran.
-        guard !isDiscarded, discardPhase == .none, state == .live, raw != nil else { return }
+        try checkStillDiscardable(since: checkpoint)
 
         discardPhase = .discarding
         delegate?.browserWillDiscard(self)
         let snapshot = await withTimeout(.seconds(2)) { try await self.snapshot() }.flatMap(NSImage.init(data:))
         do {
+            // Immediately before unloading: nothing the delegate or the
+            // snapshot waited for may have shown, navigated or busied it.
+            try checkStillDiscardable(since: checkpoint)
             if isChromeStyle {
                 try await discardInChromium()
             } else {
@@ -146,22 +181,18 @@ extension CefBrowser {
     /// input and the rest), and for every browser whether the page has a
     /// `beforeunload` handler. Browsers in a `CefWebView` report audio and
     /// form input only for `<audio>`, `<video>`, `<input>` and `<textarea>`
-    /// elements of the main frame.
+    /// elements of the main frame. A check that cannot be made counts as a
+    /// blocker, ``CefDiscardBlocker/unknown(_:)``.
     public func discardBlockers() async -> Set<CefDiscardBlocker> {
         guard !isDiscarded else { return [] }
-        var blockers = Set<CefDiscardBlocker>()
-        if !allowsDiscarding { blockers.insert(.exempt) }
-        guard state == .live, raw != nil, !isBootstrapping, !isLoading, discardPhase == .none,
-              let url, url.scheme != "devtools"
-        else {
-            blockers.insert(.notLoaded)
-            return blockers
+        var blockers = stateBlockers()
+        if discardPhase != .none { blockers.insert(.notLoaded) }
+        guard !blockers.contains(.notLoaded) else { return blockers }
+        switch await hasBeforeUnloadHandler() {
+        case true?: blockers.insert(.beforeUnloadHandler)
+        case false?: break
+        case nil: blockers.insert(.unknown("Could not read the page's beforeunload listeners."))
         }
-        if isOnScreen { blockers.insert(.visible) }
-        if isShowingDevTools { blockers.insert(.devToolsOpen) }
-        if downloads.contains(where: { !$0.isComplete && !$0.isCancelled }) { blockers.insert(.downloading) }
-        if isCapturingMedia { blockers.insert(.capturingMedia) }
-        if await hasBeforeUnloadHandler() { blockers.insert(.beforeUnloadHandler) }
         if isChromeStyle {
             blockers.formUnion(await CefRuntime.shared.tabDiscarder.blockers(for: self))
         } else {
@@ -170,40 +201,57 @@ extension CefBrowser {
         return blockers
     }
 
+    /// The blockers CefKit knows without asking the page.
+    private func stateBlockers() -> Set<CefDiscardBlocker> {
+        var blockers = Set<CefDiscardBlocker>()
+        if !allowsDiscarding { blockers.insert(.exempt) }
+        guard state == .live, raw != nil, !isBootstrapping, !isLoading, let url, url.scheme != "devtools" else {
+            blockers.insert(.notLoaded)
+            return blockers
+        }
+        if isOnScreen { blockers.insert(.visible) }
+        if isShowingDevTools { blockers.insert(.devToolsOpen) }
+        if downloads.contains(where: { !$0.isComplete && !$0.isCancelled }) { blockers.insert(.downloading) }
+        if isCapturingMedia { blockers.insert(.capturingMedia) }
+        return blockers
+    }
+
+    /// Throws unless the browser is still on the document `checkpoint` saw
+    /// and nothing CefKit knows of keeps it loaded.
+    private func checkStillDiscardable(since checkpoint: DiscardCheckpoint) throws(CefDiscardError) {
+        guard !isDiscarded, state == .live else { throw .failed("The browser was discarded, restored or closed meanwhile.") }
+        let blockers = stateBlockers()
+        guard blockers.isEmpty else { throw .blocked(blockers) }
+        guard checkpoint == DiscardCheckpoint(self) else {
+            throw .failed("The page navigated while the browser was being discarded.")
+        }
+    }
+
     // MARK: Chrome style
 
     /// Has Chromium discard the tab in place: the WebContents, and with it
     /// this browser, its back/forward list and its DevTools session, stay.
+    ///
+    /// Chromium's list of tabs carries no identifier CefKit can map to a
+    /// browser, only each tab's address and title, so the discard goes ahead
+    /// only when exactly one tab matches (``CefTabDiscarder``).
     private func discardInChromium() async throws(CefDiscardError) {
-        let discarder = CefRuntime.shared.tabDiscarder
-        var attempt = 0
-        while true {
-            // CEF stops counting a tab's frames when Chromium discards it,
-            // which tells which tab went. The count stays at zero after the
-            // tab loads again, so it says nothing about a tab discarded before.
-            let twins = CefRuntime.shared.browsers.filter {
-                $0 !== self && $0.isChromeStyle && !$0.isDiscarded && $0.url == url && $0.frameCount > 0
-            }
-            let hadFrames = frameCount > 0
-            let candidates = try await discarder.discard(self, candidate: attempt)
-            let discardedTwins = twins.filter { $0.frameCount == 0 }
-            if candidates == 1 || frameCount == 0 || (!hadFrames && discardedTwins.isEmpty) {
-                discardPhase = .discarded
-                isDiscarded = true
-                isLoading = false
-                return
-            }
-            // Chromium tells tabs apart only by address and title, and
-            // discarded another hidden tab that shares both: bring that one
-            // back and try the next.
-            for twin in discardedTwins {
-                twin.raw.map { $0.pointer.pointee.reload($0.pointer) }
-            }
-            attempt += 1
-            guard attempt < candidates else {
-                throw .failed("Chromium could not tell this browser's tab apart from another with the same address and title.")
-            }
+        // CEF stops counting a tab's frames when Chromium discards it. A
+        // browser of CefKit's that lost its frames although it was not the
+        // one asked for was discarded in its place.
+        let others = CefRuntime.shared.browsers.filter {
+            $0 !== self && $0.isChromeStyle && !$0.isDiscarded && $0.frameCount > 0
         }
+        let hadFrames = frameCount > 0
+        try await CefRuntime.shared.tabDiscarder.discard(self)
+        let wrong = others.filter { $0.frameCount == 0 }
+        if !wrong.isEmpty, !hadFrames || frameCount > 0 {
+            for other in wrong { other.raw.map { $0.pointer.pointee.reload($0.pointer) } }
+            throw .failed("Chromium discarded another tab than this browser's; it is loading again.")
+        }
+        discardPhase = .discarded
+        isDiscarded = true
+        isLoading = false
     }
 
     /// The frames CEF knows of in the browser.
@@ -264,6 +312,7 @@ extension CefBrowser {
 
     /// The main frame started loading a document.
     func pageDidStartLoading() {
+        navigationGeneration &+= 1
         guard isDiscarded, discardPhase == .discarded || discardPhase == .restoring else { return }
         isDiscarded = false
         discardPhase = .restoring
@@ -307,8 +356,8 @@ extension CefBrowser {
     // MARK: Page checks
 
     /// Whether the page's window has a `beforeunload` listener, read with
-    /// the DevTools Protocol.
-    private func hasBeforeUnloadHandler() async -> Bool {
+    /// the DevTools Protocol; `nil` if it could not be read.
+    private func hasBeforeUnloadHandler() async -> Bool? {
         let group: CefJSON = "cefswift-discard"
         defer { Task { _ = try? await devTools.send("Runtime.releaseObjectGroup", ["objectGroup": group]) } }
         let listeners = await withTimeout(.seconds(3)) { () async throws -> [String] in
@@ -316,9 +365,12 @@ extension CefBrowser {
                 "Runtime.evaluate", ["expression": "window", "silent": true, "objectGroup": group])
             let reply = try await self.devTools.send(
                 "DOMDebugger.getEventListeners", ["objectId": window["result"]["objectId"]])
-            return reply["listeners"].arrayValue?.compactMap { $0["type"].stringValue } ?? []
+            guard let listeners = reply["listeners"].arrayValue else {
+                throw CefError.operationFailed("DOMDebugger.getEventListeners returned no listeners")
+            }
+            return listeners.compactMap { $0["type"].stringValue }
         }
-        return listeners?.contains("beforeunload") ?? false
+        return listeners?.contains("beforeunload")
     }
 
     /// For browsers Chromium's discard rules do not cover: playing media
@@ -335,9 +387,12 @@ extension CefBrowser {
                 })
                 """)
         }
+        guard let audio = state?["audio"].boolValue, let edited = state?["edited"].boolValue else {
+            return [.unknown("Could not read the page's media and form fields.")]
+        }
         var blockers = Set<CefDiscardBlocker>()
-        if state?["audio"].boolValue == true { blockers.insert(.playingAudio) }
-        if state?["edited"].boolValue == true { blockers.insert(.formInteraction) }
+        if audio { blockers.insert(.playingAudio) }
+        if edited { blockers.insert(.formInteraction) }
         return blockers
     }
 }

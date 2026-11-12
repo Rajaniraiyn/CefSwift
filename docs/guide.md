@@ -520,6 +520,10 @@ same set:
 | `.devToolsOpen` | The browser's DevTools window is open. |
 | `.downloading` | A download it started is in progress. |
 | `.pictureInPicture`, `.connectedToDevice` | Picture in picture; a Bluetooth or USB device. |
+| `.unknown(reason)` | CefKit could not tell: a check failed or timed out, Chromium gave a reason CefKit does not know, or Chromium cannot tell this tab from another with the same address and title. |
+
+A browser that is shown, starts loading or navigates while it is being
+discarded stays loaded, and `discard()` throws.
 
 In a `CefWebView`, audio and form input are read from the main frame's
 `<audio>`, `<video>`, `<input>` and `<textarea>` elements; Chrome-style
@@ -1910,8 +1914,8 @@ driver crash cannot end the app.
   is the active tab of its own Chromium window; use
   `CefRuntime.shared.memorySaver` instead. A `CefWebView` browser loses its
   back/forward list when discarded, and Chromium tells tabs apart only by
-  address and title, so of two hidden Chrome-style tabs showing the same
-  page, discarding one may briefly reload the other.
+  address and title, so Chrome-style tabs showing the same page under the
+  same title cannot be discarded (`.unknown`) until one of them moves on.
 - DevTools opens in a window of its own; there is no docked DevTools.
 - In offscreen browsers, assistive apps can focus elements inside frames
   only by clicking text fields, and press them only while they are in

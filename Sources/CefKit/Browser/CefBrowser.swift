@@ -331,6 +331,9 @@ public final class CefBrowser: Identifiable {
     @ObservationIgnored private(set) var isEmbeddedView = false
     /// How far discarding has got; see `CefBrowser+Discarding.swift`.
     @ObservationIgnored var discardPhase = DiscardPhase.none
+    /// Counts the main frame's document loads; a discard checks it has not
+    /// moved on since its checks ran.
+    @ObservationIgnored var navigationGeneration = 0
     /// Calls waiting for a discarded browser to load its page again.
     @ObservationIgnored var restoreWaiters: [CheckedContinuation<Void, Error>] = []
     /// Commands that arrived while the browser was discarded, run once its

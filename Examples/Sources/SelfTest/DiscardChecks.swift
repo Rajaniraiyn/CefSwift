@@ -168,6 +168,70 @@ extension SelfTest {
         // The beforeunload page asks before it closes; answer for it.
         leaving.browser.close(force: true)
         _ = await waitUntil { windows.allSatisfy(\.isClosed) }
+        await discardIdentityChecks()
+    }
+
+    /// Runs `body` when a browser is about to be discarded.
+    final class WillDiscardHook: CefBrowserDelegate {
+        var body: (CefBrowser) -> Void = { _ in }
+        func browserWillDiscard(_ browser: CefBrowser) { body(browser) }
+    }
+
+    /// Chromium names tabs only by address and title, so tabs it cannot
+    /// tell apart are kept; and a browser that is shown or navigates while
+    /// it is being discarded stays loaded.
+    static func discardIdentityChecks() async {
+        let twinURL = URL(string: "selftest://edge/tab.html?twin")!
+        let twins = [CefBrowserWindow(browser: CefBrowser(url: twinURL)), CefBrowserWindow(browser: CefBrowser(url: twinURL))]
+        twins.forEach { $0.show() }
+        _ = await waitUntil { twins.allSatisfy { !$0.browser.isLoading && $0.browser.title == "tab" } }
+        twins.forEach { $0.hide() }
+        try? await Task.sleep(for: .milliseconds(300))
+        var twinError: CefDiscardError?
+        do { try await twins[0].browser.discard() } catch { twinError = error }
+        let ambiguous: Bool
+        if case .blocked(let blockers) = twinError {
+            ambiguous = blockers.contains { if case .unknown = $0 { true } else { false } }
+        } else {
+            ambiguous = false
+        }
+        check("discard identity: tabs with the same address and title are kept",
+              ambiguous && twins.allSatisfy { !$0.browser.isDiscarded }, detail: "\(String(describing: twinError))")
+        // One of them navigating apart makes each tab identifiable again.
+        twins[1].browser.load(URL(string: "selftest://edge/tab.html?other")!)
+        _ = await waitUntil { twins[1].browser.url?.query == "other" && !twins[1].browser.isLoading }
+        try? await Task.sleep(for: .milliseconds(300))
+        await expect("discard identity: a tab told apart by its address is discarded, and only it") {
+            try await twins[0].browser.discard()
+            return twins[0].browser.isDiscarded && !twins[1].browser.isDiscarded
+        }
+        for window in twins { window.close() }
+        _ = await waitUntil { twins.allSatisfy(\.isClosed) }
+
+        let hook = WillDiscardHook()
+        let browser = CefBrowser(url: URL(string: "selftest://edge/tab.html?revalidate")!, delegate: hook)
+        let window = CefBrowserWindow(browser: browser)
+        window.show()
+        _ = await waitUntil { !browser.isLoading && browser.title == "tab" }
+        window.hide()
+        try? await Task.sleep(for: .milliseconds(300))
+        hook.body = { _ in window.show() }
+        var shownError: CefDiscardError?
+        do { try await browser.discard() } catch { shownError = error }
+        check("discard identity: a tab shown while it is being discarded stays loaded",
+              shownError == .blocked([.visible]) && !browser.isDiscarded, detail: "\(String(describing: shownError))")
+
+        _ = await waitUntil { !browser.isLoading }
+        window.hide()
+        try? await Task.sleep(for: .milliseconds(300))
+        hook.body = { browser in browser.load(URL(string: "selftest://edge/tab.html?moved")!) }
+        var movedError: CefDiscardError?
+        do { try await browser.discard() } catch { movedError = error }
+        hook.body = { _ in }
+        check("discard identity: a tab that navigates while it is being discarded stays loaded",
+              movedError != nil && !browser.isDiscarded, detail: "\(String(describing: movedError))")
+        window.close()
+        _ = await waitUntil { window.isClosed }
     }
 
     // MARK: Memory Saver
