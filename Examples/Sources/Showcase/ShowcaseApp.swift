@@ -97,6 +97,18 @@ struct OverlayDemo: View {
 
     var body: some View {
         CefWebView(browser)
+            // A swipe indicator of the app's own, in place of the built-in one.
+            .navigationGestureIndicator { value in
+                let progress = min(1, abs(value))
+                Image(systemName: value < 0 ? "chevron.left" : "chevron.right")
+                    .font(.title2.weight(.semibold))
+                    .padding(12)
+                    .background(.regularMaterial, in: .circle)
+                    .scaleEffect(0.6 + 0.4 * progress)
+                    .opacity(progress)
+                    .padding(28)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: value < 0 ? .leading : .trailing)
+            }
             .clipShape(.rect(cornerRadius: 16))
             .padding()
             .overlay(alignment: .bottom) {
@@ -106,17 +118,6 @@ struct OverlayDemo: View {
                     .padding(.vertical, 8)
                     .background(.regularMaterial, in: .capsule)
                     .padding(32)
-            }
-            .overlay(alignment: browser.navigationGestureProgress < 0 ? .leading : .trailing) {
-                // A custom swipe-to-navigate indicator, driven by the gesture.
-                let progress = abs(browser.navigationGestureProgress)
-                Image(systemName: browser.navigationGestureProgress < 0 ? "chevron.left" : "chevron.right")
-                    .font(.title2.weight(.semibold))
-                    .padding(12)
-                    .background(.regularMaterial, in: .circle)
-                    .scaleEffect(0.6 + 0.4 * progress)
-                    .opacity(progress)
-                    .padding(28)
             }
             .navigationTitle("Native Overlay")
             .onDisappear { browser.close(force: true) }

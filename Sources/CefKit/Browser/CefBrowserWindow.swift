@@ -97,6 +97,7 @@ public final class CefBrowserWindow: Identifiable {
         self.configuration = configuration
         Self.all.append(self)
         Self.liveCount += 1
+        Self.installRuntimeHooks()
 
         let viewDelegate = BrowserViewDelegate(toolbar: configuration.toolbar, window: self)
         browserView = CefRef(adopting: browser.createBrowserView(delegate: viewDelegate.makeDelegate()))
@@ -112,6 +113,7 @@ public final class CefBrowserWindow: Identifiable {
         self.isPopup = true
         Self.all.append(self)
         Self.liveCount += 1
+        Self.installRuntimeHooks()
         browserView = popupView
         createWindow()
     }
@@ -152,6 +154,18 @@ public final class CefBrowserWindow: Identifiable {
                 window.orderOut(nil)
             }
         }
+    }
+
+    /// Installs the overrides of Chromium's AppKit classes that bubbles and
+    /// swipe navigation rely on, once.
+    private static func installRuntimeHooks() {
+        CefBubbleTracker.install()
+        CefHistorySwipeHooks.install()
+    }
+
+    /// The open window whose `NSWindow` is `window`.
+    package static func owning(_ window: NSWindow) -> CefBrowserWindow? {
+        all.first { $0.window === window }
     }
 
     private func createWindow() {
@@ -288,6 +302,7 @@ public final class CefBrowserWindow: Identifiable {
 
     private func applyLayout() {
         updateContentFrame()
+        updateGestureIndicator()
         guard let window = cefWindow?.pointer else { return }
         var settings = cef_box_layout_settings_t()
         settings.size = MemoryLayout<cef_box_layout_settings_t>.stride
@@ -302,6 +317,191 @@ public final class CefBrowserWindow: Identifiable {
             cefRelease(panel.pointee.set_to_box_layout(panel, &settings))
             panel.pointee.layout(panel)
         }
+    }
+
+    // MARK: Chromium's bubbles
+
+    /// Where Chromium's bubbles appear: the QR code generator, Cast, share,
+    /// translate, password and bookmark bubbles, and other titled bubbles
+    /// Chromium would attach to its toolbar. `nil` leaves them where Chromium
+    /// puts them, which without Chrome's toolbar is the top right of the
+    /// page.
+    ///
+    /// Bubbles follow the anchor as the window moves and resizes, and when
+    /// Chromium lays them out again. CefSwiftUI's `chromiumBubbleAnchor()`
+    /// modifier sets this from a SwiftUI view in your toolbar.
+    ///
+    /// ```swift
+    /// window.bubbleAnchor = .view(addressField, alignment: .trailing)
+    /// ```
+    public var bubbleAnchor: CefBubbleAnchor? {
+        didSet { placeBubbles() }
+    }
+
+    /// Anchors for particular kinds of bubble, which take precedence over
+    /// ``bubbleAnchor``. The sign-in dialog and the find bar move only with
+    /// an anchor here.
+    public var bubbleAnchors: [CefChromiumBubble.Kind: CefBubbleAnchor] = [:] {
+        didSet { placeBubbles() }
+    }
+
+    /// Chromium's bubbles attached to this window, oldest first.
+    public private(set) var chromiumBubbles: [CefChromiumBubble] = []
+
+    /// Called as each of Chromium's bubbles appears, after it is placed.
+    @ObservationIgnored public var onChromiumBubble: ((CefChromiumBubble) -> Void)?
+
+    @ObservationIgnored private var bubbleObservers: [ObjectIdentifier: [NSObjectProtocol]] = [:]
+    @ObservationIgnored private var frameObservers: [NSObjectProtocol] = []
+    @ObservationIgnored private var isPlacingBubble = false
+    @ObservationIgnored private var announcedBubbles: Set<ObjectIdentifier> = []
+
+    /// Chromium is about to attach `child` to this window.
+    func childWindowWillAttach(_ child: NSWindow) {
+        guard !chromiumBubbles.contains(where: { $0.window === child }),
+              CefChromiumBubble.isBubbleWindow(child)
+        else { return }
+        let title = CefChromiumBubble.title(of: child)
+        let bubble = CefChromiumBubble(
+            window: child, kind: CefChromiumBubble.kind(forTitle: title), title: title, browserWindow: self)
+        chromiumBubbles.append(bubble)
+        let center = NotificationCenter.default
+        let follow: @Sendable (Notification) -> Void = { [weak self, weak bubble] _ in
+            MainActor.assumeIsolated {
+                guard let self, let bubble, !self.isPlacingBubble else { return }
+                self.place(bubble)
+            }
+        }
+        bubbleObservers[bubble.id] = [
+            center.addObserver(forName: NSWindow.didMoveNotification, object: child, queue: nil, using: follow),
+            center.addObserver(forName: NSWindow.didResizeNotification, object: child, queue: nil, using: follow),
+            center.addObserver(forName: NSWindow.willCloseNotification, object: child, queue: nil) { [weak self, weak bubble] _ in
+                MainActor.assumeIsolated {
+                    guard let self, let bubble else { return }
+                    self.stopTracking(bubble)
+                    self.chromiumBubbles.removeAll { $0 === bubble }
+                }
+            },
+        ]
+        place(bubble)
+    }
+
+    /// Chromium has attached `child`, which is now on screen.
+    func childWindowDidAttach(_ child: NSWindow) {
+        guard let bubble = chromiumBubbles.first(where: { $0.window === child }),
+              announcedBubbles.insert(bubble.id).inserted
+        else { return }
+        bubble.refreshKind()
+        place(bubble)
+        onChromiumBubble?(bubble)
+    }
+
+    /// Chromium has detached `child`, as it does when hiding a bubble.
+    func childWindowDidDetach(_ child: NSWindow) {
+        guard let bubble = chromiumBubbles.first(where: { $0.window === child }) else { return }
+        stopTracking(bubble)
+        chromiumBubbles.removeAll { $0 === bubble }
+    }
+
+    private func stopTracking(_ bubble: CefChromiumBubble) {
+        bubbleObservers.removeValue(forKey: bubble.id)?.forEach(NotificationCenter.default.removeObserver)
+        announcedBubbles.remove(bubble.id)
+    }
+
+    /// The anchor that applies to `bubble`, if any.
+    private func anchor(for bubble: CefChromiumBubble) -> CefBubbleAnchor? {
+        bubbleAnchors[bubble.kind] ?? (bubble.followsWindowAnchor ? bubbleAnchor : nil)
+    }
+
+    /// Moves `bubble` under its anchor.
+    private func place(_ bubble: CefChromiumBubble) {
+        bubble.refreshKind()
+        guard let child = bubble.window, let parent = window, let anchor = anchor(for: bubble),
+              let origin = anchor.origin(for: child.frame.size, in: parent)
+        else { return }
+        let current = child.frame.origin
+        guard abs(current.x - origin.x) > 0.5 || abs(current.y - origin.y) > 0.5 else { return }
+        isPlacingBubble = true
+        child.setFrameOrigin(origin)
+        isPlacingBubble = false
+    }
+
+    private func placeBubbles() {
+        chromiumBubbles.forEach(place)
+    }
+
+    /// Keeps bubbles under their anchors as the window changes.
+    private func observeFrame(of nsWindow: NSWindow) {
+        guard frameObservers.isEmpty else { return }
+        let center = NotificationCenter.default
+        let update: @Sendable (Notification) -> Void = { [weak self] _ in
+            MainActor.assumeIsolated { self?.placeBubbles() }
+        }
+        frameObservers = [
+            center.addObserver(forName: NSWindow.didResizeNotification, object: nsWindow, queue: nil, using: update),
+            center.addObserver(forName: NSWindow.didMoveNotification, object: nsWindow, queue: nil, using: update),
+            center.addObserver(forName: NSWindow.didEndLiveResizeNotification, object: nsWindow, queue: nil, using: update),
+        ]
+    }
+
+    // MARK: Swipe indicator
+
+    /// A view of your own, laid over the page in place of the built-in
+    /// swipe indicator (``CefBrowserOptions/navigationGestureIndicator``).
+    /// It is sized to the page, never receives events, and stays installed;
+    /// read ``CefBrowser/navigationGestureProgress`` to draw it.
+    /// CefSwiftUI's `setNavigationGestureIndicator(_:)` sets it from a
+    /// SwiftUI view.
+    public var navigationGestureIndicatorView: NSView? {
+        didSet {
+            guard navigationGestureIndicatorView !== oldValue else { return }
+            oldValue?.removeFromSuperview()
+            updateGestureIndicator()
+        }
+    }
+
+    @ObservationIgnored private var gestureOverlay: GestureOverlayView?
+    @ObservationIgnored private var builtInIndicator: CefNavigationGestureIndicatorView?
+
+    /// The built-in indicator, when it is installed. For tests.
+    package var installedGestureIndicator: CefNavigationGestureIndicatorView? { builtInIndicator }
+
+    /// Lays the indicator over the page: the app's view, or CefSwift's
+    /// unless Chromium draws its own or none is wanted.
+    private func updateGestureIndicator() {
+        let options = browser.options
+        let wantsBuiltIn = options.allowsBackForwardNavigationGestures
+            && options.navigationGestureIndicator == .automatic
+        let indicator: NSView?
+        if let custom = navigationGestureIndicatorView {
+            builtInIndicator?.removeFromSuperview()
+            builtInIndicator = nil
+            indicator = custom
+        } else if wantsBuiltIn {
+            let builtIn = builtInIndicator ?? CefNavigationGestureIndicatorView()
+            builtIn.browser = browser
+            builtInIndicator = builtIn
+            indicator = builtIn
+        } else {
+            builtInIndicator?.removeFromSuperview()
+            builtInIndicator = nil
+            indicator = nil
+        }
+        guard let indicator, let contentView = window?.contentView else {
+            gestureOverlay?.removeFromSuperview()
+            gestureOverlay = nil
+            return
+        }
+        let overlay = gestureOverlay ?? GestureOverlayView()
+        if overlay.superview !== contentView {
+            overlay.frame = contentView.bounds
+            overlay.autoresizingMask = [.width, .height]
+            contentView.addSubview(overlay, positioned: .above, relativeTo: nil)
+            gestureOverlay = overlay
+        }
+        overlay.insets = contentInsets
+        overlay.cornerRadius = contentCornerRadius
+        overlay.setIndicator(indicator)
     }
 
     // MARK: Delegate callbacks
@@ -329,6 +529,8 @@ public final class CefBrowserWindow: Identifiable {
             if let identifier = configuration.tabbingIdentifier {
                 nsWindow.tabbingIdentifier = identifier
             }
+            observeFrame(of: nsWindow)
+            updateGestureIndicator()
             let waiters = windowWaiters
             windowWaiters = []
             waiters.forEach { $0(nsWindow) }
@@ -338,6 +540,10 @@ public final class CefBrowserWindow: Identifiable {
     fileprivate func windowDestroyed() {
         serviceWindowObserver.map(NotificationCenter.default.removeObserver)
         serviceWindowObserver = nil
+        frameObservers.forEach(NotificationCenter.default.removeObserver)
+        frameObservers = []
+        chromiumBubbles.forEach(stopTracking)
+        chromiumBubbles = []
         accessoryController = nil
         windowWaiters = []
         cefWindow = nil
@@ -391,6 +597,44 @@ private final class ContentFrameView: NSView {
         }
         cutout.frame = bounds
         cutout.path = path
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
+/// Holds the swipe indicator over the page's rectangle, clipped to its
+/// rounded corners, and lets every event through.
+private final class GestureOverlayView: NSView {
+    var insets = NSEdgeInsets() { didSet { needsLayout = true } }
+    var cornerRadius: CGFloat = 0 { didSet { needsLayout = true } }
+
+    private let clip = NSView()
+
+    init() {
+        super.init(frame: .zero)
+        clip.wantsLayer = true
+        clip.layer?.masksToBounds = true
+        addSubview(clip)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { nil }
+
+    func setIndicator(_ indicator: NSView) {
+        guard indicator.superview !== clip else { return }
+        clip.subviews.forEach { $0.removeFromSuperview() }
+        indicator.frame = clip.bounds
+        indicator.autoresizingMask = [.width, .height]
+        clip.addSubview(indicator)
+    }
+
+    override func layout() {
+        super.layout()
+        clip.frame = CGRect(
+            x: insets.left, y: insets.bottom,
+            width: max(0, bounds.width - insets.left - insets.right),
+            height: max(0, bounds.height - insets.top - insets.bottom))
+        clip.layer?.cornerRadius = cornerRadius
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }

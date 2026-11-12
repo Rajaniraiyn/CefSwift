@@ -30,8 +30,20 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
             }
             hostBrowserIfPossible()
             updateVisibility(notifyingBrowser: true)
+            gestureIndicator = updatedGestureIndicator(gestureIndicator, browser: browser, isAllowed: showsBuiltInGestureIndicator)
         }
     }
+
+    /// Whether the view draws the built-in swipe indicator that
+    /// ``CefBrowserOptions/navigationGestureIndicator`` chooses. `CefWebView`
+    /// turns it off for an indicator of the app's own.
+    public var showsBuiltInGestureIndicator = true {
+        didSet {
+            gestureIndicator = updatedGestureIndicator(gestureIndicator, browser: browser, isAllowed: showsBuiltInGestureIndicator)
+        }
+    }
+
+    private var gestureIndicator: CefNavigationGestureIndicatorView?
 
     /// Whether dismantling the view closes its browser. `CefWebView(url:)`
     /// sets this for the browser it owns.
@@ -388,34 +400,13 @@ extension CefOffscreenBrowserView {
     /// The dedicated navigation swipe (three fingers, or as configured in
     /// System Settings).
     public override func swipe(with event: NSEvent) {
-        guard let browser, browser.options.allowsBackForwardNavigationGestures else { return }
-        if event.deltaX > 0 {
-            browser.goBack()
-        } else if event.deltaX < 0 {
-            browser.goForward()
-        }
+        browser?.handleNavigationSwipe(event)
     }
 
-    /// Starts AppKit's fluid two-finger history swipe when a scroll gesture
-    /// begins horizontally and there is history in that direction. Returns
-    /// whether the gesture was claimed (and must not also scroll the page).
+    /// Starts a two-finger history swipe; see
+    /// `CefBrowser.beginHistorySwipeIfNeeded(with:)`.
     func beginHistorySwipeIfNeeded(with event: NSEvent) -> Bool {
-        guard let browser, browser.options.allowsBackForwardNavigationGestures,
-              NSEvent.isSwipeTrackingFromScrollEventsEnabled,
-              event.phase == .began,
-              abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY)
-        else { return false }
-        let goesBack = event.scrollingDeltaX > 0
-        guard goesBack ? browser.canGoBack : browser.canGoForward else { return false }
-        event.trackSwipeEvent(options: .lockDirection, dampenAmountThresholdMin: -1, max: 1) { amount, phase, isComplete, _ in
-            MainActor.assumeIsolated {
-                // AppKit reports positive amounts for "back".
-                browser.navigationGestureProgress = isComplete ? 0 : -Double(amount)
-                guard phase == .ended, abs(amount) >= 1 else { return }
-                if goesBack { browser.goBack() } else { browser.goForward() }
-            }
-        }
-        return true
+        browser?.beginHistorySwipeIfNeeded(with: event) ?? false
     }
 
     public override func touchesBegan(with event: NSEvent) {

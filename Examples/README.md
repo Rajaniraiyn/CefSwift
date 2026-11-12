@@ -18,7 +18,14 @@ A tabbed browser (`Sources/Browser`). Each tab is a Chrome-style
 
 - A SwiftUI toolbar in three parts. The address field shows the site and its
   security, edits the full address, and offers Chromium-ranked suggestions
-  as you type: ↑ and ↓ choose, Return opens, Esc closes.
+  as you type: ↑ and ↓ choose, Return opens, Esc closes. The top
+  suggestion completes the address inline, selected after the caret:
+  typing on keeps what still matches, Delete removes the completion,
+  Return opens it and Esc goes back to what you typed.
+- Chromium's bubbles under the toolbar: the QR code button's bubble hangs
+  from the button, and Cast, translate and the other toolbar bubbles from
+  the address field.
+- Two-finger swipes go back and forward, with CefSwift's swipe indicator.
 - A bookmark star (⌘D), Bookmarks and History menus, and a start page at
   `browser://start/` with frequently visited sites and recent bookmarks,
   whose data comes through a `CefBridge`.
@@ -84,6 +91,7 @@ Examples/dist/Browser.app/Contents/MacOS/Browser -private YES -addressBarText sw
 | `-addressBarText <text>` | Starts editing with that text typed. |
 | `-private YES` | Opens the tabs as private tabs. |
 | `-appearance light\|dark\|system` | Overrides the appearance setting. |
+| `-dataDirectory <path>` | Keeps profile data in that folder, which also runs an instance separate from one using the default folder. |
 
 Cocoa reads a value that starts with `(` as a list, so prefix such a script
 with `void `.

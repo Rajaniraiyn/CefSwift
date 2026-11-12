@@ -26,6 +26,9 @@ struct TrailingButtons: View {
             if !browser.downloads.isEmpty {
                 DownloadsButton(browser: browser)
             }
+            // Chromium's QR code bubble opens under this button.
+            Button("QR Code", systemImage: "qrcode") { browser.execute(.createQRCode) }
+                .chromiumBubbleAnchor(for: [.qrCode], alignment: .trailing)
             Button("New Tab", systemImage: "plus") { controller.openTab() }
         }
         .buttonStyle(ToolbarIconButtonStyle())
@@ -157,6 +160,9 @@ struct AddressBar: View {
         }
         .overlay(alignment: .bottomLeading) { progress }
         .background(ViewAnchor { suggestions.anchor = $0 })
+        // Chromium's bubbles (Cast, translate, passwords, …) open under the
+        // field's trailing end, where Chrome's would hang from its omnibox.
+        .chromiumBubbleAnchor(alignment: .trailing)
         .contentShape(.rect)
         .onTapGesture { isFocused = true }
         .animation(.easeOut(duration: 0.15), value: isFocused)

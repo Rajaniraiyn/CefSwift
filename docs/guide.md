@@ -12,6 +12,7 @@ are `@MainActor`.
 - [Browsers](#browsers)
 - [Showing a browser](#showing-a-browser)
   - [Offscreen rendering](#offscreen-rendering)
+  - [Swipe navigation](#swipe-navigation)
 - [JavaScript](#javascript)
   - [User scripts and style sheets](#user-scripts-and-style-sheets)
   - [Bridge](#bridge)
@@ -24,6 +25,7 @@ are `@MainActor`.
   - [Tabs](#tabs)
   - [Popups](#popups)
   - [Chrome commands](#chrome-commands)
+  - [Chromium's bubbles](#chromiums-bubbles)
   - [Tabs Chromium opens itself](#tabs-chromium-opens-itself)
 - [Customizing Chromium's own pages](#customizing-chromiums-own-pages)
 - [Profiles](#profiles)
@@ -292,24 +294,8 @@ options.allowsBackForwardNavigationGestures = true
 let browser = CefBrowser(url: url, options: options)
 ```
 
-With `allowsBackForwardNavigationGestures`, a horizontal two-finger swipe
-(when the system's "Swipe between pages" setting allows it) or the
-navigation swipe goes back and forward. Pinch and smart magnify change
-`zoomLevel`. While a swipe is in progress, `navigationGestureProgress` moves
-from 0 toward -1 (back) or 1 (forward). There is no built-in indicator;
-draw your own:
-
-```swift
-CefWebView(browser)
-    .overlay(alignment: browser.navigationGestureProgress < 0 ? .leading : .trailing) {
-        Image(systemName: browser.navigationGestureProgress < 0 ? "chevron.left" : "chevron.right")
-            .padding(12)
-            .background(.regularMaterial, in: .circle)
-            .opacity(abs(browser.navigationGestureProgress))
-    }
-```
-
-Set `options.forwardsRawTouchEvents = true` to send trackpad touches to the
+Pinch and smart magnify change `zoomLevel`. Set
+`options.forwardsRawTouchEvents = true` to send trackpad touches to the
 page instead of interpreting them as gestures.
 
 Offscreen browsers cannot open native popup windows: a request that would
@@ -339,6 +325,47 @@ AppKit drives a view:
   which mirror `NSDraggingDestination` and `NSDraggingSource`.
 
 `CefOffscreenBrowserView` is the reference implementation.
+
+### Swipe navigation
+
+With `options.allowsBackForwardNavigationGestures`, a two-finger swipe that
+starts sideways (when the system's "Swipe between pages" setting allows it)
+and the dedicated navigation swipe go back and forward, in `CefWebView`,
+both renderings, and in `CefBrowserWindow`, where Chrome's own swipe
+handling does the work. It is off by default everywhere.
+
+While a swipe is in progress, `browser.navigationGestureProgress` moves from
+0 toward -1 (back) or 1 (forward); at ±1 and beyond, releasing navigates.
+`options.navigationGestureIndicator` chooses what is drawn over the page:
+
+| Indicator | Drawing |
+|---|---|
+| `.automatic` (default) | CefSwift's: a chevron in a circle that slides in from the edge, resists past the commit point, and fills with the accent color once releasing navigates. |
+| `.chromium` | Chrome's own arrow, in `CefBrowserWindow`; `.automatic` elsewhere. |
+| `.hidden` | Nothing; draw your own from `navigationGestureProgress`. |
+
+To replace the indicator with a SwiftUI view:
+
+```swift
+CefWebView(browser)
+    .navigationGestureIndicator { progress in
+        Image(systemName: progress < 0 ? "chevron.left" : "chevron.right")
+            .padding(12)
+            .background(.regularMaterial, in: .circle)
+            .frame(maxWidth: .infinity, alignment: progress < 0 ? .leading : .trailing)
+            .opacity(min(1, abs(progress)))
+    }
+
+window.setNavigationGestureIndicator { progress in MyIndicator(progress: progress) }   // a CefBrowserWindow
+```
+
+In AppKit, `CefWindowedBrowserView` and `CefOffscreenBrowserView` turn the
+built-in indicator off with `showsBuiltInGestureIndicator = false`, and
+`CefBrowserWindow.navigationGestureIndicatorView` takes a view of your own.
+
+A view claims a swipe as it begins, when there is history in its direction,
+so the page does not also scroll sideways; in a `CefBrowserWindow`, Chrome
+lets the page scroll first and swipes only at its edge.
 
 ## JavaScript
 
@@ -701,6 +728,48 @@ calls the delegate's `browser(_:handleChromeCommand:disposition:)`. Return
 `hiddenAppMenuCommands`, `disabledAppMenuCommands`, `showsToolbarButtons`
 and `showsPageActionIcons`.
 
+### Chromium's bubbles
+
+Chromium shows some of its UI in bubbles over a `CefBrowserWindow`: the QR
+code generator (`.createQRCode`), Cast, share, translate, password and
+bookmark bubbles, the HTTP sign-in dialog and the find bar. Without Chrome's
+toolbar, it places the toolbar's bubbles at the top right of the page. An
+anchor puts them under your own controls instead:
+
+```swift
+window.bubbleAnchor = .view(addressField, alignment: .trailing)   // every toolbar bubble
+window.bubbleAnchors[.qrCode] = .view(qrButton, alignment: .trailing)
+```
+
+In SwiftUI, mark the view in your toolbar:
+
+```swift
+AddressField(browser: browser)
+    .chromiumBubbleAnchor(alignment: .trailing)
+Button("QR Code", systemImage: "qrcode") { browser.execute(.createQRCode) }
+    .chromiumBubbleAnchor(for: [.qrCode])
+```
+
+- `CefBubbleAnchor` is `.view(_:alignment:spacing:)` or
+  `.rect(_:alignment:spacing:)`, a rectangle in window coordinates. The
+  bubble hangs below it, `spacing` points away, lined up with its leading
+  or trailing edge or centered, and kept inside the window.
+- Bubbles follow their anchor as the window moves or resizes, and when
+  Chromium lays them out again.
+- `bubbleAnchor` applies to the bubbles Chromium attaches to its toolbar.
+  The sign-in dialog and the find bar belong to the page and move only
+  with an anchor of their own kind in `bubbleAnchors`. Untitled bubbles
+  attached to the page, such as autofill suggestions, never move.
+
+`window.chromiumBubbles` lists the bubbles on screen as `CefChromiumBubble`
+values, and `onChromiumBubble` is called as each appears. A bubble has a
+`kind` (`.qrCode`, `.cast`, `.share`, `.signIn`, `.findBar`, `.permission`,
+`.translate`, `.savePassword`, `.bookmark`, `.other`), its `title`, its
+`window`, and `dismiss()`, which cancels it as Esc would. Kinds are
+recognized from Chromium's own localized titles, so they work in every UI
+language. Permission prompts reach your delegate's
+`browser(_:decidePermissionFor:)` instead of appearing as bubbles.
+
 ### Tabs Chromium opens itself
 
 Chromium sometimes opens a tab on its own, without an opener: following a
@@ -952,3 +1021,8 @@ secure, CORS-enabled and fetchable; pass `options:` to change them.
   popup windows.
 - `CefAutocomplete` is experimental, and `CefBookmarks`, `CefHistory` and
   `CefAutocomplete` depend on Chromium-internal pages.
+- Bubble anchors and swipe navigation in `CefBrowserWindow` depend on
+  Chromium's AppKit classes ([architecture](architecture.md#chromiums-appkit-classes)).
+  If a CEF update renames them, bubbles stay where Chromium puts them and
+  browser windows swipe as Chrome does, with its arrow, whatever the
+  options say. SelfTest fails on such an update.
