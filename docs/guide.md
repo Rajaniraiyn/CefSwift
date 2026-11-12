@@ -12,6 +12,7 @@ are `@MainActor`.
 - [Browsers](#browsers)
 - [Showing a browser](#showing-a-browser)
   - [Offscreen rendering](#offscreen-rendering)
+  - [Offscreen accessibility](#offscreen-accessibility)
 - [Discarding browsers](#discarding-browsers)
 - [JavaScript](#javascript)
   - [User scripts and style sheets](#user-scripts-and-style-sheets)
@@ -344,6 +345,47 @@ AppKit drives a view:
 
 `CefOffscreenBrowserView` is the reference implementation.
 
+### Offscreen accessibility
+
+VoiceOver, Voice Control, Full Keyboard Access, Accessibility Inspector and
+UI tests read an offscreen page as they read a windowed one. The view is an
+`AXGroup` whose child is the page's `AXWebArea`, and below it are the
+page's headings, links, buttons, text fields, checkboxes, lists, tables,
+images, landmarks and frames, with their frames on screen, hit testing,
+keyboard focus, and the notifications assistive apps follow (focus, value,
+selected text, layout, load complete and live-region announcements).
+
+Chromium builds the tree only when something reads it, because keeping it
+costs renderer time and memory on every change. `offscreenAccessibility`
+decides when:
+
+| Value | The tree is built |
+|---|---|
+| `.automatic` (default) | When VoiceOver is running, when an assistive app first asks the view for its children, hit-tests it or asks for its focused element, or when an app sets `AXEnhancedUserInterface` or `AXManualAccessibility` on the application, as Voice Control and automation tools do. It then stays on for the browser's lifetime. |
+| `.enabled` | From creation. |
+| `.disabled` | Never. The page is a single element. |
+
+```swift
+options.offscreenAccessibility = .enabled
+```
+
+`setAccessibilityEnabled(_:)` turns the tree on or off at any time,
+whatever the option says, and `isAccessibilityEnabled` reports it.
+
+Actions from assistive apps reach the page as the user's own input would:
+pressing clicks the element's centre, incrementing and decrementing press
+the arrow keys, and setting a text field's value selects its text and
+inserts the new text as an input method does. Focusing an element and
+scrolling it into view use the DevTools protocol's `DOM.focus` and
+`DOM.scrollIntoViewIfNeeded`.
+
+A host of your own reads the same model: `browser.accessibilityTree` is a
+`CefAccessibilityTree` of `CefAccessibilityNode`s with frames in view
+points, `offscreenAccessibilityTreeDidChange(_:)` reports each change, and
+`browser.performAccessibilityAction(_:on:)` carries out actions. For tests
+and diagnostics, `CefOffscreenBrowserView.didPostAccessibilityNotification`
+reports every notification the view posts.
+
 ## Discarding browsers
 
 A browser the user is not looking at can give back its page's memory
@@ -411,6 +453,7 @@ What a discard keeps:
 | `devTools` event streams | Keep delivering | Keep delivering; enabled domains are enabled again |
 | Other DevTools session state | Kept | Lost (overrides, scripts added through `devTools`) |
 | `identifier` | Kept | A new one |
+| Offscreen accessibility tree | — | Emptied, and built again when the page loads |
 
 A Chrome-style browser is discarded by Chromium itself and comes back when
 its window is shown. A browser in a view is discarded by closing its
@@ -1205,7 +1248,11 @@ driver crash cannot end the app.
   address and title, so of two hidden Chrome-style tabs showing the same
   page, discarding one may briefly reload the other.
 - DevTools opens in a window of its own; there is no docked DevTools.
-- Offscreen pages appear to VoiceOver as a single element.
+- In offscreen browsers, assistive apps can focus elements inside frames
+  only by clicking text fields, and press them only while they are in
+  view; elements of the main frame have no such limit. The scroll
+  position of scrolling elements other than the document reaches the
+  accessibility tree only when Chromium next resends them.
 - Offscreen browsers always use the Alloy style and cannot open native
   popup windows.
 - `CefAutocomplete` is experimental, and `CefBookmarks`, `CefHistory` and

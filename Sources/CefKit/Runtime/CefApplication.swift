@@ -55,6 +55,39 @@ public final class CefApplication: NSApplication, CefAppProtocol {
         super.sendEvent(event)
     }
 
+    /// Posted when an assistive app asks the application for its full
+    /// accessibility tree by setting `AXEnhancedUserInterface` or
+    /// `AXManualAccessibility`, as Voice Control, Switch Control and UI
+    /// automation tools do. Offscreen browsers with
+    /// ``CefOffscreenAccessibility/automatic`` start building their tree.
+    public nonisolated static let accessibilityRequestedNotification = Notification.Name("CefApplicationAccessibilityRequested")
+
+    /// Whether an assistive app has asked for the full accessibility tree
+    /// since launch. See ``accessibilityRequestedNotification``.
+    public private(set) static var isAccessibilityRequested = false
+
+    /// Catches `AXEnhancedUserInterface` and `AXManualAccessibility`, which
+    /// arrive only through the informal accessibility protocol.
+    public override func accessibilitySetValue(_ value: Any?, forAttribute attribute: NSAccessibility.Attribute) {
+        let isRequest = attribute.rawValue == "AXEnhancedUserInterface" || attribute.rawValue == "AXManualAccessibility"
+        if isRequest, (value as? NSNumber)?.boolValue == true {
+            MainActor.assumeIsolated {
+                guard !Self.isAccessibilityRequested else { return }
+                Self.isAccessibilityRequested = true
+                NotificationCenter.default.post(name: Self.accessibilityRequestedNotification, object: nil)
+            }
+        }
+        // AppKit does not know AXManualAccessibility, which Chromium
+        // introduced; accepting it here is enough.
+        guard attribute.rawValue != "AXManualAccessibility" else { return }
+        // The informal protocol is deprecated, so NSApplication's own
+        // implementation is called through the runtime.
+        let selector = NSSelectorFromString("accessibilitySetValue:forAttribute:")
+        typealias Setter = @convention(c) (AnyObject, Selector, AnyObject?, NSString) -> Void
+        guard let implementation = class_getMethodImplementation(NSApplication.self, selector) else { return }
+        unsafeBitCast(implementation, to: Setter.self)(self, selector, value as AnyObject?, attribute.rawValue as NSString)
+    }
+
     /// Quitting closes every browser first, so pages can run `beforeunload`
     /// and state is flushed; the runtime calls back here once they are gone.
     public override func terminate(_ sender: Any?) {
