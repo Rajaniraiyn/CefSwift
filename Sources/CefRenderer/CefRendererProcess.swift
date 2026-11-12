@@ -113,11 +113,12 @@ final class CefRendererProcess {
         handler.pointee.on_process_message_received = { s, browser, frame, _, message in
             let browserID = browser.map { $0.pointee.get_identifier($0) } ?? -1
             cefRelease(browser)
-            defer { cefRelease(message) }
-            guard let message, let frame, let process = cefOwner(CefRendererProcess.self, s) else {
+            guard let owned = CefOwned(message), let process = cefOwner(CefRendererProcess.self, s) else {
                 cefRelease(frame)
                 return 0
             }
+            let message = owned.pointer
+            guard let frame else { return 0 }
             // Page-scripting payloads are read in place; only other
             // messages are copied into a `CefProcessMessage`.
             let name = message.pointee.get_name(message)

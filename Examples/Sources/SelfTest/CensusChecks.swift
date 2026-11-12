@@ -17,6 +17,22 @@ extension SelfTest {
         print("CENSUS after \(group): \(line)")
     }
 
+    /// What may stay until shutdown: the global request context, which
+    /// `CefRuntime` holds for the process, and the scheme handler factories
+    /// registered with CEF, which it keeps until `cef_shutdown()`.
+    static let processLifetimeCensus = ["CefRef<_cef_request_context_t>", "implemented SchemeHandlerFactory"]
+
+    /// Before quitting: everything else CefKit held is gone.
+    static func censusChecks(baseline: [String: Int]) async {
+        var extra: [String: Int] = [:]
+        _ = await waitUntil(timeout: .seconds(10)) {
+            extra = censusDifference(from: baseline).filter { !processLifetimeCensus.contains($0.key) }
+            return extra.isEmpty
+        }
+        check("census: nothing but process-lifetime objects is alive before quitting", extra.isEmpty,
+              detail: extra.sorted { $0.key < $1.key }.map { "\($0.key) \($0.value)" }.joined(separator: ", "))
+    }
+
     static func censusDifference(from baseline: [String: Int]) -> [String: Int] {
         var difference: [String: Int] = [:]
         let now = CefDiagnostics.census()

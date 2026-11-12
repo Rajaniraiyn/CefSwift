@@ -8,9 +8,10 @@ extension CefBrowserClient {
     /// once the browser's accessibility state is enabled.
     ///
     /// A large page's first update holds tens of thousands of values. Each
-    /// update is written as JSON by Chromium in one call, then parsed on a
-    /// serial background queue and applied back on the main thread, in the
-    /// order Chromium sent them, so the main thread stays responsive.
+    /// update is copied by CEF in one call (`cef_value_t` objects may be
+    /// used on any thread), read into `CefJSON` on a serial background
+    /// queue and applied back on the main thread, in the order Chromium
+    /// sent them, so the main thread stays responsive.
     func makeAccessibilityHandler() -> UnsafeMutablePointer<cef_accessibility_handler_t> {
         let handler = cefAllocate(cef_accessibility_handler_t.self, owner: self)
 
@@ -62,10 +63,10 @@ extension CefBrowserClient {
 }
 
 extension CefBrowserClient {
-    /// The alternative SelfTest's `axingest` benchmark measures: a deep
-    /// copy of the value on the main thread (`cef_value_t` objects may be
-    /// used on any thread), read value by value into `CefJSON` on the
-    /// queue.
+    /// A deep copy of the value on the main thread, read value by value
+    /// into `CefJSON` on the queue. The copy takes a quarter of the main
+    /// thread's time `cef_write_json` and its text take
+    /// (`-benchmark axingest`).
     private nonisolated static func deliverAccessibilityCopy(
         _ client: CefBrowserClient, _ value: UnsafeMutablePointer<cef_value_t>,
         _ apply: @escaping @MainActor @Sendable (CefBrowser, CefJSON) -> Void

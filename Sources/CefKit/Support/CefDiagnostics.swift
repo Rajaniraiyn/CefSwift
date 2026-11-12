@@ -33,11 +33,12 @@ import os
     public enum AccessibilityIngestion: Sendable {
         /// `cef_write_json` on the main thread, parsed on a queue.
         case json
-        /// A deep copy on the main thread, read value by value on a queue.
+        /// A deep copy on the main thread, read value by value on a queue
+        /// (the default).
         case valueCopy
     }
 
-    private static let ingestion = OSAllocatedUnfairLock(initialState: AccessibilityIngestion.json)
+    private static let ingestion = OSAllocatedUnfairLock(initialState: AccessibilityIngestion.valueCopy)
 
     /// For SelfTest's `axingest` benchmark.
     public static var accessibilityIngestion: AccessibilityIngestion {

@@ -96,6 +96,18 @@ jobs:
           CEF_FRAMEWORK_PATH: ${{ steps.cef.outputs.framework }}
         run: swift test
 
+      # The unit tests again under Thread Sanitizer and Address Sanitizer.
+      # They never start Chromium; the loader tests skip without the
+      # framework's path.
+      - name: Test with Thread Sanitizer
+        run: swift test --sanitize=thread
+
+      # The default build system links the C helper-startup dylib without
+      # the ASan runtime (undefined ___asan_* symbols); the native one
+      # links it.
+      - name: Test with Address Sanitizer
+        run: swift test --sanitize=address --build-system native
+
       # Every Swift sample in README.md and docs/ compiles against this
       # checkout, for macOS 14.
       - name: Documentation samples compile

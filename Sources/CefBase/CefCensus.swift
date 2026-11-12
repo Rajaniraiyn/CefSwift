@@ -23,7 +23,7 @@ package enum CefCensus {
     }
 
     private static let counts = OSAllocatedUnfairLock(initialState: [Kind: Int]())
-    // A cached copy of `enabled`, read without the lock on every count.
+    // Whether counting is on, read without a lock on every count.
     // Written only by `setEnabled`, before the objects it counts exist.
     nonisolated(unsafe) private static var isOn = false
 

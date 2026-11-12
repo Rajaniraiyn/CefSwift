@@ -27,7 +27,8 @@ import Foundation
 ///
 /// The global exists before any page script runs, in every document
 /// ``access`` permits, cross-site frames and popups included. Arguments and
-/// results travel as JSON, so any `Codable` type works on the Swift side. A
+/// results are JSON's kinds of values plus bytes, so any `Codable` type
+/// works on the Swift side, and `Data` is an `ArrayBuffer` in the page. A
 /// handler that throws rejects the promise.
 ///
 /// The helper's renderer code defines the global with the V8 API as each

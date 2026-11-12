@@ -194,13 +194,13 @@ final class CefBrowserClient {
         client.pointee.get_command_handler = { CefBrowserClient.handler($0) }
         client.pointee.get_render_handler = { CefBrowserClient.handler($0) }
         client.pointee.on_process_message_received = { s, browser, frame, _, message in
-            // Adopted before anything can return early.
+            // Owned before anything can return early.
             let frame = CefRef(adopting: frame)
-            defer { cefRelease(message) }
-            guard let message, let frame else {
+            guard let owned = CefOwned(message), let frame else {
                 cefRelease(browser)
                 return 0
             }
+            let message = owned.pointer
             // Page-scripting payloads are read in place, by name, without
             // copying the message into Swift values first.
             let name = message.pointee.get_name(message)
@@ -886,8 +886,10 @@ final class ResourceRequestFilter: Sendable {
             cefRelease(browser)
             cefRelease(frame)
             cefRelease(callback)
-            defer { cefRelease(request) }
-            guard let request, let owner = cefOwner(ResourceRequestFilter.self, s) else { return RV_CONTINUE }
+            // Released on every return below.
+            guard let owned = CefOwned(request) else { return RV_CONTINUE }
+            let request = owned.pointer
+            guard let owner = cefOwner(ResourceRequestFilter.self, s) else { return RV_CONTINUE }
             let resourceType = request.pointee.get_resource_type(request)
             let snapshot = CefResourceRequest(
                 url: CefStringUtil.takingUserFree(request.pointee.get_url(request)).flatMap(URL.init(string:)),

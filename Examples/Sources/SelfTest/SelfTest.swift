@@ -183,6 +183,7 @@ enum SelfTest {
             await run(group: group.name, group.run)
             await reportCensus(after: group.name, baseline: baseline)
         }
+        await censusChecks(baseline: baseline)
     }
 
     /// What the bundle's signature allows, as CefKit reads it.

@@ -656,7 +656,10 @@ selector `settings-section #row` matches nothing; write `#row`.
 ### Bridge
 
 `CefBridge` exposes Swift methods to JavaScript as functions that return
-promises. Arguments and results travel as JSON, so any `Codable` type works.
+promises. Arguments and results are JSON's kinds of values plus bytes, so
+any `Codable` type works, and an `ArrayBuffer` argument or a `Data` result
+travels as bytes: an `ArrayBuffer` in the page, `Data` in Swift. Typed
+arrays reach Swift as objects; pass their `buffer`.
 
 ```swift
 struct Person: Codable { var name: String }
@@ -1616,7 +1619,8 @@ final class LibraryPages: CefSchemeHandler {
 A body is `.data(_:)`, `.file(_:)` or `.stream(_:length:)`. Chromium reads
 a file or a stream as the page consumes it, never more than about a
 megabyte ahead, so a 200 MB response costs about 12 MB of memory instead
-of 200 MB. A file is read on `CefFileActor`. A stream is any
+of 200 MB. A file is read straight into Chromium's buffer as the page
+asks for more, on Chromium's thread pool. A stream is any
 `AsyncSequence` of `Data`; give its length when you know it.
 
 ```swift
