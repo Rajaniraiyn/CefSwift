@@ -46,6 +46,10 @@ public struct CefBrowserOptions {
     /// (Offscreen only) Forward raw trackpad touches to Chromium instead of
     /// translating gestures natively.
     public var forwardsRawTouchEvents = false
+    /// Who answers the pages' WebAuthn requests (passkeys and security
+    /// keys): Chromium (the default), the app from a ``CefPasskeyStore``,
+    /// or nobody. Popups use their opener's mode.
+    public var passkeys: CefPasskeyMode = .chromium
 
     public init() {}
 }
@@ -256,6 +260,7 @@ public final class CefBrowser: Identifiable {
     @ObservationIgnored private(set) var client: CefBrowserClient?
     @ObservationIgnored private var initialURL: URL?
     @ObservationIgnored private(set) var isBootstrapping = false
+    @ObservationIgnored private var passkeyAuthenticator: CefPasskeyAuthenticator?
     @ObservationIgnored private var readyWaiters: [CheckedContinuation<Void, Error>] = []
     @ObservationIgnored private var downloadControls: [UInt32: CefRef<cef_download_item_callback_t>] = [:]
     @ObservationIgnored private(set) var isChromeStyle = false
@@ -640,7 +645,7 @@ extension CefBrowser {
 
         // Bridges and user scripts must be installed before the first real
         // document, so such browsers start blank and navigate once set up.
-        isBootstrapping = !options.bridges.isEmpty || !options.userScripts.isEmpty
+        isBootstrapping = !options.bridges.isEmpty || !options.userScripts.isEmpty || !options.passkeys.isChromium
         let url = isBootstrapping ? "about:blank" : (initialURL?.absoluteString ?? "about:blank")
 
         return Blueprint(
@@ -779,11 +784,28 @@ extension CefBrowser {
         delegate?.browserDidCreate(self)
         if isBootstrapping {
             Task { await bootstrap() }
+        } else if !options.passkeys.isChromium {
+            // A popup: Chromium loads its page right away, so its first
+            // document may be answered by Chromium.
+            Task { await startPasskeys() }
+        }
+    }
+
+    /// Takes WebAuthn requests over from Chromium, for
+    /// ``CefBrowserOptions/passkeys`` other than ``CefPasskeyMode/chromium``.
+    private func startPasskeys() async {
+        let authenticator = CefPasskeyAuthenticator(browser: self, mode: options.passkeys)
+        passkeyAuthenticator = authenticator
+        do {
+            try await authenticator.start()
+        } catch {
+            CefLog.error("passkeys: setup failed for browser \(identifier): \(error)")
         }
     }
 
     /// Installs bridges and user scripts, then performs the real first load.
     private func bootstrap() async {
+        if !options.passkeys.isChromium { await startPasskeys() }
         do {
             for script in options.userScripts {
                 try await addUserScript(script)
@@ -930,6 +952,8 @@ extension CefBrowser {
         canGoBack = false
         canGoForward = false
         downloadControls = [:]
+        passkeyAuthenticator?.stop()
+        passkeyAuthenticator = nil
         devTools.invalidate()
         readyWaiters.forEach { $0.resume(throwing: CefError.browserClosed) }
         readyWaiters = []

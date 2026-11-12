@@ -18,6 +18,7 @@ are `@MainActor`.
 - [Decisions](#decisions)
   - [Navigation and new windows](#navigation-and-new-windows)
   - [Downloads](#downloads)
+  - [Passkeys](#passkeys)
 - [Context menu](#context-menu)
 - [Building a browser](#building-a-browser)
   - [Toolbar and window](#toolbar-and-window)
@@ -461,6 +462,7 @@ final class Policy: CefBrowserDelegate {
 | `browser(_:credentialFor:) async` (HTTP authentication) | Native sign-in sheet. CEF 156 does not call it; see [Known limits](#known-limits) |
 | `browser(_:shouldProceedDespite:) async` (certificate errors) | `false`: the load is cancelled |
 | `browser(_:decideDestinationFor:suggestedName:) async` | `.allow(destination: nil)`: `~/Downloads` |
+| `browser(_:decidePasskeyRequest:) async` | Native passkey sheet; see [Passkeys](#passkeys) |
 | `browser(_:decidePolicyFor:)` | `.allow` |
 | `browser(_:decideWindowOpenFor:)` | `CefWindowOpenAction.default(for:)` |
 | `browser(_:handleKeyEvent:isBeforePage:)` | `false` |
@@ -524,6 +526,94 @@ func browser(_ browser: CefBrowser, decideDestinationFor download: CefDownload, 
     return .allow(destination: folder.appending(path: suggestedName))
 }
 ```
+
+### Passkeys
+
+`options.passkeys` chooses who answers a page's WebAuthn calls,
+`navigator.credentials.create()` and `.get()`:
+
+| Mode | Who answers |
+|---|---|
+| `.chromium` (default) | Chromium, with its own dialog and authenticators. |
+| `.app(store)` | Your app, from a `CefPasskeyStore`, through the delegate. Chromium's dialog and authenticators are not used. |
+| `.disabled` | Nobody: every call rejects with `NotAllowedError`. |
+
+With `.chromium`, what Chromium can offer depends on how the app is
+signed:
+
+| Authenticator | Needs |
+|---|---|
+| USB security keys | Nothing. |
+| iCloud Keychain passkeys, through AuthenticationServices | The `com.apple.developer.web-browser.public-key-credential` entitlement, which Apple grants to web browsers, in a provisioning profile, and a Developer ID or Apple Development signature. |
+| Chromium's own profile passkeys (Touch ID) | A `keychain-access-groups` entitlement of `<team ID>.org.chromium.Chromium.webauthn`. |
+| A phone or tablet (QR code and Bluetooth) | `NSBluetoothAlwaysUsageDescription` in the app's `Info.plist`, and a launch from Finder or `open`, which makes the app responsible for its own Bluetooth access. |
+
+An ad hoc signed app gets only security keys. Chromium shows its dialog
+("Use your security key with example.com") as a window attached to a
+`CefBrowserWindow`, or as a free-standing window for a `CefWebView`.
+
+With `.app(store)`, the delegate decides each call while the page waits at
+it:
+
+```swift
+var options = CefBrowserOptions()
+options.passkeys = .app(CefKeychainPasskeyStore())
+
+func browser(_ browser: CefBrowser, decidePasskeyRequest request: CefPasskeyRequest) async -> CefPasskeyDecision {
+    guard request.hasUserGesture else { return .ignore }   // conditional requests wait
+    switch request.kind {
+    case .registration:
+        return await confirm("Save a passkey for \(request.host)?") ? .createPasskey : .deny
+    case .assertion:
+        guard let passkey = await choose(from: request.passkeys) else { return .deny }
+        return .signIn(with: passkey)
+    }
+}
+```
+
+- `CefPasskeyRequest` has `kind`, `origin` (the calling document's, as
+  Chromium reports it), `isMainFrame`, `hasUserGesture` and, for an
+  assertion, `passkeys`: the stored passkeys a page on that origin may use,
+  most recently used first.
+- `.createPasskey` makes a new ECDSA P-256 key pair and saves the passkey,
+  with the account the page named, to the store. `.signIn(with:)` signs
+  with that passkey and saves its new sign count. Both tell the site the
+  user was verified, so verify the user first.
+- `.deny` rejects the call with `NotAllowedError` at once. `.ignore`
+  leaves it waiting until the page aborts it or its timeout passes, which
+  suits conditional requests (passkeys offered in an autofill list).
+- The page stays stopped at its call until you answer, as it does for
+  `alert()`. JavaScript you evaluate in it meanwhile waits too.
+- The default, `CefPasskeyPresenter.present(_:in:)`, ignores requests
+  without a user gesture, shows a sheet naming the site (with an account
+  menu when several passkeys fit), and verifies the user with Touch ID or
+  the account password through `LAContext` before answering.
+
+`CefPasskey` holds the credential ID, `relyingPartyID`, `userHandle`,
+`userName`, `userDisplayName`, the PKCS #8 `privateKey`, `signCount` and
+dates. List and remove passkeys through the store, for a settings screen:
+
+```swift
+let saved = try await store.passkeys()
+try await store.remove(saved[0])
+```
+
+| Store | Keeps passkeys |
+|---|---|
+| `CefInMemoryPasskeyStore` | In memory, until it is released. For tests and private browsing. |
+| `CefKeychainPasskeyStore(service:accessGroup:)` | In the data protection keychain, one item per passkey, available while the Mac is unlocked and never synced. Needs a team signature; an ad hoc signed app gets `errSecMissingEntitlement` (-34018) as `CefError.operationFailed`. It never shows a keychain password prompt. |
+
+Adopt `CefPasskeyStore` (`passkeys()`, `save(_:)`, `remove(_:)`) to keep
+them elsewhere, such as in a password manager.
+
+Chrome's settings link to Chromium's password manager from Autofill and
+passwords → Passkeys. That tab arrives through
+[`onChromiumOpensTab`](#tabs-chromium-opens-itself) like the other
+password-manager links.
+
+The Browser example has a Passkeys setting (Chromium or the browser
+itself) and lists and removes saved passkeys in its Settings window
+(`BrowserPasskeys.swift`).
 
 ## Context menu
 
@@ -952,3 +1042,16 @@ secure, CORS-enabled and fetchable; pass `options:` to change them.
   popup windows.
 - `CefAutocomplete` is experimental, and `CefBookmarks`, `CefHistory` and
   `CefAutocomplete` depend on Chromium-internal pages.
+- Passkeys answered by the app (`CefPasskeyMode.app`) are software keys the
+  app keeps, not iCloud Keychain passkeys, and their attestation is
+  "none". CEF offers no way to hand a request's options to
+  AuthenticationServices and return its answer to the page, so iCloud
+  Keychain passkeys are available only through Chromium's own
+  authenticator (`.chromium`, with the entitlement). The app's
+  authenticator is a platform authenticator: a request that asks for a
+  cross-platform one (`authenticatorAttachment: "cross-platform"`) waits
+  until its timeout. A call made by a document's first scripts, before
+  CefKit has set up its watch on the new document, also waits until its
+  timeout without reaching the delegate, and so do calls from cross-site
+  iframes. The app's mode uses the browser's DevTools `Debugger` and
+  `WebAuthn` domains; do not use those domains yourself in such a browser.
