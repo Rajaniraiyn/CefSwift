@@ -1292,7 +1292,7 @@ executable to the page's `didFinishLoad`.
 | `CefWebView` with `.embedded` (the Minimal example) | 5 | 88 MB | 306 ms |
 | The same, before the changes below | 6 | 185 MB | 276 ms |
 | The same with `memoryPolicy = .minimal` | 4 | 82 MB | 284 ms |
-| Browser example, one tab, `.browser` | 8 | 260 MB | 527 ms |
+| Browser example, one tab, `.browser` | 7 | 166 MB | 551 ms |
 | The same, before the changes below | 8 | 371 MB | 559 ms |
 | For comparison: a `WKWebView` app | 4 | 60 MB | 284 ms |
 | For comparison: Chrome 157, empty profile, one tab | 12 | 286 MB | – |
@@ -1301,9 +1301,10 @@ Launch times vary by about 30 ms from run to run, so none of the changes
 measurably changes them. The first launch after a bundle is built or signed
 takes 2 to 3 s longer while macOS checks its signature. A first launch on
 an empty profile measures within the same ranges, with up to 4 MB more
-memory. The Browser example has two renderers at launch: the tab and the
-spare renderer. Its bookmarks come from Chromium's `Bookmarks` file, and
-its history is read when the menu bar opens, so no service host runs.
+memory. The Browser example starts no service host at launch: its
+bookmarks come from Chromium's `Bookmarks` file, and its history is read
+when the menu bar opens. Measured on a build without the passkey and
+Chromium-panel code, it uses:
 
 | Browser example (`measure-services.py browser`, median of 3) | Processes | Memory |
 |---|---|---|
