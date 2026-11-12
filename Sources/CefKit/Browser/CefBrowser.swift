@@ -40,9 +40,16 @@ public struct CefBrowserOptions {
     public var contextMenu = CefContextMenuConfiguration()
     /// Inspects — and may block, redirect or amend — every network request.
     public var requestFilter: CefRequestFilter?
-    /// Whether horizontal swipes navigate back and forward (offscreen
-    /// rendering; Chrome-style windows follow the system setting).
+    /// Whether horizontal swipes navigate back and forward, as the system's
+    /// "Swipe between pages" setting allows: two-finger scrolls that start
+    /// sideways, and the dedicated navigation swipe. Chrome-style browsers
+    /// (``CefBrowserWindow``) use Chrome's own swipe handling; views use
+    /// CefSwift's. While a swipe is in progress,
+    /// ``CefBrowser/navigationGestureProgress`` follows it.
     public var allowsBackForwardNavigationGestures = false
+    /// How a swipe in progress is shown when
+    /// ``allowsBackForwardNavigationGestures`` is on.
+    public var navigationGestureIndicator = CefNavigationGestureIndicator.automatic
     /// (Offscreen only) Forward raw trackpad touches to Chromium instead of
     /// translating gestures natively.
     public var forwardsRawTouchEvents = false
@@ -216,10 +223,12 @@ public final class CefBrowser: Identifiable {
     public private(set) var statusText = ""
     /// Downloads started by this browser, oldest first.
     public private(set) var downloads: [CefDownload] = []
-    /// Progress of an in-flight swipe-to-navigate gesture: 0 at rest, toward
-    /// -1 while swiping back, toward 1 while swiping forward. Draw your own
-    /// indicator from it. CefSwiftUI's offscreen view updates it; offscreen
-    /// rendering only.
+    /// Progress of a back or forward swipe
+    /// (``CefBrowserOptions/allowsBackForwardNavigationGestures``): 0 at
+    /// rest, moving toward -1 while swiping back and toward 1 while swiping
+    /// forward. At -1 or 1 and beyond, releasing navigates. Use it to draw
+    /// your own indicator with
+    /// ``CefBrowserOptions/navigationGestureIndicator`` set to `.hidden`.
     public package(set) var navigationGestureProgress = 0.0
     /// The latest result of ``find(_:backwards:caseSensitive:)``.
     public private(set) var findResult: CefFindResult?

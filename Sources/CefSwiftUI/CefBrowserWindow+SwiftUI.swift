@@ -59,6 +59,92 @@ extension CefBrowserWindow {
     }
 }
 
+extension View {
+    /// Makes this view the anchor of Chromium's bubbles in the
+    /// ``CefBrowserWindow`` it is in, such as a view of the window's toolbar:
+    /// bubbles appear beneath it instead of where Chrome's toolbar would be.
+    ///
+    /// Without `kinds`, the view becomes the window's
+    /// ``CefBrowserWindow/bubbleAnchor``, which every bubble Chromium would
+    /// attach to its toolbar follows; with them, it anchors only those
+    /// kinds (``CefBrowserWindow/bubbleAnchors``). The anchor is removed
+    /// when the view leaves the window.
+    ///
+    /// ```swift
+    /// AddressField(browser: browser)
+    ///     .chromiumBubbleAnchor(alignment: .trailing)
+    /// ```
+    public func chromiumBubbleAnchor(
+        for kinds: Set<CefChromiumBubble.Kind>? = nil,
+        alignment: CefBubbleAnchor.Alignment = .center,
+        spacing: CGFloat = 4
+    ) -> some View {
+        background(BubbleAnchorRepresentable(kinds: kinds, alignment: alignment, spacing: spacing))
+    }
+}
+
+private struct BubbleAnchorRepresentable: NSViewRepresentable {
+    let kinds: Set<CefChromiumBubble.Kind>?
+    let alignment: CefBubbleAnchor.Alignment
+    let spacing: CGFloat
+
+    func makeNSView(context: Context) -> BubbleAnchorView {
+        BubbleAnchorView()
+    }
+
+    func updateNSView(_ view: BubbleAnchorView, context: Context) {
+        view.configure(kinds: kinds, alignment: alignment, spacing: spacing)
+    }
+}
+
+/// An invisible view that registers itself as a bubble anchor with the
+/// browser window it is in.
+private final class BubbleAnchorView: NSView {
+    private var kinds: Set<CefChromiumBubble.Kind>?
+    private var alignment = CefBubbleAnchor.Alignment.center
+    private var spacing: CGFloat = 4
+    private weak var registeredWindow: CefBrowserWindow?
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    func configure(kinds: Set<CefChromiumBubble.Kind>?, alignment: CefBubbleAnchor.Alignment, spacing: CGFloat) {
+        unregister()
+        self.kinds = kinds
+        self.alignment = alignment
+        self.spacing = spacing
+        register()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        unregister()
+        register()
+    }
+
+    private func register() {
+        guard let window, let owner = CefBrowserWindow.owning(window) else { return }
+        let anchor = CefBubbleAnchor.view(self, alignment: alignment, spacing: spacing)
+        if let kinds {
+            for kind in kinds { owner.bubbleAnchors[kind] = anchor }
+        } else {
+            owner.bubbleAnchor = anchor
+        }
+        registeredWindow = owner
+    }
+
+    private func unregister() {
+        guard let owner = registeredWindow else { return }
+        registeredWindow = nil
+        if let kinds {
+            for kind in kinds where owner.bubbleAnchors[kind]?.isAnchored(to: self) == true {
+                owner.bubbleAnchors[kind] = nil
+            }
+        } else if owner.bubbleAnchor?.isAnchored(to: self) == true {
+            owner.bubbleAnchor = nil
+        }
+    }
+}
+
 extension ToolbarItemProvider {
     /// Makes a toolbar of this provider's items the window's toolbar.
     func install(in nsWindow: NSWindow) {

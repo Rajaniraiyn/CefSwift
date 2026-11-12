@@ -87,6 +87,9 @@ enum SelfTest {
         await bridgeScopeChecks()
         await internalPageDataChecks()
         await serviceLifetimeChecks()
+        // After the history checks: the pages these visit would crowd the
+        // probe out of the most-visited tiles.
+        await nativeUIChecks()
         await relaunchChecks()
         await chromeWindowChecks()
     }

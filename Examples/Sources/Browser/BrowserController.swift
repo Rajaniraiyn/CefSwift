@@ -51,6 +51,8 @@ final class BrowserController: CefBrowserDelegate {
         options.profile = profile
         options.userScripts = Self.internalPageStyles
         options.bridges = [library.startPageBridge]
+        // Two-finger swipes go back and forward, with CefSwift's indicator.
+        options.allowsBackForwardNavigationGestures = true
         options.contextMenu.showsInspectElement = true
         options.contextMenu.hiddenCommands = [.viewSource]
         options.contextMenu.items = [

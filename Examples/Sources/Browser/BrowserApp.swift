@@ -19,6 +19,10 @@ struct BrowserApp: CefSwiftApp {
         configuration.customSchemes = [CefCustomScheme(name: BrowserPages.scheme)]
         // Quit immediately on ⌘Q instead of Chromium's "Hold ⌘Q to Quit".
         configuration.preferences["browser.confirm_to_quit"] = false
+        // A separate data directory runs a second, independent instance.
+        if let path = UserDefaults.standard.string(forKey: "dataDirectory") {
+            configuration.rootCacheDirectory = URL(fileURLWithPath: path, isDirectory: true)
+        }
         return configuration
     }
 
@@ -95,6 +99,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 ///   shows its suggestions.
 /// - `-private YES` opens the tabs as private tabs.
 /// - `-appearance dark` (or `light`, `system`) overrides the setting.
+/// - `-dataDirectory /path` keeps profile data there, apart from (and able
+///   to run beside) an instance using the default folder.
 @MainActor
 struct LaunchOptions {
     var urls: [URL] = []
