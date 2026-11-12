@@ -122,8 +122,7 @@ extension SelfTest {
         }
 
         // Left discarded for the quit check.
-        _ = await waitUntil { !browser.isLoading }
-        try? await Task.sleep(for: .milliseconds(300))
+        await waitUntilDiscardable(browser)
         check("discard: discarded again for quitting", (try? await browser.discard()) != nil && browser.isDiscarded)
         discardedWindow = browserWindow
     }
@@ -186,7 +185,10 @@ extension SelfTest {
         twins.forEach { $0.show() }
         _ = await waitUntil { twins.allSatisfy { !$0.browser.isLoading && $0.browser.title == "tab" } }
         twins.forEach { $0.hide() }
-        try? await Task.sleep(for: .milliseconds(300))
+        // Kept only for being ambiguous, once both are hidden.
+        for twin in twins {
+            await waitUntilDiscardable(twin.browser) { if case .unknown = $0 { true } else { false } }
+        }
         var twinError: CefDiscardError?
         do { try await twins[0].browser.discard() } catch { twinError = error }
         let ambiguous: Bool
@@ -200,7 +202,7 @@ extension SelfTest {
         // One of them navigating apart makes each tab identifiable again.
         twins[1].browser.load(URL(string: "selftest://edge/tab.html?other")!)
         _ = await waitUntil { twins[1].browser.url?.query == "other" && !twins[1].browser.isLoading }
-        try? await Task.sleep(for: .milliseconds(300))
+        await waitUntilDiscardable(twins[0].browser)
         await expect("discard identity: a tab told apart by its address is discarded, and only it") {
             try await twins[0].browser.discard()
             return twins[0].browser.isDiscarded && !twins[1].browser.isDiscarded
@@ -214,7 +216,7 @@ extension SelfTest {
         window.show()
         _ = await waitUntil { !browser.isLoading && browser.title == "tab" }
         window.hide()
-        try? await Task.sleep(for: .milliseconds(300))
+        await waitUntilDiscardable(browser)
         hook.body = { _ in window.show() }
         var shownError: CefDiscardError?
         do { try await browser.discard() } catch { shownError = error }
@@ -223,7 +225,7 @@ extension SelfTest {
 
         _ = await waitUntil { !browser.isLoading }
         window.hide()
-        try? await Task.sleep(for: .milliseconds(300))
+        await waitUntilDiscardable(browser)
         hook.body = { browser in browser.load(URL(string: "selftest://edge/tab.html?moved")!) }
         var movedError: CefDiscardError?
         do { try await browser.discard() } catch { movedError = error }
@@ -313,6 +315,15 @@ extension SelfTest {
         view.isHidden = true
         check("discard (view): discarded again for quitting", (try? await browser.discard()) != nil && browser.isDiscarded)
         discardedViewBrowser = browser
+    }
+
+    /// Waits until nothing keeps `browser` loaded but what `allowed`
+    /// accepts: a hidden window takes a moment to reach Chromium's tab
+    /// state, and a page that just loaded to settle.
+    static func waitUntilDiscardable(
+        _ browser: CefBrowser, allowing allowed: (CefDiscardBlocker) -> Bool = { _ in false }
+    ) async {
+        _ = await waitUntilAsync(timeout: .seconds(5)) { await browser.discardBlockers().allSatisfy(allowed) }
     }
 
     // MARK: Processes

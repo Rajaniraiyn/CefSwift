@@ -24,7 +24,7 @@ extension SelfTest {
         }
         defer { stage.close() }
         guard stage.window.occlusionState.contains(.visible) else {
-            print("SKIP compositor: the test window is not visible (screen locked or asleep?)")
+            skip("compositor", because: "the test window is not visible (screen locked or asleep?)", .environment)
             return
         }
         let animated = await stage.animate(for: .seconds(2), resizing: false)
