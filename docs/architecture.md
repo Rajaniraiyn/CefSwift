@@ -146,6 +146,61 @@ throws there instead of starting a service. An incognito profile's
 bookmarks are the default profile's `CefBookmarks`, since Chromium shares
 the original profile's bookmarks with its incognito profile.
 
+## Discarding
+
+`CefBrowser.discard()` frees a hidden browser's page and keeps the
+`CefBrowser`. How depends on the runtime style.
+
+A Chrome-style browser is a tab in a Chromium tab strip, so Chromium
+discards it. CefKit starts Chromium with the `WebContentsDiscard` feature,
+which discards a tab in place: the frame tree is torn down and the renderer
+process exits once no other frame uses it, while the `WebContents` and its
+navigation entries stay, marked to load again. Without the feature Chromium
+replaces the `WebContents` with a new one, which CEF reports as the browser
+closing and another opening.
+
+Chromium's own policies (Memory Saver, urgent discarding under memory
+pressure) never pick a CefKit tab. Each Chrome-style browser is the only,
+and so the active, tab of its own Chromium window, and the discard
+eligibility policy protects the active tab of every window, as it does a
+tab with DevTools attached, which CefKit's DevTools connection counts as.
+The `EXTERNAL` discard reason, which `chrome.tabs.discard()` uses, skips
+those protections. CefKit calls `DiscardById` with it on the
+`discards.mojom.DetailsProvider` of a hidden service browser parked on
+`chrome://discards`, after its own checks. It reads Chromium's other
+protections (audio, media capture, form interaction, connected devices)
+from `GetTabDiscardsInfo` as blockers, leaving out the ones it overrides.
+That interface numbers tabs afresh on every query and describes them only
+by address and title, so each discard looks its tab up again. CEF's frame
+count for a browser drops to zero when Chromium discards its tab; when two
+hidden tabs share an address and title, that tells which one went, and a
+discard that reached the other tab reloads it and tries the next. The
+service browser closes after 30 seconds without calls.
+
+When the window is shown again, Chromium loads the tab
+(`NavigationController::SetActive`), with its scroll position from the
+saved page state. A command sent to a hidden discarded tab reloads it. The
+DevTools session survives the discard, so bridges, user scripts and event
+streams carry on unchanged.
+
+An Alloy browser is not a tab, and Chromium has no lifecycle unit for it.
+CefKit closes the Chromium browser and keeps the `CefBrowser` in
+`CefRuntime.browsers` without an identifier. When its view is shown again,
+or the browser is used, a new Chromium browser is created in the same view
+on the saved address and set up as a new one is: bridges, user scripts and
+scripts added with `addUserScript` are installed first, and `CefDevTools`
+enables again the domains enabled before, so event streams keep
+delivering. Its back/forward list starts from that page. Closing a browser
+never ends a renderer process another browser shares; Chromium keeps the
+process until its last frame goes.
+
+`CefRuntime.memorySaver` is applied by a monitor that polls which browsers
+are off screen, at a quarter of the policy's interval and at most every 30
+seconds, and listens for memory pressure through
+`DispatchSource.makeMemoryPressureSource`. Window occlusion notifications
+restore browsers discarded by closing when their view comes back on
+screen.
+
 ## Quitting
 
 `CefApplication.terminate(_:)` asks `CefRuntime` first. The runtime closes
@@ -153,7 +208,8 @@ every browser, so pages can run `beforeunload`, and declines the request. As
 the last browser and the last Chromium window are destroyed, it calls
 `terminate(_:)` again from the run loop, then calls `cef_shutdown()`. Calling
 `cef_shutdown()` earlier, or from inside a CEF callback, crashes. A page that
-asks to stay cancels the quit.
+asks to stay cancels the quit. A browser discarded by closing has no
+Chromium browser left and is marked closed at once.
 
 ## Relaunching
 

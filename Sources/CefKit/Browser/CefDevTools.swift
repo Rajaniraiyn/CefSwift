@@ -37,15 +37,47 @@ public final class CefDevTools {
         self.browser = browser
     }
 
+    /// Domains enabled through this session (`Network.enable` and the
+    /// like), with their parameters, in the order they were enabled.
+    private var enabledDomains: [(method: String, params: CefJSON)] = []
+    /// Set when the browser was discarded by closing it: the next session
+    /// enables ``enabledDomains`` again before anything else is sent.
+    private var needsDomainReplay = false
+
     /// Calls a protocol method and returns its result object.
     ///
-    /// Waits for the browser to be created if it is still pending.
+    /// Waits for the browser to be created if it is still pending, and
+    /// restores a discarded browser first.
     @discardableResult
     public func send(_ method: String, _ params: CefJSON = [:]) async throws -> CefJSON {
         guard let browser else { throw CefError.browserClosed }
         try await browser.ready()
-        attachIfNeeded(to: browser)
+        if attachIfNeeded(to: browser), needsDomainReplay {
+            needsDomainReplay = false
+            for domain in enabledDomains {
+                _ = try? await deliver(domain.method, domain.params, to: browser)
+            }
+        }
+        let result = try await deliver(method, params, to: browser)
+        recordDomainState(method, params)
+        return result
+    }
 
+    private func recordDomainState(_ method: String, _ params: CefJSON) {
+        guard let dot = method.lastIndex(of: ".") else { return }
+        let enable = method[..<dot] + ".enable"
+        switch method[method.index(after: dot)...] {
+        case "enable":
+            enabledDomains.removeAll { $0.method == method }
+            enabledDomains.append((method, params))
+        case "disable":
+            enabledDomains.removeAll { $0.method == enable }
+        default:
+            break
+        }
+    }
+
+    private func deliver(_ method: String, _ params: CefJSON, to browser: CefBrowser) async throws -> CefJSON {
         nextMessageID += 1
         let id = nextMessageID
         let message = CefJSON.object(["id": .number(Double(id)), "method": .string(method), "params": params]).data
@@ -99,6 +131,20 @@ public final class CefDevTools {
         streams[token] = nil
     }
 
+    /// The browser was discarded by closing it, and a new Chromium browser
+    /// takes its place when it is restored. Event streams stay open and
+    /// the domains enabled so far are enabled again in the new session.
+    /// CefKit's own listeners are dropped: bridges install themselves again.
+    func prepareForNewSession() {
+        registration = nil
+        pending.values.forEach { $0.continuation.resume(throwing: CefError.browserClosed) }
+        pending = [:]
+        for method in listeners.keys {
+            listeners[method] = listeners[method]?.filter { streams[$0.key] != nil }
+        }
+        needsDomainReplay = !enabledDomains.isEmpty
+    }
+
     /// Fails outstanding calls and ends event streams. Called at browser close.
     func invalidate() {
         registration = nil
@@ -111,14 +157,17 @@ public final class CefDevTools {
 
     // MARK: Observer
 
-    private func attachIfNeeded(to browser: CefBrowser) {
-        guard registration == nil else { return }
+    /// Attaches the observer unless it is attached already. Returns whether
+    /// it attached now.
+    private func attachIfNeeded(to browser: CefBrowser) -> Bool {
+        guard registration == nil else { return false }
         let observer = DevToolsObserver(devTools: self).makeObserver()
         // add_dev_tools_message_observer takes over the observer reference;
         // the returned registration keeps it installed until released.
         registration = browser.withHost { host in
             CefRef(adopting: host.pointee.add_dev_tools_message_observer(host, observer))
         } ?? nil
+        return registration != nil
     }
 
     fileprivate func received(result: Data, forMessage id: Int32, succeeded: Bool) {

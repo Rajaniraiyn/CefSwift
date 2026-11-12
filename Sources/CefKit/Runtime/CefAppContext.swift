@@ -13,6 +13,11 @@ final class CefAppContext: @unchecked Sendable {
     let defaultClient: UnsafeMutablePointer<cef_client_t>
     private let stringOverrides: [Int32: String]
 
+    /// The Chromium feature that discards a tab in place
+    /// (``CefBrowser/discard()``). On by default; listing it in
+    /// ``CefConfiguration/disabledFeatures`` turns it off.
+    static let webContentsDiscardFeature = "WebContentsDiscard"
+
     private var browserProcessHandler: UnsafeMutablePointer<cef_browser_process_handler_t>?
     private var resourceBundleHandler: UnsafeMutablePointer<cef_resource_bundle_handler_t>?
 
@@ -108,7 +113,15 @@ final class CefAppContext: @unchecked Sendable {
             // Chromium is phasing out --load-extension behind this feature.
             disabledFeatures.insert("DisableLoadExtensionCommandLineSwitch")
         }
-        commandLine.appendValues(configuration.enabledFeatures, toListSwitch: "enable-features")
+        // Discarding a tab then keeps its WebContents, and so its CefBrowser
+        // and back/forward list. Without it Chromium replaces the
+        // WebContents, which CEF reports as the browser closing and a new
+        // one opening.
+        var enabledFeatures = configuration.enabledFeatures
+        if !disabledFeatures.contains(Self.webContentsDiscardFeature) {
+            enabledFeatures.insert(Self.webContentsDiscardFeature)
+        }
+        commandLine.appendValues(enabledFeatures, toListSwitch: "enable-features")
         commandLine.appendValues(disabledFeatures, toListSwitch: "disable-features")
 
         configuration.onBeforeCommandLineProcessing?(commandLine)
