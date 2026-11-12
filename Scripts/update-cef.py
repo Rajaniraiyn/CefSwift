@@ -14,7 +14,8 @@ A release counts only when it is stable and ships the minimal and standard
 distributions for both macOS architectures. Updating:
 
   1. downloads the arm64 minimal distribution into .cef/downloads (resumed,
-     size- and SHA-1-verified; shared with the CefPlugin cache),
+     size- and SHA-1-verified, one fresh retry if a resumed download does not
+     verify; shared with the CefPlugin cache),
   2. stages a copy of Sources/CCef/include in .cef/update with the new headers,
   3. regenerates the C bridge there (Scripts/generate-bindings.py), which also
      fails clearly if the new headers no longer support the pinned API version,
@@ -144,13 +145,17 @@ def download(artifact):
             target.unlink()
     if partial.exists() and partial.stat().st_size >= size:
         partial.unlink()
-    log(f"{'resuming' if partial.exists() else 'downloading'} {name} ({size // 1_000_000} MB)")
-    curl(f"{CDN}/{urllib.parse.quote(name)}", partial, resume=True)
-    if partial.stat().st_size != size or sha1(partial) != artifact["sha1"]:
-        partial.unlink()
-        fail(f"{name} does not match the size and SHA-1 in the CDN index; deleted it, run again")
-    os.replace(partial, target)
-    return target
+    # A resumed partial can be stale (an interrupted download of an earlier
+    # upload of the same name), so a mismatch after resuming earns one fresh try.
+    for attempt in ("resume", "fresh") if partial.exists() else ("fresh",):
+        log(f"{'resuming' if attempt == 'resume' else 'downloading'} {name} ({size // 1_000_000} MB)")
+        curl(f"{CDN}/{urllib.parse.quote(name)}", partial, resume=True)
+        if partial.exists() and partial.stat().st_size == size and sha1(partial) == artifact["sha1"]:
+            os.replace(partial, target)
+            return target
+        partial.unlink(missing_ok=True)
+        log(f"{name} does not match the size and SHA-1 in the CDN index; deleted it")
+    fail(f"{name} does not match the size and SHA-1 in the CDN index; run again later")
 
 
 # --- release selection -------------------------------------------------------
@@ -351,8 +356,13 @@ def main(argv=None):
 
     if arguments.check or not (revendor or arguments.api_version):
         updated = revendor and arguments.check
-        if not updated:
+        if updated:
+            log(f"{version} is available (pinned: {current['cef']})")
+        else:
             log(f"{current['cef']} is the newest stable")
+        if not arguments.check:
+            # No stale commit message or PR body from an earlier run.
+            shutil.rmtree(WORK, ignore_errors=True)
         write_outputs(updated=str(updated).lower(), cef_old=current["cef"],
                       cef_new=version if updated else current["cef"], api_old=api_old, api_new=api_old)
         return
@@ -504,6 +514,39 @@ def self_test():
                                 [("cef/include/a.h", "a")]):
                     with self.assertRaises(SystemExit):
                         extract_headers(tarball(directory, members), Path(tempfile.mkdtemp(dir=directory)) / "o")
+
+        def test_download_verifies_and_retries_a_stale_partial_once(self):
+            content = b"the real archive"
+            artifact = {"name": "cef.tar.bz2", "size": len(content), "sha1": hashlib.sha1(content).hexdigest()}
+            calls = []
+
+            def fake_curl(url, output, resume=False, max_time=None, serve=content):
+                calls.append(output.stat().st_size if output.exists() else 0)
+                done = output.stat().st_size if output.exists() else 0
+                with output.open("ab") as file:
+                    file.write(serve[done:])
+
+            global DOWNLOADS, curl
+            saved = DOWNLOADS, curl
+            try:
+                with tempfile.TemporaryDirectory() as directory:
+                    DOWNLOADS, curl = Path(directory), fake_curl
+                    # A stale partial: the resume yields a mismatch, the fresh try succeeds.
+                    (DOWNLOADS / "cef.tar.bz2.part").write_bytes(b"stale")
+                    self.assertEqual(download(artifact).read_bytes(), content)
+                    self.assertEqual(calls, [5, 0])
+                    calls.clear()
+                    download(artifact)  # cached and verified: no network
+                    self.assertEqual(calls, [])
+                    # A CDN that keeps serving the wrong bytes fails after one retry, leaving nothing.
+                    (DOWNLOADS / "cef.tar.bz2").unlink()
+                    (DOWNLOADS / "cef.tar.bz2.part").write_bytes(b"stale")
+                    curl = lambda url, output, **kw: fake_curl(url, output, serve=b"x" * len(content))
+                    with self.assertRaises(SystemExit):
+                        download(artifact)
+                    self.assertEqual(list(DOWNLOADS.iterdir()), [])
+            finally:
+                DOWNLOADS, curl = saved
 
         def test_api_version_pin_handling(self):
             gb = bindings()
