@@ -61,7 +61,7 @@ struct TaskManagerView: View {
             }
             .padding(10)
         }
-        .frame(minWidth: 420, minHeight: 240)
+        .frame(minWidth: 420, idealWidth: 560, minHeight: 240, idealHeight: 380)
     }
 
     /// Figures belong to processes: shown once, on a process's first task.
