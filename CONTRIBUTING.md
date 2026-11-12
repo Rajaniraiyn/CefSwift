@@ -8,7 +8,11 @@ swift test
 ```
 
 The Command Line Tools are enough; Xcode is not required. `CefKitTests`
-covers CefKit and `CefSwiftUITests` the views; neither starts Chromium.
+covers CefKit, `CefSwiftUITests` the views, and `CefPluginTests` the
+plugin's signing and distribution logic; none of them starts Chromium.
+`CefPluginTests` compiles `Plugins/CefPlugin/Distribution` through a
+directory symlink, since a test target cannot depend on a plugin, so keep
+that directory free of `PackagePlugin` and of running tools.
 
 The loader tests run only when `CEF_FRAMEWORK_PATH` names a CEF framework,
 either the `.framework` directory or the binary inside it. Download one with
