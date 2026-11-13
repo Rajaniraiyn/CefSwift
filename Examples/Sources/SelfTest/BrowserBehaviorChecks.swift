@@ -1,6 +1,5 @@
 import AppKit
 import CefSwiftUI
-import Network
 
 /// Checks of what a browser built on `CefBrowserWindow` relies on: popups,
 /// closing in awkward moments, downloads, `beforeunload`, load errors,
@@ -368,107 +367,5 @@ struct EdgePages: CefSchemeHandler {
 
     private static func page(_ html: String) -> CefSchemeResponse {
         CefSchemeResponse(mimeType: "text/html", body: Data(html.utf8))
-    }
-}
-
-/// A local HTTP server. `/private` wants Basic credentials `ada:lovelace`;
-/// as a proxy, it wants `grace:hopper` for every request;
-/// `*.txt` is served as an attachment and `/page` as a plain page.
-final class LocalServer: @unchecked Sendable {
-    private let listener: NWListener
-    private(set) var port: UInt16 = 0
-    private let lock = NSLock()
-    private var receivedRequestLines: [String] = []
-
-    /// The first line of each request received, such as `POST /ping HTTP/1.1`.
-    var requestLines: [String] { lock.withLock { receivedRequestLines } }
-
-    private init(listener: NWListener) {
-        self.listener = listener
-    }
-
-    static func start() async throws -> LocalServer {
-        let parameters = NWParameters.tcp
-        parameters.requiredLocalEndpoint = NWEndpoint.hostPort(host: "127.0.0.1", port: .any)
-        let server = LocalServer(listener: try NWListener(using: parameters))
-        server.listener.newConnectionHandler = { connection in
-            connection.start(queue: .global())
-            connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { data, _, _, _ in
-                let request = data.flatMap { String(data: $0, encoding: .utf8) } ?? ""
-                let path = request.split(separator: " ").dropFirst().first.map(String.init) ?? "/"
-                server.lock.withLock {
-                    server.receivedRequestLines.append(String(request.prefix { $0 != "\r" && $0 != "\n" }))
-                }
-                let head: String, body: String
-                if path.hasPrefix("http://") {
-                    // A request sent to this server as a proxy.
-                    if request.contains("Proxy-Authorization: Basic \(Data("grace:hopper".utf8).base64EncodedString())") {
-                        head = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n"
-                        body = "<title>proxied</title>ok"
-                    } else {
-                        head = "HTTP/1.1 407 Proxy Authentication Required\r\nContent-Type: text/html\r\n"
-                            + "Proxy-Authenticate: Basic realm=\"selftest-proxy\"\r\n"
-                        body = "<title>proxy denied</title>denied"
-                    }
-                } else if path == "/ping-page" {
-                    head = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n"
-                    body = "<title>ping-page</title><a id=link ping=/ping href=/page>A link that pings</a>"
-                } else if path == "/ping" {
-                    head = "HTTP/1.1 204 No Content\r\n"
-                    body = ""
-                } else if path == "/accept-language" {
-                    let header = request.split(separator: "\r\n")
-                        .first { $0.lowercased().hasPrefix("accept-language:") }
-                        .map { $0.dropFirst("accept-language:".count).trimmingCharacters(in: .whitespaces) } ?? ""
-                    head = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n"
-                    body = "<title>accept-language \(header)</title>"
-                } else if path.hasPrefix("/passkeys") {
-                    head = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n"
-                    body = PasskeyChecks.page
-                } else if path.hasSuffix(".txt") {
-                    head = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n"
-                        + "Content-Disposition: attachment; filename=\"\(path.dropFirst())\"\r\n"
-                    body = String(repeating: "CefSwift\n", count: 2048)
-                } else if path == "/page" {
-                    head = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n"
-                    body = "<title>page</title><p>A page on http, which Chrome's QR code generator accepts.</p><p>Another page, then a third page.</p><p><a id=link href=/page>A link</a></p>"
-                } else if request.contains("Authorization: Basic \(Data("ada:lovelace".utf8).base64EncodedString())") {
-                    head = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n"
-                    body = "<title>authorized</title>ok"
-                } else {
-                    head = "HTTP/1.1 401 Unauthorized\r\nContent-Type: text/html\r\nWWW-Authenticate: Basic realm=\"selftest\"\r\n"
-                    body = "<title>denied</title>denied"
-                }
-                let response = head + "Content-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n" + body
-                // Close the write side after the response; the client closes the rest.
-                connection.send(
-                    content: Data(response.utf8), contentContext: .finalMessage, isComplete: true,
-                    completion: .contentProcessed { _ in
-                        DispatchQueue.global().asyncAfter(deadline: .now() + 5) { connection.cancel() }
-                    })
-            }
-        }
-        return try await withCheckedThrowingContinuation { continuation in
-            nonisolated(unsafe) var resumed = false
-            server.listener.stateUpdateHandler = { state in
-                guard !resumed else { return }
-                switch state {
-                case .ready:
-                    resumed = true
-                    server.port = server.listener.port?.rawValue ?? 0
-                    continuation.resume(returning: server)
-                case .failed(let error):
-                    resumed = true
-                    continuation.resume(throwing: error)
-                default:
-                    break
-                }
-            }
-            server.listener.start(queue: .global())
-        }
-    }
-
-    func stop() {
-        listener.cancel()
     }
 }
