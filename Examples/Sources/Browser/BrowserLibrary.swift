@@ -1,4 +1,5 @@
 import AppKit
+import CefChromium
 import CefSwiftUI
 
 /// The browser's bookmarks and history, kept current for the menus, the

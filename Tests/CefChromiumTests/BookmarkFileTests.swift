@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-@testable import CefKit
+@testable import CefChromium
 
 @Suite struct BookmarkFileTests {
     /// A file as Chromium 156 writes it (`bookmark_codec.cc`), trimmed.

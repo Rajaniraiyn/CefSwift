@@ -13,6 +13,7 @@ let package = Package(
             name: "Browser",
             dependencies: [
                 .product(name: "CefSwiftUI", package: "CefSwift"),
+                .product(name: "CefChromium", package: "CefSwift"),
                 .product(name: "CefPasskeys", package: "CefSwift"),
                 "SystemEngine",
             ],
@@ -55,6 +56,7 @@ let package = Package(
             name: "SelfTest",
             dependencies: [
                 .product(name: "CefSwiftUI", package: "CefSwift"),
+                .product(name: "CefChromium", package: "CefSwift"),
                 .product(name: "CefPasskeys", package: "CefSwift"),
                 "SystemEngine",
             ],

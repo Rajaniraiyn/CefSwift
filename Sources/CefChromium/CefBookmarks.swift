@@ -1,3 +1,4 @@
+import CefKit
 import Foundation
 
 /// A bookmark or bookmark folder.
@@ -49,7 +50,7 @@ public struct CefBookmark: Sendable, Identifiable, Hashable {
 ///
 /// Changes, searches and lookups by address go through the documented
 /// `chrome.bookmarks` extension API, which Chromium grants its own
-/// `chrome://bookmarks` host; CefKit reaches it from a hidden service host
+/// `chrome://bookmarks` host; CefChromium reaches it from a hidden service host
 /// that starts on first use and closes when idle. While that host is not
 /// running, ``tree()``, ``children(of:)``, ``bookmark(_:)`` and
 /// ``recent(limit:)`` read Chromium's `Bookmarks` file instead, and
@@ -59,8 +60,8 @@ public struct CefBookmark: Sendable, Identifiable, Hashable {
 /// page in a visible window, Chromium holds the save back, and a new
 /// profile has no file until its first save. Reads go to the host while the file is
 /// missing or a change made through this API is not saved yet. Both paths
-/// rely on Chromium internals, so this API is more likely than the rest of
-/// CefKit to need attention when Chromium updates.
+/// rely on Chromium internals, so this API is more likely than CefKit to
+/// need attention when Chromium updates.
 ///
 /// Incognito profiles have no bookmarks of their own; their
 /// ``CefProfile/bookmarks`` are the default profile's.
@@ -83,15 +84,15 @@ public final class CefBookmarks {
     /// service host is not running.
     @_spi(Testing) public enum ReadSource: Sendable { case automatic, file, service }
     @_spi(Testing) public var readSource: ReadSource {
-        get { services.bookmarkReadSource }
-        set { services.bookmarkReadSource = newValue }
+        get { profile.chromiumStores.bookmarkReadSource }
+        set { profile.chromiumStores.bookmarkReadSource = newValue }
     }
 
     /// When the last change made through this API, for the profile,
     /// finished; reads go to the host until Chromium has saved it.
     private var unsavedWrite: Date? {
-        get { services.unsavedBookmarkWrite }
-        set { services.unsavedBookmarkWrite = newValue }
+        get { profile.chromiumStores.unsavedBookmarkWrite }
+        set { profile.chromiumStores.unsavedBookmarkWrite = newValue }
     }
 
     /// Whether a change made through this API is not yet in Chromium's
@@ -271,8 +272,7 @@ public final class CefBookmarks {
 
     /// Chromium's `Bookmarks` file, when it can stand in for the service:
     /// the service host is not running, Chromium has saved every change
-    /// made through it, the file
-    /// is in the format CefKit reads, and the profile has no
+    /// made through it, the file is in the format CefChromium reads, and the profile has no
     /// enterprise-managed or account bookmarks, which the file does not
     /// hold.
     private func storedBookmarks() throws -> CefBookmarkFile? {

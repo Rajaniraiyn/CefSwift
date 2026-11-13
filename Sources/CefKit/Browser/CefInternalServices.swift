@@ -11,30 +11,21 @@ import Foundation
 /// host serves (`strings.m.js`, a few kilobytes of JavaScript shown as text)
 /// instead of the page's app, and imports only the Mojo modules a service
 /// needs.
-struct CefServiceHost: Hashable, Sendable {
+package struct CefServiceHost: Hashable, Sendable {
     /// Identifies the host in logs and diagnostics.
-    let name: String
+    package let name: String
     /// The document the hidden browser shows.
-    let document: String
+    package let document: String
     /// Whether Chromium can open the host in an incognito profile. It stops
     /// the process when asked to open one it cannot (`chrome://history`).
-    let isAvailableInIncognito: Bool
+    package let isAvailableInIncognito: Bool
 
-    /// `chrome.bookmarks`, `chrome.tabs` and `chrome://favicon2`.
-    static let bookmarks = CefServiceHost(
-        name: "bookmarks", document: "chrome://bookmarks/strings.m.js", isAvailableInIncognito: true)
-    /// `history.mojom.PageHandler` and `chrome://favicon2`.
-    static let history = CefServiceHost(
-        name: "history", document: "chrome://history/strings.m.js", isAvailableInIncognito: false)
-    /// `most_visited.mojom.MostVisitedPageHandlerFactory`, on the new tab
-    /// page Chromium uses with third-party search engines, whose WebUI
-    /// controller does the least work.
-    static let mostVisited = CefServiceHost(
-        name: "most-visited", document: "chrome://new-tab-page-third-party/strings.m.js",
-        isAvailableInIncognito: false)
-    /// `mojom.OmniboxPageHandler`, the address bar's autocomplete controller.
-    static let omnibox = CefServiceHost(
-        name: "omnibox", document: "chrome://omnibox/strings.m.js", isAvailableInIncognito: true)
+    package init(name: String, document: String, isAvailableInIncognito: Bool) {
+        self.name = name
+        self.document = document
+        self.isAvailableInIncognito = isAvailableInIncognito
+    }
+
     /// `discards.mojom.DetailsProvider`, Chromium's tab lifecycle units.
     static let discards = CefServiceHost(
         name: "discards", document: "chrome://discards/strings.m.js", isAvailableInIncognito: true)
@@ -44,7 +35,8 @@ struct CefServiceHost: Hashable, Sendable {
 /// call of a service — a bound Mojo remote, or an extension API with its
 /// listeners — together with the hosts that can build it.
 ///
-/// Adding a service is declaring one:
+/// Adding a service is declaring one, in CefKit or in a module built on it
+/// (CefChromium declares its bookmark, history and omnibox services so):
 ///
 /// ```swift
 /// static let downloads = CefServiceModule(name: "downloads", hosts: [.downloads], setup: """
@@ -56,14 +48,21 @@ struct CefServiceHost: Hashable, Sendable {
 ///     """)
 /// let items = try await profile.services.call(.downloads, "s => s.handler.getDownloads()")
 /// ```
-struct CefServiceModule: Sendable {
-    let name: String
+package struct CefServiceModule: Sendable {
+    package let name: String
     /// Hosts that can build the module, the one to start first. A call goes
     /// to the first of them that is already running.
-    let hosts: [CefServiceHost]
+    package let hosts: [CefServiceHost]
     /// A JavaScript expression evaluating to `async emit => service`.
-    /// `emit(name, payload)` delivers an event to ``CefInternalServices/events(_:_:)``.
-    let setup: String
+    /// `emit(name, payload)` delivers an event to
+    /// ``CefInternalServices/events(_:_:bufferingPolicy:)``.
+    package let setup: String
+
+    package init(name: String, hosts: [CefServiceHost], setup: String) {
+        self.name = name
+        self.hosts = hosts
+        self.setup = setup
+    }
 }
 
 /// Calls into Chromium's internal services for one profile, from hidden
@@ -85,7 +84,7 @@ struct CefServiceModule: Sendable {
 ///   every Chrome-style window in its session and reopens them after a
 ///   crash, and ``CefRuntime`` closes the ones it recognizes by it.
 @MainActor
-final class CefInternalServices: CefShutdownParticipant {
+package final class CefInternalServices: CefShutdownParticipant {
     /// The fragment that marks a service page's address.
     nonisolated static let addressMarker = "cefswift-service"
 
@@ -105,11 +104,6 @@ final class CefInternalServices: CefShutdownParticipant {
 
     private var hosts: [CefServiceHost: CefServiceHostBrowser] = [:]
 
-    /// The profile's bookmark state that outlives one ``CefBookmarks``.
-    var bookmarkReadSource = CefBookmarks.ReadSource.automatic
-    /// When the last change made through ``CefBookmarks`` finished, until
-    /// Chromium's `Bookmarks` file is seen saved after it.
-    var unsavedBookmarkWrite: Date?
     private var subscribers: [String: [UUID: AsyncStream<CefJSON>.Continuation]] = [:]
 
     init(profile: CefProfile) {
@@ -118,14 +112,14 @@ final class CefInternalServices: CefShutdownParticipant {
         CefRuntime.shared.addShutdownParticipant(self)
     }
 
-    func runtimeWillShutDown() { stopAll() }
+    package func runtimeWillShutDown() { stopAll() }
 
     // MARK: Calling
 
     /// Evaluates `function` — a JavaScript expression of the form
     /// `async (service, args) => value` — on `module`'s service object with
     /// `arguments`, and returns its JSON result.
-    func call(
+    package func call(
         _ module: CefServiceModule, _ function: String, _ arguments: CefJSON = [:], timeout: Duration = .seconds(15)
     ) async throws -> CefJSON {
         let host = try runningHost(for: module)
@@ -134,7 +128,7 @@ final class CefInternalServices: CefShutdownParticipant {
 
     /// Evaluates `function` as ``call(_:_:_:timeout:)`` does and decodes its
     /// result.
-    func call<Result: Decodable>(
+    package func call<Result: Decodable>(
         _ module: CefServiceModule, _ function: String, _ arguments: CefJSON = [:], as type: Result.Type,
         timeout: Duration = .seconds(15)
     ) async throws -> Result {
@@ -146,7 +140,7 @@ final class CefInternalServices: CefShutdownParticipant {
     /// nothing running. `bufferingPolicy` matches the events' meaning:
     /// `.bufferingNewest(1)` for invalidations, where only the latest
     /// matters.
-    func events(
+    package func events(
         _ module: CefServiceModule, _ name: String,
         bufferingPolicy: AsyncStream<CefJSON>.Continuation.BufferingPolicy
     ) -> AsyncStream<CefJSON> {
@@ -185,7 +179,7 @@ final class CefInternalServices: CefShutdownParticipant {
     // MARK: Lifetime
 
     /// Whether `host`'s browser is open or opening.
-    func isRunning(_ host: CefServiceHost) -> Bool {
+    package func isRunning(_ host: CefServiceHost) -> Bool {
         hosts[host] != nil
     }
 
@@ -195,7 +189,7 @@ final class CefInternalServices: CefShutdownParticipant {
     }
 
     /// Closes every host; the next call starts its host again.
-    func stopAll() {
+    package func stopAll() {
         hosts.values.forEach { $0.stop() }
     }
 
@@ -204,9 +198,10 @@ final class CefInternalServices: CefShutdownParticipant {
         hosts.values.filter(\.isIdle).forEach { $0.stop() }
     }
 
-    /// Kills `host`'s renderer, as a crash would. For tests.
-    func crashRenderer(of host: CefServiceHost) async {
-        await hosts[host]?.crashRenderer()
+    /// Kills the renderer of the running host called `name`, as a crash
+    /// would. For tests.
+    func crashRenderer(ofHostNamed name: String) async {
+        await hosts.first { $0.key.name == name }?.value.crashRenderer()
     }
 
     /// A host's browser closed or is closing.

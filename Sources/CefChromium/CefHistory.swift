@@ -1,4 +1,5 @@
 import AppKit
+import CefKit
 import Foundation
 
 /// A page in a profile's browsing history.
@@ -52,8 +53,8 @@ public struct CefMostVisitedSite: Sendable, Identifiable, Hashable {
 /// CEF exposes no history API, so this one talks to the Mojo interfaces
 /// behind Chromium's own `chrome://history` and new tab pages, from hidden
 /// service hosts that start on first use and close when idle. Those
-/// interfaces are internal to Chromium: this API is more likely than the
-/// rest of CefKit to need attention when Chromium updates.
+/// interfaces are internal to Chromium: this API is more likely than CefKit
+/// to need attention when Chromium updates.
 @MainActor
 public final class CefHistory {
     /// Held, so the profile lives as long as this object is in use.
@@ -65,7 +66,7 @@ public final class CefHistory {
 
     private func call(_ module: CefServiceModule, _ function: String, _ arguments: CefJSON = [:]) async throws -> CefJSON {
         // Incognito profiles keep no history.
-        guard profile.kind != .incognito else {
+        guard !profile.isIncognito else {
             throw CefError.operationFailed("an incognito profile keeps no history")
         }
         return try await profile.services.call(module, function, arguments)

@@ -76,6 +76,20 @@ attachment declares (`preparesBeforeFirstDocument`): any attachment that
 must see every document from its first script needs both. A browser with
 no such attachment keeps native popups and starts on its page at once.
 
+## Chromium's own features: a module, not CefKit
+
+Bookmarks, history and autocomplete, and the presentation of Chromium's
+bubbles, find bar and status bubble, used to be CefKit API. They drive
+interfaces Chromium keeps private: the Mojo handlers and extension APIs of
+its WebUI pages, the format of its `Bookmarks` file, the classes of its
+AppKit windows and the view names its accessibility reports. Each CEF
+update can break them, and a browser product needs them where an app that
+embeds pages does not, so they moved to the optional `CefChromium` module,
+bound to the pinned CEF. What CefKit had to keep is general: the service
+host engine, which native tab discarding needs too, per-window module
+state, a Chrome-command interceptor, and an overlay slot over the page.
+Without the module, Chromium shows its interface as it draws it.
+
 ## Memory settings measured and not used
 
 These were measured on the Minimal example and are not used: they saved

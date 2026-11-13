@@ -67,9 +67,9 @@ extension CefRuntime {
     /// own — `window.open`, and links with `target=_blank` — do not come
     /// here: ``CefBrowserWindow/onPopup`` takes those browsers themselves,
     /// with their opener and history. DevTools does not come here either.
-    /// Pages CefKit keeps in hidden windows (for ``CefProfile/bookmarks``
-    /// and the like) that Chromium restores from a crashed session are
-    /// closed, never handed over.
+    /// Pages CefKit keeps in hidden windows (internal service hosts, for
+    /// tab discarding and CefChromium's stores) that Chromium restores
+    /// from a crashed session are closed, never handed over.
     ///
     /// When `nil`, Chromium shows these browsers in its own windows. Leave
     /// it `nil` in apps that use

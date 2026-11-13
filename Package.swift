@@ -8,6 +8,7 @@ let package = Package(
         .library(name: "CefKit", targets: ["CefKit"]),
         .library(name: "CefSwiftUI", targets: ["CefSwiftUI"]),
         .library(name: "CefPasskeys", targets: ["CefPasskeys"]),
+        .library(name: "CefChromium", targets: ["CefChromium"]),
         .plugin(name: "CefPlugin", targets: ["CefPlugin"]),
         // The helper processes' executable and its startup library, which
         // `swift package cef bundle` builds and puts in the app bundle.
@@ -60,6 +61,15 @@ let package = Package(
             name: "CefPasskeys",
             dependencies: ["CefKit"]
         ),
+        // Optional: Chromium's own browser features, bound to Chromium's
+        // private WebUI interfaces and AppKit classes of the pinned CEF:
+        // bookmarks, history and autocomplete through CefKit's internal
+        // service hosts, and Chromium's surfaces (bubbles, find bar, status
+        // bubble) in Chrome-style windows, with their SwiftUI glue.
+        .target(
+            name: "CefChromium",
+            dependencies: ["CefKit", "CCef", "CefBase"]
+        ),
         // SwiftUI integration: `CefWebView`, `CefSwiftApp` and modifiers,
         // built on CefKit's AppKit host views.
         .target(
@@ -99,6 +109,10 @@ let package = Package(
         .testTarget(
             name: "CefPasskeysTests",
             dependencies: ["CefPasskeys", "CefKit"]
+        ),
+        .testTarget(
+            name: "CefChromiumTests",
+            dependencies: ["CefChromium", "CefKit"]
         ),
     ],
     cLanguageStandard: .c11

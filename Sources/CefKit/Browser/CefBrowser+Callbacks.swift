@@ -106,8 +106,8 @@ extension CefBrowser {
     /// handled and Chrome must not run it.
     func handleChromeCommand(_ command: CefChromeCommand, disposition: CefWindowOpenDisposition) -> Bool {
         if delegate?.browser(self, handleChromeCommand: command, disposition: disposition) == true { return true }
-        // Surfaces the window replaces or hides.
-        if let window = CefBrowserWindow.hosting(self), window.handleSurfaceCommand(command) { return true }
+        // Modules that handle commands in browser windows (CefChromium).
+        if let window = CefBrowserWindow.hosting(self), window.intercept(command) { return true }
         // Chrome runs the command after this returns.
         if command.isZoomCommand { CefBrowser.refreshZoomLevels() }
         return false

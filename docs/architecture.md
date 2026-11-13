@@ -10,10 +10,14 @@ CefSwiftUI   CefSwiftApp, CefWebView (over CefKit's host views), SwiftUI modifie
     │        CefBrowserWindow.setToolbar and setTabAccessory
     │  CefPasskeys  optional: CefPasskeyController (a CefBrowserAttachment), passkey
     │     │         stores and the passkey sheet
+    │     │  CefChromium  optional, bound to the pinned CEF: CefBookmarks, CefHistory,
+    │     │     │         CefAutocomplete (on CefKit's service hosts); CefChromiumSurface,
+    │     │     │         chromiumUI and their SwiftUI glue (on Chromium's AppKit classes)
 CefKit       CefRuntime, CefBrowser, CefBrowserWindow, CefBrowserDelegate, CefBridge,
     │        CefDevTools, CefProfile, CefBrowserAttachment, configuration and policy types; the AppKit
     │        host views CefWindowedBrowserView and CefOffscreenBrowserView
-    │        (with its compositor and accessibility elements), no SwiftUI
+    │        (with its compositor and accessibility elements), the internal
+    │        service hosts and tab discarding, no SwiftUI
 CCef         vendored CEF C headers, the generated bridge, the runtime loader (C)
 
 CefBase      reference counting, strings and process messages, shared by
@@ -28,7 +32,7 @@ CefPlugin    swift package cef download | bundle | info | clean; builds the
 ### Extension points
 
 CefKit names no optional feature. An optional module, such as
-CefPasskeys, plugs into it at three points:
+CefPasskeys or CefChromium, plugs into it at these points:
 
 - `CefBrowserAttachment` (public), through
   `CefBrowser.Configuration.attachments`: told when Chromium has created a
@@ -49,13 +53,46 @@ CefPasskeys, plugs into it at three points:
   service hosts and the media router are participants.
 - `CefProfile.moduleState(_:make:)` (package): one object per type that a
   module keeps for a profile, made on first use.
+- `CefBrowserWindow.moduleState(_:make:)` and `existingModuleState(_:)`
+  (package): the same for a browser window. A state object that is a
+  `CefBrowserWindowParticipant` is told when the window is destroyed
+  (`browserWindowDidClose(_:)`).
+- `CefBrowserWindow.addChromeCommandInterceptor(_:)` (package): decides
+  Chrome commands in every browser window, from Chrome's UI and from
+  `CefBrowser.execute(_:disposition:)`, after the browser's delegate and
+  before Chromium runs them.
+- `CefBrowserWindow.Configuration.moduleValues` (package): values a module
+  keeps in a window configuration, by type, dropped for the window's
+  popups; `showsChromiumStatusBubble` and `showsChromiumZoomBubble`
+  (package) set the browser's `chrome_status_bubble` and
+  `chrome_zoom_bubble`. `statusOverlayView` (package) is a view laid over
+  the page beneath the swipe indicator.
+- The internal service hosts (package): `CefInternalServices`
+  (`CefProfile.services`), `CefServiceHost` and `CefServiceModule`. A module
+  declares its own hosts and modules and calls them
+  ([Internal-page services](#internal-page-services)).
 
 A module also uses a few `package` members of CefKit that are not public
 API: `CefDevTools.addListener(for:_:)`, `removeListener(_:for:)` and
 `leaseCount(_:)` (synchronous, ordered event listeners and domain leases),
 `CefBrowser.decision(_:_:)` with `CefBrowser.DecisionScope` (a question
 cancelled when its page or browser goes), `CefDialogPresenter.run(_:in:)`
-(an alert that dismisses itself on cancellation) and `CefLog`.
+(an alert that dismisses itself on cancellation), `CefLog`,
+`CefBrowserWindow.owning(_:)`, `CefProfile.directory`, and `CefObjCHook`
+for overrides of Chromium's AppKit classes.
+
+**CefChromium** wraps Chromium's own browser features, which are bound to
+Chromium-private interfaces of the pinned CEF: its stores
+(`profile.bookmarks`, `history` and `autocomplete`, kept weakly in the
+profile's module state) and the surfaces of Chrome-style windows
+(`window.chromiumUI`, kept in the window's module state). It depends on
+CefKit and on CCef and CefBase for Chromium's command and string
+identifiers. Its surface handling starts on the first use of its window
+API: that installs the AppKit overrides and the command interceptor once,
+for every window, and a window's state, made on first use or when
+Chromium first attaches a child window to it, takes up the surfaces
+already attached. Until then Chromium's interface shows natively, as
+without the module.
 
 ## The C bridge
 
@@ -237,8 +274,8 @@ paints everything except the page's rectangle and passes events through.
 The framework exports only CEF's C API, but Chromium's macOS UI is AppKit,
 and its Objective-C classes are visible to the Objective-C runtime.
 `CefObjCHook` overrides a few of their methods, a feature at a time:
-surface tracking (`CefNSWindow` child windows and `NativeWidgetMacNSWindow`
-alpha), swipe gating (`ChromeRenderWidgetHostViewMacDelegate`) and the
+CefChromium's surface tracking (`CefNSWindow` child windows and
+`NativeWidgetMacNSWindow` alpha), swipe gating (`ChromeRenderWidgetHostViewMacDelegate`) and the
 swipe indicator (`HistoryOverlayController`). Every method a feature
 overrides or calls is looked up first by class name, selector and type
 encoding, and the feature's overrides go in only when all of them are
@@ -253,7 +290,7 @@ Views widgets, each in a `NativeWidgetMacNSWindow` that Chromium attaches to
 the browser window as a child window. Every CEF Views window is a
 `CefNSWindow`, a subclass; `CefSurfaceTracker` overrides its
 `-addChildWindow:ordered:` and `-removeChildWindow:`. As Chromium attaches a
-widget, `CefBrowserWindow` makes it transparent; once attached, it reads
+widget, the window's surface controller makes it transparent; once attached, it reads
 what the widget shows and applies the kind's presentation: it restores the
 widget and moves it under its anchor with `setFrameOrigin(_:)` (and again
 when the widget or the window moves or resizes), or keeps it transparent,
@@ -277,7 +314,7 @@ field's accessibility value.
 
 Commands that open a surface the window replaces or hides never reach
 Chromium: `CefBrowser.execute(_:)` and the command handler's
-`on_chrome_command` hand them to the window's presenter first. The custom
+`on_chrome_command` hand them to CefChromium's command interceptor first. The custom
 find bar drives CEF's `find`/`stop_finding` and reads `on_find_result`. A
 new search only highlights its matches (Chromium reports an active ordinal
 of 0 and an empty selection), so once its count is final `CefFindSession`
@@ -824,7 +861,10 @@ once, for the call waiting on it.
 CEF has no API for bookmarks, history, most-visited sites, omnibox
 suggestions or tab discarding, but Chromium's own WebUI pages reach those
 services. `CefInternalServices`, one per profile, calls them from hidden
-Chrome-style browsers it calls service hosts.
+Chrome-style browsers it calls service hosts. The engine is CefKit's,
+since native tab discarding uses it; the bookmark, history, most-visited
+and omnibox hosts and modules are CefChromium's, declared there and
+registered with the engine by being called.
 
 `CefHistory.mostVisited()` binds a new most-visited page handler for each
 call. Chromium's `TopSites` reads the list from history once, shortly after
@@ -854,8 +894,8 @@ Chromium locks a WebUI renderer to its host, and neither
 queries with Chromium's autocomplete. It ranks for the new tab page,
 though: a web search first even when a bookmark matches the typed
 address, no match on bookmark titles, and no relevance or bookmarked flag
-in its results. CefKit keeps `chrome://omnibox`, whose controller is the
-address bar's.
+in its results. CefChromium keeps `chrome://omnibox`, whose controller is
+the address bar's.
 
 **The smallest document.** A service host loads the host's
 `strings.m.js`, a few kilobytes of JavaScript that Chromium shows as text,
@@ -908,7 +948,7 @@ address, whose matching is Chromium's, and every change go through the
 host. History, favicons and top sites live in SQLite databases that
 Chromium opens with exclusive locking: a read-only open fails with
 `SQLITE_BUSY` once Chromium has written, and an `immutable` open reads
-pages Chromium may be writing, so CefKit reads them only through the
+pages Chromium may be writing, so CefChromium reads them only through the
 hosts. The DevTools Protocol of Chromium 156 has no domain for any of
 these services.
 

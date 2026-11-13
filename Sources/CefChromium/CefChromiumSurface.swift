@@ -1,8 +1,9 @@
 import AppKit
 import CCef
+import CefBase
+import CefKit
 import Foundation
 import Observation
-import CefBase
 
 /// A piece of Chromium's own interface over a ``CefBrowserWindow``: a
 /// bubble such as the QR code generator or Cast, a dialog such as the HTTP
@@ -128,11 +129,6 @@ public final class CefChromiumSurface: Identifiable {
     /// The browser window the surface belongs to.
     @ObservationIgnored public private(set) weak var browserWindow: CefBrowserWindow?
 
-    /// The search a custom find bar drives. `nil` for other kinds.
-    public var findSession: CefFindSession? {
-        kind == .findBar ? browser.findSession : nil
-    }
-
     public nonisolated var id: ObjectIdentifier { ObjectIdentifier(self) }
 
     /// Called once when the surface is dismissed.
@@ -152,8 +148,9 @@ public final class CefChromiumSurface: Identifiable {
 
     /// Ends the surface. Chromium's surfaces close as pressing Esc in them
     /// would, which cancels what they ask (a sign-in dialog cancels the
-    /// sign-in); a find bar ends its search; your own interface for a
-    /// custom surface should close when ``isPresented`` turns `false`.
+    /// sign-in); a find bar ends the browser's ``CefBrowser/findSession``;
+    /// your own interface for a custom surface should close when
+    /// ``isPresented`` turns `false`.
     public func dismiss() {
         guard isPresented else { return }
         isPresented = false
@@ -455,7 +452,7 @@ extension CefChromiumSurface {
         }
 
         /// Whether this anchor is beneath `view`.
-        package func isAnchored(to view: NSView) -> Bool {
+        func isAnchored(to view: NSView) -> Bool {
             if case .view(let box) = target { return box.view === view }
             return false
         }
@@ -518,11 +515,11 @@ enum CefSurfaceTracker {
             MainActor.assumeIsolated {
                 // Hidden until it is recognized, so a surface the app
                 // replaces or hides never shows.
-                CefBrowserWindow.owning(parent)?.childWindowWillAttach(child)
+                CefBrowserWindow.owning(parent)?.surfaces.childWindowWillAttach(child)
             }
             addOriginal?(parent, addSelector, child, order)
             MainActor.assumeIsolated {
-                CefBrowserWindow.owning(parent)?.childWindowDidAttach(child)
+                CefBrowserWindow.owning(parent)?.surfaces.childWindowDidAttach(child)
             }
         }
 
@@ -531,7 +528,7 @@ enum CefSurfaceTracker {
         let remove: @convention(block) (NSWindow, NSWindow) -> Void = { parent, child in
             removeOriginal?(parent, removeSelector, child)
             MainActor.assumeIsolated {
-                CefBrowserWindow.owning(parent)?.childWindowDidDetach(child)
+                CefBrowserWindow.owning(parent)?.surfaces.childWindowDidDetach(child)
             }
         }
 

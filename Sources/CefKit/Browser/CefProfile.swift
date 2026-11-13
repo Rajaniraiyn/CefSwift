@@ -108,37 +108,12 @@ public final class CefProfile {
 
     private var moduleStates: [ObjectIdentifier: AnyObject] = [:]
 
-    // MARK: Bookmarks, history, autocomplete
-    // Built on Chromium's internal services; see CefInternalServices.swift.
-    // Each service object holds its profile, so a profile stays alive while
-    // a service of it is in use; the profile holds its services weakly.
+    // MARK: Internal services
 
-    /// The profile's bookmarks.
-    ///
-    /// An incognito profile shares the default profile's bookmarks, as
-    /// Chrome's incognito windows share the bookmarks of the profile they
-    /// belong to: for an incognito profile this is
-    /// `CefProfile.default.bookmarks`, and bookmarks added through it are
-    /// kept on disk with the default profile.
-    public var bookmarks: CefBookmarks {
-        if kind == .incognito { return CefProfile.default.bookmarks }
-        return bookmarksService.object { CefBookmarks(profile: self) }
-    }
-
-    /// The profile's browsing history and most-visited sites. An incognito
-    /// profile keeps no history; its ``CefHistory`` methods throw.
-    public var history: CefHistory { historyService.object { CefHistory(profile: self) } }
-
-    /// Omnibox-ranked address-bar suggestions. Experimental.
-    public var autocomplete: CefAutocomplete { autocompleteService.object { CefAutocomplete(profile: self) } }
-
-    private let bookmarksService = WeakService<CefBookmarks>()
-    private let historyService = WeakService<CefHistory>()
-    private let autocompleteService = WeakService<CefAutocomplete>()
-
-    /// The hidden service hosts behind ``bookmarks``, ``history`` and
-    /// ``autocomplete``.
-    private(set) lazy var services = CefInternalServices(profile: self)
+    /// The hidden service hosts on Chromium's WebUI pages: native tab
+    /// discarding's here, and those of modules built on CefKit, such as
+    /// CefChromium's bookmarks, history and autocomplete.
+    package private(set) lazy var services = CefInternalServices(profile: self)
 
     /// The profile's last browser has closed. Its service hosts close too —
     /// they hold the profile, so an incognito profile and its data could
@@ -160,15 +135,7 @@ public final class CefProfile {
     /// Kills the renderer of the running service host called `name`, as a
     /// crash would.
     @_spi(Testing) public func crashServiceHost(named name: String) async {
-        let hosts: [CefServiceHost] = [.bookmarks, .history, .mostVisited, .omnibox, .discards]
-        guard let host = hosts.first(where: { $0.name == name }) else { return }
-        await services.crashRenderer(of: host)
-    }
-
-    /// Calls the history service with `timeout`, starting its host if it
-    /// is not running.
-    @_spi(Testing) public func pingHistoryService(timeout: Duration) async throws {
-        _ = try await services.call(CefHistory.historyModule, "async () => true", timeout: timeout)
+        await services.crashRenderer(ofHostNamed: name)
     }
 
     /// How long a service host stays open after its last call.
@@ -179,7 +146,7 @@ public final class CefProfile {
 
     /// The directory Chromium keeps this profile's files in; `nil` for an
     /// incognito profile.
-    var directory: URL? {
+    package var directory: URL? {
         guard let context = requestContext(),
               let path = CefStringUtil.takingUserFree(context.pointer.pointee.get_cache_path(context.pointer)),
               !path.isEmpty
@@ -442,20 +409,6 @@ public final class CefProfile {
     package var storage: Storage {
         let root = (CefRuntime.shared.configuration ?? CefRuntime.Configuration()).resolvedRootCacheDirectory
         return Self.storage(for: kind, rootCacheDirectory: root)
-    }
-}
-
-/// A service object a profile hands out, held weakly so the service can
-/// hold the profile.
-@MainActor
-private final class WeakService<Service: AnyObject> {
-    private weak var service: Service?
-
-    func object(_ make: () -> Service) -> Service {
-        if let service { return service }
-        let made = make()
-        service = made
-        return made
     }
 }
 

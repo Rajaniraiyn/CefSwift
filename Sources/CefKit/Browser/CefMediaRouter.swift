@@ -41,7 +41,7 @@ public struct CefMediaRouteError: Error, Sendable, CustomStringConvertible {
 
 /// Chromium's media router: the Cast and DIAL devices on the network, and
 /// the routes to them. For a cast picker of your own in place of
-/// Chromium's (``CefChromiumSurface/Kind/cast``).
+/// Chromium's (CefChromium's `CefChromiumSurface.Kind.cast`).
 ///
 /// ```swift
 /// let router = CefMediaRouter.shared

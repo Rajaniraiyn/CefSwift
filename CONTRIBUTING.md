@@ -26,7 +26,7 @@ Address Sanitizer runtime, so that one uses the native build system.
 
 The Command Line Tools are enough; Xcode is not required. `CefKitTests`
 covers CefKit and its AppKit views, `CefPasskeysTests` the passkeys
-library, `CefKitAppKitTests` hosts a browser through CefKit's public API
+library, `CefChromiumTests` the CefChromium library, `CefKitAppKitTests` hosts a browser through CefKit's public API
 alone (no SwiftUI), and `CefPluginTests` the
 plugin's signing, distribution and bundle-assembly logic; none of them
 starts Chromium.
@@ -229,11 +229,14 @@ reading as one.
   supplies a value (a credential, a certificate, whether to proceed, what to
   do with a hung page) rather than allowing or denying a request, so do not
   rename them or wrap their answers in new enums for uniformity.
-- **Optional modules** (`CefPasskeys`) depend on CefKit alone and name
-  their types as CefKit does (`CefPasskeyController`, `CefPasskeyStore`).
+- **Optional modules** (`CefPasskeys`, `CefChromium`) depend on CefKit
+  (and on CefKit's own C layer, `CCef` and `CefBase`, only for Chromium's
+  identifiers) and name their types as CefKit does
+  (`CefPasskeyController`, `CefPasskeyStore`, `CefBookmarks`).
   CefKit never names them: a module plugs in through an extension point
-  (`CefBrowserAttachment`, a shutdown participant, per-profile module
-  state) and gets its own delegate (`CefPasskeyDelegate`) rather than
+  (`CefBrowserAttachment`, a shutdown participant, per-profile or
+  per-window module state, a Chrome-command interceptor, the service-host
+  engine) and gets its own delegate (`CefPasskeyDelegate`) rather than
   members on `CefBrowserDelegate`. What it needs from CefKit and apps
   should not use is `package`, not public.
 - **Booleans** read as assertions: `isRunning`, `isDiscarded`,
