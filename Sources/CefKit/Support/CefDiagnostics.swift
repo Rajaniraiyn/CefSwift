@@ -25,8 +25,6 @@ import os
         case accessibilityIngestBackground
         /// Main-thread time handling a DevTools event.
         case devToolsEvent
-        /// Main-thread time handling a DevTools method result.
-        case devToolsResult
     }
 
     /// How offscreen accessibility updates are taken from CEF.

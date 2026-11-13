@@ -111,10 +111,8 @@ extension CefCertificate.Principal {
             return CefStringUtil.takingUserFree(get(principal)) ?? ""
         }
         func list(_ get: ((UnsafeMutablePointer<cef_x509_cert_principal_t>?, cef_string_list_t?) -> Void)?) -> [String] {
-            guard let principal, let get, let names = cef_string_list_alloc() else { return [] }
-            defer { cef_string_list_free(names) }
-            get(principal, names)
-            return cefStrings(from: names)
+            guard let principal, let get else { return [] }
+            return cefStrings { get(principal, $0) }
         }
         displayName = string(principal?.pointee.get_display_name)
         commonName = string(principal?.pointee.get_common_name)

@@ -132,6 +132,26 @@ package func cefForEachString(in list: cef_string_list_t?, _ body: (UnsafePointe
     }
 }
 
+/// The strings a getter such as `get_argv` puts in a new
+/// `cef_string_list_t`, which `fill` receives.
+package func cefStrings(_ fill: (cef_string_list_t) -> Void) -> [String] {
+    var strings: [String] = []
+    cefForEachString(filledBy: fill) { strings.append(CefStringUtil.string(from: $0)) }
+    return strings
+}
+
+/// Calls `body` with each string a getter such as `get_keys` puts in a new
+/// `cef_string_list_t`, which `fill` receives; see
+/// ``cefForEachString(in:_:)``.
+package func cefForEachString(
+    filledBy fill: (cef_string_list_t) -> Void, _ body: (UnsafePointer<cef_string_t>) -> Void
+) {
+    guard let list = cef_string_list_alloc() else { return }
+    defer { cef_string_list_free(list) }
+    fill(list)
+    cefForEachString(in: list, body)
+}
+
 /// HTTP header fields read into a new `cef_string_multimap_t` by `fill`
 /// (such as `get_header_map`). A name that repeats has its values joined
 /// with ", ", as HTTP allows.

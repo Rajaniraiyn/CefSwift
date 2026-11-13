@@ -312,8 +312,6 @@ private final class DevToolsObserver: Sendable {
             return 0  // not consumed: CEF goes on to the typed callbacks below
         }
         observer.pointee.on_dev_tools_method_result = { s, browser, messageID, success, result, size in
-            let started = CefDiagnostics.start()
-            defer { CefDiagnostics.record(.devToolsResult, since: started) }
             cefRelease(browser)
             let data = result.map { Data(bytes: $0, count: size) } ?? Data()
             guard let owner = cefOwner(DevToolsObserver.self, s) else { return }

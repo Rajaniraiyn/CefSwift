@@ -54,6 +54,8 @@ public struct CefPreferences {
     public func value(named name: String) -> CefJSON? {
         withManager { manager in
             CefStringUtil.withCefString(name) { cefName -> CefJSON? in
+                // The header says get_preference returns NULL for an unknown
+                // name, but CEF 156 returns a value (SelfTest checks this).
                 guard manager.pointee.has_preference(manager, cefName) != 0 else { return nil }
                 let value = manager.pointee.get_preference(manager, cefName)
                 defer { cefRelease(value) }
@@ -88,6 +90,19 @@ public struct CefPreferences {
         }
     }
 
+    /// Sets each preference that exists, logging what Chromium refuses:
+    /// the configured preferences, as Chromium starts or a profile is
+    /// first used.
+    func apply(_ preferences: [String: CefJSON]) {
+        for (name, value) in preferences where contains(named: name) {
+            do {
+                try setValue(value, named: name)
+            } catch {
+                CefLog.error("\(error)")
+            }
+        }
+    }
+
     /// Restores a preference's default value.
     public func reset<Value>(_ key: Key<Value>) throws(CefError) {
         try setValue(nil, named: key.name)
@@ -104,7 +119,13 @@ public struct CefPreferences {
     }
 
     /// Whether the preference exists.
-    public func contains<Value>(_ key: Key<Value>) -> Bool { value(named: key.name) != nil }
+    public func contains<Value>(_ key: Key<Value>) -> Bool { contains(named: key.name) }
+
+    func contains(named name: String) -> Bool {
+        withManager { manager in
+            CefStringUtil.withCefString(name) { manager.pointee.has_preference(manager, $0) != 0 }
+        } ?? false
+    }
 
     /// Whether the preference can be changed. It cannot when an enterprise
     /// policy manages it or a command-line switch set it; Chromium's API
@@ -129,7 +150,7 @@ public struct CefPreferences {
 
     /// Whether the preference called `name` has its default value.
     public func isDefault(named name: String) -> Bool {
-        guard value(named: name) != nil else { return false }
+        guard contains(named: name) else { return false }
         let explicit: CefJSON? = withManager { manager in
             let dictionary = manager.pointee.get_all_preferences(manager, 0)
             defer { cefRelease(dictionary) }

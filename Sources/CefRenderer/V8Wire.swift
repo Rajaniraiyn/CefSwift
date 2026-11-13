@@ -102,18 +102,14 @@ enum V8Wire {
     private static func writeObject(_ object: Value, to buffer: inout CefWireBuffer, ancestors: inout [Value]) {
         let container = buffer.open(.object)
         var members = 0
-        if let keys = cef_string_list_alloc() {
-            defer { cef_string_list_free(keys) }
-            if object.pointee.get_keys(object, keys) != 0 {
-                cefForEachString(in: keys) { key in
-                    guard let member = object.pointee.get_value_bykey(object, key) else { return }
-                    defer { cefRelease(member) }
-                    guard !isOmitted(member) else { return }
-                    buffer.append(key: UnsafeBufferPointer(start: key.pointee.str, count: key.pointee.length))
-                    _ = write(member, to: &buffer, ancestors: &ancestors)
-                    members += 1
-                }
-            }
+        // A failed get_keys adds no key.
+        cefForEachString(filledBy: { _ = object.pointee.get_keys(object, $0) }) { key in
+            guard let member = object.pointee.get_value_bykey(object, key) else { return }
+            defer { cefRelease(member) }
+            guard !isOmitted(member) else { return }
+            buffer.append(key: UnsafeBufferPointer(start: key.pointee.str, count: key.pointee.length))
+            _ = write(member, to: &buffer, ancestors: &ancestors)
+            members += 1
         }
         buffer.close(container, count: members)
     }
