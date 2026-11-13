@@ -37,8 +37,8 @@ extension SelfTest {
         }, detail: "\(String(describing: browser.rendererTask?.memory))")
         _ = manager.tasks
         check("processes: reading the tasks keeps them refreshing", manager.isRefreshing)
-        try? await Task.sleep(for: manager.refreshInterval * 3)
-        check("processes: refreshing stops when nobody reads", !manager.isRefreshing)
+        check("processes: refreshing stops when nobody reads",
+              await waitUntil(timeout: manager.refreshInterval * 3) { !manager.isRefreshing })
 
         // A page that spins: busy, then unresponsive to input.
         browser.executeJavaScript("setTimeout(spin, 100)")
@@ -51,8 +51,9 @@ extension SelfTest {
             recorder.asked > 0
         }, detail: "asked \(recorder.asked)")
         check("processes: the browser reports it unresponsive", recorder.wasResponsiveWhenAsked == false)
+        // The crashed page keeps its title, so wait for the reload to finish.
         check("processes: reloading recovers the page", await waitUntil(timeout: .seconds(20)) {
-            recorder.terminations > 0 && browser.title == "busy" && !browser.isLoading
+            recorder.loadsAfterTermination > 0 && browser.title == "busy" && !browser.isLoading
         }, detail: "\(recorder.terminations) terminations, \(browser.title)")
         await expect("processes: the reloaded page runs script and responds") {
             try await browser.evaluateJavaScript("1 + 1").intValue == 2 && browser.isResponsive
@@ -79,14 +80,20 @@ final class HangRecorder: CefBrowserDelegate {
     var asked = 0
     var wasResponsiveWhenAsked: Bool?
     var terminations = 0
+    var loadsAfterTermination = 0
 
+    /// Reloads once: a second answer would reload the recovered page again.
     func browserPageIsUnresponsive(_ browser: CefBrowser) async -> CefUnresponsivePageDecision {
         asked += 1
         wasResponsiveWhenAsked = browser.isResponsive
-        return .reload
+        return asked == 1 ? .reload : .wait
     }
 
     func browser(_ browser: CefBrowser, renderProcessDidTerminate reason: CefTerminationReason) {
         terminations += 1
+    }
+
+    func browser(_ browser: CefBrowser, didFinishLoadWithStatus httpStatus: Int) {
+        if terminations > 0 { loadsAfterTermination += 1 }
     }
 }
