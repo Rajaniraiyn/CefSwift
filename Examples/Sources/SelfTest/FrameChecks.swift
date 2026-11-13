@@ -32,12 +32,21 @@ extension SelfTest {
             try? await Task.sleep(for: .seconds(1))
             return probe.paints.count - before
         }
+        // In Low Power Mode macOS slows Chromium's timers, so a rate that
+        // is off then says nothing about CefSwift.
+        func rateCheck(_ name: String, _ passed: Bool, _ rate: Int) {
+            if !passed, ProcessInfo.processInfo.isLowPowerModeEnabled {
+                skip(name, because: "\(rate) a second with Low Power Mode on", .environment)
+            } else {
+                check(name, passed, detail: "\(rate) a second")
+            }
+        }
         let visible = await paintsPerSecond()
-        check("frames: an animated offscreen page paints at its frame rate", visible >= 40, detail: "\(visible) a second")
+        rateCheck("frames: an animated offscreen page paints at its frame rate", visible >= 40, visible)
         browser.setOffscreenFrameRate(20)
         try? await Task.sleep(for: .milliseconds(200))
         let slow = await paintsPerSecond()
-        check("frames: a lower frame rate applies at once", (15...25).contains(slow), detail: "\(slow) a second")
+        rateCheck("frames: a lower frame rate applies at once", (15...25).contains(slow), slow)
         browser.hostViewDidHide()
         try? await Task.sleep(for: .milliseconds(300))
         let hidden = await paintsPerSecond()
