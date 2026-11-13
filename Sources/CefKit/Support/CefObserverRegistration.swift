@@ -29,9 +29,6 @@ final class CefObserverRegistration {
         Self.live[ObjectIdentifier(self)] = nil
     }
 
-    /// Whether the observation is still registered.
-    var isActive: Bool { registration != nil }
-
     /// Ends every observation, before Chromium shuts down.
     static func releaseAll() {
         let all = live.values
@@ -42,9 +39,6 @@ final class CefObserverRegistration {
             registration.finish = nil
         }
     }
-
-    /// The number of observations registered, for tests.
-    static var liveCount: Int { live.count }
 
     /// Ties `registration` to `continuation`: when the stream's consumer
     /// stops iterating, the observation ends on the main actor.

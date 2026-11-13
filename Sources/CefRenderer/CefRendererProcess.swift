@@ -49,10 +49,8 @@ final class CefRendererFrame {
         self.browserID = browserID
     }
 
-    var isValid: Bool { raw.pointee.is_valid(raw) != 0 }
     var isMain: Bool { raw.pointee.is_main(raw) != 0 }
     var url: String { CefStringUtil.takingUserFree(raw.pointee.get_url(raw)) ?? "" }
-    var identifier: String { CefStringUtil.takingUserFree(raw.pointee.get_identifier(raw)) ?? "" }
 
     /// The frame's main-world context, created if the document has none yet.
     var mainWorldContext: V8Context? {

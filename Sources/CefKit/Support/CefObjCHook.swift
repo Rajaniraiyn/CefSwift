@@ -43,9 +43,6 @@ enum CefObjCHook {
     /// the feature is installed.
     private(set) static var features: [(name: String, missing: [String])] = []
 
-    /// Every method some feature lacks, as `Class -selector` strings.
-    static var missingHooks: [String] { features.flatMap(\.missing) }
-
     /// Whether the feature called `name` was installed.
     static func isInstalled(_ name: String) -> Bool {
         features.first { $0.name == name }?.missing.isEmpty ?? false
