@@ -113,7 +113,7 @@ description to `.cef/update/`.
 
 `.github/workflows/ci.yml` runs on pushes and pull requests to `main`, and
 when dispatched. Its `ci` job, on a `macos-15` runner, does everything
-below; two short jobs run beside it without CEF:
+below; one short job runs beside it without CEF:
 
 - `intel` compiles the package and its tests for x86_64
   (`swift build --build-tests --arch x86_64`) on the same arm64 runner,
