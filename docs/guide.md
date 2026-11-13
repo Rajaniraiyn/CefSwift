@@ -1692,9 +1692,13 @@ Chromium's window is hidden before it is seen. In SwiftUI:
 window.setFindBar { session in FindBar(session: session) }      // under the toolbar, as in Safari
 window.setStatusBubble { text in StatusBubble(text: text) }      // over the page
 window.setCustomPresentation(for: .qrCode) { surface in         // in a panel at the kind's anchor
-    CefQRCodeView(url: surface.url).frame(width: 200, height: 200).padding()
+    QRCodeView(url: surface.url).frame(width: 200, height: 200).padding()
 }
 ```
+
+`FindBar`, `StatusBubble` and `QRCodeView` are views of your own; the
+Browser example has all three (`QRCodeView` draws the code with Core
+Image's `CIFilter.qrCodeGenerator()`).
 
 A surface carries what a replacement needs: `kind`, `title`, `browser`,
 `url` (the address a QR code encodes, or the page's), `anchorRect`,
@@ -1708,7 +1712,7 @@ a presenter included.
 | Surface | Kind | Native | Custom: what you get | Notes |
 |---|---|---|---|---|
 | Find bar | `.findBar` | Yes | `browser.findSession`: `text`, `isCaseSensitive`, `matchCount`, `activeMatch`, `next()`, `previous()`, `end()` | ⌘G and ⇧⌘G move through the matches. |
-| QR code | `.qrCode` | Yes | `url`; draw it with `CefQRCodeView` or `CefQRCode.image(for:size:)` | |
+| QR code | `.qrCode` | Yes | `url`, to encode with Core Image's `CIFilter.qrCodeGenerator()` | |
 | Cast | `.cast` | Yes | `url`; `CefMediaRouter.shared` lists `sinks` and `routes` and casts Cast apps and presentation URLs | Mirroring a tab needs Chromium's dialog. |
 | Share | `.share` | No: Chromium's share menu needs its toolbar | `url`, `title` | By default the command opens macOS's share menu at the anchor. |
 | HTTP sign-in | `.signIn` | Yes | No: the credentials go to Chromium's dialog | Only with `authenticationPrompt = .chromium`; by default the delegate answers. Dismissing cancels the sign-in. |

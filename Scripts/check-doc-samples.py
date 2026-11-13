@@ -101,6 +101,7 @@ struct MyIndicator: View { let progress: Double; var body: some View { EmptyView
 struct FindBar: View { let session: CefFindSession; var body: some View { EmptyView() } }
 struct TabIcon: View { let browser: CefBrowser; var body: some View { EmptyView() } }
 struct StatusBubble: View { let text: String; var body: some View { EmptyView() } }
+struct QRCodeView: View { let url: URL?; var body: some View { EmptyView() } }
 """
 
 DECLARATION = re.compile(r"^(@main|@MainActor|@objc|struct |final class |class |enum |actor |extension |protocol )")

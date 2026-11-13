@@ -12,7 +12,7 @@ extension CefBrowserWindow {
     ///
     /// ```swift
     /// window.setCustomPresentation(for: .qrCode) { surface in
-    ///     CefQRCodeView(url: surface.url)
+    ///     MyQRCodeView(url: surface.url)
     ///         .padding()
     /// }
     /// ```
@@ -65,32 +65,6 @@ extension CefBrowserWindow {
     public func setStatusBubble(@ViewBuilder _ content: @escaping (String) -> some View) {
         let hosting = NSHostingView(rootView: StatusTextReader(browser: browser, content: { AnyView(content($0)) }))
         statusBubbleView = PassthroughHostingContainer(hosting)
-    }
-}
-
-/// A QR code for an address, drawn crisply at any size. For an interface of
-/// your own in place of Chromium's QR code bubble.
-public struct CefQRCodeView: View {
-    private let text: String
-
-    /// A QR code encoding `url`.
-    public init(url: URL?) {
-        text = url?.absoluteString ?? ""
-    }
-
-    /// A QR code encoding `text`.
-    public init(text: String) {
-        self.text = text
-    }
-
-    public var body: some View {
-        if let image = CefQRCode.image(for: text) {
-            Image(nsImage: image)
-                .resizable()
-                .interpolation(.none)
-                .aspectRatio(1, contentMode: .fit)
-                .accessibilityLabel(Text("QR code for \(text)"))
-        }
     }
 }
 

@@ -1,15 +1,33 @@
 import AppKit
 import CoreImage
 import CoreImage.CIFilterBuiltins
+import SwiftUI
 
-/// QR codes for an interface of your own in place of Chromium's QR code
-/// bubble (``CefChromiumSurface/Kind/qrCode``).
-public enum CefQRCode {
+/// A QR code for an address, drawn crisply at any size: the browser's own
+/// QR code panel in place of Chromium's bubble.
+struct QRCodeView: View {
+    private let text: String
+
+    /// A QR code encoding `url`.
+    init(url: URL?) {
+        text = url?.absoluteString ?? ""
+    }
+
+    var body: some View {
+        if let image = Self.image(for: text) {
+            Image(nsImage: image)
+                .resizable()
+                .interpolation(.none)
+                .aspectRatio(1, contentMode: .fit)
+                .accessibilityLabel(Text("QR code for \(text)"))
+        }
+    }
+
     /// A QR code encoding `text`, `size` points square, black on white,
     /// with the standard quiet zone. `nil` when the text is too long to
     /// encode.
     @MainActor
-    public static func image(for text: String, size: CGFloat = 240) -> NSImage? {
+    static func image(for text: String, size: CGFloat = 240) -> NSImage? {
         let filter = CIFilter.qrCodeGenerator()
         filter.message = Data(text.utf8)
         filter.correctionLevel = "M"

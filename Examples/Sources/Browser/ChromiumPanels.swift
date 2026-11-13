@@ -80,7 +80,7 @@ private struct QRCodePanel: View {
     var body: some View {
         VStack(spacing: 12) {
             Text("Scan QR Code").font(.headline)
-            CefQRCodeView(url: surface.url)
+            QRCodeView(url: surface.url)
                 .frame(width: 200, height: 200)
                 .padding(8)
                 .background(.white, in: .rect(cornerRadius: 8))
