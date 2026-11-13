@@ -199,15 +199,11 @@ extension CefJSON {
         guard let dictionary, let keys = cef_string_list_alloc() else { return [:] }
         defer { cef_string_list_free(keys) }
         _ = dictionary.pointee.get_keys(dictionary, keys)
-        let count = cef_string_list_size(keys)
         var members: [String: CefJSON] = [:]
-        members.reserveCapacity(count)
+        members.reserveCapacity(cef_string_list_size(keys))
         // Each key is looked up with CEF's own string, and decoded once.
-        for index in 0..<count {
-            var key = cef_string_t()
-            defer { cef_string_utf16_clear(&key) }
-            guard cef_string_list_value(keys, index, &key) != 0 else { continue }
-            let element = dictionary.pointee.get_value(dictionary, &key)
+        cefForEachString(in: keys) { key in
+            let element = dictionary.pointee.get_value(dictionary, key)
             defer { cefRelease(element) }
             members[CefStringUtil.string(from: key)] = CefJSON(cefValue: element)
         }

@@ -105,15 +105,11 @@ enum V8Wire {
         if let keys = cef_string_list_alloc() {
             defer { cef_string_list_free(keys) }
             if object.pointee.get_keys(object, keys) != 0 {
-                for index in 0..<cef_string_list_size(keys) {
-                    var key = cef_string_t()
-                    defer { cef_string_utf16_clear(&key) }
-                    guard cef_string_list_value(keys, index, &key) != 0,
-                          let member = object.pointee.get_value_bykey(object, &key)
-                    else { continue }
+                cefForEachString(in: keys) { key in
+                    guard let member = object.pointee.get_value_bykey(object, key) else { return }
                     defer { cefRelease(member) }
-                    guard !isOmitted(member) else { continue }
-                    buffer.append(key: UnsafeBufferPointer(start: key.str, count: key.length))
+                    guard !isOmitted(member) else { return }
+                    buffer.append(key: UnsafeBufferPointer(start: key.pointee.str, count: key.pointee.length))
                     _ = write(member, to: &buffer, ancestors: &ancestors)
                     members += 1
                 }
