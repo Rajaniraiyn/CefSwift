@@ -44,13 +44,19 @@ extension CefBrowser {
     /// Reads every browser's zoom level back, now and once Chromium has
     /// finished applying an asynchronous change.
     static func refreshZoomLevels() {
-        let refresh = { CefRuntime.shared.browsers.forEach { $0.refreshZoomLevel() } }
-        refresh()
+        refreshAll { $0.refreshZoomLevel() }
+    }
+
+    /// Runs `refresh` on every browser now, after Chromium's pending work,
+    /// and again 250 ms later, for state Chromium changes asynchronously.
+    private static func refreshAll(_ refresh: @escaping @MainActor (CefBrowser) -> Void) {
+        let refreshAll = { CefRuntime.shared.browsers.forEach(refresh) }
+        refreshAll()
         Task {
             await Task.yield()
-            refresh()
+            refreshAll()
             try? await Task.sleep(for: .milliseconds(250))
-            refresh()
+            refreshAll()
         }
     }
 
@@ -175,14 +181,7 @@ extension CefBrowser {
     /// Reads every browser's DevTools state back, now and once Chromium
     /// has finished opening or closing a DevTools window.
     static func refreshDevToolsStates() {
-        let refresh = { CefRuntime.shared.browsers.forEach { $0.refreshDevToolsState() } }
-        refresh()
-        Task {
-            await Task.yield()
-            refresh()
-            try? await Task.sleep(for: .milliseconds(250))
-            refresh()
-        }
+        refreshAll { $0.refreshDevToolsState() }
     }
 
     // MARK: Chrome commands

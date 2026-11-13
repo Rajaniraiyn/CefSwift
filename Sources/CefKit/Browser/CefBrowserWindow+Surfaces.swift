@@ -57,6 +57,11 @@ extension CefBrowserWindow {
         pendingSurfaces.removeValue(forKey: ObjectIdentifier(child))
         guard let surface = chromiumSurfaces.first(where: { $0.window === child }) else { return }
         surface.isPresented = false
+        forget(surface)
+    }
+
+    /// Stops listing and placing a native surface.
+    private func forget(_ surface: CefChromiumSurface) {
         stopTracking(surface)
         chromiumSurfaces.removeAll { $0 === surface }
     }
@@ -78,8 +83,7 @@ extension CefBrowserWindow {
                 MainActor.assumeIsolated {
                     guard let self, let surface else { return }
                     surface.isPresented = false
-                    self.stopTracking(surface)
-                    self.chromiumSurfaces.removeAll { $0 === surface }
+                    self.forget(surface)
                 }
             },
         ]
@@ -102,8 +106,7 @@ extension CefBrowserWindow {
             guard let child = surface.window else { continue }
             if case .hidden = chromiumUI[surface.kind] {
                 hide(surface, window: child)
-                stopTracking(surface)
-                chromiumSurfaces.removeAll { $0 === surface }
+                forget(surface)
             } else {
                 place(surface)
             }
@@ -144,9 +147,7 @@ extension CefBrowserWindow {
     // MARK: Custom surfaces
 
     /// Hands a surface to the app's presenter, or to `onChromiumSurface`.
-    /// Returns the surface.
-    @discardableResult
-    private func presentCustom(kind: CefChromiumSurface.Kind, url: URL?, title: String = "") -> CefChromiumSurface {
+    private func presentCustom(kind: CefChromiumSurface.Kind, url: URL?, title: String) {
         // One custom surface of a kind at a time.
         chromiumSurfaces.filter { $0.kind == kind && $0.window == nil }.forEach { $0.dismiss() }
         let surface = CefChromiumSurface(
@@ -165,7 +166,6 @@ extension CefBrowserWindow {
             surface.dismiss()
         }
         onChromiumSurface?(surface)
-        return surface
     }
 
     /// The surface a Chrome command opens.

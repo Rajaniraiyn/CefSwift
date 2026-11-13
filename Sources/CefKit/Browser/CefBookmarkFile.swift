@@ -1,3 +1,4 @@
+import CCef
 import Foundation
 
 /// Chromium's `Bookmarks` file, read as `chrome.bookmarks` would report it.
@@ -89,10 +90,6 @@ struct CefBookmarkFile {
         var children: [StoredNode]?
     }
 
-    /// Microseconds from 1601-01-01 (Windows FILETIME epoch, which Chromium's
-    /// `base::Time` uses) to 1970-01-01.
-    private static let unixEpochOffset: Int64 = 11_644_473_600_000_000
-
     private static func bookmark(_ node: StoredNode, parent: CefBookmark.ID?, index: Int) -> CefBookmark? {
         let isFolder: Bool
         switch node.type {
@@ -112,9 +109,8 @@ struct CefBookmarkFile {
             }
             children = contents
         }
-        let dateAdded = node.date_added.flatMap(Int64.init).flatMap { microseconds -> Date? in
-            microseconds == 0 ? nil : Date(timeIntervalSince1970: Double(microseconds - unixEpochOffset) / 1_000_000)
-        }
+        // Microseconds since 1601, as Chromium's `base::Time` counts.
+        let dateAdded = node.date_added.flatMap(Int64.init).flatMap { $0 == 0 ? nil : cef_basetime_t(val: $0).date }
         return CefBookmark(
             id: id, parentID: parent, index: index, title: node.name, url: url, dateAdded: dateAdded,
             permanentFolder: nil, isEditable: true, children: children)

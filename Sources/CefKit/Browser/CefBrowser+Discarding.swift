@@ -347,7 +347,7 @@ extension CefBrowser {
             if !isDiscarded, isEmbeddedView, let native = nativeView, native.superview !== view { return false }
             window = view.window
         } else {
-            window = CefBrowserWindow.all.first { $0.browser === self }?.window ?? nativeView?.window
+            window = CefBrowserWindow.hosting(self)?.window ?? nativeView?.window
         }
         guard let window, !window.isMiniaturized else { return false }
         if window.isVisible { return true }
