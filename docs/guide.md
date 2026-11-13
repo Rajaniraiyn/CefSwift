@@ -1035,10 +1035,10 @@ renderers that report the same figures side by side are grouped as one,
 which undercounts the total, and tasks not measured yet stay apart. Show
 the grouping; do not decide anything by it.
 
-`browser.rendererTask` is the task of the renderer showing a browser's page,
-and `taskManager.browsers(in:)` lists the browsers in the same estimated
-process, so a browser's memory is that process's memory shared with those
-browsers.
+`taskManager.task(for: browser)` is the task of the renderer showing a
+browser's page, and `taskManager.browsers(in:)` lists the browsers in the
+same estimated process, so a browser's memory is that process's memory
+shared with those browsers.
 
 ### Unresponsive pages
 
