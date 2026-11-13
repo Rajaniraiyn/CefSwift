@@ -308,7 +308,8 @@ final class BrowserController: CefBrowserDelegate {
         alert.messageText = "Allow \(request.origin) to use \(request.kinds.summary)?"
         alert.addButton(withTitle: "Allow")
         alert.addButton(withTitle: "Don’t Allow")
-        alert.showsSuppressionButton = true
+        // Screen capture is decided per request, never remembered.
+        alert.showsSuppressionButton = request.kinds.isDisjoint(with: [.screenCapture, .systemAudioCapture])
         alert.suppressionButton?.title = "Remember for this website"
         guard let window = browser.hostWindow else { return .deny }
         let allowed = await alert.beginSheetModal(for: window) == .alertFirstButtonReturn
@@ -396,7 +397,9 @@ extension NSView {
 extension CefPermissionRequest.Kinds {
     var summary: String {
         let names: [(CefPermissionRequest.Kinds, String)] = [
-            (.camera, "the camera"), (.microphone, "the microphone"), (.geolocation, "your location"),
+            (.camera, "the camera"), (.microphone, "the microphone"),
+            (.cameraPanTiltZoom, "camera movement"), (.screenCapture, "your screen"),
+            (.systemAudioCapture, "your Mac’s audio"), (.geolocation, "your location"),
             (.notifications, "notifications"), (.clipboard, "the clipboard"),
         ]
         let matched = names.filter { contains($0.0) }.map(\.1)

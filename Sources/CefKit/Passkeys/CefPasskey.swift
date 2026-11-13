@@ -150,6 +150,19 @@ public struct CefPasskeyStoreError: Error, Sendable, CustomStringConvertible {
 
 extension CefBrowser {
     /// Who answers a browser's WebAuthn requests.
+    ///
+    /// ``app(_:)`` and ``disabled`` take each document's calls over before
+    /// its first script runs, in every browser CefKit creates. A page's
+    /// popups, new tabs and windows that the delegate lets Chromium open
+    /// (``CefWindowOpenDecision/allowNativePopup``) are not left to
+    /// Chromium with these policies: Chromium would run the popup's first
+    /// document before interception could attach, so CefKit opens the URL
+    /// in a browser of its own with the opener's configuration instead. That
+    /// popup arrives as a native one does, but the page cannot script it:
+    /// `window.open` returns `null`, the popup has no `window.opener`, and a
+    /// popup without a URL is refused. Browsers Chromium opens without a
+    /// page asking, such as a tab from Chrome's own UI, have the default
+    /// configuration and so ``chromium``.
     public enum PasskeyPolicy {
         /// Chromium, with its own dialog and authenticators: security keys, and
         /// iCloud Keychain when the app has the entitlement for it. The default.

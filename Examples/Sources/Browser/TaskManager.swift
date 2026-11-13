@@ -53,7 +53,7 @@ struct TaskManagerView: View {
             }
             Divider()
             HStack {
-                Text("Total \(Self.bytes(CefTaskManager.Process.totalMemory(of: manager.processes)))")
+                Text("Total \(Self.bytes(CefTaskManager.Process.estimatedTotalMemory(of: manager.processes)))")
                     .foregroundStyle(.secondary)
                 Spacer()
                 Button("End Process", action: endSelected)

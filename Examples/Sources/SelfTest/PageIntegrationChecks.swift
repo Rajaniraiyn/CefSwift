@@ -229,6 +229,14 @@ extension SelfTest {
               await waitUntil(timeout: .seconds(5)) { isEditing(before) },
               detail: "\(String(describing: window.firstResponder))")
 
+        // Focus that moves on before the page takes it stays where it went.
+        window.makeFirstResponder(before)
+        window.selectKeyView(following: before)
+        window.makeFirstResponder(after)
+        try? await Task.sleep(for: .milliseconds(500))
+        check("focus: focus moved on before the handoff is not taken back", isEditing(after),
+              detail: "\(String(describing: window.firstResponder))")
+
         window.makeFirstResponder(nil)
         await closeHosted(browser, view)
 

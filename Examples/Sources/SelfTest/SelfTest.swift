@@ -117,6 +117,7 @@ enum SelfTest {
                           restart.contains("cannot be initialized again") && CefRuntime.shared.state == .stopped,
                           detail: restart)
                     check("quit: a job sent to CefIOActor after shutdown runs", jobAfterShutdownRuns())
+                    quitChecksAfterShutdown()
                     exit(Int32(min(SelfTestReport.finish(failures: failures, isolated: false, started: started), 123)))
                 }
             }
@@ -200,6 +201,9 @@ enum SelfTest {
         // After the census: these stay open for the quit.
         if selectedGroups.contains(where: { $0.name == "discard" }) {
             await discardBrowsersForQuitting()
+        }
+        if selectedGroups.contains(where: { $0.name == "urlRequest" }) {
+            await requestsStalledForQuitting()
         }
     }
 

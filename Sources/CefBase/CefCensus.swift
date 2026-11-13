@@ -4,8 +4,9 @@ import os
 /// for leak checks: SelfTest compares them with a baseline after each
 /// group of checks and before shutdown.
 ///
-/// Off unless enabled; when off, each count costs one atomic load. The
-/// helper process never enables it.
+/// Off unless enabled; when off, each count costs one read of a plain
+/// flag (not an atomic), which is why it must be enabled at startup,
+/// before anything it counts exists. The helper process never enables it.
 package enum CefCensus {
     /// What is counted.
     package enum Kind: Hashable, Sendable {

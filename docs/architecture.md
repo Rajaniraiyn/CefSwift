@@ -97,6 +97,7 @@ names at run time:
 | `cef_urlrequest_create`; `cef_urlrequest_client_t.on_request_complete`, `on_upload_progress`, `on_download_progress`, `on_download_data`; `cef_urlrequest_t.cancel` | The thread that created the request; CefKit creates it on IO (`Chrome_IOThread`, checked by thread name) | `cef_urlrequest_create` needs a thread with a Chromium task runner and calls back on that thread, which alone may call `cancel`. `URLRequestLoader` is isolated to `CefIOActor` and creates requests there; callbacks enter it with `CefIOActor.assumeIsolated`. Progress closures run there. |
 | `cef_urlrequest_client_t.get_auth_credentials` | IO, whatever thread created the request | Hops to the concurrent executor for `RequestConfiguration.credential`. |
 | `cef_cookie_visitor_t.visit`, `cef_download_handler_t` | UI | No hop needed. |
+| `cef_browser_process_handler_t.on_before_child_process_launch` | UI for a renderer, IO for the GPU process (per its header) | Reads only the app context's immutable scheme list and appends to the command line; touches no actor-isolated state. |
 | `cef_render_handler_t`, `cef_accessibility_handler_t`, everything else | UI | `MainActor.assumeIsolated`. |
 | `on_schedule_message_pump_work` | Any | Posts to the main queue. |
 
@@ -646,8 +647,15 @@ A 64 MB body read off the main actor arrives in about 800 chunks, with
 at most 1.5 MB unread and the footprint 1–3 MB higher. The client struct
 owns the loader; the loader holds the `cef_urlrequest_t` until the request
 completes, which breaks the cycle through CEF's reference to the client.
-Quitting cancels requests still running on the IO thread before
-`cef_shutdown()`, and their callers get `CefError.shutDown`.
+Each loader is registered from the moment it takes a request-context
+reference. Quitting closes the registry, cancels every registered loader
+on the IO thread and waits, suspended on the main actor while Chromium's
+message loop keeps running, until each has cancelled its
+`cef_urlrequest_t` and released its CEF references there; only then does
+shutdown begin. Their callers get `CefError.shutDown`. A drain that has
+not finished after five seconds is abandoned with a log line, and what is
+left is cancelled without waiting, so a stuck IO thread cannot stop the
+app from quitting.
 
 **DevTools messages.** CEF splits each message into a method and its
 parameters as UTF-8. An event's parameters are parsed, without a copy,
@@ -956,8 +964,10 @@ Chrome-style browsers draw at the display's rate, which CEF cannot change.
 `CefApplication.terminate(_:)` asks `CefRuntime` first. The runtime closes
 every browser, so pages can run `beforeunload`, and declines the request. As
 the last browser and the last Chromium window are destroyed, it calls
-`terminate(_:)` again from the run loop, then shuts Chromium down in a
-fixed order: service hosts, lifecycle observers and the discard policy's
+`terminate(_:)` again from the run loop. It then waits for the profile
+requests in flight to end on the IO thread (see “The app’s requests”), declining once
+more and calling `terminate(_:)` again when they have, and shuts Chromium
+down in a fixed order: service hosts, lifecycle observers and the discard policy's
 timer, the media router's registrations, the preference and site-setting
 observer registrations (`CefObserverRegistration`, whose streams finish)
 and the task manager object, every profile's request context,
@@ -984,11 +994,15 @@ consumer stops, on the main actor, or at shutdown. Chromium measures CPU
 and memory only while a task manager object is alive, so
 `CefTaskManager` holds one for two refresh intervals after each read and
 lets go when nothing reads; its API names no process, so tasks are grouped
-by Chromium's ordering and identical figures. Camera and microphone
-requests reach `on_request_media_access_permission` before Chromium reads
-the content settings, so the client answers them from the settings and
-asks the delegate only about the rest; prompt-based permissions are
-answered and stored by Chromium itself. Connection security is read from
+by Chromium's ordering and identical figures, an estimate the public API
+says it is. Camera and microphone requests reach
+`on_request_media_access_permission` before Chromium reads the content
+settings, so the client answers them from the settings and asks the
+delegate only about the rest; desktop audio and video capture in the same
+callback are `.systemAudioCapture` and `.screenCapture`, which no setting
+answers and nothing stores, and a device grant never sets their bits in
+the mask. Prompt-based permissions are answered and stored by Chromium
+itself. Connection security is read from
 the visible navigation entry's `cef_sslstatus_t` on each address and
 loading-state change.
 

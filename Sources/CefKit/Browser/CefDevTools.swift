@@ -264,11 +264,12 @@ public final class CefDevTools {
     /// Attaches the observer unless it is attached already.
     private func attachIfNeeded(to browser: CefBrowser) {
         guard registration == nil else { return }
-        let observer = DevToolsObserver(devTools: self).makeObserver()
         // add_dev_tools_message_observer takes over the observer reference;
-        // the returned registration keeps it installed until released.
+        // the returned registration keeps it installed until released. The
+        // observer is made only once there is a host to take it.
         registration = browser.withHost { host in
-            CefRef(adopting: host.pointee.add_dev_tools_message_observer(host, observer))
+            let observer = DevToolsObserver(devTools: self).makeObserver()
+            return CefRef(adopting: host.pointee.add_dev_tools_message_observer(host, observer))
         } ?? nil
     }
 

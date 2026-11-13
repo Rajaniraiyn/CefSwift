@@ -199,6 +199,11 @@ final class LocalServer: Sendable {
                 sendLarge(remaining: size, on: connection)
             })
             return
+        case "/stall":
+            // Never answers: a request stalled before its headers.
+            log.withLock { $0.slowRequests.append(request.target) }
+            DispatchQueue.global().asyncAfter(deadline: .now() + 30) { connection.cancel() }
+            return
         case "/slow":
             log.withLock { $0.slowRequests.append(request.target) }
             let head = "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: 1048576\r\nConnection: close\r\n\r\n"

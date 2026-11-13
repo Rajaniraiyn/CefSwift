@@ -913,14 +913,18 @@ intervals. When nothing does, it stops, and Chromium stops measuring.
 The figures belong to processes, and several tasks can share one: tabs of
 one site in one renderer, a page and its workers. Tasks of one process
 report the same figures and the same `process`; `processes` groups them,
-and `CefTaskManager.Process.totalMemory(of:)` counts each process once.
-Chromium's API names no process, so CefSwift groups the consecutive
-renderer tasks with identical figures, which is what the tasks of one
-process have.
+and `CefTaskManager.Process.estimatedTotalMemory(of:)` counts each process
+once. Chromium's API names no process, so the grouping is an estimate:
+CefSwift groups the consecutive renderer tasks with identical measured
+figures, which is what the tasks of one process have. Two separate
+renderers that report the same figures side by side are grouped as one,
+which undercounts the total, and tasks not measured yet stay apart. Show
+the grouping; do not decide anything by it.
 
 `browser.rendererTask` is the task of the renderer showing a browser's page,
-and `tasks.browsers(in:)` lists every browser a process serves, so a
-browser's memory is that process's memory shared with those browsers.
+and `taskManager.browsers(in:)` lists the browsers in the same estimated
+process, so a browser's memory is that process's memory shared with those
+browsers.
 
 ### Unresponsive pages
 
@@ -940,6 +944,10 @@ Set `CefBrowser.Configuration.unresponsivePages` to `.delegate` to have
 Chrome-style browsers ask the delegate too, instead of showing Chromium's
 dialog. A page that responds again before you answer withdraws the
 question: the task is cancelled and the default sheet dismisses itself.
+So do a navigation, closing the browser, and a second notification while
+the first is still open, which replaces it; an answer to a withdrawn
+question is ignored. `.reload` reloads only when the renderer it was asked
+about ends, never a later one.
 
 ## JavaScript
 
@@ -1263,6 +1271,16 @@ with a debugger that stops each document as it starts; pages can observe
 both ([Compatibility with bot protection](#compatibility-with-bot-protection)).
 Use them for browsers that show your own or trusted pages.
 
+Chromium creates a native popup and runs its first document before
+DevTools can attach to it, so with `.app` and `.disabled` a popup, tab or
+window the delegate lets Chromium open (`.allowNativePopup`) is opened in a
+browser CefKit creates instead, with the opener's configuration and the
+calls taken over from its first document. It arrives as a native popup
+does (`browser(_:didOpen:)`, then `onPopup` or a window of its own), but
+the page cannot script it: `window.open` returns `null`, the popup has no
+`window.opener`, and a blank popup is refused. A sign-in flow that posts
+its result back to the opener needs `.chromium`.
+
 With `.chromium`, what Chromium can offer depends on how the app is
 signed and configured. The `passkeys` capability of `cef bundle` adds what
 it can ([bundling](bundling.md#features)):
@@ -1559,7 +1577,9 @@ arrives through `onPopup` as a hidden `CefBrowserWindow` of its own, still
 connected to its opener. `popup.browser.popupFeatures` holds the origin and
 size the page asked for, and `popup.browser.opener` is the opening browser.
 Without `onPopup`, Chromium shows the popup in a window of its own design
-with a location bar.
+with a location bar. With `.app` or `.disabled` passkeys the popup is a
+browser CefKit created, not connected to the opener's page; see
+[Passkeys](#passkeys).
 
 ```swift
 window.onPopup = { [weak window] popup in
@@ -1958,7 +1978,13 @@ answer the delegate gives, `.allow` or `.deny`, for the site as Chrome
 does. Camera and microphone requests reach the delegate before Chromium
 reads the settings, so CefSwift answers them from the settings itself, and
 asks the delegate only about kinds that are still `.ask`. An answer there
-applies to that request; `.alwaysAllow` and `.alwaysDeny` also store it:
+applies to that request; `.alwaysAllow` and `.alwaysDeny` also store it.
+Screen and system-audio capture (`.screenCapture`, `.systemAudioCapture`)
+are kinds of their own, never answered by the camera's or microphone's
+settings and never stored: granting one hands the page the screen without
+Chromium's picker, so the delegate is asked on every request. Camera
+movement (`.cameraPanTiltZoom`) is separate from `.camera` too, stored as
+`CefSitePermission.cameraPanTiltZoom`:
 
 ```swift
 func browser(_ browser: CefBrowser, decidePermissionFor request: CefPermissionRequest) async -> CefPermissionDecision {

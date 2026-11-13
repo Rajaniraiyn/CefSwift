@@ -136,7 +136,9 @@ public struct CefClientCertificateRequest: Sendable, Equatable {
 @MainActor
 public enum CefClientCertificatePresenter {
     /// Asks which certificate to identify with, as a sheet on `window` or
-    /// a modal alert without one; `nil` to continue without one.
+    /// a modal alert without one; `nil` to continue without one. Dismisses
+    /// itself, as `nil`, when the task is cancelled: the page navigated or
+    /// the browser closed.
     public static func present(_ request: CefClientCertificateRequest, in window: NSWindow?) async -> CefCertificate? {
         guard !request.certificates.isEmpty else { return nil }
         let alert = NSAlert()
@@ -149,14 +151,9 @@ public enum CefClientCertificatePresenter {
         alert.accessoryView = menu
         alert.addButton(withTitle: "Continue")
         alert.addButton(withTitle: "Cancel")
-        let response = await withTaskCancellationHandler {
-            if let window { return await alert.beginSheetModal(for: window) }
-            return alert.runModal()
-        } onCancel: {
-            Task { @MainActor in
-                alert.window.sheetParent?.endSheet(alert.window, returnCode: .alertSecondButtonReturn)
-            }
-        }
+        // Dismissed, as Cancel, when the task is cancelled: before it is
+        // shown, as a sheet or as a modal alert.
+        let response = await CefDialogPresenter.run(alert, in: window)
         guard response == .alertFirstButtonReturn, menu.indexOfSelectedItem >= 0 else { return nil }
         return request.certificates[menu.indexOfSelectedItem]
     }

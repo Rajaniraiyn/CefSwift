@@ -143,7 +143,7 @@ public enum CefFileDialogPresenter {
             }
             return panel.runModal()
         } onCancel: {
-            Task { @MainActor in panel.cancel(nil) }
+            CefDialogPresenter.dismissOnMain { panel.cancel(nil) }
         }
         guard response == .OK else { return nil }
         if let open = panel as? NSOpenPanel { return open.urls }
