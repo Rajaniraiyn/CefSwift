@@ -95,6 +95,7 @@ public final class CefPasskeyController: CefBrowserAttachment {
     }
 
     private func start(_ browser: CefBrowser) async {
+        guard browser.state == .live else { return }
         let key = ObjectIdentifier(browser)
         sessions[key]?.stop()
         let session = CefPasskeySession(browser: browser, controller: self)
@@ -105,9 +106,6 @@ public final class CefPasskeyController: CefBrowserAttachment {
             CefLog.error("passkeys: setup failed for browser \(browser.identifier): \(error)")
         }
     }
-
-    /// How many browsers the controller is answering for. For tests.
-    var sessionCount: Int { sessions.count }
 }
 
 /// Decides the WebAuthn requests a ``CefPasskeyController`` answers.

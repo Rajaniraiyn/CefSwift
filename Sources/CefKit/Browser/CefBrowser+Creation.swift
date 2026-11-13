@@ -213,7 +213,10 @@ extension CefBrowser {
             // that never reached `route(_:)`; its first document may run
             // before this.
             Task {
-                for attachment in configuration.attachments { await attachment.browserDidCreate(self) }
+                // An attachment told after the close would never hear of it.
+                for attachment in configuration.attachments where state == .live {
+                    await attachment.browserDidCreate(self)
+                }
             }
         }
     }
@@ -239,7 +242,8 @@ extension CefBrowser {
                 await devTools.enableDomainsAgain()
                 reassertAccessibilityState()
             }
-            for attachment in configuration.attachments {
+            // An attachment told after the close would never hear of it.
+            for attachment in configuration.attachments where state == .live {
                 if isRestoring {
                     await attachment.browserDidRestore(self)
                 } else {

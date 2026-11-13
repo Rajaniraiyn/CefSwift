@@ -56,6 +56,10 @@ public protocol CefBrowserAttachment: AnyObject {
     /// Chromium has created the browser, and its first page has not
     /// started loading. With ``preparesBeforeFirstDocument``, the page
     /// waits until this returns.
+    ///
+    /// The browser can close while this runs; ``browserDidClose(_:)`` is
+    /// then called before it returns. Attachments later in the list are
+    /// not told of a browser that has closed.
     func browserDidCreate(_ browser: CefBrowser) async
 
     /// The browser was created anew after a discard. Its page loads again
