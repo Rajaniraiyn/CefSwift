@@ -32,8 +32,7 @@ extension CefBrowserClient {
             cefRelease(frame)
             CefBrowserClient.run(s, browser, default: ()) { _, b in
                 if let id { b.frameDidUpdate(id, url: url.flatMap(URL.init(string:))) }
-                guard isMain, !b.isBootstrapping else { return }
-                b.delegate?.browser(b, didFinishLoadWithStatus: Int(httpStatus))
+                if isMain { b.mainFrameDidFinishLoad(status: Int(httpStatus)) }
             }
         }
         h.pointee.on_load_error = { s, browser, frame, errorCode, errorText, failedURL in
@@ -69,10 +68,7 @@ extension CefBrowserClient {
             }
             let action = CefNavigationAction(
                 url: url.flatMap(URL.init(string:)), isRedirect: isRedirect != 0, hasUserGesture: userGesture != 0)
-            return CefBrowserClient.run(s, browser, default: 0) { _, b in
-                guard let delegate = b.delegate, !b.isBootstrapping else { return 0 }
-                return delegate.browser(b, decidePolicyFor: action) == .cancel ? 1 : 0
-            }
+            return CefBrowserClient.run(s, browser, default: 0) { _, b in b.cancelsNavigation(action) ? 1 : 0 }
         }
         h.pointee.on_open_urlfrom_tab = { s, browser, frame, targetURL, disposition, userGesture in
             cefRelease(frame)
@@ -85,10 +81,7 @@ extension CefBrowserClient {
                     isSourceOffscreen: b.isOffscreen,
                     isSourceChromeStyle: b.isChromeStyle
                 )
-                let isHandled = b.route(request)
-                // Chromium opens the URL in a tab of its own window next.
-                if !isHandled { CefRuntime.shared.chromiumWillOpen(url, from: b, disposition: request.disposition) }
-                return isHandled ? 1 : 0
+                return b.route(request) ? 1 : 0
             }
         }
         h.pointee.on_certificate_error = { s, browser, certError, requestURL, sslInfo, callback in
@@ -158,11 +151,7 @@ extension CefBrowserClient {
         }
         h.pointee.on_render_process_terminated = { s, browser, status, _, _ in
             let reason = CefTerminationReason(cefValue: status)
-            CefBrowserClient.run(s, browser, default: ()) { _, b in
-                b.pageScripting.failPendingEvaluations()
-                b.delegate?.browser(b, renderProcessDidTerminate: reason)
-                b.renderProcessEnded()
-            }
+            CefBrowserClient.run(s, browser, default: ()) { _, b in b.renderProcessDidTerminate(reason) }
         }
         Self.installResponsivenessCallbacks(on: h)
         Self.installClientCertificateCallback(on: h)

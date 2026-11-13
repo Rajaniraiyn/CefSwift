@@ -59,7 +59,6 @@ extension CefBrowserClient {
                 )
                 let isHandled = b.route(request)
                 client.pendingPopupFeatures = isHandled ? nil : popupFeatures
-                if !isHandled { CefRuntime.shared.chromiumWillOpen(url, from: b, disposition: request.disposition) }
                 // A popup gets its opener's bridges and user scripts, like
                 // the CefBrowser that wraps it.
                 if !isHandled, let extraInfo, extraInfo.pointee == nil {

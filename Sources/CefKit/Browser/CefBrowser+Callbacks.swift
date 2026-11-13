@@ -73,6 +73,17 @@ extension CefBrowser {
         if started == nil { cefRelease(callback) }
     }
 
+    func mainFrameDidFinishLoad(status: Int) {
+        guard !isBootstrapping else { return }
+        delegate?.browser(self, didFinishLoadWithStatus: status)
+    }
+
+    /// Asks the delegate about a main-frame navigation; `true` cancels it.
+    func cancelsNavigation(_ action: CefNavigationAction) -> Bool {
+        guard let delegate, !isBootstrapping else { return false }
+        return delegate.browser(self, decidePolicyFor: action) == .cancel
+    }
+
     func mainFrameDidFailLoad(_ error: CefLoadError) {
         // ERR_INVALID_AUTH_CREDENTIALS: with `CefRuntime.AuthenticationPromptPolicy.chromium`,
         // Chromium asks for credentials itself, in a window of its own.
@@ -80,6 +91,23 @@ extension CefBrowser {
             signInPromptURL = error.url
         }
         delegate?.browser(self, didFailLoad: error)
+    }
+
+    func renderProcessDidTerminate(_ reason: CefTerminationReason) {
+        pageScripting.failPendingEvaluations()
+        delegate?.browser(self, renderProcessDidTerminate: reason)
+        renderProcessEnded()
+    }
+
+    /// A command from Chrome's UI or shortcuts. Returns `true` when it was
+    /// handled and Chrome must not run it.
+    func handleChromeCommand(_ command: CefChromeCommand, disposition: CefWindowOpenDisposition) -> Bool {
+        if delegate?.browser(self, handleChromeCommand: command, disposition: disposition) == true { return true }
+        // Surfaces the window replaces or hides.
+        if let window = CefBrowserWindow.hosting(self), window.handleSurfaceCommand(command) { return true }
+        // Chrome runs the command after this returns.
+        if command.isZoomCommand { CefBrowser.refreshZoomLevels() }
+        return false
     }
 
     func applyFullscreen(_ isFullscreen: Bool) { self.isFullscreen = isFullscreen }
@@ -101,11 +129,13 @@ extension CefBrowser {
     }
 
     /// Routes a window-open request. Returns `true` when CEF must not create
-    /// its own popup.
+    /// its own popup or tab.
     func route(_ request: CefWindowOpenRequest) -> Bool {
         let decided = (delegate ?? CefDefaultBrowserDelegate.shared).browser(self, decideWindowOpenFor: request)
         switch CefWindowOpenPolicy.resolve(decided, for: request) {
         case .allowNativePopup:
+            // Chromium opens it next, in a popup or a tab of its own window.
+            CefRuntime.shared.chromiumWillOpen(request.targetURL, from: self, disposition: request.disposition)
             return false
         case .openInCurrentBrowser:
             if let url = request.targetURL { load(url) }

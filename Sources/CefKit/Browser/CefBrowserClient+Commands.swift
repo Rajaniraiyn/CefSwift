@@ -76,18 +76,10 @@ extension CefBrowserClient {
     func makeCommandHandler() -> UnsafeMutablePointer<cef_command_handler_t> {
         let h = cefAllocate(cef_command_handler_t.self, owner: self)
         h.pointee.on_chrome_command = { s, browser, commandID, disposition in
-            CefBrowserClient.run(s, browser, default: 0) { _, b in
-                let command = CefChromeCommand(rawValue: Int(commandID))
-                let handled = b.delegate?.browser(
-                    b, handleChromeCommand: command,
-                    disposition: CefWindowOpenDisposition(cefValue: disposition)) ?? false
-                // Surfaces the window replaces or hides.
-                if !handled, let window = CefBrowserWindow.hosting(b), window.handleSurfaceCommand(command) {
-                    return 1
-                }
-                // Chrome runs the command after this returns.
-                if !handled, command.isZoomCommand { CefBrowser.refreshZoomLevels() }
-                return handled ? 1 : 0
+            let command = CefChromeCommand(rawValue: Int(commandID))
+            let disposition = CefWindowOpenDisposition(cefValue: disposition)
+            return CefBrowserClient.run(s, browser, default: 0) { _, b in
+                b.handleChromeCommand(command, disposition: disposition) ? 1 : 0
             }
         }
         h.pointee.is_chrome_app_menu_item_visible = { s, browser, commandID in
