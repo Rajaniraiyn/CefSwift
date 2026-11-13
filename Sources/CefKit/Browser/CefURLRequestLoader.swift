@@ -252,8 +252,7 @@ final class URLRequestLoader {
         report(CefProfile.TransferProgress(completed: current, total: total >= 0 ? total : nil))
     }
 
-    private func complete(status: cef_urlrequest_status_t, error: Int, response head: HTTPURLResponse?) {
-        if response == nil, let head { didReceive(head) }
+    private func complete(status: cef_urlrequest_status_t, error: Int) {
         if let stopReason { return finish(.failure(stopReason.error(url: plan.url))) }
         if status == UR_SUCCESS, let response { return finish(.success(response)) }
         // A redirect Chromium stopped at, as asked: the 3xx is the answer.
@@ -303,8 +302,8 @@ final class URLRequestLoader {
             let pointer = request.pointer
             let status = pointer.pointee.get_request_status(pointer)
             let error = Int(pointer.pointee.get_request_error(pointer).rawValue)
-            let head = URLRequestLoader.response(of: pointer, fallbackURL: loader.plan.url)
-            CefIOActor.assumeIsolated { loader.complete(status: status, error: error, response: head) }
+            loader.receiveHeadIfNeeded(from: pointer)
+            CefIOActor.assumeIsolated { loader.complete(status: status, error: error) }
         }
         client.pointee.on_upload_progress = { s, request, current, total in
             cefRelease(request)

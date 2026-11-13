@@ -41,13 +41,16 @@ extension CefBrowserClient {
             CefBrowserClient.run(s, browser, default: ()) { _, b in b.applyStatusText(text) }
         }
         h.pointee.on_console_message = { s, browser, level, message, source, line in
-            let entry = CefConsoleMessage(
-                level: CefLogSeverity(cefValue: level),
-                text: CefStringUtil.string(from: message),
-                source: CefStringUtil.string(from: source),
-                line: Int(line)
-            )
-            CefBrowserClient.run(s, browser, default: ()) { _, b in b.delegate?.browser(b, didLog: entry) }
+            CefBrowserClient.run(s, browser, default: ()) { _, b in
+                // Converted only for a delegate; the strings live for this call.
+                guard let delegate = b.delegate else { return }
+                delegate.browser(b, didLog: CefConsoleMessage(
+                    level: CefLogSeverity(cefValue: level),
+                    text: CefStringUtil.string(from: message),
+                    source: CefStringUtil.string(from: source),
+                    line: Int(line)
+                ))
+            }
             return 0  // keep Chromium's own logging
         }
         h.pointee.on_media_access_change = { s, browser, hasVideo, hasAudio in

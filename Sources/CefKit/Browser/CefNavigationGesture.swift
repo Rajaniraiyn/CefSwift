@@ -48,6 +48,8 @@ package final class CefNavigationGestureIndicatorView: NSView {
     private let circle = CALayer()
     private let chevron = CAShapeLayer()
     private var isArmed = false
+    /// The direction ``chevron``'s path points, once it has one.
+    private var chevronPointsBack: Bool?
 
     package init() {
         super.init(frame: .zero)
@@ -123,7 +125,10 @@ package final class CefNavigationGestureIndicatorView: NSView {
         circle.position = CGPoint(x: x, y: bounds.midY)
         circle.opacity = Float(min(1, magnitude * 2.5))
         CATransaction.setDisableActions(armed == isArmed)
-        chevron.path = Self.chevronPath(pointingBack: goesBack, in: circle.bounds)
+        if chevronPointsBack != goesBack {
+            chevronPointsBack = goesBack
+            chevron.path = Self.chevronPath(pointingBack: goesBack, in: circle.bounds)
+        }
         if armed != isArmed {
             isArmed = armed
             applyColors()

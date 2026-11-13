@@ -350,23 +350,21 @@ struct URLRequestPlan: Equatable, Sendable {
 
 /// How many bytes of a streamed body have arrived and not been read.
 final class URLRequestStreamBuffer: Sendable {
-    private let unread = OSAllocatedUnfairLock(initialState: 0)
-    private let highWater = OSAllocatedUnfairLock(initialState: 0)
+    private let state = OSAllocatedUnfairLock(initialState: (unread: 0, peak: 0))
 
     /// Adds `count` received bytes; returns the unread total.
     func received(_ count: Int) -> Int {
-        let total = unread.withLock { unread in
-            unread += count
-            return unread
+        state.withLock { state in
+            state.unread += count
+            state.peak = max(state.peak, state.unread)
+            return state.unread
         }
-        highWater.withLock { $0 = max($0, total) }
-        return total
     }
 
     func consumed(_ count: Int) {
-        unread.withLock { $0 -= count }
+        state.withLock { $0.unread -= count }
     }
 
     /// The most bytes that were unread at once.
-    var peak: Int { highWater.withLock { $0 } }
+    var peak: Int { state.withLock { $0.peak } }
 }
