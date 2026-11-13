@@ -244,7 +244,7 @@ enum CefHistorySwipeHooks {
         let showSelector = NSSelectorFromString("showPanelForView:")
         var showOriginal: ShowPanel?
         let show: @convention(block) (NSObject, NSView) -> Void = { overlay, view in
-            let browser = MainActor.assumeIsolated { browser(showing: view) }
+            let browser = MainActor.assumeIsolated { Self.browser(showing: view) }
             guard let browser else {
                 showOriginal?(overlay, showSelector, view)
                 return

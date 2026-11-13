@@ -80,16 +80,21 @@ public enum CefPasskeyPresenter {
         }
         // Cancelling the task invalidates the context, which ends the
         // system prompt with an error.
-        nonisolated(unsafe) let evaluating = context
+        let evaluating = AuthenticationContextBox(context: context)
         do {
             return try await withTaskCancellationHandler {
-                try await evaluating.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason) ? .verified : .failed
+                try await evaluate(evaluating, reason: reason) ? .verified : .failed
             } onCancel: {
-                evaluating.invalidate()
+                evaluating.context.invalidate()
             }
         } catch {
             return .failed
         }
+    }
+
+    /// Off the main actor, where the context's evaluation runs.
+    private nonisolated static func evaluate(_ box: AuthenticationContextBox, reason: String) async throws -> Bool {
+        try await box.context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason)
     }
 
     /// The answer once the user confirmed and verification finished.
@@ -160,6 +165,14 @@ public struct CefUserVerifier: Sendable {
 
 /// The part of `LAContext` user verification needs, so it can be tested
 /// without a system prompt.
+/// Carries a context to its evaluation and to the cancellation handler.
+/// `LAContext` may be used from any thread, and a context is evaluated
+/// once and at most invalidated meanwhile, which is what `@unchecked`
+/// vouches for.
+private struct AuthenticationContextBox: @unchecked Sendable {
+    let context: any CefLocalAuthenticationContext
+}
+
 protocol CefLocalAuthenticationContext {
     func canEvaluatePolicy(_ policy: LAPolicy, error: NSErrorPointer) -> Bool
     func evaluatePolicy(_ policy: LAPolicy, localizedReason: String) async throws -> Bool
