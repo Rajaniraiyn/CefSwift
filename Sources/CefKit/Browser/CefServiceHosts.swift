@@ -135,6 +135,9 @@ package final class CefServiceHosts: CefShutdownParticipant {
     /// `async (service, args, context) => value` — on `module`'s service
     /// object with `arguments`, and decodes its value as `Result`.
     ///
+    /// Each host document compiles `function` once and keeps it by its
+    /// source, so pass a constant and put what varies in `arguments`.
+    ///
     /// `context.signal` is an `AbortSignal` that aborts when the calling
     /// task is cancelled; `context.progress(value)` sends an intermediate
     /// value to `progress` — one at a time, and a value sent while the one

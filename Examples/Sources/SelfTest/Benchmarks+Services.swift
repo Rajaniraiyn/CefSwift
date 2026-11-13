@@ -271,11 +271,12 @@ final class ServiceBench {
         meter.start()
         MallocCounter.start()
         var lastIssued = ContinuousClock.now
-        var cancelledAt: [String: ContinuousClock.Instant] = [:]
+        // When each query was cancelled, read by the queries' own tasks.
+        let cancelledAt = CancelTimes()
         var cancellationLatencies: [Double] = []
         var previousText: String?
         for text in texts {
-            if let previousText { cancelledAt[previousText] = ContinuousClock.now }
+            if let previousText { cancelledAt.times[previousText] = ContinuousClock.now }
             current?.cancel()
             previousText = text
             let start = ContinuousClock.now
@@ -285,7 +286,7 @@ final class ServiceBench {
                     let suggestions = try await self.profile.autocomplete.suggestions(for: text)
                     outcomes.append((text, suggestions.count, Task.isCancelled, (ContinuousClock.now - start).benchMilliseconds))
                 } catch {
-                    if error is CancellationError, let at = cancelledAt[text] {
+                    if error is CancellationError, let at = cancelledAt.times[text] {
                         cancellationLatencies.append((ContinuousClock.now - at).benchMilliseconds)
                     }
                     outcomes.append((text, nil, error is CancellationError, (ContinuousClock.now - start).benchMilliseconds))
@@ -484,6 +485,11 @@ final class ServiceBench {
             elapsed, before.heap / 1_048_576, after.heap / 1_048_576, after.inFlight, pendingOperations,
             "\(CefDiagnostics.census().filter { $0.key.contains("pending") || $0.key.contains("payload") || $0.key.contains("shared") })"))
     }
+}
+
+@MainActor
+final class CancelTimes {
+    var times: [String: ContinuousClock.Instant] = [:]
 }
 
 /// p50, p95 and p99 of a set of milliseconds.
