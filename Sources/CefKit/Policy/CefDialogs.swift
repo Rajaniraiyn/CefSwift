@@ -117,7 +117,10 @@ public enum CefDialogPresenter {
             if let parent = alert.window.sheetParent {
                 parent.endSheet(alert.window, returnCode: .abort)
             } else if NSApp.modalWindow === alert.window {
-                NSApp.stopModal(withCode: .abort)
+                // Ends the modal session from outside its event handling,
+                // as a run-loop callout does; stopModal would wait for an
+                // event first.
+                NSApp.abortModal()
             }
         }
         return await withTaskCancellationHandler {
@@ -126,7 +129,23 @@ public enum CefDialogPresenter {
             }
             return alert.runModal()
         } onCancel: {
-            Task { @MainActor in dismiss() }
+            dismissOnMain(dismiss)
+        }
+    }
+
+    /// Runs `dismiss` on the main thread, in the modal run-loop mode too.
+    ///
+    /// While `runModal()` runs, the main actor's queued jobs do not: a
+    /// `Task { @MainActor in … }` would wait for the modal session it is
+    /// meant to end. CefKit cancels decisions on the main thread, from CEF
+    /// callbacks that the message pump delivers inside the modal loop, so
+    /// `dismiss` usually runs at once; from another thread it goes to the
+    /// main run loop, which serves the modal mode.
+    nonisolated static func dismissOnMain(_ dismiss: @escaping @MainActor @Sendable () -> Void) {
+        if Thread.isMainThread {
+            MainActor.assumeIsolated { dismiss() }
+        } else {
+            RunLoop.main.perform(inModes: [.common, .modalPanel]) { MainActor.assumeIsolated { dismiss() } }
         }
     }
 }

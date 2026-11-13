@@ -145,7 +145,7 @@ public final class CefBrowser: Identifiable {
     /// Chromium's identifier for this browser; `-1` until created.
     @ObservationIgnored public internal(set) var identifier: Int32 = -1
     /// The browser that opened this one, for popups.
-    @ObservationIgnored public private(set) weak var opener: CefBrowser?
+    @ObservationIgnored public internal(set) weak var opener: CefBrowser?
     /// For a popup, the window features its page asked for — the size to
     /// give the popup's window, for instance.
     @ObservationIgnored public internal(set) var popupFeatures: CefPopupFeatures?

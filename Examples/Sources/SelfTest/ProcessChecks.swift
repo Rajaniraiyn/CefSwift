@@ -33,7 +33,9 @@ extension SelfTest {
         _ = manager.tasks
         check("processes: reading the tasks keeps them refreshing", manager.isRefreshing)
         check("processes: refreshing stops when nobody reads",
-              await waitUntil(timeout: manager.refreshInterval * 3) { !manager.isRefreshing })
+              // The loop ends at its first wake-up two intervals after the last read;
+              // a busy Mac delays wake-ups, so allow twice that.
+              await waitUntil(timeout: manager.refreshInterval * 6) { !manager.isRefreshing })
 
         // A page that spins: busy, then unresponsive to input.
         browser.executeJavaScript("setTimeout(spin, 100)")

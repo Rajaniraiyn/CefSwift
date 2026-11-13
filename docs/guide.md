@@ -1208,6 +1208,16 @@ with a debugger that stops each document as it starts; pages can observe
 both ([Compatibility with bot protection](#compatibility-with-bot-protection)).
 Use them for browsers that show your own or trusted pages.
 
+Chromium creates a native popup and runs its first document before
+DevTools can attach to it, so with `.app` and `.disabled` a popup, tab or
+window the delegate lets Chromium open (`.allowNativePopup`) is opened in a
+browser CefKit creates instead, with the opener's configuration and the
+calls taken over from its first document. It arrives as a native popup
+does (`browser(_:didOpen:)`, then `onPopup` or a window of its own), but
+the page cannot script it: `window.open` returns `null`, the popup has no
+`window.opener`, and a blank popup is refused. A sign-in flow that posts
+its result back to the opener needs `.chromium`.
+
 With `.chromium`, what Chromium can offer depends on how the app is
 signed and configured. The `passkeys` capability of `cef bundle` adds what
 it can ([bundling](bundling.md#features)):
@@ -1503,7 +1513,9 @@ arrives through `onPopup` as a hidden `CefBrowserWindow` of its own, still
 connected to its opener. `popup.browser.popupFeatures` holds the origin and
 size the page asked for, and `popup.browser.opener` is the opening browser.
 Without `onPopup`, Chromium shows the popup in a window of its own design
-with a location bar.
+with a location bar. With `.app` or `.disabled` passkeys the popup is a
+browser CefKit created, not connected to the opener's page; see
+[Passkeys](#passkeys).
 
 ```swift
 window.onPopup = { [weak window] popup in

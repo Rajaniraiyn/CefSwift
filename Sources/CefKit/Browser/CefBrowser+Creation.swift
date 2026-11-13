@@ -207,8 +207,10 @@ extension CefBrowser {
         if isBootstrapping {
             Task { await bootstrap() }
         } else if !configuration.passkeys.isChromium {
-            // A popup: Chromium loads its page right away, so its first
-            // document may be answered by Chromium.
+            // A browser Chromium created by itself with this policy: not a
+            // page's popup, which `route(_:)` opens bootstrapped instead,
+            // but one such as a tab Chrome's own UI opened. Its first
+            // document may run before this; see CefBrowser.PasskeyPolicy.
             Task { await startPasskeys() }
         }
     }

@@ -136,6 +136,11 @@ extension CefBrowser {
     func route(_ request: CefWindowOpenRequest) -> Bool {
         let decided = (delegate ?? CefDefaultBrowserDelegate.shared).browser(self, decideWindowOpenFor: request)
         switch CefWindowOpenPolicy.resolve(decided, for: request) {
+        case .allowNativePopup where !configuration.passkeys.isChromium:
+            // Chromium would create it and run its first document before
+            // passkey interception is in place; see openPopupWithPasskeys.
+            openPopupWithPasskeys(request)
+            return true
         case .allowNativePopup:
             // Chromium opens it next, in a popup or a tab of its own window.
             CefRuntime.shared.chromiumWillOpen(request.targetURL, from: self, disposition: request.disposition)
@@ -145,6 +150,37 @@ extension CefBrowser {
             return true
         case .deny, .handled:
             return true
+        }
+    }
+
+    /// Opens what a page asked for in a browser CefKit creates, for a
+    /// browser whose ``Configuration/passkeys`` is ``PasskeyPolicy/app(_:)``
+    /// or ``PasskeyPolicy/disabled``.
+    ///
+    /// A native popup is created by Chromium and runs its first document
+    /// at once, before DevTools can attach to it, so a call to
+    /// `navigator.credentials` there would reach Chromium's own
+    /// authenticators. This browser instead has the opener's configuration
+    /// and is bootstrapped as every browser CefKit creates is: interception
+    /// is in place before its first document starts. It arrives where a
+    /// native popup would: ``CefBrowserDelegate/browser(_:didOpen:)``, then
+    /// the opener's window's ``CefBrowserWindow/onPopup``, or a window of
+    /// its own. The page cannot script it: `window.open` returns `null` and
+    /// the popup has no `window.opener`. A blank popup (no URL) is refused.
+    func openPopupWithPasskeys(_ request: CefWindowOpenRequest) {
+        guard let url = request.targetURL else { return }
+        let popup = CefBrowser(url: url, configuration: configuration, delegate: delegate)
+        popup.opener = self
+        popup.popupFeatures = request.features
+        delegate?.browser(self, didOpen: popup)
+        let openerWindow = CefBrowserWindow.hosting(self)
+        var windowConfiguration = openerWindow?.configuration ?? CefBrowserWindow.Configuration()
+        windowConfiguration.frame = nil
+        let window = CefBrowserWindow(browser: popup, configuration: windowConfiguration)
+        if let onPopup = openerWindow?.onPopup {
+            onPopup(window)
+        } else {
+            window.show()
         }
     }
 

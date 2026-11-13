@@ -149,20 +149,33 @@ extension SelfTest {
     /// shown shows nothing. The unresponsive-page, dialog and
     /// client-certificate presenters share this presentation.
     static func presenterCancellationChecks() async {
+        // Main-actor jobs wait while a modal session runs, so the task is
+        // cancelled from the modal run loop, as CefKit's own cancellations
+        // arrive (CEF callbacks the message pump delivers there).
         let browser = CefBrowser()
         var answer: CefUnresponsivePageDecision?
+        var shown = false
         let task = Task { @MainActor in
             answer = await CefUnresponsivePagePresenter.present(for: browser, in: nil)
         }
-        let shown = await waitUntil(timeout: .seconds(5)) { NSApp.modalWindow != nil }
-        task.cancel()
-        let dismissed = await waitUntil(timeout: .seconds(5)) { answer != nil && NSApp.modalWindow == nil }
-        check("operations: cancelling dismisses a presenter's modal alert", shown && dismissed && answer == .wait,
-              detail: "shown \(shown), answer \(String(describing: answer)), modal \(String(describing: NSApp.modalWindow))")
-        if let modal = NSApp.modalWindow, !dismissed {
-            NSApp.stopModal()
-            modal.orderOut(nil)
+        RunLoop.main.perform(inModes: [.modalPanel]) {
+            MainActor.assumeIsolated {
+                shown = NSApp.modalWindow != nil
+                task.cancel()
+            }
         }
+        // A last resort, should cancelling not end the session.
+        let rescue = Timer(timeInterval: 5, repeats: false) { _ in
+            MainActor.assumeIsolated { if NSApp.modalWindow != nil { NSApp.abortModal() } }
+        }
+        RunLoop.main.add(rescue, forMode: .modalPanel)
+        let start = ContinuousClock.now
+        await task.value
+        rescue.invalidate()
+        let elapsed = ContinuousClock.now - start
+        check("operations: cancelling dismisses a presenter's modal alert",
+              shown && answer == .wait && NSApp.modalWindow == nil && elapsed < .seconds(4),
+              detail: "shown \(shown), answer \(String(describing: answer)), after \(elapsed)")
 
         var leaving: Bool?
         var everShown = false
@@ -170,14 +183,17 @@ extension SelfTest {
             leaving = await CefDialogPresenter.confirmLeaving(isReload: false, in: nil)
         }
         early.cancel()
-        let ended = await waitUntil(timeout: .seconds(5)) {
-            everShown = everShown || NSApp.modalWindow != nil
-            return leaving != nil
+        let probe = Timer(timeInterval: 2, repeats: false) { _ in
+            MainActor.assumeIsolated {
+                everShown = NSApp.modalWindow != nil
+                if everShown { NSApp.abortModal() }
+            }
         }
-        check("operations: a presenter cancelled before it shows shows nothing",
-              ended && !everShown && leaving == false,
-              detail: "ended \(ended), shown \(everShown), \(String(describing: leaving))")
-        if NSApp.modalWindow != nil { NSApp.stopModal() }
+        RunLoop.main.add(probe, forMode: .modalPanel)
+        await early.value
+        probe.invalidate()
+        check("operations: a presenter cancelled before it shows shows nothing", !everShown && leaving == false,
+              detail: "shown \(everShown), \(String(describing: leaving))")
     }
 
     /// Delegate decisions end with the page they belong to.
