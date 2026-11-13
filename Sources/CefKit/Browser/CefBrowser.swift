@@ -107,8 +107,8 @@ public final class CefBrowser: Identifiable {
     /// The page's top-level frame; `nil` when ``frames`` is empty.
     public var mainFrame: CefFrame? { frames.first(where: \.isMain) }
 
-    /// Whether the page has been unloaded to free its memory, by
-    /// ``discard()`` or ``CefRuntime/discardPolicy``.
+    /// Whether the page has been unloaded to free its memory by
+    /// ``discard()``.
     ///
     /// A discarded browser keeps its ``url``, ``title`` and ``favicon`` and
     /// stays in your UI; dim its tab, for instance. It loads its page again
@@ -121,14 +121,19 @@ public final class CefBrowser: Identifiable {
     /// place while it loads again. `nil` when the browser is not discarded
     /// or the capture failed; released once the page has loaded again.
     public internal(set) var discardSnapshot: NSImage?
-    /// Whether ``CefRuntime/discardPolicy`` and ``discard()`` may discard this
-    /// browser. Turn it off for tabs the user pinned, or pages that must
-    /// keep running.
-    public var allowsDiscarding = true
     /// Where the page is in its lifecycle: whether the user can see it,
     /// whether it has their input, or whether it is discarded. The page's
     /// `document.visibilityState` agrees with it. See ``Lifecycle``.
-    public internal(set) var lifecycle = Lifecycle.hidden
+    public internal(set) var lifecycle = Lifecycle.hidden {
+        didSet { if lifecycle != oldValue { lifecycleChangedAt = .now } }
+    }
+    /// When ``lifecycle`` last changed. While it is
+    /// ``Lifecycle/hidden``, the page has been out of sight since then:
+    ///
+    /// ```swift
+    /// let hiddenFor = browser.lifecycle == .hidden ? .now - browser.lifecycleChangedAt : .zero
+    /// ```
+    public internal(set) var lifecycleChangedAt = ContinuousClock.now
 
     // MARK: Configuration
 

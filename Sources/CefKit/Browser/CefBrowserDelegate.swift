@@ -26,9 +26,8 @@ public protocol CefBrowserDelegate: AnyObject {
 
     // MARK: Discarding
 
-    /// The browser is about to be discarded (``CefBrowser/discard()`` or
-    /// ``CefRuntime/discardPolicy``): its page is still there, and this is the
-    /// last moment to read from it.
+    /// The browser is about to be discarded (``CefBrowser/discard()``): its
+    /// page is still there, and this is the last moment to read from it.
     func browserWillDiscard(_ browser: CefBrowser)
     /// The browser's page was unloaded to free its memory. The browser
     /// keeps its URL, title and icon, and comes back when shown or used.

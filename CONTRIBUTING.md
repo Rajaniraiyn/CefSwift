@@ -7,6 +7,13 @@ swift build
 swift test
 ```
 
+The examples' own logic (the Browser example's Memory Saver policy) has
+unit tests in the Examples package:
+
+```sh
+swift test --package-path Examples
+```
+
 CI also runs the unit tests under the sanitizers:
 
 ```sh
@@ -204,8 +211,7 @@ reading as one.
   chooses who answers or when CefKit acts, the type ends in `Policy`
   (`passkeys: PasskeyPolicy`, `unresponsivePages: UnresponsivePagePolicy`,
   `safeStorage: SafeStoragePolicy`); a live runtime knob of that kind is a
-  `…Policy` property too (`CefRuntime.shared.discardPolicy`,
-  `energyPolicy`).
+  `…Policy` property too (`CefRuntime.shared.energyPolicy`).
 - **Case names**: `.automatic` leaves a choice to Chromium (or to the user in
   `chrome://settings`), `.disabled` turns a facility off; not `.default`,
   `.standard`, `.off` or `.disable`. A shared on-or-off choice is
@@ -221,7 +227,7 @@ reading as one.
   supplies a value (a credential, a certificate, whether to proceed, what to
   do with a hung page) rather than allowing or denying a request, so do not
   rename them or wrap their answers in new enums for uniformity.
-- **Booleans** read as assertions: `isRunning`, `allowsDiscarding`,
+- **Booleans** read as assertions: `isRunning`, `isDiscarded`,
   `showsToolbarButtons`, `usesSafeBrowsing`.
 - **No abbreviations** beyond terms of art (`URL`, `PDF`, `DNS`, `HTTPS`,
   `JSON`, `CDM`). A property holding a full address is `url`, not `origin`.

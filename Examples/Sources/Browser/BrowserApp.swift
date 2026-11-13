@@ -110,11 +110,11 @@ enum MemorySaver: String, CaseIterable {
     }
 
     @MainActor func apply() {
-        CefRuntime.shared.discardPolicy = switch self {
+        TabDiscarding.shared.policy = switch self {
         case .off: .disabled
-        case .underPressure: .underMemoryPressure
-        case .after15Minutes: .after(.seconds(15 * 60))
-        case .after1Hour: .after(.seconds(60 * 60))
+        case .underPressure: .init(discardsUnderMemoryPressure: true)
+        case .after15Minutes: .init(hiddenDuration: .seconds(15 * 60), discardsUnderMemoryPressure: true)
+        case .after1Hour: .init(hiddenDuration: .seconds(60 * 60), discardsUnderMemoryPressure: true)
         }
     }
 }

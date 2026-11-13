@@ -167,6 +167,7 @@ covers identifiers, signing, entitlements, notarization and the bundle layout;
 | Profiles, cookies, Chromium preferences | `CefProfile` | [Profiles](docs/guide.md#profiles) |
 | The app's own requests through Chromium's network stack, sharing a profile's cookies, cache and proxy | `CefProfile.data(for:)`, `bytes(for:)` | [Requests through Chromium's network stack](docs/guide.md#requests-through-chromiums-network-stack) |
 | Bookmarks, history, address-bar suggestions | `CefBookmarks`, `CefHistory`, `CefAutocomplete` | [Bookmarks, history and suggestions](docs/guide.md#bookmarks-history-and-suggestions) |
+| Discarding hidden browsers to free memory, and restoring them when shown; when to discard is the app's policy | `discard()`, `discardBlockers()`, `lifecycle`, `lifecycleChangedAt` | [Discarding browsers](docs/guide.md#discarding-browsers) |
 | Chrome DevTools Protocol, in-process | `CefDevTools` | [DevTools](docs/guide.md#devtools) |
 | Content served from your own URL scheme | `CefSchemeHandler` | [Serving your own content](docs/guide.md#serving-your-own-content) |
 | Protected media: Widevine in Chromium, FairPlay through the system's WebKit for streaming services | `CefRuntime.Configuration.services.protectedMedia`, `CefSystemBrowser` and `CefSystemWebView` (the `CefSystemEngine` library) | [Playing streaming services](docs/guide.md#playing-streaming-services) |
@@ -176,7 +177,8 @@ covers identifiers, signing, entitlements, notarization and the bundle layout;
 [`Examples/`](Examples/README.md) is a separate package with five apps:
 
 - **Browser**: a tabbed browser with a SwiftUI toolbar, address-bar
-  suggestions, bookmarks, history, private tabs, downloads and popups.
+  suggestions, bookmarks, history, private tabs, downloads, popups, and a
+  Memory Saver that puts background tabs to sleep.
 - **Showcase**: three demos of embedding web content in SwiftUI.
 - **Minimal**: one `CefWebView` on the `.embedded` configuration, and the
   lean case of the footprint benchmark.

@@ -4,25 +4,34 @@ import Foundation
 
 extension CefBrowser {
     /// A reason a browser cannot be discarded right now.
+    ///
+    /// Each one is a fact Chromium or CefKit knows without reading the page.
+    /// Chrome-style browsers can report all of them; browsers in a
+    /// `CefWebView` only ``visible``, ``notLoaded``, ``capturingMedia``,
+    /// ``beforeUnloadHandler``, ``devToolsOpen``, ``downloading`` and
+    /// ``unknown(_:)``.
     public enum DiscardBlocker: Sendable, Hashable, CustomStringConvertible {
         /// The browser is on screen: the selected tab of a visible window, or
         /// a view in one.
         case visible
-        /// ``CefBrowser/allowsDiscarding`` is off, or an extension protects the
-        /// tab.
+        /// Chromium protects the tab: an extension, pinning, or a setting
+        /// or enterprise policy opted it out.
         case exempt
         /// The browser is not open, is still loading, or shows DevTools.
         case notLoaded
-        /// The page is playing sound, or did so in the last minute.
+        /// The page is playing sound, or did so in the last minute
+        /// (Chrome style only).
         case playingAudio
         /// The page uses the camera, microphone or screen capture, or is being
         /// cast.
         case capturingMedia
-        /// The page shows picture in picture.
+        /// The page shows picture in picture (Chrome style only).
         case pictureInPicture
-        /// The page is connected to a Bluetooth or USB device.
+        /// The page is connected to a Bluetooth or USB device (Chrome style
+        /// only).
         case connectedToDevice
-        /// The user has typed into the page or changed its form fields.
+        /// Chromium saw the user type into the page or change its form
+        /// fields (Chrome style only).
         case formInteraction
         /// The page has a `beforeunload` handler: it may ask before it is left.
         case beforeUnloadHandler
@@ -116,7 +125,13 @@ extension CefBrowser {
     ///
     /// Only a browser that is off screen and that nothing in
     /// ``discardBlockers()`` holds can be discarded; the error lists what
-    /// does. Discarding a discarded browser does nothing.
+    /// does. Discarding a discarded browser does nothing, and nothing is
+    /// discarded once the app is quitting.
+    ///
+    /// CefKit never discards a browser on its own: when to discard (after
+    /// a tab has been hidden a while, under memory pressure, never for
+    /// tabs the user pinned) is the app's policy. ``lifecycle`` and
+    /// ``lifecycleChangedAt`` say how long a browser has been hidden.
     ///
     /// A browser in a ``CefBrowserWindow`` or a Chrome UI window is
     /// discarded by Chromium itself and keeps its back/forward list and
@@ -128,6 +143,7 @@ extension CefBrowser {
     /// delivering, and form input that was not submitted is lost.
     public func discard() async throws(CefBrowser.DiscardError) {
         guard !isDiscarded else { return }
+        guard !CefRuntime.shared.isTerminating else { throw .failed("The app is quitting.") }
         guard discardPhase == .none else { throw .failed("The browser is already being discarded or restored.") }
         let checkpoint = DiscardCheckpoint(self)
         let blockers = await discardBlockers()
@@ -152,7 +168,6 @@ extension CefBrowser {
             throw error
         }
         discardSnapshot = snapshot
-        CefRuntime.shared.discardMonitor.browserDidDiscard(self)
         delegate?.browserDidDiscard(self)
     }
 
@@ -180,13 +195,19 @@ extension CefBrowser {
     /// What keeps this browser from being discarded now; empty when
     /// ``discard()`` would discard it.
     ///
-    /// Besides the browser's own state, this asks the page: Chromium's
-    /// discard rules for Chrome-style browsers (audio, media capture, form
-    /// input and the rest), and for every browser whether the page has a
-    /// `beforeunload` handler. Browsers in a `CefWebView` report audio and
-    /// form input only for `<audio>`, `<video>`, `<input>` and `<textarea>`
-    /// elements of the main frame. A check that cannot be made counts as a
-    /// blocker, ``CefBrowser/DiscardBlocker/unknown(_:)``.
+    /// Every blocker is a fact known natively, never read from the page's
+    /// content: the browser's own state (on screen, loading, DevTools, a
+    /// download, media capture), whether the page's window has a
+    /// `beforeunload` listener (asked of the DevTools Protocol), and for
+    /// Chrome-style browsers Chromium's own discard rules (audio, picture in
+    /// picture, devices, form input and the rest). A check that cannot be
+    /// made counts as a blocker, ``CefBrowser/DiscardBlocker/unknown(_:)``.
+    ///
+    /// For a browser in a `CefWebView` Chromium keeps no such rules, so an
+    /// empty set does not mean the page is idle: it may be playing sound
+    /// or hold form input the user has not submitted. An app that knows
+    /// more about its pages decides for itself before calling
+    /// ``discard()``.
     public func discardBlockers() async -> Set<CefBrowser.DiscardBlocker> {
         guard !isDiscarded else { return [] }
         var blockers = stateBlockers()
@@ -199,8 +220,6 @@ extension CefBrowser {
         }
         if isChromeStyle {
             blockers.formUnion(await CefRuntime.shared.tabDiscarder.blockers(for: self))
-        } else {
-            blockers.formUnion(await pageContentBlockers())
         }
         return blockers
     }
@@ -208,7 +227,6 @@ extension CefBrowser {
     /// The blockers CefKit knows without asking the page.
     private func stateBlockers() -> Set<CefBrowser.DiscardBlocker> {
         var blockers = Set<CefBrowser.DiscardBlocker>()
-        if !allowsDiscarding { blockers.insert(.exempt) }
         guard state == .live, raw != nil, !isBootstrapping, !isLoading, let url, url.scheme != "devtools" else {
             blockers.insert(.notLoaded)
             return blockers
@@ -374,29 +392,6 @@ extension CefBrowser {
             return listeners.compactMap { $0["type"].stringValue }
         }
         return listeners?.contains("beforeunload")
-    }
-
-    /// For browsers Chromium's discard rules do not cover: playing media
-    /// and edited form fields in the main frame.
-    private func pageContentBlockers() async -> Set<CefBrowser.DiscardBlocker> {
-        let state = await withTimeout(.seconds(3)) {
-            try await self.pageScripting.evaluate("""
-                ({
-                  audio: [...document.querySelectorAll('audio, video')]
-                    .some(m => !m.paused && !m.ended && !m.muted && m.volume > 0),
-                  edited: [...document.querySelectorAll('input, textarea')].some(e =>
-                    e.type === 'checkbox' || e.type === 'radio' ? e.checked !== e.defaultChecked
-                      : e.type !== 'hidden' && e.type !== 'file' && e.value !== e.defaultValue),
-                })
-                """)
-        }
-        guard let audio = state?["audio"].boolValue, let edited = state?["edited"].boolValue else {
-            return [.unknown("Could not read the page's media and form fields.")]
-        }
-        var blockers = Set<CefBrowser.DiscardBlocker>()
-        if audio { blockers.insert(.playingAudio) }
-        if edited { blockers.insert(.formInteraction) }
-        return blockers
     }
 }
 

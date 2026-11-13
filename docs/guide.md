@@ -430,7 +430,7 @@ when it is first shown.
 | JavaScript | `evaluateJavaScript(_:timeout:)`, `evaluateJavaScript(_:as:timeout:)`, `executeJavaScript(_:)`, `addUserScript(_:)` |
 | DevTools | `devTools`, `showDevTools(inspecting:)`, `closeDevTools()`, `isShowingDevTools` |
 | Lifetime | `ready()`, `close(force:)` |
-| Memory | `isDiscarded`, `discard()`, `restore()`, `discardBlockers()`, `allowsDiscarding`, `discardSnapshot` ([discarding](#discarding-browsers)) |
+| Memory | `isDiscarded`, `discard()`, `restore()`, `discardBlockers()`, `discardSnapshot`, `lifecycle`, `lifecycleChangedAt` ([discarding](#discarding-browsers)) |
 | Relations | `delegate`, `configuration`, `opener`, `popupFeatures`, `hostWindow` |
 
 Options are fixed at creation:
@@ -772,7 +772,8 @@ Image(nsImage: browser.favicon ?? fallbackIcon)
     .opacity(browser.isDiscarded ? 0.4 : 1)
 ```
 
-Discard one browser yourself, or let CefKit do it:
+CefKit provides the capability; when to use it is your app's policy.
+CefKit never discards a browser on its own:
 
 ```swift
 do {
@@ -780,10 +781,23 @@ do {
 } catch .blocked(let blockers) {
     print("kept loaded:", blockers)          // [.visible], [.playingAudio], …
 }
-
-CefRuntime.shared.discardPolicy = .after(.seconds(30 * 60))   // hidden 30 minutes, or memory is low
-CefRuntime.shared.discardPolicy = .underMemoryPressure    // only when macOS runs low on memory
 ```
+
+A policy such as "sleep tabs hidden for an hour, and every hidden tab when
+memory is low" takes a timer, a `DispatchSource.makeMemoryPressureSource`,
+and how long each browser has been hidden, which `lifecycle` and
+`lifecycleChangedAt` tell:
+
+```swift
+for browser in CefRuntime.shared.browsers
+where browser.lifecycle == .hidden && .now - browser.lifecycleChangedAt > .seconds(60 * 60) {
+    try? await browser.discard()
+}
+```
+
+The Browser example's Memory Saver (`Examples/Sources/Browser/TabDiscarding.swift`)
+is a complete one, with exemptions left to the app: a tab the user pinned is
+simply never passed to `discard()`.
 
 Only a browser that is off screen can be discarded: a window tab that is
 not selected, a hidden or minimized window, or a `CefWebView` that is
@@ -794,7 +808,7 @@ same set:
 | Blocker | When |
 |---|---|
 | `.visible` | The browser is on screen. |
-| `.exempt` | `allowsDiscarding` is `false` (pinned tabs, say), or an extension protects the tab. |
+| `.exempt` | Chromium protects the tab: an extension, pinning, or a setting or enterprise policy. |
 | `.notLoaded` | The browser is not open yet, is loading, or shows DevTools itself. |
 | `.playingAudio` | The page plays sound, or did in the last minute. |
 | `.capturingMedia` | The page uses the camera, microphone or screen capture, or is cast. |
@@ -808,9 +822,15 @@ same set:
 A browser that is shown, starts loading or navigates while it is being
 discarded stays loaded, and `discard()` throws.
 
-In a `CefWebView`, audio and form input are read from the main frame's
-`<audio>`, `<video>`, `<input>` and `<textarea>` elements; Chrome-style
-browsers use Chromium's own signals, which cover every frame and Web Audio.
+Every blocker is something Chromium or CefKit knows natively; CefKit does
+not read the page's content to find more. Chrome-style browsers get
+Chromium's own discard rules, which cover audio, form input, picture in
+picture and devices in every frame. A `CefWebView` browser has no such
+rules in Chromium, so its set holds only `.visible`, `.notLoaded`,
+`.capturingMedia`, `.beforeUnloadHandler`, `.devToolsOpen`, `.downloading`
+and `.unknown`: an empty set does not mean the page is silent or has no
+unsent form input. An app that knows more about its pages decides itself
+before calling `discard()`.
 
 `restore()` loads a discarded page at once, even while it is hidden. The
 delegate hears `browserWillDiscard(_:)`, while the page can still be read,
@@ -2653,9 +2673,9 @@ the switches measured and not used.
   dialog and the delegate cannot be chosen per browser. HTTP authentication
   requests without a browser, such as a service worker's, are refused.
 - Chromium's own Memory Saver never discards a CefKit browser, since each
-  is the active tab of its own Chromium window; use
-  `CefRuntime.shared.discardPolicy` instead. A `CefWebView` browser loses its
-  back/forward list when discarded, and Chromium tells tabs apart only by
+  is the active tab of its own Chromium window; call `discard()` from your
+  own policy instead. A `CefWebView` browser loses its back/forward list
+  when discarded, does not report playing audio or form input as blockers, and Chromium tells tabs apart only by
   address and title, so Chrome-style tabs showing the same page under the
   same title cannot be discarded (`.unknown`) until one of them moves on.
 - DevTools opens in a window of its own; there is no docked DevTools.

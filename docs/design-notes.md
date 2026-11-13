@@ -44,6 +44,25 @@ three) on a build without the passkey and Chromium-panel code:
 | After typing in the address field, bookmarking the page and opening the menu bar | 9 | 217 MB | 10 | 305 MB |
 | 40 s later, once the hosts have closed | 6 | 157 MB | 10 | 290 MB |
 
+## Tab discarding: the capability, not a policy
+
+CefKit discards a browser only when asked (`CefBrowser.discard()`) and
+restores it when it is shown or used. An earlier design also had a
+runtime-wide `discardPolicy` with a timer, memory-pressure handling and a
+per-browser exemption; how long a tab may stay hidden, what counts as
+memory pressure and which tabs are exempt are product decisions, so they
+moved to the Browser example (`TabDiscarding.swift`), built from
+`lifecycle`, `lifecycleChangedAt`, `discard()` and Dispatch's memory
+pressure source.
+
+`discardBlockers()` used to read a `CefWebView` browser's main frame by
+script (`<audio>`/`<video>` playing, `<input>`/`<textarea>` edited) to
+guess at audio and form input, since Chromium keeps no discard rules for
+Alloy browsers. That missed frames, Web Audio and editable elements, and
+reading the page is not something the library does. The blocker set now
+holds only what is known natively, and for Alloy browsers says nothing
+about audio or form input; the app decides for pages it knows.
+
 ## Memory settings measured and not used
 
 These were measured on the Minimal example and are not used: they saved

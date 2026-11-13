@@ -179,6 +179,20 @@ private actor ProbeActor {
         #expect(CefBrowser.Lifecycle.active.isVisible && CefBrowser.Lifecycle.passive.isVisible)
         #expect(!CefBrowser.Lifecycle.hidden.isVisible && !CefBrowser.Lifecycle.discarded.isVisible)
     }
+
+    @MainActor @Test func lifecycleChangedAtMovesOnlyWithTheLifecycle() async throws {
+        let browser = CefBrowser()
+        let created = browser.lifecycleChangedAt
+        try await Task.sleep(for: .milliseconds(5))
+        browser.lifecycle = .hidden
+        #expect(browser.lifecycleChangedAt == created)
+        browser.lifecycle = .active
+        let shown = browser.lifecycleChangedAt
+        #expect(shown > created)
+        try await Task.sleep(for: .milliseconds(5))
+        browser.lifecycle = .hidden
+        #expect(browser.lifecycleChangedAt > shown)
+    }
 }
 
 @Suite struct SchemeByteRangeTests {
