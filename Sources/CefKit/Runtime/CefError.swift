@@ -27,6 +27,9 @@ public enum CefError: Error {
     case notInitialized
     /// The browser closed before the operation could complete.
     case browserClosed
+    /// The frame an operation targeted was gone: detached from its
+    /// renderer, or navigated away.
+    case frameDetached
     /// A Chromium operation reported failure. The associated value says which.
     case operationFailed(String)
 }
@@ -68,6 +71,8 @@ extension CefError: CustomStringConvertible {
             return "CefRuntime has not been initialized. Call CefRuntime.shared.initialize() first."
         case .browserClosed:
             return "The browser closed before the operation completed."
+        case .frameDetached:
+            return "The frame was detached before the operation completed."
         case .operationFailed(let detail):
             return detail
         }

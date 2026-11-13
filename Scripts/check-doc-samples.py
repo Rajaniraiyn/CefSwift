@@ -62,6 +62,10 @@ import SwiftUI
 @MainActor var addressField = NSView()
 @MainActor var qrButton = NSView()
 @MainActor var fallbackIcon = NSImage()
+@MainActor var recentDocument: URL? = nil
+@MainActor var nameField = NSView()
+@MainActor var browserView = NSView()
+@MainActor var sendButton = NSView()
 let url = URL(string: "https://example.com")!
 let home = URL(string: "https://example.com")!
 let cookie = HTTPCookie()

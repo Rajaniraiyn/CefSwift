@@ -234,7 +234,9 @@ extension CefOffscreenBrowserView {
     // MARK: Focus
 
     public override func becomeFirstResponder() -> Bool {
-        browser?.hostViewDidBecomeKey()
+        // Tab or Shift-Tab from another control focuses the page's first or
+        // last element.
+        browser?.hostViewDidBecomeKey(selecting: window?.keyViewSelectionDirection ?? .directSelection)
         return super.becomeFirstResponder()
     }
 

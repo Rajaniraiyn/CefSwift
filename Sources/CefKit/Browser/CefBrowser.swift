@@ -270,6 +270,16 @@ public final class CefBrowser: Identifiable {
     /// How the page shown was loaded: TLS, its certificate, insecure
     /// content. `nil` before the first page commits.
     public internal(set) var connectionSecurity: CefConnectionSecurity?
+    /// The page's frames connected to a renderer, the main frame first and
+    /// the others in the order they attached. Empty before the browser is
+    /// created, while it is discarded and after it closes.
+    ///
+    /// ```swift
+    /// let embeds = browser.frames.filter { !$0.isMain }.compactMap(\.url)
+    /// ```
+    public internal(set) var frames: [CefFrame] = []
+    /// The page's top-level frame; `nil` when ``frames`` is empty.
+    public var mainFrame: CefFrame? { frames.first(where: \.isMain) }
 
     /// Whether the page has been unloaded to free its memory, by
     /// ``discard()`` or ``CefRuntime/memorySaver``.
@@ -1325,6 +1335,7 @@ extension CefBrowser {
         canGoBack = false
         canGoForward = false
         isShowingDevTools = false
+        frames = []
         downloadControls = [:]
         passkeyAuthenticator?.stop()
         passkeyAuthenticator = nil

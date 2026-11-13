@@ -172,6 +172,9 @@ final class CefBrowserClient {
         handlers.set(makeKeyboardHandler())
         handlers.set(makeFindHandler())
         handlers.set(makeCommandHandler())
+        handlers.set(makeFrameHandler())
+        handlers.set(makeDialogHandler())
+        handlers.set(makeFocusHandler())
         if offscreenHost != nil {
             handlers.set(makeRenderHandler())
             handlers.set(makeAccessibilityHandler())
@@ -193,6 +196,9 @@ final class CefBrowserClient {
         client.pointee.get_find_handler = { CefBrowserClient.handler($0) }
         client.pointee.get_command_handler = { CefBrowserClient.handler($0) }
         client.pointee.get_render_handler = { CefBrowserClient.handler($0) }
+        client.pointee.get_frame_handler = { CefBrowserClient.handler($0) }
+        client.pointee.get_dialog_handler = { CefBrowserClient.handler($0) }
+        client.pointee.get_focus_handler = { CefBrowserClient.handler($0) }
         client.pointee.on_process_message_received = { s, browser, frame, _, message in
             // Owned before anything can return early.
             let frame = CefRef(adopting: frame)
@@ -313,15 +319,20 @@ final class CefBrowserClient {
         h.pointee.on_load_start = { s, browser, frame, _ in
             let isMain = frame.map { $0.pointee.is_main($0) != 0 } ?? false
             let url = frame.flatMap { CefStringUtil.takingUserFree($0.pointee.get_url($0)) }
+            let id = frame.flatMap { CefStringUtil.takingUserFree($0.pointee.get_identifier($0)) }
             cefRelease(frame)
             CefBrowserClient.run(s, browser, default: ()) { _, b in
+                if let id { b.frameDidUpdate(id, url: url.flatMap(URL.init(string:))) }
                 if isMain { b.mainFrameDidStartLoading(url.flatMap(URL.init(string:))) }
             }
         }
         h.pointee.on_load_end = { s, browser, frame, httpStatus in
             let isMain = frame.map { $0.pointee.is_main($0) != 0 } ?? false
+            let url = frame.flatMap { CefStringUtil.takingUserFree($0.pointee.get_url($0)) }
+            let id = frame.flatMap { CefStringUtil.takingUserFree($0.pointee.get_identifier($0)) }
             cefRelease(frame)
             CefBrowserClient.run(s, browser, default: ()) { _, b in
+                if let id { b.frameDidUpdate(id, url: url.flatMap(URL.init(string:))) }
                 guard isMain, !b.isBootstrapping else { return }
                 b.delegate?.browser(b, didFinishLoadWithStatus: Int(httpStatus))
             }
@@ -352,9 +363,11 @@ final class CefBrowserClient {
         }
         h.pointee.on_address_change = { s, browser, frame, url in
             let isMain = frame.map { $0.pointee.is_main($0) != 0 } ?? false
+            let id = frame.flatMap { CefStringUtil.takingUserFree($0.pointee.get_identifier($0)) }
             cefRelease(frame)
             let url = CefStringUtil.string(from: url)
             CefBrowserClient.run(s, browser, default: ()) { _, b in
+                if let id { b.frameDidUpdate(id, url: URL(string: url)) }
                 if isMain {
                     b.applyURL(url)
                     b.refreshConnectionSecurity()

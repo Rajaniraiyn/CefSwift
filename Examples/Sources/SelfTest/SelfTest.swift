@@ -185,6 +185,7 @@ enum SelfTest {
         ("processes", processChecks),
         ("pdf", pdfChecks),
         ("security", securityChecks),
+        ("pageIntegration", pageIntegrationChecks),
         ("discard", discardChecks),
     ]
 

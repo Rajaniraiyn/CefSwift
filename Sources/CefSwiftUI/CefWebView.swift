@@ -247,6 +247,24 @@ public final class CefWindowedBrowserView: NSView {
         browser.host(windowedIn: self)
     }
 
+    // MARK: Focus
+
+    /// The view stands in the window's key-view loop for its page, so Tab
+    /// and Shift-Tab from the app's controls reach it.
+    public override var acceptsFirstResponder: Bool {
+        browser?.state == .live && browser?.nativeView?.superview === self
+    }
+
+    /// Selected through the key-view loop, it hands focus to the page and
+    /// focuses the page's first element (Tab) or last (Shift-Tab).
+    public override func becomeFirstResponder() -> Bool {
+        guard let browser, super.becomeFirstResponder() else { return false }
+        let direction = window?.keyViewSelectionDirection ?? .directSelection
+        // Once AppKit has finished selecting this view.
+        DispatchQueue.main.async { browser.hostViewDidBecomeKey(selecting: direction) }
+        return true
+    }
+
     func tearDown() {
         guard !isTornDown else { return }
         isTornDown = true

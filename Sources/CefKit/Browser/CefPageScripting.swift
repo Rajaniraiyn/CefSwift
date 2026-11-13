@@ -22,6 +22,9 @@ final class CefPageScripting {
     /// is unique for the browser's lifetime; the renderer tells requests of
     /// different browsers apart by the browser's identifier.
     let pendingEvaluations = CefPendingOperations<CefWirePayload>()
+    /// The frame each evaluation sent to a frame other than the main one
+    /// runs in, by request.
+    private var evaluationFrames: [Int: CefFrame.ID] = [:]
 
     init(browser: CefBrowser) {
         self.browser = browser
@@ -71,8 +74,8 @@ final class CefPageScripting {
     /// as `T`, straight from the reply's payload. Cancelling the calling
     /// task ends the wait with `CancellationError`; the script itself runs
     /// on.
-    func evaluate<T: Decodable>(_ script: String, as type: T.Type = T.self) async throws -> T {
-        try await evaluatedPayload(script).decode(T.self, at: Self.valueOffset)
+    func evaluate<T: Decodable>(_ script: String, as type: T.Type = T.self, in frame: CefFrame.ID? = nil) async throws -> T {
+        try await evaluatedPayload(script, in: frame).decode(T.self, at: Self.valueOffset)
     }
 
     /// Runs `script` and returns its value as `CefJSON`.
@@ -83,18 +86,37 @@ final class CefPageScripting {
     /// Where a reply's value starts: after the header.
     static let valueOffset = CefWireHeader.size
 
-    private func evaluatedPayload(_ script: String) async throws -> CefWirePayload {
+    /// Sends `script` to `frameID`'s renderer, or the main frame's, and
+    /// waits for the reply.
+    private func evaluatedPayload(_ script: String, in frameID: CefFrame.ID?) async throws -> CefWirePayload {
         guard let browser else { throw CefError.browserClosed }
         try await browser.ready()
+        if let frameID, browser.frame(withID: frameID) == nil { throw CefError.frameDetached }
         return try await pendingEvaluations.wait { request in
             var sent = false
             var payload = CefWireBuffer(capacity: script.utf8.count + 64)
             payload.append(header: CefWireHeader(target: Int32(truncatingIfNeeded: request)))
             payload.append(script)
-            browser.withMainFrame { frame in
+            let send = { (frame: UnsafeMutablePointer<cef_frame_t>) in
                 sent = payload.send(CefPageScriptingMessage.evaluate, from: frame, to: PID_RENDERER)
             }
-            if !sent { pendingEvaluations.complete(request, .failure(CefError.browserClosed)) }
+            if let frameID {
+                browser.withFrame(frameID, send)
+                if sent { evaluationFrames[request] = frameID }
+            } else {
+                browser.withMainFrame(send)
+            }
+            if !sent {
+                pendingEvaluations.complete(request, .failure(frameID == nil ? CefError.browserClosed : CefError.frameDetached))
+            }
+        }
+    }
+
+    /// A frame lost its renderer: evaluations still waiting in it fail.
+    func frameDidDetach(_ id: CefFrame.ID) {
+        for (request, frame) in evaluationFrames where frame == id {
+            evaluationFrames[request] = nil
+            pendingEvaluations.complete(request, .failure(CefError.frameDetached))
         }
     }
 
@@ -108,6 +130,7 @@ final class CefPageScripting {
 
     /// Fails every evaluation still waiting: the renderer went away.
     func failPendingEvaluations(_ error: Error = CefError.browserClosed) {
+        evaluationFrames = [:]
         pendingEvaluations.completeAll(.failure(error))
     }
 
@@ -133,6 +156,7 @@ final class CefPageScripting {
             guard let header = try? reader.header() else { return true }
             reader.skipHeader()
             let request = Int(header.target)
+            evaluationFrames[request] = nil
             if header.succeeded != 0 {
                 pendingEvaluations.complete(request, .success(payload))
             } else {

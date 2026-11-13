@@ -80,6 +80,10 @@ public protocol CefBrowserDelegate: AnyObject {
     /// Confirm leaving a page with a `beforeunload` handler. Return `true` to
     /// leave. The default shows a native sheet.
     func browser(_ browser: CefBrowser, confirmLeavingPage isReload: Bool) async -> Bool
+    /// Choose files for a page's file chooser. Return the chosen files, or
+    /// `nil` to cancel. The default shows an `NSOpenPanel` or `NSSavePanel`
+    /// (``CefFileDialogPresenter``) as a sheet.
+    func browser(_ browser: CefBrowser, runFileDialog dialog: CefFileDialog) async -> [URL]?
     /// Resolve a permission request. The default denies.
     func browser(_ browser: CefBrowser, decidePermissionFor request: CefPermissionRequest) async -> CefPermissionDecision
     /// Supply credentials for HTTP/proxy authentication, or `nil` to cancel.
@@ -159,6 +163,9 @@ extension CefBrowserDelegate {
     }
     public func browser(_ browser: CefBrowser, confirmLeavingPage isReload: Bool) async -> Bool {
         await CefDialogPresenter.confirmLeaving(isReload: isReload, in: browser.hostWindow)
+    }
+    public func browser(_ browser: CefBrowser, runFileDialog dialog: CefFileDialog) async -> [URL]? {
+        await CefFileDialogPresenter.present(dialog, in: browser.hostWindow)
     }
     public func browser(_ browser: CefBrowser, decidePermissionFor request: CefPermissionRequest) async -> CefPermissionDecision {
         .deny

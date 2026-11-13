@@ -18,16 +18,19 @@ are `@MainActor`.
   - [Offscreen rendering](#offscreen-rendering)
   - [Swipe navigation](#swipe-navigation)
   - [Offscreen accessibility](#offscreen-accessibility)
+  - [Keyboard focus](#keyboard-focus)
 - [Discarding browsers](#discarding-browsers)
 - [Processes](#processes)
   - [Unresponsive pages](#unresponsive-pages)
 - [JavaScript](#javascript)
+  - [Frames](#frames)
   - [User scripts and style sheets](#user-scripts-and-style-sheets)
   - [Bridge](#bridge)
 - [Decisions](#decisions)
   - [HTTP authentication](#http-authentication)
   - [Navigation and new windows](#navigation-and-new-windows)
   - [Downloads](#downloads)
+  - [File choosers](#file-choosers)
   - [Passkeys](#passkeys)
 - [Context menu](#context-menu)
 - [Building a browser](#building-a-browser)
@@ -688,6 +691,27 @@ points, `offscreenAccessibilityTreeDidChange(_:)` reports each change, and
 and diagnostics, `CefOffscreenBrowserView.didPostAccessibilityNotification`
 reports every notification the view posts.
 
+### Keyboard focus
+
+`CefWindowedBrowserView` and `CefOffscreenBrowserView` take part in the
+window's key-view loop like any control. Tab from the control before the
+view focuses the page's first focusable element, Shift-Tab from the control
+after it the page's last. Tab past the page's last element (or Shift-Tab
+past its first) moves on to the next (or previous) key view outside the
+browser's view:
+
+```swift
+nameField.nextKeyView = browserView
+browserView.nextKeyView = sendButton
+```
+
+Chromium reports a page giving up focus natively (`on_take_focus`). It has
+no call for focusing a page's first or last element, so entering the page
+clears its focused element with one `blur()` in the page's main world and
+presses Tab (or Shift-Tab) for it. An offscreen view of your own calls
+`hostViewDidBecomeKey(selecting:)` with the window's
+`keyViewSelectionDirection` from `becomeFirstResponder()`.
+
 ## Discarding browsers
 
 A browser the user is not looking at can give back its page's memory
@@ -889,6 +913,29 @@ starting audio, a `beforeunload` prompt. `evaluateJavaScript(_:userGesture:
 true)` runs the script as if the user had just clicked. Only the DevTools
 Protocol can do that, so it attaches `devTools` to the browser; see
 [Compatibility with bot protection](#compatibility-with-bot-protection).
+
+### Frames
+
+`browser.frames` lists the page's frames connected to a renderer: the main
+frame first, then each `iframe` in the order it attached. `mainFrame` is
+the top-level one. Each `CefFrame` has an `id`, its `url`, the `name` of
+its `iframe`, `isMain`, and its parent's `parentID`. The list is
+observable and follows Chromium's frame events: an `iframe` appears when it
+attaches and goes when it is removed, and a frame's `url` follows its
+navigations. A cross-site navigation of the main frame replaces it with a
+new frame.
+
+```swift
+for frame in browser.frames where !frame.isMain {
+    let title = try await browser.evaluateJavaScript("document.title", in: frame)
+    print(frame.url as Any, title)
+}
+```
+
+`evaluateJavaScript(_:in:)` and `executeJavaScript(_:in:)` run a script in
+one frame, cross-site frames in other renderer processes included, as the
+main-frame versions do. An evaluation in a frame that is gone, or that
+goes while the script runs, throws `CefError.frameDetached`.
 
 ### User scripts and style sheets
 
@@ -1116,6 +1163,26 @@ func browser(_ browser: CefBrowser, decideDestinationFor download: CefDownload, 
     return .allow(destination: folder.appending(path: suggestedName))
 }
 ```
+
+### File choosers
+
+An `<input type="file">` or `showOpenFilePicker()` asks the delegate,
+with a `CefFileDialog`: its `mode` (`.open`, `.openMultiple`,
+`.openFolder`, `.save`), the page's `title`, a `defaultURL`, and the
+`acceptedTypes` the page lists, each with its `contentTypes` as `UTType`s.
+Return the chosen files, or `nil` to cancel:
+
+```swift
+func browser(_ browser: CefBrowser, runFileDialog dialog: CefFileDialog) async -> [URL]? {
+    if dialog.mode == .open, let recent = recentDocument { return [recent] }
+    return await CefFileDialogPresenter.present(dialog, in: browser.hostWindow)
+}
+```
+
+The default, `CefFileDialogPresenter`, shows an `NSOpenPanel` (or
+`NSSavePanel`) as a sheet on the browser's window, limited to the accepted
+types. A page that navigates away closes the panel as Cancel. CefSwift has
+no API for opening a file panel on the app's behalf: use `NSOpenPanel`.
 
 ### Passkeys
 
