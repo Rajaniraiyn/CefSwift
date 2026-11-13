@@ -227,6 +227,12 @@ final class CefThreadExecutor: SerialExecutor, Sendable {
         return cef_currently_on(thread) != 0
     }
 
+    /// Whether the calling thread is Chromium's own thread or sequence, not
+    /// the private queue: code here may call into CEF.
+    var isOnChromium: Bool {
+        DispatchQueue.getSpecific(key: queueKey) == nil && isCurrent
+    }
+
     // MARK: Running jobs
 
     private func setPhase(_ new: Phase) {

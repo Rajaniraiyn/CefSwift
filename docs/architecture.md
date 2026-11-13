@@ -41,6 +41,9 @@ time, so the Swift modules build without the framework.
 - In a bundle from `cef bundle`, the app executable also links the
   framework, weakly, so dyld loads it at launch and `dlopen` returns the
   library already loaded. See [Loading the framework at launch](#loading-the-framework-at-launch).
+- `ccef_net_error.c` names Chromium's network errors from the vendored
+  `cef_net_error_list.h` (`ccef_net_error_name(-105)` is
+  `"NAME_NOT_RESOLVED"`), without the framework.
 
 Because the API version is pinned, CEF binaries update without changes to
 the Swift code. Adopting newer C APIs is a separate step that moves the pin
@@ -89,6 +92,8 @@ names at run time:
 | `cef_resource_handler_t.get_response_headers`, `cancel` | IO | Read and change the handler's locked state. |
 | `cef_resource_handler_t.open`, `skip`, `read` | Chromium's thread pool (`ThreadPoolForegroundWorker`), in sequence | `open` starts the `CefSchemeHandler` in a task; `read` reads a file, copies buffered bytes or waits for them. |
 | `cef_request_handler_t.get_auth_credentials` | IO | Hops to the main actor for the delegate. CEF calls it only with `--disable-chrome-login-prompt` (`CefAuthenticationPrompt.delegate`, the default); without the switch Chromium shows its own dialog. |
+| `cef_urlrequest_create`; `cef_urlrequest_client_t.on_request_complete`, `on_upload_progress`, `on_download_progress`, `on_download_data`; `cef_urlrequest_t.cancel` | The thread that created the request; CefKit creates it on IO (`Chrome_IOThread`, checked by thread name) | `cef_urlrequest_create` needs a thread with a Chromium task runner and calls back on that thread, which alone may call `cancel`. `URLRequestLoader` is isolated to `CefIOActor` and creates requests there; callbacks enter it with `CefIOActor.assumeIsolated`. Progress closures run there. |
+| `cef_urlrequest_client_t.get_auth_credentials` | IO, whatever thread created the request | Hops to the concurrent executor for `RequestOptions.credential`. |
 | `cef_cookie_visitor_t.visit`, `cef_download_handler_t` | UI | No hop needed. |
 | `cef_render_handler_t`, `cef_accessibility_handler_t`, everything else | UI | `MainActor.assumeIsolated`. |
 | `on_schedule_message_pump_work` | Any | Posts to the main queue. |
@@ -620,6 +625,27 @@ CEF's buffer, once per `read`. A `.file` body is read with `pread(2)`
 into CEF's buffer, with no copy in between. A `.stream` body's chunks
 are copied into CEF's buffer once, and the producer waits while more
 than 1 MB is buffered.
+
+**The app's requests.** `CefProfile.data(for:)` and `bytes(for:)` turn
+a `URLRequest` into a `cef_request_t` (`URLRequestPlan`, tested without
+Chromium) and start a `cef_urlrequest_t` on the profile's request context
+from the IO thread. `on_download_data` hands over a pointer into
+Chromium's buffer, valid for the call. For `data(for:)` it is appended to
+one `Data`, reserved from `Content-Length`, so each byte is copied once.
+For `bytes(for:)` each chunk becomes its own `Data` (one copy) in an
+`AsyncThrowingStream`. `cef_urlrequest_t` has no way to pause a body, and
+blocking the IO thread until the reader catches up is not allowed, so
+the stream counts unread bytes and fails the request with
+`ERR_INSUFFICIENT_RESOURCES` past `streamBufferLimit` (16 MB). Real back
+pressure would need a `cef_thread_t` per stream to block in
+`on_download_data`; a `cef_thread_t` must be stopped and released on the
+thread that created it, which a stream that ends at quit cannot promise.
+A 64 MB body read off the main actor arrives in about 800 chunks, with
+at most 1.5 MB unread and the footprint 1–3 MB higher. The client struct
+owns the loader; the loader holds the `cef_urlrequest_t` until the request
+completes, which breaks the cycle through CEF's reference to the client.
+Quitting cancels requests still running on the IO thread before
+`cef_shutdown()`, and their callers get `CefError.shutDown`.
 
 **DevTools messages.** CEF splits each message into a method and its
 parameters as UTF-8. An event's parameters are parsed, without a copy,

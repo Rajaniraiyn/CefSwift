@@ -162,6 +162,7 @@ enum SelfTest {
         ("browserWindow", browserWindowChecks),
         ("behavior", browserBehaviorChecks),
         ("authentication", authenticationChecks),
+        ("urlRequest", urlRequestChecks),
         ("localization", localizationChecks),
         ("configuration", configurationChecks),
         ("favicon", faviconChecks),

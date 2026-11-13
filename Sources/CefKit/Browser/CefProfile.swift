@@ -370,6 +370,7 @@ public final class CefProfile {
 
     /// Releases every profile's request context, before Chromium shuts down.
     static func releaseRequestContexts() {
+        URLRequestRegistry.shared.cancelAllForShutdown()
         CefObserverRegistration.releaseAll()
         CefTaskManager.shared.releaseForShutdown()
         for profile in all { profile.context = nil }

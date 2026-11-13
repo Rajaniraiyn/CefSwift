@@ -10,6 +10,7 @@
 #include "ccef_capi.h"
 
 #include "ccef_loader.h"
+#include "ccef_net_error.h"
 #include "ccef_object.h"
 #include "ccef_string.h"
 
