@@ -2051,7 +2051,7 @@ are taken up as they are. Set `chromiumSurfacePolicy` before showing the window,
 nothing shows before it applies. Until then Chromium's interface shows as
 it does without the library.
 
-A status bubble or zoom bubble hidden in the window's configuration is
+A status bubble or zoom bubble hidden or custom in the window's configuration is
 switched off in Chromium when the browser is created
 (`cef_browser_settings_t`'s `chrome_status_bubble` and
 `chrome_zoom_bubble`), so Chromium never creates its window, and
