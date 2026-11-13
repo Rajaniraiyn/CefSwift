@@ -273,8 +273,10 @@ final class CompositorStage {
         // The newest block is the one whose successor does not continue it.
         for newest in 0..<16 {
             let code = grid[newest]
-            let matches = (1..<16).allSatisfy { back in
-                grid[(newest - back + 16) % 16] == (code - back + 64) % 64
+            let matches = (1..<16).allSatisfy { (back: Int) -> Bool in
+                let block: Int = (newest - back + 16) % 16
+                let expected: Int = (code - back + 64) % 64
+                return grid[block] == expected
             }
             if matches, code % 16 == newest { return true }
         }

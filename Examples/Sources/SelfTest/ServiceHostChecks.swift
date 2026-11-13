@@ -68,8 +68,12 @@ extension SelfTest {
             async let visits = profile.history.search(limit: 5)
             async let tiles = profile.history.mostVisited()
             async let suggestions = profile.autocomplete.suggestions(for: "selftest")
-            async let icon = profile.history.favicon(for: URL(string: "selftest://edge/favicon.html")!)
-            _ = try await (search, visits, tiles, suggestions, icon)
+            // An image is not `Sendable`, so its call stays on the main actor.
+            let icon = Task { @MainActor in
+                try await profile.history.favicon(for: URL(string: "selftest://edge/favicon.html")!) != nil
+            }
+            _ = try await (search, visits, tiles, suggestions)
+            _ = try await icon.value
             return true
         }
         let hostBrowsers = CefRuntime.shared.openServiceBrowsers

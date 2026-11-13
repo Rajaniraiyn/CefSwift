@@ -356,7 +356,7 @@ extension SelfTest {
     /// Runs `body` while a page shows in a visible window, then closes it.
     /// Chromium's profile file saves (`Bookmarks` among them) wait while
     /// the app shows no page, as a group run on its own may not.
-    static func withVisiblePage<T>(_ body: () async -> T) async -> T {
+    static func withVisiblePage<T>(_ body: @MainActor () async -> T) async -> T {
         let window = CefBrowserWindow(browser: CefBrowser(url: URL(string: "selftest://app/second.html")!))
         window.show()
         _ = await loaded(window.browser, title: "second")
