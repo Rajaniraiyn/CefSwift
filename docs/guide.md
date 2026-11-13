@@ -1508,7 +1508,7 @@ password manager.
 
 Chrome's settings link to Chromium's password manager from Autofill and
 passwords → Passkeys. That tab arrives through
-[`onOpenBrowser`](#tabs-chromium-opens-itself) like the other
+[`onChromeTab`](#tabs-chromium-opens-itself) like the other
 password-manager links.
 
 The Browser example has a Passkeys setting (Chromium or the browser
@@ -1885,15 +1885,15 @@ Chrome's tab strip and toolbar:
 | Tabs restored from an earlier session | none | `.unknown` |
 | A ⌘-click (`.newBackgroundTab`) or ⇧-click (`.newWindow`) in a Chrome-style browser whose delegate answers `.allowNativePopup` | the clicked page's browser | as clicked |
 
-`CefRuntime.shared.onOpenBrowser` decides what happens to each. The request
+`CefRuntime.shared.onChromeTab` decides what happens to each. The request
 carries the browser Chromium created (live, and in `CefRuntime.shared.browsers`),
 the URL it opens, its `CefProfile` (`nil` for one Chromium made itself,
 such as its own incognito profile), the browser whose page asked for it,
 and the disposition. Open the URL in your own UI and answer `.close`, or
-answer `.showInChromium`:
+answer `.showInChromeWindow`:
 
 ```swift
-CefRuntime.shared.onOpenBrowser = { request in
+CefRuntime.shared.onChromeTab = { request in
     // Your tab UI; open it in request.profile, next to request.opener.
     openTab(request.url, inBackground: request.disposition == .newBackgroundTab)
     return .close
@@ -1904,21 +1904,21 @@ Chromium's window, the one holding that browser's view, stays off screen
 until the handler answers; other windows are left alone, and so is a
 Chromium window already on screen that the tab joined. `.close` closes
 the browser, and its window when that window shows no other tab;
-`.showInChromium` shows the window and announces the browser through
+`.showInChromeWindow` shows the window and announces the browser through
 `onBrowserCreated`. CEF cannot move a browser out of Chromium's tab strip,
 so the tab you open is a new browser that starts from the URL: it has no
 back-forward list, and a form submission opened in a new tab loads again
-as a plain request. When `onOpenBrowser` is `nil`, Chromium shows these
+as a plain request. When `onChromeTab` is `nil`, Chromium shows these
 browsers itself. Leave it `nil` in apps that use `openChromeWindow`, whose
 new tabs Chromium opens the same way.
 
 Popups and links with `target=_blank` from a `CefWindow` open in a
 browser view of their own, which `CefWindow.onPopup` adopts with
-its opener and history intact; they never reach `onOpenBrowser`.
+its opener and history intact; they never reach `onChromeTab`.
 
 Every other browser Chromium creates on its own, popups and DevTools
 included, is passed to `CefRuntime.shared.onBrowserCreated`. Assign a
-delegate there to manage it. Browsers that `onOpenBrowser` closes do not
+delegate there to manage it. Browsers that `onChromeTab` closes do not
 reach `onBrowserCreated`. `CefRuntime.shared.browsers` lists every live
 browser.
 

@@ -239,7 +239,7 @@ appear: a popup inherits its opener's delegate, which hears about it through
 `browser(_:didOpen:)`. A browser in one of Chromium's own tabbed windows
 arrives on the default client (`get_default_client`) without a browser
 view, so CEF cannot move it into a `CefWindow`; it goes to
-`CefRuntime.onOpenBrowser` when that is set, with its window kept off
+`CefRuntime.onChromeTab` when that is set, with its window kept off
 screen until the handler answers. Its opener is the browser whose
 `on_open_urlfrom_tab` (⌘- and ⇧-clicks) or `on_before_popup` CefKit left
 to Chromium just before, which CEF does not report itself. The rest are passed to `CefRuntime.onBrowserCreated`.

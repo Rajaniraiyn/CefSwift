@@ -327,11 +327,11 @@ extension SelfTest {
     }
 
     /// The Passkeys button in Chrome's autofill settings opens a tab of
-    /// Chromium's own; it must reach `onOpenBrowser`, not a window.
+    /// Chromium's own; it must reach `onChromeTab`, not a window.
     private static func passkeySettingsChecks() async {
         var opened: [URL] = []
-        CefRuntime.shared.onOpenBrowser = { opened.append($0.url); return .close }
-        defer { CefRuntime.shared.onOpenBrowser = nil }
+        CefRuntime.shared.onChromeTab = { opened.append($0.url); return .close }
+        defer { CefRuntime.shared.onChromeTab = nil }
         let browser = CefBrowser(url: URL(string: "chrome://settings/autofill")!)
         let window = CefWindow(browser: browser)
         window.show()

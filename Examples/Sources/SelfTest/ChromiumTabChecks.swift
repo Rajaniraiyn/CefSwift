@@ -2,21 +2,21 @@ import AppKit
 import CefSwiftUI
 
 /// Browsers Chromium opens in tabbed windows of its own, through
-/// `CefRuntime.onOpenBrowser`.
+/// `CefRuntime.onChromeTab`.
 extension SelfTest {
     static func chromiumTabChecks() async {
-        var requests: [CefOpenBrowserRequest] = []
-        var decision = CefOpenBrowserDecision.close
+        var requests: [CefChromeTabRequest] = []
+        var decision = CefChromeTabDecision.close
         var announced: [CefBrowser] = []
         var wasLive: [Bool] = []
-        CefRuntime.shared.onOpenBrowser = { request in
+        CefRuntime.shared.onChromeTab = { request in
             wasLive.append(request.browser.state == .live && CefRuntime.shared.browsers.contains { $0 === request.browser })
             requests.append(request)
             return decision
         }
         CefRuntime.shared.onBrowserCreated = { announced.append($0) }
         defer {
-            CefRuntime.shared.onOpenBrowser = nil
+            CefRuntime.shared.onChromeTab = nil
             CefRuntime.shared.onBrowserCreated = nil
         }
         var configuration = CefBrowser.Configuration()
@@ -75,7 +75,7 @@ extension SelfTest {
 
         // A Chrome command opens a tab with no page asking for it; this one
         // stays in Chromium's window.
-        decision = .showInChromium
+        decision = .showInChromeWindow
         requests = []
         browser.execute(.newTab)
         _ = await waitUntil { !requests.isEmpty }
@@ -88,7 +88,7 @@ extension SelfTest {
               shown?.opener == nil && shown?.disposition == .unknown && shown?.url.scheme == "chrome"
                   && shown?.profile === configuration.profile,
               detail: "\(String(describing: shown.map { ($0.url, $0.opener?.identifier, $0.disposition) }))")
-        check("Chromium's tabs: answering showInChromium shows Chromium's window and announces the browser",
+        check("Chromium's tabs: answering showInChromeWindow shows Chromium's window and announces the browser",
               visible && announced.contains { $0 === shown?.browser })
         shown?.browser.close(force: true)
         _ = await waitUntil { shown?.browser.state == .closed }
