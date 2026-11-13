@@ -3,7 +3,7 @@ import Foundation
 import Testing
 
 @testable import CefKit
-@testable import CefSwiftUI
+@testable import CefKit
 
 /// How Chromium's roles and attributes appear to AppKit.
 @MainActor

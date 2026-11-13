@@ -1,7 +1,8 @@
 # Guide
 
 Task-oriented reference for CefSwift. Snippets assume `import CefSwiftUI`,
-which re-exports `CefKit`. The runtime, browser, window and profile APIs
+which re-exports `CefKit`; an AppKit app imports `CefKit` alone (see
+[In AppKit](#in-appkit)). The runtime, browser, window and profile APIs
 are `@MainActor`.
 
 - [Starting Chromium](#starting-chromium)
@@ -15,6 +16,7 @@ are `@MainActor`.
 - [Browsers](#browsers)
   - [PDF](#pdf)
 - [Showing a browser](#showing-a-browser)
+  - [In AppKit](#in-appkit)
   - [Offscreen rendering](#offscreen-rendering)
   - [Swipe navigation](#swipe-navigation)
   - [Offscreen accessibility](#offscreen-accessibility)
@@ -601,13 +603,45 @@ goes away.
 | `.windowed` (default) | Chromium's own `NSView` inside yours. Chromium handles input, IME and accessibility. | Most embedding. Nothing can be drawn over the page. |
 | `.offscreen` or `.offscreen(frameRate:)` | Frames composited in a layer. | SwiftUI content over the page, clipping, animation. |
 
-In AppKit, assign the browser to a `CefWindowedBrowserView` or
-`CefOffscreenBrowserView` (both in `CefSwiftUI`), or call
-`browser.host(windowedIn:)` with a view of your own.
-
 Views embed browsers in the Alloy runtime style, which has no `chrome://`
 pages, extensions or history. For those, use a
 [`CefBrowserWindow`](#building-a-browser).
+
+### In AppKit
+
+`CefWindowedBrowserView` and `CefOffscreenBrowserView` are the `NSView`s
+`CefWebView` hosts its browsers in. They are in `CefKit`, so an AppKit app
+depends on the `CefKit` product and imports neither SwiftUI nor
+`CefSwiftUI`. Pick the view that matches the browser's `rendering`:
+
+```swift
+import AppKit
+import CefKit
+
+@MainActor
+final class BrowserWindowController: NSWindowController {
+    let browser = CefBrowser(url: URL(string: "https://swift.org")!)
+
+    init() {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1024, height: 768),
+            styleMask: [.titled, .closable, .resizable, .miniaturizable],
+            backing: .buffered, defer: false)
+        super.init(window: window)
+        window.contentView = CefWindowedBrowserView(browser: browser)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { nil }
+}
+```
+
+Chromium creates the browser once its view is in a window. A view never
+closes its browser: call `close(force:)` when you are done with it.
+Assigning another browser to `browser` shows that one instead, and moving a
+live browser to another view keeps its page. To draw frames or host a
+windowed browser in a view of your own, see
+[Offscreen rendering](#offscreen-rendering) and `browser.host(windowedIn:)`.
 
 ### Offscreen rendering
 

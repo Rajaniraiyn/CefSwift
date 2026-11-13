@@ -39,10 +39,11 @@ let package = Package(
             exclude: ["cefapp.json"]
         ),
         // One page in one host with chosen CefSwift features: the
-        // web-compatibility matrix (Scripts/compat-matrix.py).
+        // web-compatibility matrix (Scripts/compat-matrix.py). AppKit only:
+        // it hosts browsers with CefKit's views and imports no SwiftUI.
         .executableTarget(
             name: "Compat",
-            dependencies: [.product(name: "CefSwiftUI", package: "CefSwift")],
+            dependencies: [.product(name: "CefKit", package: "CefSwift")],
             exclude: ["cefapp.json"]
         ),
         // End-to-end checks against the real Chromium runtime; CI runs it.

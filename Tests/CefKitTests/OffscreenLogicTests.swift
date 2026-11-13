@@ -2,7 +2,7 @@ import AppKit
 import Foundation
 import Testing
 
-@testable import CefSwiftUI
+@testable import CefKit
 
 /// Key codes and menu titles used when forwarding AppKit input to offscreen
 /// browsers.

@@ -46,13 +46,15 @@ let package = Package(
         .target(
             name: "CefHelperStartup"
         ),
-        // Core Swift wrapper over the CEF C API.
+        // Core Swift wrapper over the CEF C API, and the AppKit views that
+        // host a browser (windowed and offscreen).
         .target(
             name: "CefKit",
             dependencies: ["CCef", "CefBase"],
             linkerSettings: [.linkedFramework("AppKit")]
         ),
-        // First-class SwiftUI integration.
+        // SwiftUI integration: `CefWebView`, `CefSwiftApp` and modifiers,
+        // built on CefKit's AppKit host views.
         .target(
             name: "CefSwiftUI",
             dependencies: ["CefKit"]
@@ -81,9 +83,11 @@ let package = Package(
         .testTarget(
             name: "CefPluginTests"
         ),
+        // An AppKit consumer: imports CefKit and AppKit only, without
+        // `@testable`, to prove hosting a browser needs no SwiftUI.
         .testTarget(
-            name: "CefSwiftUITests",
-            dependencies: ["CefSwiftUI"]
+            name: "CefKitAppKitTests",
+            dependencies: ["CefKit"]
         ),
     ],
     cLanguageStandard: .c11

@@ -1,5 +1,4 @@
 import AppKit
-import CefKit
 
 /// Runs `body` on the main actor. AppKit serves accessibility requests on
 /// the main thread, but its accessibility methods are not annotated.

@@ -1,5 +1,4 @@
 import AppKit
-import CefKit
 
 /// How Chromium's roles appear to AppKit, following Chromium's own macOS
 /// mapping (`AXPlatformNodeCocoa`).

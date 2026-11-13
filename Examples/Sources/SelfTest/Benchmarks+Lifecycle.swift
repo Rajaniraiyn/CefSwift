@@ -38,12 +38,10 @@ final class HostedBenchmarkBrowser {
             window.isReleasedWhenClosed = false; window.level = .floating
             let view: NSView
             if host == .windowed {
-                let windowed = CefWindowedBrowserView()
-                windowed.browser = browser
+                let windowed = CefWindowedBrowserView(browser: browser)
                 view = windowed
             } else {
-                let offscreen = CefOffscreenBrowserView()
-                offscreen.browser = browser
+                let offscreen = CefOffscreenBrowserView(browser: browser)
                 view = offscreen
             }
             view.frame = window.contentView!.bounds
@@ -468,11 +466,10 @@ extension Benchmarks {
                 styleMask: [.titled, .resizable, .miniaturizable], backing: .buffered, defer: false)
             window.isReleasedWhenClosed = false; window.level = .floating
             if showFirst { window.makeKeyAndOrderFront(nil) }
-            let view = CefWindowedBrowserView()
+            let browser = CefBrowser(url: URL(string: "selftest://bench/animated.html")!)
+            let view = CefWindowedBrowserView(browser: browser)
             view.frame = window.contentView!.bounds
             window.contentView!.addSubview(view)
-            let browser = CefBrowser(url: URL(string: "selftest://bench/animated.html")!)
-            view.browser = browser
             if !showFirst { window.makeKeyAndOrderFront(nil) }
             _ = await SelfTest.waitUntil { browser.title == "animated" }
             func report(_ label: String) async {

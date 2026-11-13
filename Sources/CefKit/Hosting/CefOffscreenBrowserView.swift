@@ -1,5 +1,4 @@
 import AppKit
-import CefKit
 import Foundation
 
 /// An `NSView` showing an offscreen-rendered browser.
@@ -16,23 +15,29 @@ import Foundation
 /// When its window is occluded or miniaturized, or the view is hidden, the
 /// view tells the browser it is hidden, and Chromium stops painting.
 ///
-/// `CefWebView` uses this for browsers whose ``CefBrowser/Configuration/rendering``
-/// is `.offscreen`; use it directly in AppKit by assigning ``browser``.
+/// Use it for browsers whose ``CefBrowser/Configuration/rendering`` is
+/// `.offscreen`. Chromium creates the browser once the view is in a window.
+/// The view never closes its browser: call ``CefBrowser/close(force:)`` when
+/// you are done with it.
+///
+/// ```swift
+/// var configuration = CefBrowser.Configuration()
+/// configuration.rendering = .offscreen
+/// let browser = CefBrowser(url: URL(string: "https://example.com")!, configuration: configuration)
+/// window.contentView = CefOffscreenBrowserView(browser: browser)
+/// ```
+///
+/// `CefWebView` in CefSwiftUI hosts its offscreen browsers in this view.
 @MainActor
 public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
 
     /// The browser shown in this view. Assigning a browser that is already
-    /// live moves it here from wherever it was shown before.
+    /// live moves it here from wherever it was shown before; assigning `nil`
+    /// stops showing it.
     public var browser: CefBrowser? {
         didSet {
             guard browser !== oldValue else { return }
-            if let oldValue, oldValue.hostView === self {
-                oldValue.hostViewDidHide()
-            }
-            hostBrowserIfPossible()
-            updateVisibility(notifyingBrowser: true)
-            accessibilityBridge.browserDidChange()
-            gestureIndicator = updatedGestureIndicator(gestureIndicator, browser: browser, isAllowed: showsBuiltInGestureIndicator)
+            browserDidChange(from: oldValue)
         }
     }
 
@@ -40,8 +45,8 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
     lazy var accessibilityBridge = CefOffscreenAccessibilityBridge(view: self)
 
     /// Whether the view draws the built-in swipe indicator that
-    /// ``CefBrowser/Configuration/navigationGestureIndicator`` chooses. `CefWebView`
-    /// turns it off for an indicator of the app's own.
+    /// ``CefBrowser/Configuration/navigationGestureIndicator`` chooses. Turn
+    /// it off to draw an indicator of your own.
     public var showsBuiltInGestureIndicator = true {
         didSet {
             gestureIndicator = updatedGestureIndicator(gestureIndicator, browser: browser, isAllowed: showsBuiltInGestureIndicator)
@@ -50,9 +55,9 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
 
     private var gestureIndicator: CefNavigationGestureIndicatorView?
 
-    /// Whether dismantling the view closes its browser. `CefWebView(url:)`
-    /// sets this for the browser it owns.
-    var closesBrowserOnTeardown = false
+    /// Whether ``tearDown()`` closes the browser. `CefWebView(url:)` sets
+    /// this for the browser it owns.
+    package var closesBrowserOnTeardown = false
     private var isTornDown = false
 
     /// Displays the page.
@@ -108,7 +113,10 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
 
     // MARK: Initialization
 
-    public init() {
+    /// Creates a view showing `browser`, whose
+    /// ``CefBrowser/Configuration/rendering`` must be `.offscreen`.
+    public init(browser: CefBrowser) {
+        self.browser = browser
         super.init(frame: .zero)
         wantsLayer = true
         layerContentsRedrawPolicy = .onSetNeedsDisplay
@@ -130,10 +138,21 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
         for compositor in [contentCompositor, popupCompositor] {
             compositor.requestFrame = { [weak self] in self?.browser?.setNeedsDisplay() }
         }
+        browserDidChange(from: nil)
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { nil }
+
+    private func browserDidChange(from oldValue: CefBrowser?) {
+        if let oldValue, oldValue.hostView === self {
+            oldValue.hostViewDidHide()
+        }
+        hostBrowserIfPossible()
+        updateVisibility(notifyingBrowser: true)
+        accessibilityBridge.browserDidChange()
+        gestureIndicator = updatedGestureIndicator(gestureIndicator, browser: browser, isAllowed: showsBuiltInGestureIndicator)
+    }
 
     public override var isFlipped: Bool { true }
     public override var acceptsFirstResponder: Bool { true }
@@ -210,7 +229,9 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
         browser.host(offscreenIn: self, size: bounds.size == .zero ? CGSize(width: 800, height: 600) : bounds.size)
     }
 
-    func tearDown() {
+    /// Stops hosting for good: stops observing the window, closes the
+    /// browser if ``closesBrowserOnTeardown`` is set, and clears ``browser``.
+    package func tearDown() {
         guard !isTornDown else { return }
         isTornDown = true
         removeWindowObservers()

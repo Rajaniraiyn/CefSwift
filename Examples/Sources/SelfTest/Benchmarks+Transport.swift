@@ -36,10 +36,9 @@ extension Benchmarks {
         var configuration = CefBrowser.Configuration()
         configuration.bridges = [bridge]
         let browser = CefBrowser(url: URL(string: "selftest://bench/bridge.html")!, configuration: configuration)
-        let view = CefWindowedBrowserView()
+        let view = CefWindowedBrowserView(browser: browser)
         view.frame = SelfTest.window.contentView!.bounds
         SelfTest.window.contentView!.addSubview(view)
-        view.browser = browser
         defer {
             browser.close(force: true)
             view.removeFromSuperview()
@@ -79,10 +78,9 @@ extension Benchmarks {
 
     static func evaluate() async {
         let browser = CefBrowser(url: URL(string: "selftest://bench/bridge.html")!)
-        let view = CefWindowedBrowserView()
+        let view = CefWindowedBrowserView(browser: browser)
         view.frame = SelfTest.window.contentView!.bounds
         SelfTest.window.contentView!.addSubview(view)
-        view.browser = browser
         defer {
             browser.close(force: true)
             view.removeFromSuperview()
@@ -161,16 +159,15 @@ extension Benchmarks {
             configuration.rendering = .offscreen
             configuration.offscreenAccessibility = .enabled
             let browser = CefBrowser(url: URL(string: "selftest://bench/axlarge.html")!, configuration: configuration)
-            let view = CefOffscreenBrowserView()
+            let view = CefOffscreenBrowserView(browser: browser)
             view.frame = SelfTest.window.contentView!.bounds
-            SelfTest.window.contentView!.addSubview(view)
             CefDiagnostics.reset()
             let meter = MainThreadMeter()
             let memory = MemorySampler()
             memory.start()
             meter.start()
             let start = ContinuousClock.now
-            view.browser = browser
+            SelfTest.window.contentView!.addSubview(view)
             _ = await SelfTest.waitUntil(timeout: .seconds(60)) {
                 browser.accessibilityTree.nodeCount > 15000 && browser.accessibilityTree.isLoaded
             }
@@ -194,10 +191,9 @@ extension Benchmarks {
     static func devToolsEvents() async {
         for run in 1...2 {
             let browser = CefBrowser(url: URL(string: "selftest://bench/bridge.html")!)
-            let view = CefWindowedBrowserView()
+            let view = CefWindowedBrowserView(browser: browser)
             view.frame = SelfTest.window.contentView!.bounds
             SelfTest.window.contentView!.addSubview(view)
-            view.browser = browser
             _ = await SelfTest.waitUntil { browser.title == "bridge" }
             _ = try? await browser.devTools.send("Runtime.enable")
             CefDiagnostics.reset()

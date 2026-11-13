@@ -1,5 +1,4 @@
 import AppKit
-import CefKit
 import Foundation
 
 // Forwards AppKit mouse, scroll and keyboard events to the browser, in view

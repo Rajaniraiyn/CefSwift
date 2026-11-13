@@ -33,8 +33,9 @@ let package = Package(
 )
 ```
 
-`CefSwiftUI` re-exports `CefKit`, the core library. Depend on `CefKit` alone
-only if you host browsers without the views `CefSwiftUI` provides.
+`CefSwiftUI` re-exports `CefKit`, the core library. An AppKit app depends on
+`CefKit` alone: its `CefWindowedBrowserView` and `CefOffscreenBrowserView`
+host a browser without SwiftUI (see [In AppKit](docs/guide.md#in-appkit)).
 
 ### Show a web page
 

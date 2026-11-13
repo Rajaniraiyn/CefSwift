@@ -1,5 +1,4 @@
 import AppKit
-import CefKit
 
 // The view is an `AXGroup` whose child is the page's `AXWebArea`. Chromium
 // builds the page's tree only once an assistive app asks for it (see
