@@ -128,7 +128,7 @@ when dispatched, on one `macos-15` runner:
    then again with the Thread Sanitizer and with the Address Sanitizer.
 7. `Scripts/check-doc-samples.py`: every Swift sample in the README and
    the docs compiles.
-8. Build the Examples package, then bundle SelfTest and run `cef doctor`
+8. Build the Examples package in release, then bundle SelfTest and run `cef doctor`
    on it. The Examples package gets a copy-on-write clone of the
    downloaded archive instead of downloading it again.
 9. Run SelfTest with `SELFTEST_ISOLATED=1` (each group in a process of its
