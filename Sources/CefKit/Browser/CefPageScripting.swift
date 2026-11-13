@@ -90,8 +90,8 @@ final class CefPageScripting {
     private static let valueOffset = CefWireHeader.size
 
     /// Sends `script` to `frameID`'s renderer, or the main frame's, and
-    /// waits for the reply.
-    private func evaluatedPayload(_ script: String, in frameID: CefFrame.ID?) async throws -> CefWirePayload {
+    /// waits for the reply: its header, then the value or the error.
+    func evaluatedPayload(_ script: String, in frameID: CefFrame.ID?) async throws -> CefWirePayload {
         guard let browser else { throw CefError.browserClosed }
         try await browser.ready()
         if let frameID, browser.frame(withID: frameID) == nil { throw CefError.frameDetached }
@@ -113,6 +113,16 @@ final class CefPageScripting {
                 pendingEvaluations.complete(request, .failure(frameID == nil ? CefError.browserClosed : CefError.frameDetached))
             }
         }
+    }
+
+    /// Runs `script` in the main frame without waiting for it: request 0,
+    /// which the renderer does not answer.
+    func evaluateWithoutReply(_ script: String) {
+        guard let browser, browser.state == .live else { return }
+        var payload = CefWireBuffer(capacity: script.utf8.count + 64)
+        payload.append(header: CefWireHeader(target: 0))
+        payload.append(script)
+        browser.withMainFrame { _ = payload.send(CefPageScriptingMessage.evaluate, from: $0, to: PID_RENDERER) }
     }
 
     /// A frame lost its renderer: evaluations still waiting in it fail.

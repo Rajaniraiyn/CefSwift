@@ -1,3 +1,4 @@
+import CefBase
 import Foundation
 
 /// A Chromium WebUI host whose renderer can reach some of Chromium's
@@ -47,7 +48,8 @@ extension CefServiceHost {
     ///       return { handler };
     ///     }
     ///     """)
-    /// let items = try await profile.serviceHosts.call(.downloads, "s => s.handler.getDownloads()")
+    /// let items = try await profile.serviceHosts.call(
+    ///     .downloads, "s => s.handler.getDownloads()", as: [Download].self)
     /// ```
     package struct Module: Sendable {
         package let name: String
@@ -56,7 +58,9 @@ extension CefServiceHost {
         package let hosts: [CefServiceHost]
         /// A JavaScript expression evaluating to `async emit => service`.
         /// `emit(name, payload)` delivers an event to
-        /// ``CefServiceHosts/events(_:_:bufferingPolicy:)``.
+        /// ``CefServiceHosts/events(_:_:bufferingPolicy:)``; while one is
+        /// being delivered, a newer event of the same name replaces the one
+        /// waiting, so a burst costs one message per round trip.
         package let setup: String
 
         package init(name: String, hosts: [CefServiceHost], setup: String) {
@@ -78,7 +82,12 @@ extension CefServiceHost {
 ///   their host, so hosts cannot share one.
 /// - A call that does not finish in time, or a renderer that dies (Chromium
 ///   kills a page that sends a malformed Mojo message), closes the host's
-///   browser; the call throws and the next one starts the host again.
+///   browser; the call throws and the next one starts the host again. A
+///   call marked idempotent whose host stops before answering is made once
+///   more, on a new host.
+/// - Cancelling a call's task resumes it at once with `CancellationError`,
+///   aborts the call's `AbortSignal` in the host, and drops a result that
+///   arrives later without decoding it.
 /// - Service browsers are listed in neither ``CefRuntime/browsers`` nor
 ///   ``CefWindow/all``. Their windows are 1 × 1 point, so their
 ///   compositor allocates next to nothing, and never shown.
@@ -108,6 +117,10 @@ package final class CefServiceHosts: CefShutdownParticipant {
 
     private var subscribers: [String: [UUID: AsyncStream<CefJSON>.Continuation]] = [:]
 
+    /// Progress handlers of the calls in flight, by call.
+    private var progressHandlers: [Int: @MainActor (Data) -> Void] = [:]
+    private var lastCall = 0
+
     init(profile: CefProfile) {
         self.profile = profile
         Self.memoryPressure.watch(self)
@@ -118,26 +131,116 @@ package final class CefServiceHosts: CefShutdownParticipant {
 
     // MARK: Calling
 
-    /// Evaluates `function` — a JavaScript expression of the form
-    /// `async (service, args) => value` — on `module`'s service object with
-    /// `arguments`, and returns its JSON result.
+    /// Calls `function` — a JavaScript expression of the form
+    /// `async (service, args, context) => value` — on `module`'s service
+    /// object with `arguments`, and decodes its value as `Result`.
+    ///
+    /// `context.signal` is an `AbortSignal` that aborts when the calling
+    /// task is cancelled; `context.progress(value)` sends an intermediate
+    /// value to `progress` — one at a time, and a value sent while the one
+    /// before is on its way replaces the one waiting, so a slow consumer
+    /// sees the newest. Neither reaches Swift after the call has returned.
+    ///
+    /// - Parameter isIdempotent: Whether the call may run twice: a call
+    ///   whose host stops before it answers (its renderer crashed, or the
+    ///   host was closed) is then made once more, on a new host. Reads are;
+    ///   changes are not.
+    package func call<Result: Decodable & Sendable, Progress: Decodable>(
+        _ module: CefServiceHost.Module, _ function: String, _ arguments: CefJSON = [:], as type: Result.Type,
+        timeout: Duration = .seconds(15), isIdempotent: Bool = false, progress: @escaping @MainActor (Progress) -> Void
+    ) async throws -> Result {
+        try await call(
+            module, function, arguments, as: type, timeout: timeout, isIdempotent: isIdempotent,
+            onProgress: { (data: Data) in
+                guard let value = try? Self.decodeEncoded(Progress.self, from: data) else { return }
+                progress(value)
+            })
+    }
+
+    /// ``call(_:_:_:as:timeout:isIdempotent:progress:)`` without progress.
+    package func call<Result: Decodable & Sendable>(
+        _ module: CefServiceHost.Module, _ function: String, _ arguments: CefJSON = [:], as type: Result.Type,
+        timeout: Duration = .seconds(15), isIdempotent: Bool = false
+    ) async throws -> Result {
+        try await call(module, function, arguments, as: type, timeout: timeout, isIdempotent: isIdempotent, onProgress: nil)
+    }
+
+    /// Calls `function` and returns its value as `CefJSON`.
     package func call(
         _ module: CefServiceHost.Module, _ function: String, _ arguments: CefJSON = [:], timeout: Duration = .seconds(15)
     ) async throws -> CefJSON {
-        let host = try runningHost(for: module)
-        return try await host.call(module, function, arguments, timeout: timeout)
+        try await call(module, function, arguments, as: CefJSON.self, timeout: timeout)
     }
 
-    /// Evaluates `function` as ``call(_:_:_:timeout:)`` does and decodes its
-    /// result.
-    package func call<Result: Decodable>(
-        _ module: CefServiceHost.Module, _ function: String, _ arguments: CefJSON = [:], as type: Result.Type,
-        timeout: Duration = .seconds(15)
+    private func call<Result: Decodable & Sendable>(
+        _ module: CefServiceHost.Module, _ function: String, _ arguments: CefJSON, as type: Result.Type,
+        timeout: Duration, isIdempotent: Bool, onProgress: (@MainActor (Data) -> Void)?
     ) async throws -> Result {
-        let json = try await call(module, function, arguments, timeout: timeout)
+        let started = CefDiagnostics.start()
+        defer { CefDiagnostics.record(.serviceCall, since: started) }
+        var attempt = 0
+        while true {
+            attempt += 1
+            lastCall += 1
+            let call = lastCall
+            if let onProgress { progressHandlers[call] = onProgress }
+            defer { progressHandlers[call] = nil }
+            let host = try runningHost(for: module)
+            do {
+                return try await host.call(module, function, arguments, call: call, as: type, timeout: timeout)
+            } catch let stopped as CefServiceHostBrowser.HostStopped {
+                guard isIdempotent, attempt == 1, !Task.isCancelled else {
+                    throw CefError.operationFailed(stopped.message)
+                }
+                CefLog.error("service \(module.name): \(stopped.message); calling again on a new host")
+            }
+        }
+    }
+
+    /// An intermediate value from a host, for the call it belongs to.
+    /// A late one, whose call has returned, is dropped undecoded.
+    fileprivate func deliverProgress(call: Int, data: Data) {
+        progressHandlers[call]?(data)
+    }
+
+    /// Decodes `Result` from `payload`, an evaluation's reply whose value
+    /// is the wire encoding the host wrote (`CefServiceHostRuntime`): in
+    /// place, and off the main actor when the reply is large.
+    fileprivate nonisolated static func decode<Result: Decodable & Sendable>(
+        _ type: Result.Type, from payload: CefWirePayload
+    ) async throws -> Result {
         let started = CefDiagnostics.start()
         defer { CefDiagnostics.record(.serviceDecode, since: started) }
-        return try json.decode(Result.self)
+        if payload.bytes.count >= offMainDecodeThreshold {
+            return try await Task.detached(priority: .userInitiated) { try decodeNow(type, from: payload) }.value
+        }
+        return try decodeNow(type, from: payload)
+    }
+
+    /// From this size a reply is decoded off the main actor: from about a
+    /// millisecond of decoding.
+    nonisolated static let offMainDecodeThreshold = 64 << 10
+
+    nonisolated static func decodeNow<Result: Decodable>(_ type: Result.Type, from payload: CefWirePayload) throws -> Result {
+        try withExtendedLifetime(payload) { try decodeValue(type, from: payload.bytes, at: CefWireHeader.size) }
+    }
+
+    /// Decodes `Result` from the value at `offset` in `bytes`: from inside
+    /// it when it is bytes the host encoded, else from the value itself.
+    nonisolated static func decodeValue<Result: Decodable>(
+        _ type: Result.Type, from bytes: UnsafeRawBufferPointer, at offset: Int
+    ) throws -> Result {
+        var reader = CefWireReader(bytes, offset: offset)
+        guard (try? reader.peekTag()) == .bytes else {
+            return try CefWireDecoder(bytes: bytes, offset: offset).decode(type)
+        }
+        _ = try reader.readTag()
+        return try CefWireDecoder(bytes: try reader.readRun()).decode(type)
+    }
+
+    /// Decodes `Result` from wire bytes the host encoded.
+    nonisolated static func decodeEncoded<Result: Decodable>(_ type: Result.Type, from data: Data) throws -> Result {
+        try data.withUnsafeBytes { try CefWireDecoder(bytes: $0).decode(type) }
     }
 
     /// Events `module` emits as `emit(name, payload)`, while one of its hosts
@@ -160,6 +263,7 @@ package final class CefServiceHosts: CefShutdownParticipant {
     }
 
     func deliver(module: String, name: String, payload: CefJSON) {
+        CefDiagnostics.record(.serviceEvent, amount: 0)
         subscribers["\(module)/\(name)"]?.values.forEach { $0.yield(payload) }
     }
 
@@ -257,9 +361,25 @@ final class CefServiceHostBrowser {
     private var isStopped = false
     private let delegate = ServiceBrowserDelegate()
 
-    /// The bridge module events reach Swift through, as
-    /// `window.__cefswiftServiceEvents.event({module, name, payload})`: a
-    /// native V8 function, so the host attaches no DevTools session.
+    /// Whether the document has the runtime (`CefServiceHostRuntime`),
+    /// and the functions it has compiled, by handle. Set as the script
+    /// that installs them is sent: scripts reach the renderer in order.
+    private var hasRuntime = false
+    private var definedFunctions: Set<Int> = []
+
+    /// Each function's handle, by module and source, for every host.
+    private static var handles: [String: Int] = [:]
+
+    /// The host stopped (its renderer died, or it was closed) before the
+    /// call was answered.
+    struct HostStopped: Error {
+        var message: String
+    }
+
+    /// The bridge module events and progress reach Swift through, as
+    /// `window.__cefswiftServiceEvents.event({module, name, payload})` and
+    /// `.progress({call, data})`: native V8 functions, so the host attaches
+    /// no DevTools session.
     private static let eventBridgeName = "__cefswiftServiceEvents"
     private let eventBridge = CefBridge(name: CefServiceHostBrowser.eventBridgeName)
 
@@ -267,6 +387,11 @@ final class CefServiceHostBrowser {
         var module: String
         var name: String
         var payload: CefJSON?
+    }
+
+    private struct ProgressMessage: Decodable {
+        var call: Int
+        var data: Data
     }
 
     init(host: CefServiceHost, services: CefServiceHosts) {
@@ -277,20 +402,22 @@ final class CefServiceHostBrowser {
         eventBridge.handle("event") { [weak self] (event: ModuleEvent) in
             self?.services?.deliver(module: event.module, name: event.name, payload: event.payload ?? .null)
         }
+        eventBridge.handle("progress") { [weak self] (message: ProgressMessage) in
+            self?.services?.deliverProgress(call: message.call, data: message.data)
+        }
     }
 
     fileprivate var isIdle: Bool { callsInProgress == 0 }
 
     fileprivate var liveBrowserIfRunning: CefBrowser? { browser?.state == .live ? browser : nil }
 
-    func call(
-        _ module: CefServiceHost.Module, _ function: String, _ arguments: CefJSON, timeout: Duration
-    ) async throws -> CefJSON {
+    func call<Result: Decodable & Sendable>(
+        _ module: CefServiceHost.Module, _ function: String, _ arguments: CefJSON, call: Int, as type: Result.Type,
+        timeout: Duration
+    ) async throws -> Result {
         callsInProgress += 1
         idleStop?.cancel()
-        let started = CefDiagnostics.start()
         defer {
-            CefDiagnostics.record(.serviceCall, since: started)
             callsInProgress -= 1
             if callsInProgress == 0 { scheduleIdleStop() }
         }
@@ -302,44 +429,64 @@ final class CefServiceHostBrowser {
             CefLog.error("service \(message)")
             self?.stop()
         } _: { [self] in
-            let browser = try await liveBrowser()
+            let browser: CefBrowser
             do {
+                browser = try await liveBrowser()
+            } catch CefError.browserClosed {
+                throw HostStopped(message: "\(module.name): \(host.document) closed while it started")
+            }
+            var redefined = false
+            while true {
                 let encodeStarted = CefDiagnostics.start()
-                let script = Self.script(module, function, arguments)
+                let script = invocation(module, function, arguments, call: call)
                 CefDiagnostics.record(.serviceEncode, since: encodeStarted)
                 CefDiagnostics.record(.serviceRequestBytes, amount: script.utf8.count)
-                return try await browser.evaluateJavaScript(script)
-            } catch let error as CefJavaScriptError {
-                throw CefError.operationFailed("\(module.name): \(error.message)")
-            } catch CefError.browserClosed {
-                throw CefError.operationFailed("\(module.name): \(host.document) stopped responding")
+                do {
+                    let payload = try await browser.pageScripting.evaluatedPayload(script, in: nil)
+                    return try await CefServiceHosts.decode(type, from: payload)
+                } catch is CancellationError {
+                    // The caller has resumed already; the host stops the work.
+                    browser.pageScripting.evaluateWithoutReply("window.__cefswiftServices?.cancel(\(call))")
+                    throw CancellationError()
+                } catch let error as CefJavaScriptError {
+                    if error.message.contains(CefServiceHostRuntime.undefinedFunctionMarker), !redefined {
+                        // The document lost what was installed: install again.
+                        redefined = true
+                        hasRuntime = false
+                        definedFunctions = []
+                        continue
+                    }
+                    if isStopped { throw HostStopped(message: "\(module.name): \(host.document) stopped responding") }
+                    throw CefError.operationFailed("\(module.name): \(error.message)")
+                } catch CefError.browserClosed, CefError.frameDetached {
+                    throw HostStopped(message: "\(module.name): \(host.document) stopped responding")
+                }
             }
         }
     }
 
-    /// Builds the module on first use in this document, then calls
-    /// `function` with it.
-    private static func script(_ module: CefServiceHost.Module, _ function: String, _ arguments: CefJSON) -> String {
-        let name = CefJSON.string(module.name).text
-        return """
-            (async () => {
-              const registry = window.__cefswiftServices ??= {};
-              const emit = (event, payload) => window.\(eventBridgeName)?.event(
-                { module: \(name), name: event, payload: payload ?? null });
-              const service = await (registry[\(name)] ??= (\(module.setup))(emit).catch(error => {
-                delete registry[\(name)];
-                throw error;
-              }));
-              const stats = window.__cefswiftServiceStats ??= { calls: 0, ms: 0 };
-              const started = performance.now();
-              try {
-                return await (\(function))(service, \(arguments.text));
-              } finally {
-                stats.calls += 1;
-                stats.ms += performance.now() - started;
-              }
-            })()
-            """
+    /// The script that calls `function` with `arguments` as call `call`,
+    /// installing the runtime and defining the function first where the
+    /// document has not seen them.
+    private func invocation(_ module: CefServiceHost.Module, _ function: String, _ arguments: CefJSON, call: Int) -> String {
+        let key = "\(module.name)\u{1}\(function)"
+        let handle: Int
+        if let known = Self.handles[key] {
+            handle = known
+        } else {
+            handle = Self.handles.count + 1
+            Self.handles[key] = handle
+        }
+        var script = ""
+        if !hasRuntime {
+            script += CefServiceHostRuntime.bootstrap(eventBridge: Self.eventBridgeName) + ";\n"
+            hasRuntime = true
+        }
+        if definedFunctions.insert(handle).inserted {
+            script += "__cefswiftServices.define(\(handle), \(CefJSON.string(module.name).text), (\(module.setup)), (\(function)));\n"
+        }
+        script += "__cefswiftServices.invoke(\(handle), \(arguments.text), \(call))"
+        return script
     }
 
     private func scheduleIdleStop() {
@@ -447,16 +594,18 @@ private final class ServiceBrowserDelegate: CefBrowserDelegate {
 
 extension CefProfile {
     /// What the running service host called `name` reports about itself:
-    /// its calls and the renderer time they took, and its JavaScript heap.
+    /// its calls and the renderer time they took, the calls in flight and
+    /// those aborted, and its JavaScript heap.
     /// For benchmarks.
     @_spi(Testing) public func serviceHostStatistics(named name: String) async -> CefJSON? {
         guard let browser = serviceHosts.browser(ofHostNamed: name) else { return nil }
         return try? await browser.evaluateJavaScript("""
             ({
-              calls: window.__cefswiftServiceStats?.calls ?? 0,
-              ms: window.__cefswiftServiceStats?.ms ?? 0,
+              calls: window.__cefswiftServices?.stats.calls ?? 0,
+              ms: window.__cefswiftServices?.stats.ms ?? 0,
               heap: performance.memory?.usedJSHeapSize ?? 0,
               inFlight: window.__cefswiftServices?.calls?.size ?? 0,
+              aborts: window.__cefswiftServices?.stats.aborts ?? 0,
             })
             """)
     }

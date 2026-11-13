@@ -79,4 +79,72 @@ struct DeadlineTests {
         #expect(throws: CancellationError.self) { try result.get() }
         stuck.release()
     }
+
+    /// Cancelled from the main thread, as a superseded query is, the caller
+    /// resumes in the same turn rather than after a hop through a new task.
+    @Test func cancellingFromTheMainThreadResumesTheCallerAtOnce() async {
+        let stuck = Stuck()
+        var resumed = false
+        let call = Task { @MainActor in
+            defer { resumed = true }
+            return try await withDeadline(.seconds(30), timeoutError: TimedOut()) {
+                await stuck.wait()
+                return 1
+            }
+        }
+        try? await Task.sleep(for: .milliseconds(20))
+        call.cancel()
+        // The continuation resumed already: the caller runs on its next
+        // turns, without waiting for the stuck operation.
+        for _ in 0..<100 where !resumed { await Task.yield() }
+        #expect(resumed)
+        let result = await call.result
+        #expect(throws: CancellationError.self) { try result.get() }
+        stuck.release()
+    }
+}
+
+/// `CefPendingOperations`: callers waiting for a script's result, a
+/// DevTools reply, a browser's creation.
+@MainActor
+struct PendingOperationsTests {
+    @Test func aCancelledWaiterResumesAtOnceAndItsLateResultIsDropped() async {
+        let pending = CefPendingOperations<Int>()
+        var id = 0
+        let waiter = Task { @MainActor in try await pending.wait { id = $0 } }
+        while id == 0 { await Task.yield() }
+        #expect(pending.count == 1)
+        waiter.cancel()
+        // Cancelled on the main thread: no longer waiting, before any hop.
+        #expect(pending.count == 0)
+        let result = await waiter.result
+        #expect(throws: CancellationError.self) { try result.get() }
+        // The result arriving afterwards finds no one and is dropped.
+        pending.complete(id, .success(1))
+        #expect(pending.count == 0)
+    }
+
+    @Test func aWaiterCancelledBeforeItWaitsNeverRegisters() async {
+        let pending = CefPendingOperations<Int>()
+        var started = false
+        let waiter = Task { @MainActor in
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try await pending.wait { _ in started = true }
+        }
+        let result = await waiter.result
+        #expect(throws: CancellationError.self) { try result.get() }
+        #expect(!started && pending.count == 0)
+    }
+
+    @Test func completingAllResumesEveryWaiter() async {
+        let pending = CefPendingOperations<Int>()
+        let waiters = (0..<100).map { _ in Task { @MainActor in try await pending.wait() } }
+        while pending.count < 100 { await Task.yield() }
+        pending.completeAll(.failure(CefError.browserClosed))
+        for waiter in waiters {
+            let result = await waiter.result
+            #expect(throws: CefError.self) { try result.get() }
+        }
+        #expect(pending.count == 0)
+    }
 }

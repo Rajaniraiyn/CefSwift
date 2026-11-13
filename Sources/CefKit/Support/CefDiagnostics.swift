@@ -35,6 +35,8 @@ import os
         case serviceRequestBytes
         /// Bytes received from service hosts (``Counter/nanoseconds`` holds bytes).
         case serviceReplyBytes
+        /// Events delivered from service hosts.
+        case serviceEvent
     }
 
     /// How offscreen accessibility updates are taken from CEF.

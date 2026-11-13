@@ -433,6 +433,8 @@ final class PageScripting: CefRendererExtension {
         _ request: Int32, from frame: CefRendererFrame, value: V8Value? = nil, error: String? = nil,
         line: Int = 0, column: Int = 0
     ) {
+        // Request 0 wants no answer.
+        guard request != 0 else { return }
         var payload = CefWireBuffer()
         var error = error
         if error == nil {

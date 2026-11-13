@@ -93,6 +93,20 @@ final class ServiceBench {
         await measure("autocomplete query", host: "omnibox", count: 60) {
             _ = try await self.profile.autocomplete.suggestions(for: "selftest edge")
         }
+        var firstResults: [Double] = [], completeResults: [Double] = [], resultCounts: [Double] = []
+        for _ in 0..<40 {
+            let start = ContinuousClock.now
+            var count = 0
+            do {
+                for try await result in profile.autocomplete.results(for: "selftest edge") {
+                    count += 1
+                    if count == 1 { firstResults.append((ContinuousClock.now - start).benchMilliseconds) }
+                    if result.isComplete { completeResults.append((ContinuousClock.now - start).benchMilliseconds) }
+                }
+            } catch { print("bench error \(error)") }
+            resultCounts.append(Double(count))
+        }
+        print("bench services autocomplete stream: first result \(Percentiles(firstResults)); complete \(Percentiles(completeResults)); results a query \(Percentiles(resultCounts))")
         await measure("history search (20)", host: "history", count: 100) {
             _ = try await self.profile.history.search(limit: 20)
         }
@@ -101,6 +115,13 @@ final class ServiceBench {
         }
         await measure("favicon (32 pt)", host: nil, count: 100) {
             _ = try await self.profile.history.favicon(for: self.faviconPage, size: 32)
+        }
+        let pages = (0..<50).map { URL(string: "selftest://edge/favicon.html?\($0 == 0 ? "" : "missing\($0)")")! }
+        await measure("50 favicons in one call", host: nil, count: 20) {
+            _ = try await self.profile.history.favicons(for: pages, size: 16)
+        }
+        await measure("history page (entries(matching:), 50 a page)", host: "history", count: 30) {
+            for try await _ in self.profile.history.entries(matching: "", pageSize: 50) { break }
         }
         await measure("bookmark tree (service)", host: "bookmarks", count: 100) {
             _ = try await self.profile.bookmarks.tree()
@@ -191,6 +212,53 @@ final class ServiceBench {
             }
         }
         await typingRun(texts, label: "200 queries at 20 ms, each cancelling the one before (Task per query)")
+        await typingStream(texts)
+    }
+
+    /// The same typing through `results(following:)`, the latest-wins API.
+    func typingStream(_ texts: [String]) async {
+        let (stream, typed) = AsyncStream.makeStream(of: String.self, bufferingPolicy: .bufferingNewest(1))
+        let meter = MainThreadMeter()
+        let jsBefore = await jsStatistics("omnibox")
+        CefDiagnostics.reset()
+        meter.start()
+        MallocCounter.start()
+        var yielded: [CefAutocomplete.Result] = []
+        var issuedAt: [String: ContinuousClock.Instant] = [:]
+        var firstResult: [String: Double] = [:]
+        let consumer = Task { @MainActor in
+            do {
+                for try await result in self.profile.autocomplete.results(following: stream) {
+                    yielded.append(result)
+                    if firstResult[result.text] == nil, let at = issuedAt[result.text] {
+                        firstResult[result.text] = (ContinuousClock.now - at).benchMilliseconds
+                    }
+                }
+            } catch { print("bench error \(error)") }
+        }
+        var lastIssued = ContinuousClock.now
+        for text in texts {
+            lastIssued = ContinuousClock.now
+            issuedAt[text] = issuedAt[text] ?? lastIssued
+            typed.yield(text)
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        typed.finish()
+        await consumer.value
+        let finalLatency = (ContinuousClock.now - lastIssued).benchMilliseconds
+        let allocations = MallocCounter.stop()
+        meter.stop()
+        try? await Task.sleep(for: .milliseconds(500))
+        let jsAfter = await jsStatistics("omnibox")
+        let last = texts.last ?? ""
+        let finalComplete = yielded.last.map { $0.text == last && $0.isComplete } ?? false
+        let stale = yielded.indices.dropLast().filter { yielded[$0].isComplete && yielded[$0].text == last }.count
+        print(String(
+            format: "bench services typing (results(following:), 200 texts at 20 ms): stream ended %.0f ms after the last text, last element complete for the last text: %@; %d results yielded for %d distinct texts; first result after a text p50 %.1f ms; result decodes %d; renderer calls %d, %.0f ms renderer time; main thread busy %.0f ms (%.1f%%); main-thread allocations %d; pending operations after: %@; in flight in the host after: %d; extra complete results for the last text %d",
+            finalLatency, finalComplete ? "yes" : "NO", yielded.count, Set(yielded.map(\.text)).count,
+            Percentiles(Array(firstResult.values)).percentile(0.5), CefDiagnostics.counter(.serviceDecode).count,
+            jsAfter.calls - jsBefore.calls, jsAfter.ms - jsBefore.ms, meter.busy.benchMilliseconds, meter.busyFraction * 100,
+            allocations, pendingOperations, jsAfter.inFlight, stale))
     }
 
     func typingRun(_ texts: [String], label: String) async {
@@ -202,8 +270,13 @@ final class ServiceBench {
         meter.start()
         MallocCounter.start()
         var lastIssued = ContinuousClock.now
+        var cancelledAt: [String: ContinuousClock.Instant] = [:]
+        var cancellationLatencies: [Double] = []
+        var previousText: String?
         for text in texts {
+            if let previousText { cancelledAt[previousText] = ContinuousClock.now }
             current?.cancel()
+            previousText = text
             let start = ContinuousClock.now
             lastIssued = start
             current = Task { @MainActor in
@@ -211,6 +284,9 @@ final class ServiceBench {
                     let suggestions = try await self.profile.autocomplete.suggestions(for: text)
                     outcomes.append((text, suggestions.count, Task.isCancelled, (ContinuousClock.now - start).benchMilliseconds))
                 } catch {
+                    if error is CancellationError, let at = cancelledAt[text] {
+                        cancellationLatencies.append((ContinuousClock.now - at).benchMilliseconds)
+                    }
                     outcomes.append((text, nil, error is CancellationError, (ContinuousClock.now - start).benchMilliseconds))
                 }
             }
@@ -224,7 +300,7 @@ final class ServiceBench {
         let jsAfter = await jsStatistics("omnibox")
         let delivered = outcomes.filter { ($0.result ?? 0) > 0 }
         let cancelled = outcomes.filter { $0.cancelled }
-        let cancelledTimes = cancelled.map(\.ms)
+        let cancelledTimes = cancellationLatencies
         let decoded = CefDiagnostics.counter(.serviceDecode).count
         print(String(
             format: "bench services typing (%@): last query's result %.0f ms after it was issued; %d of %d queries delivered suggestions, %d ended cancelled (cancellation took %@); results decoded %d; renderer calls %d, %.0f ms renderer time; main thread busy %.0f ms (%.1f%%); main-thread allocations %d; pending operations after: %@; in flight in the host after: %d",

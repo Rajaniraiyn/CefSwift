@@ -319,7 +319,8 @@ public final class CefBookmarks {
     }
 
     private func nodes(_ function: String, _ arguments: CefJSON = [:]) async throws -> [CefBookmark] {
-        try await services.call(Self.module, function, arguments, as: [BookmarkNode].self).map(CefBookmark.init)
+        try await services.call(Self.module, function, arguments, as: [BookmarkNode].self, isIdempotent: true)
+            .map(CefBookmark.init)
     }
 
     private func write(_ function: String, _ arguments: CefJSON) async throws -> CefBookmark {
