@@ -3,10 +3,9 @@ import Security
 import Testing
 
 @testable import CefKit
-@testable import CefPasskeys
 
 /// The authenticators Chromium offers, from made-up signing information.
-@Suite struct PasskeyCapabilitiesTests {
+@Suite struct WebAuthnCapabilitiesTests {
     private func signing(flags: UInt32, team: String? = nil, entitlements: [String: Any] = [:]) -> [String: Any] {
         var info: [String: Any] = [
             kSecCodeInfoIdentifier as String: "com.example.browser",
@@ -18,24 +17,24 @@ import Testing
     }
 
     @Test func unsignedAndAdHocOfferSecurityKeys() {
-        #expect(CefAppCapabilities(signingInformation: nil, infoDictionary: [:]).passkeyAuthenticators == [.securityKey])
-        #expect(CefAppCapabilities(signingInformation: signing(flags: 0x2), infoDictionary: [:]).passkeyAuthenticators
+        #expect(CefAppCapabilities(signingInformation: nil, infoDictionary: [:]).webAuthnAuthenticators == [.securityKey])
+        #expect(CefAppCapabilities(signingInformation: signing(flags: 0x2), infoDictionary: [:]).webAuthnAuthenticators
             == [.securityKey])
     }
 
     @Test func bluetoothUsageEnablesHybrid() {
         let info = ["NSBluetoothAlwaysUsageDescription": "Phones as passkeys"]
         let plain = CefAppCapabilities(signingInformation: signing(flags: 0x2), infoDictionary: info)
-        #expect(plain.passkeyAuthenticators.contains(.hybrid))
+        #expect(plain.webAuthnAuthenticators.contains(.hybrid))
 
         // Under the hardened runtime the Bluetooth entitlement is needed too.
         let hardened = CefAppCapabilities(signingInformation: signing(flags: 0x10002), infoDictionary: info)
         #expect(hardened.isHardenedRuntime)
-        #expect(!hardened.passkeyAuthenticators.contains(.hybrid))
+        #expect(!hardened.webAuthnAuthenticators.contains(.hybrid))
         let entitled = CefAppCapabilities(
             signingInformation: signing(flags: 0x10002, entitlements: ["com.apple.security.device.bluetooth": true]),
             infoDictionary: info)
-        #expect(entitled.passkeyAuthenticators.contains(.hybrid))
+        #expect(entitled.webAuthnAuthenticators.contains(.hybrid))
     }
 
     @Test func iCloudKeychainNeedsAnAppleTeam() {
@@ -45,10 +44,10 @@ import Testing
             ]),
             infoDictionary: [:])
         #expect(selfSigned.teamIdentifier == nil)
-        #expect(!selfSigned.passkeyAuthenticators.contains(.iCloudKeychain))
+        #expect(!selfSigned.webAuthnAuthenticators.contains(.iCloudKeychain))
     }
 
     @Test func theTestRunnerOffersSecurityKeys() {
-        #expect(CefAppCapabilities.current.passkeyAuthenticators.contains(.securityKey))
+        #expect(CefAppCapabilities.current.webAuthnAuthenticators.contains(.securityKey))
     }
 }

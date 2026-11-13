@@ -5,16 +5,16 @@ import CefKit
 import Foundation
 import Observation
 
-/// A piece of Chromium's own interface over a ``CefBrowserWindow``: a
+/// A piece of Chromium's own interface over a ``CefWindow``: a
 /// bubble such as the QR code generator or Cast, a dialog such as the HTTP
 /// sign-in, the find bar, the link status bubble, and others.
 ///
 /// Chromium draws these with its Views toolkit, each in a window of its
-/// own attached to the browser window. ``CefBrowserWindow/chromiumUI``
+/// own attached to the ``CefWindow``. ``CefWindow/chromiumSurfacePolicy``
 /// decides how each kind is presented: as Chromium draws it, anchored under
 /// one of your controls, replaced by your own interface, or hidden. Every
-/// surface that appears is listed in ``CefBrowserWindow/chromiumSurfaces``
-/// and reported to ``CefBrowserWindow/onChromiumSurface``.
+/// surface that appears is listed in ``CefWindow/chromiumSurfaces``
+/// and reported to ``CefWindow/onChromiumSurface``.
 ///
 /// A surface you present yourself (``Presentation/custom``) carries what
 /// your interface needs: the ``browser``, the ``url`` it is about, the
@@ -35,7 +35,7 @@ public final class CefChromiumSurface: Identifiable {
         /// Cast and media routing (``CefChromeCommand/castMedia``).
         case cast
         /// The share menu (``CefChromeCommand/showSharingHub``). Chromium
-        /// shows it only from its own toolbar, so in a ``CefBrowserWindow``
+        /// shows it only from its own toolbar, so in a ``CefWindow``
         /// the command opens macOS's share menu unless you present your own.
         case share
         /// The sign-in dialog for HTTP authentication, with
@@ -68,7 +68,7 @@ public final class CefChromiumSurface: Identifiable {
         case other(String)
 
         /// Whether Chromium would attach the surface to its toolbar, so that
-        /// ``CefBrowserWindow/ChromiumUI/anchor`` applies to it.
+        /// ``CefChromiumSurface/Policy/anchor`` applies to it.
         public var hangsFromToolbar: Bool {
             switch self {
             case .qrCode, .cast, .share, .downloads, .permissionPrompt, .translate, .savePassword, .bookmark,
@@ -87,14 +87,14 @@ public final class CefChromiumSurface: Identifiable {
     /// How a kind of surface is presented.
     public enum Presentation: Sendable {
         /// As Chromium draws it, under its anchor
-        /// (``CefBrowserWindow/ChromiumUI/anchors``, or ``CefBrowserWindow/ChromiumUI/anchor`` for
+        /// (``CefChromiumSurface/Policy/anchors``, or ``CefChromiumSurface/Policy/anchor`` for
         /// surfaces that hang from the toolbar), or where Chromium puts it
         /// when there is none.
         case native
         /// Not shown by Chromium: your own interface instead. The surface
         /// goes to the presenter set with
-        /// ``CefBrowserWindow/setCustomPresentation(for:_:)``, or else to
-        /// ``CefBrowserWindow/onChromiumSurface``.
+        /// ``CefWindow/setCustomPresentation(for:_:)``, or else to
+        /// ``CefWindow/onChromiumSurface``.
         case custom
         /// Not shown at all. Dialogs that ask something are cancelled.
         case hidden
@@ -113,8 +113,8 @@ public final class CefChromiumSurface: Identifiable {
     /// for a custom surface goes; `nil` when there is none. ``position(_:)``
     /// places a window there.
     public var anchorRect: CGRect? {
-        guard let window = browserWindow?.window else { return nil }
-        return browserWindow?.chromiumUI.anchor(for: kind)?.screenRect(in: window)
+        guard let window = parentWindow?.window else { return nil }
+        return parentWindow?.chromiumSurfacePolicy.anchor(for: kind)?.screenRect(in: window)
     }
     /// How the surface is presented.
     public internal(set) var presentation: Presentation = .native
@@ -126,8 +126,8 @@ public final class CefChromiumSurface: Identifiable {
     /// with your own interface from the start. Chromium owns it: move it,
     /// but dismiss it with ``dismiss()``.
     @ObservationIgnored public private(set) weak var window: NSWindow?
-    /// The browser window the surface belongs to.
-    @ObservationIgnored public private(set) weak var browserWindow: CefBrowserWindow?
+    /// The window the surface belongs to. Chromium attaches the surface's ``window`` to it as a child window.
+    @ObservationIgnored public private(set) weak var parentWindow: CefWindow?
 
     public nonisolated var id: ObjectIdentifier { ObjectIdentifier(self) }
 
@@ -136,14 +136,14 @@ public final class CefChromiumSurface: Identifiable {
 
     init(
         kind: Kind, title: String, browser: CefBrowser, url: URL?,
-        window: NSWindow?, browserWindow: CefBrowserWindow
+        window: NSWindow?, parentWindow: CefWindow
     ) {
         self.kind = kind
         self.title = title
         self.browser = browser
         self.url = url
         self.window = window
-        self.browserWindow = browserWindow
+        self.parentWindow = parentWindow
     }
 
     /// Ends the surface. Chromium's surfaces close as pressing Esc in them
@@ -194,9 +194,9 @@ public final class CefChromiumSurface: Identifiable {
     /// Places a window of yours for this surface as Chromium's would be:
     /// beneath the kind's anchor, or else at the top right of the page.
     public func position(_ panel: NSWindow) {
-        guard let parent = browserWindow?.window else { return }
+        guard let parent = parentWindow?.window else { return }
         let size = panel.frame.size
-        if let anchor = browserWindow?.chromiumUI.anchor(for: kind), let origin = anchor.origin(for: size, in: parent) {
+        if let anchor = parentWindow?.chromiumSurfacePolicy.anchor(for: kind), let origin = anchor.origin(for: size, in: parent) {
             panel.setFrameOrigin(origin)
             return
         }
@@ -205,9 +205,9 @@ public final class CefChromiumSurface: Identifiable {
     }
 
     /// Shows macOS's share menu for ``url`` at ``anchorRect``, or at the top
-    /// right of the browser window. What ``Kind/share`` does by default.
+    /// right of the window. What ``Kind/share`` does by default.
     public func showSharingServicePicker() {
-        guard let url, let host = browserWindow?.window?.contentView else { return }
+        guard let url, let host = parentWindow?.window?.contentView else { return }
         let picker = NSSharingServicePicker(items: [url])
         let rect: CGRect
         if let anchorRect, let window = host.window {
@@ -347,32 +347,32 @@ public final class CefChromiumSurface: Identifiable {
         text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
     }
 
-    /// Whether a child window of a browser window is one of Chromium's
+    /// Whether a child window of a ``CefWindow`` is one of Chromium's
     /// surfaces: a Views widget window, not a Chrome-style browser window
     /// such as a popup the app layers over its opener.
     static func isSurfaceWindow(_ window: NSWindow) -> Bool {
         guard let widgetClass = NSClassFromString("NativeWidgetMacNSWindow"), window.isKind(of: widgetClass) else {
             return false
         }
-        if let browserWindowClass = NSClassFromString("CefNSWindow"), window.isKind(of: browserWindowClass) {
+        if let viewsWindowClass = NSClassFromString("CefNSWindow"), window.isKind(of: viewsWindowClass) {
             return false
         }
         return true
     }
 }
 
-extension CefBrowserWindow {
-    /// How a ``CefBrowserWindow`` presents Chromium's own interface: for each
+extension CefChromiumSurface {
+    /// How a ``CefWindow`` presents Chromium's own interface: for each
     /// kind of surface, whether Chromium draws it, you replace it, or it is
     /// hidden, and where it goes.
     ///
     /// ```swift
-    /// window.chromiumUI.anchor = .view(addressField, alignment: .trailing)
-    /// window.chromiumUI.anchors[.qrCode] = .view(qrButton, alignment: .trailing)
-    /// window.chromiumUI[.statusBubble] = .hidden
+    /// window.chromiumSurfacePolicy.anchor = .view(addressField, alignment: .trailing)
+    /// window.chromiumSurfacePolicy.anchors[.qrCode] = .view(qrButton, alignment: .trailing)
+    /// window.chromiumSurfacePolicy[.statusBubble] = .hidden
     /// ```
     @MainActor
-    public struct ChromiumUI {
+    public struct Policy {
         /// Where surfaces that hang from Chrome's toolbar go
         /// (``CefChromiumSurface/Kind/hangsFromToolbar``) when their kind has no
         /// anchor in ``anchors``. `nil` leaves them where Chromium puts them,
@@ -403,13 +403,13 @@ extension CefBrowserWindow {
     }
 }
 extension CefChromiumSurface {
-    /// Where a surface of Chromium's goes in a ``CefBrowserWindow``: beneath a
+    /// Where a surface of Chromium's goes in a ``CefWindow``: beneath a
     /// view or a rectangle of yours, aligned with its leading or trailing edge
     /// or centered on it.
     ///
     /// ```swift
-    /// window.chromiumUI.anchor = .view(addressField, alignment: .trailing)
-    /// window.chromiumUI.anchors[.findBar] = .rect(CGRect(x: 0, y: 700, width: 300, height: 0))
+    /// window.chromiumSurfacePolicy.anchor = .view(addressField, alignment: .trailing)
+    /// window.chromiumSurfacePolicy.anchors[.findBar] = .rect(CGRect(x: 0, y: 700, width: 300, height: 0))
     /// ```
     @MainActor
     public struct Anchor {
@@ -438,7 +438,7 @@ extension CefChromiumSurface {
         /// The gap between the anchor's bottom edge and the surface.
         public var spacing: CGFloat
 
-        /// Beneath `view`, which must be in the browser window, its title bar
+        /// Beneath `view`, which must be in the window, its title bar
         /// and toolbar included. The view is held weakly; once it is gone or
         /// out of the window, surfaces stay where Chromium puts them.
         public static func view(_ view: NSView, alignment: Alignment = .center, spacing: CGFloat = 4) -> CefChromiumSurface.Anchor {
@@ -515,11 +515,11 @@ enum CefSurfaceTracker {
             MainActor.assumeIsolated {
                 // Hidden until it is recognized, so a surface the app
                 // replaces or hides never shows.
-                CefBrowserWindow.owning(parent)?.surfaces.childWindowWillAttach(child)
+                CefWindow.owning(parent)?.surfaces.childWindowWillAttach(child)
             }
             addOriginal?(parent, addSelector, child, order)
             MainActor.assumeIsolated {
-                CefBrowserWindow.owning(parent)?.surfaces.childWindowDidAttach(child)
+                CefWindow.owning(parent)?.surfaces.childWindowDidAttach(child)
             }
         }
 
@@ -528,7 +528,7 @@ enum CefSurfaceTracker {
         let remove: @convention(block) (NSWindow, NSWindow) -> Void = { parent, child in
             removeOriginal?(parent, removeSelector, child)
             MainActor.assumeIsolated {
-                CefBrowserWindow.owning(parent)?.surfaces.childWindowDidDetach(child)
+                CefWindow.owning(parent)?.surfaces.childWindowDidDetach(child)
             }
         }
 

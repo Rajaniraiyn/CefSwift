@@ -166,7 +166,7 @@ public enum CefWindowOpenDecision: Sendable, Equatable {
     /// ``CefBrowserAttachment/preparesBeforeFirstDocument``.
     case allowNativePopup
     /// You opened the content yourself, for example in a new
-    /// ``CefBrowserWindow``; Chromium does nothing more.
+    /// ``CefWindow``; Chromium does nothing more.
     case handled
 
     /// The action taken when the delegate does not implement

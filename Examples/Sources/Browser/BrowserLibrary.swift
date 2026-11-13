@@ -18,7 +18,7 @@ final class BrowserLibrary {
     /// Every bookmarked address, for the star in the address field.
     private(set) var bookmarkedURLs: Set<URL> = []
     /// The most recently visited pages, newest first, one entry per page.
-    private(set) var recentHistory: [CefHistoryEntry] = []
+    private(set) var recentHistory: [CefHistory.Entry] = []
 
     /// Serves the start page (`browser://start/`) its data. Only that page
     /// may call it.
@@ -29,7 +29,7 @@ final class BrowserLibrary {
 
     init() {
         startPageBridge.access = .origins([BrowserPages.startOrigin])
-        startPageBridge.handle("load") { [weak self] (_: CefJSON, call: CefBridgeCall) in
+        startPageBridge.handle("load") { [weak self] (_: CefJSON, call: CefBridge.Call) in
             await self?.startPageContent(isPrivate: call.browser.configuration.profile.map { $0 !== CefProfile.default } ?? false)
         }
         NotificationCenter.default.addObserver(
@@ -127,7 +127,7 @@ final class BrowserLibrary {
     }
 
     private func startPageContent(isPrivate: Bool) async -> StartPageContent {
-        let topSites = isPrivate ? [] : (try? await profile.history.mostVisited()) ?? []
+        let topSites = isPrivate ? [] : (try? await profile.history.topSites()) ?? []
         let recent = (try? await profile.bookmarks.recent(limit: 12)) ?? []
         var frequentlyVisited: [StartPageContent.Site] = []
         for site in topSites.filter({ !BrowserPages.isInternal($0.url) }).prefix(8) {

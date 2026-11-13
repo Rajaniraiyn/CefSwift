@@ -24,8 +24,8 @@ struct EventStreamTests {
     }
 
     @Test func serviceInvalidationsCoalesce() async {
-        let services = CefInternalServices(profile: CefProfile.incognito())
-        let module = CefServiceModule(name: "test", hosts: [], setup: "")
+        let services = CefServiceHosts(profile: CefProfile.incognito())
+        let module = CefServiceHost.Module(name: "test", hosts: [], setup: "")
         let changed = services.events(module, "changed", bufferingPolicy: .bufferingNewest(1))
         for index in 0..<10 { services.deliver(module: "test", name: "changed", payload: .number(Double(index))) }
         var iterator = changed.makeAsyncIterator()

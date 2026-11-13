@@ -157,8 +157,8 @@ ran on the same Mac at the time, so run-to-run spread is wider than in the guide
 |---|---|---|---|
 | Minimal (`.embedded`) | On | 322 ms | 108.6 MiB (102.7–113.0) |
 | Minimal (`.embedded`) | Off (`-sandbox NO`) | 315 ms | 110.6 MiB (90.2–118.2) |
-| Browser (`.browser`) | On | 440 ms | 173.2 MiB (171.1–179.3) |
-| Browser (`.browser`) | Off (`--no-sandbox`) | 384 ms | 162.0 MiB (160.9–165.1) |
+| Browser (`.chrome`) | On | 440 ms | 173.2 MiB (171.1–179.3) |
+| Browser (`.chrome`) | Off (`--no-sandbox`) | 384 ms | 162.0 MiB (160.9–165.1) |
 
 In an earlier pair of Minimal runs, per process: GPU 24.5 MiB sandboxed
 against 21.0 MiB, network service 10.9 against 7.7 MiB, the others within

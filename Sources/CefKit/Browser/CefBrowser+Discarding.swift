@@ -133,7 +133,7 @@ extension CefBrowser {
     /// tabs the user pinned) is the app's policy. ``lifecycle`` and
     /// ``lifecycleChangedAt`` say how long a browser has been hidden.
     ///
-    /// A browser in a ``CefBrowserWindow`` or a Chrome UI window is
+    /// A browser in a ``CefWindow`` or a Chrome UI window is
     /// discarded by Chromium itself and keeps its back/forward list and
     /// scroll position. A browser in a `CefWebView` is discarded by closing
     /// its Chromium browser and creating a new one in the same view when it
@@ -365,7 +365,7 @@ extension CefBrowser {
             if !isDiscarded, isEmbeddedView, let native = nativeView, native.superview !== view { return false }
             window = view.window
         } else {
-            window = CefBrowserWindow.hosting(self)?.window ?? nativeView?.window
+            window = CefWindow.hosting(self)?.window ?? nativeView?.window
         }
         guard let window, !window.isMiniaturized else { return false }
         if window.isVisible { return true }

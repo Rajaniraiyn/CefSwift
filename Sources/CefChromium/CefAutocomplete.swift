@@ -1,49 +1,51 @@
 import CefKit
 import Foundation
 
-/// One ranked suggestion for text typed into an address bar.
-public struct CefAutocompleteSuggestion: Sendable, Identifiable, Hashable {
-    /// Where a suggestion comes from.
-    public enum Kind: Sendable, Hashable {
-        /// The typed text, taken as an address.
-        case typedURL
-        /// A page from history.
-        case history
-        /// A bookmark.
-        case bookmark
-        /// A tab that is already open.
-        case openTab
-        /// A web search for the typed text.
-        case search
-        /// A query suggested by the search engine, or a past search.
-        case searchSuggestion
-        /// A page suggested by the search engine.
-        case navigationSuggestion
-        /// Anything else: calculator answers, actions, clipboard, …
-        case other
-    }
+extension CefAutocomplete {
+    /// One ranked suggestion for text typed into an address bar.
+    public struct Suggestion: Sendable, Identifiable, Hashable {
+        /// Where a suggestion comes from.
+        public enum Kind: Sendable, Hashable {
+            /// The typed text, taken as an address.
+            case typedURL
+            /// A page from history.
+            case history
+            /// A bookmark.
+            case bookmark
+            /// A tab that is already open.
+            case openTab
+            /// A web search for the typed text.
+            case search
+            /// A query suggested by the search engine, or a past search.
+            case searchSuggestion
+            /// A page suggested by the search engine.
+            case navigationSuggestion
+            /// Anything else: calculator answers, actions, clipboard, …
+            case other
+        }
 
-    public var id: String { "\(kind)|\(url?.absoluteString ?? "")|\(text)" }
-    public var kind: Kind
-    /// The main line: an address, or a search query.
-    public var text: String
-    /// The secondary line: a page title or search engine name.
-    public var detail: String
-    /// Where choosing the suggestion navigates (for searches, the results
-    /// page).
-    public var url: URL?
-    /// What an address bar shows when the suggestion is selected.
-    public var replacementText: String
-    /// Text to complete inline after the caret, as Chrome's omnibox does,
-    /// when this is the top suggestion. Empty when there is none.
-    public var inlineCompletion: String
-    /// Chromium's relevance score; higher ranks first within a group.
-    public var relevance: Int
-    /// Whether the suggestion may be the default (top, Return-key) match.
-    public var canBeDefault: Bool
-    public var isBookmarked: Bool
-    /// Whether choosing it runs a search rather than opening a page.
-    public var isSearch: Bool
+        public var id: String { "\(kind)|\(url?.absoluteString ?? "")|\(text)" }
+        public var kind: Kind
+        /// The main line: an address, or a search query.
+        public var text: String
+        /// The secondary line: a page title or search engine name.
+        public var detail: String
+        /// Where choosing the suggestion navigates (for searches, the results
+        /// page).
+        public var url: URL?
+        /// What an address bar shows when the suggestion is selected.
+        public var replacementText: String
+        /// Text to complete inline after the caret, as Chrome's omnibox does,
+        /// when this is the top suggestion. Empty when there is none.
+        public var inlineCompletion: String
+        /// Chromium's relevance score; higher ranks first within a group.
+        public var relevance: Int
+        /// Whether the suggestion may be the default (top, Return-key) match.
+        public var canBeDefault: Bool
+        public var isBookmarked: Bool
+        /// Whether choosing it runs a search rather than opening a page.
+        public var isSearch: Bool
+    }
 }
 
 /// Address-bar suggestions for a ``CefProfile``, ranked by Chromium's own
@@ -61,7 +63,7 @@ public struct CefAutocompleteSuggestion: Sendable, Identifiable, Hashable {
 ///   it is the most likely to change when Chromium updates.
 ///
 /// Search-engine suggestions are fetched over the network like Chrome's
-/// omnibox does; filter on ``CefAutocompleteSuggestion/kind`` to keep only
+/// omnibox does; filter on ``CefAutocomplete/Suggestion/kind`` to keep only
 /// local results.
 @MainActor
 public final class CefAutocomplete {
@@ -84,9 +86,9 @@ public final class CefAutocomplete {
     ///     as Chrome does, so the top suggestion does not complete inline.
     public func suggestions(
         for text: String, currentURL: URL? = nil, allowsInlineCompletion: Bool = true
-    ) async throws -> [CefAutocompleteSuggestion] {
+    ) async throws -> [CefAutocomplete.Suggestion] {
         guard !text.trimmingCharacters(in: .whitespaces).isEmpty else { return [] }
-        return try await profile.services.call(
+        return try await profile.serviceHosts.call(
             Self.module,
             "(s, a) => s.query(a.text, a.url, a.preventInline)",
             [
@@ -94,12 +96,12 @@ public final class CefAutocomplete {
                 "url": .string(currentURL?.absoluteString ?? ""),
                 "preventInline": .bool(!allowsInlineCompletion),
             ]
-        ).decode([MatchRecord]?.self)?.map(CefAutocompleteSuggestion.init) ?? []
+        ).decode([MatchRecord]?.self)?.map(CefAutocomplete.Suggestion.init) ?? []
     }
 
     /// Binds an own `mojom.OmniboxPageHandler` and collects the debug
     /// controller's final response for the latest query.
-    static let module = CefServiceModule(
+    static let module = CefServiceHost.Module(
         name: "omnibox", hosts: [.omnibox],
         setup: """
         async () => {
@@ -156,7 +158,7 @@ private struct MatchRecord: Decodable {
     var isSearch: Bool
 }
 
-extension CefAutocompleteSuggestion {
+extension CefAutocomplete.Suggestion {
     fileprivate init(_ match: MatchRecord) {
         kind =
             switch match.type {

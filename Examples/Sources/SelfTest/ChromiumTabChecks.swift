@@ -2,21 +2,21 @@ import AppKit
 import CefSwiftUI
 
 /// Browsers Chromium opens in tabbed windows of its own, through
-/// `CefRuntime.onOpenBrowser`.
+/// `CefRuntime.onChromeTab`.
 extension SelfTest {
     static func chromiumTabChecks() async {
-        var requests: [CefOpenBrowserRequest] = []
-        var decision = CefOpenBrowserDecision.close
+        var requests: [CefChromeTabRequest] = []
+        var decision = CefChromeTabDecision.close
         var announced: [CefBrowser] = []
         var wasLive: [Bool] = []
-        CefRuntime.shared.onOpenBrowser = { request in
+        CefRuntime.shared.onChromeTab = { request in
             wasLive.append(request.browser.state == .live && CefRuntime.shared.browsers.contains { $0 === request.browser })
             requests.append(request)
             return decision
         }
         CefRuntime.shared.onBrowserCreated = { announced.append($0) }
         defer {
-            CefRuntime.shared.onOpenBrowser = nil
+            CefRuntime.shared.onChromeTab = nil
             CefRuntime.shared.onBrowserCreated = nil
         }
         var configuration = CefBrowser.Configuration()
@@ -24,7 +24,7 @@ extension SelfTest {
         let page = "data:text/html,<title>links</title><a href='selftest://app/second.html' "
             + "style='display:block;width:300px;height:100px'>second</a>"
         let browser = CefBrowser(url: URL(string: page)!, configuration: configuration)
-        let window = CefBrowserWindow(browser: browser)
+        let window = CefWindow(browser: browser)
         window.show()
         defer { window.close() }
         guard await loaded(browser, title: "links", timeout: .seconds(20)) else {
@@ -48,7 +48,7 @@ extension SelfTest {
         unrelated.orderFront(nil)
         var sawChromiumWindow: String?
         let arrived = await waitUntil {
-            let ours = Set(CefBrowserWindow.all.compactMap(\.window).map(ObjectIdentifier.init))
+            let ours = Set(CefWindow.all.compactMap(\.window).map(ObjectIdentifier.init))
             if sawChromiumWindow == nil, let shown = NSApp.windows.first(where: {
                 $0.isVisible && $0.alphaValue > 0.05 && $0.styleMask.contains(.titled) && $0.parent == nil
                     && $0 !== SelfTest.window && $0 !== unrelated && !ours.contains(ObjectIdentifier($0))
@@ -75,7 +75,7 @@ extension SelfTest {
 
         // A Chrome command opens a tab with no page asking for it; this one
         // stays in Chromium's window.
-        decision = .showInChromium
+        decision = .showInChromeWindow
         requests = []
         browser.execute(.newTab)
         _ = await waitUntil { !requests.isEmpty }
@@ -88,7 +88,7 @@ extension SelfTest {
               shown?.opener == nil && shown?.disposition == .unknown && shown?.url.scheme == "chrome"
                   && shown?.profile === configuration.profile,
               detail: "\(String(describing: shown.map { ($0.url, $0.opener?.identifier, $0.disposition) }))")
-        check("Chromium's tabs: answering showInChromium shows Chromium's window and announces the browser",
+        check("Chromium's tabs: answering showInChromeWindow shows Chromium's window and announces the browser",
               visible && announced.contains { $0 === shown?.browser })
         shown?.browser.close(force: true)
         _ = await waitUntil { shown?.browser.state == .closed }

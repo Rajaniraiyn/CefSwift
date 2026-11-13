@@ -5,7 +5,7 @@ import Testing
 @Suite struct ProcessPolicyTests {
     @Test func presetsChooseTheirPolicy() {
         #expect(CefRuntime.Configuration().processPolicy == .automatic)
-        #expect(CefRuntime.Configuration.browser.processPolicy == .automatic)
+        #expect(CefRuntime.Configuration.chrome.processPolicy == .automatic)
         #expect(CefRuntime.Configuration.embedded.processPolicy == .onDemand)
     }
 

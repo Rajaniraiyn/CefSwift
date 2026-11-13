@@ -50,9 +50,8 @@ final class ContentFrameView: NSView {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
 
-/// Holds views over the page's rectangle — the swipe indicator, the app's
-/// status bubble — clipped to its rounded corners, and lets every event
-/// through.
+/// Holds ``CefWindow/pageOverlay`` over the page's rectangle, clipped to
+/// its rounded corners, and lets every event through.
 final class PageOverlayView: NSView {
     var insets = NSEdgeInsets() { didSet { needsLayout = true } }
     var cornerRadius: CGFloat = 0 { didSet { needsLayout = true } }
@@ -69,15 +68,13 @@ final class PageOverlayView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { nil }
 
-    /// Shows `views`, bottom to top, each filling the page.
-    func setViews(_ views: [NSView]) {
-        guard clip.subviews != views else { return }
+    /// Shows `view`, filling the page.
+    func setView(_ view: NSView) {
+        guard clip.subviews != [view] else { return }
         clip.subviews.forEach { $0.removeFromSuperview() }
-        for view in views {
-            view.frame = clip.bounds
-            view.autoresizingMask = [.width, .height]
-            clip.addSubview(view)
-        }
+        view.frame = clip.bounds
+        view.autoresizingMask = [.width, .height]
+        clip.addSubview(view)
     }
 
     override func layout() {
@@ -97,12 +94,12 @@ final class PageOverlayView: NSView {
 /// Owner of a `cef_browser_view_delegate_t`. Popups opened from the view get
 /// a delegate of their own showing Chrome's location bar.
 final class BrowserViewDelegate: Sendable {
-    let toolbar: CefBrowserWindow.Toolbar
+    let toolbar: CefWindow.Toolbar
     /// The window whose page may open popups; UI thread only.
-    private let windowReference: CefWeak<CefBrowserWindow>
-    private var window: CefBrowserWindow? { windowReference.object }
+    private let windowReference: CefWeak<CefWindow>
+    private var window: CefWindow? { windowReference.object }
 
-    init(toolbar: CefBrowserWindow.Toolbar, window: CefBrowserWindow?) {
+    init(toolbar: CefWindow.Toolbar, window: CefWindow?) {
         self.toolbar = toolbar
         windowReference = CefWeak(window)
     }
@@ -156,11 +153,11 @@ final class BrowserViewDelegate: Sendable {
 
 /// Owner of a `cef_window_delegate_t`. Callbacks arrive on the UI thread.
 final class WindowDelegate: Sendable {
-    private let ownerReference: CefWeak<CefBrowserWindow>
-    private var owner: CefBrowserWindow? { ownerReference.object }
+    private let ownerReference: CefWeak<CefWindow>
+    private var owner: CefWindow? { ownerReference.object }
 
     @MainActor
-    init(owner: CefBrowserWindow) {
+    init(owner: CefWindow) {
         ownerReference = CefWeak(owner)
     }
 
@@ -168,7 +165,7 @@ final class WindowDelegate: Sendable {
         _ delegateSelf: UnsafeMutablePointer<S>?,
         _ window: UnsafeMutablePointer<cef_window_t>?,
         default fallback: R,
-        _ body: @MainActor (CefBrowserWindow) -> R
+        _ body: @MainActor (CefWindow) -> R
     ) -> R {
         defer { cefRelease(window) }
         guard let delegate = cefOwner(WindowDelegate.self, delegateSelf) else { return fallback }

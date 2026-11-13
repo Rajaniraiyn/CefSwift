@@ -252,7 +252,7 @@ struct AddressBar: View {
 
     /// Goes where a suggestion leads: an open tab is brought forward, a
     /// search runs on the browser's search engine, a page opens.
-    static func open(_ suggestion: CefAutocompleteSuggestion, in browser: CefBrowser, controller: BrowserController) {
+    static func open(_ suggestion: CefAutocomplete.Suggestion, in browser: CefBrowser, controller: BrowserController) {
         if suggestion.kind == .openTab, let url = suggestion.url, controller.switchToTab(showing: url) { return }
         let destination = suggestion.isSearch ? searchURL(for: suggestion.text) : suggestion.url
         if let destination = destination ?? Self.destination(for: suggestion.replacementText) {

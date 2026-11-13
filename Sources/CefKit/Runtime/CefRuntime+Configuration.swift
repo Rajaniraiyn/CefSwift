@@ -142,7 +142,7 @@ extension CefRuntime {
 
         /// Unpacked extension directories (each containing a `manifest.json`)
         /// to load at startup. Extensions run in Chrome-style browsers
-        /// (``CefBrowserWindow``); more can be installed at runtime from
+        /// (``CefWindow``); more can be installed at runtime from
         /// `chrome://extensions` or the Chrome Web Store.
         public var extensions: [URL] = []
 
@@ -223,11 +223,11 @@ extension CefRuntime {
 
         /// A lean configuration for showing your own web content — an editor, a
         /// preview pane, an app UI. Turns off the parts of Chromium that only a
-        /// general-purpose browser needs, and starts renderer processes only
-        /// when a page needs one (``CefRuntime/ProcessPolicy/onDemand``). Fewer
-        /// background tasks, fewer network requests, lower idle cost.
+        /// general-purpose browser needs. Fewer background tasks, fewer network
+        /// requests, lower idle cost. Compared with ``init()``:
         ///
-        /// Typed options:
+        /// - ``processPolicy``: ``CefRuntime/ProcessPolicy/onDemand``; renderer
+        ///   processes start only when a page needs one.
         /// - ``Services/protectedMedia``: ``CefRuntime/Configuration/Services/ProtectedMedia/disabled``.
         /// - ``Services/componentUpdates``: ``CefRuntime/Setting/disabled``. Content the
         ///   app chooses needs neither the CDM nor the data files the updater
@@ -238,22 +238,22 @@ extension CefRuntime {
         /// - ``Services/translation``, ``Network/preloading``,
         ///   ``Privacy/hyperlinkAuditing``, ``Credentials/passwordSaving`` and
         ///   ``Credentials/autofill``: ``CefRuntime/Setting/disabled``.
-        ///
-        /// Switches:
-        /// - `disable-background-networking`: turns off several subsystems that
-        ///   make requests in the background. Chromium made it for network
+        /// - Switches (``extraCommandLineSwitches``):
+        ///   `disable-background-networking` turns off several subsystems that
+        ///   make requests in the background (Chromium made it for network
         ///   measurements; it does not cover every request Chromium makes on
-        ///   its own.
-        /// - `disable-sync`, `disable-default-apps`: no Chrome Sync, and no
-        ///   default apps installed on first run.
-        /// - `disable-domain-reliability`: no network error reports to Google.
-        /// - `no-first-run`, `no-default-browser-check`: no first-run or
+        ///   its own); `disable-sync` and `disable-default-apps`: no Chrome
+        ///   Sync, and no default apps installed on first run;
+        ///   `disable-domain-reliability`: no network error reports to Google;
+        ///   `no-first-run` and `no-default-browser-check`: no first-run or
         ///   default-browser prompts.
+        /// - ``disabledFeatures``: `MediaRouter` (Cast discovery on the local
+        ///   network), `OptimizationHints` (hints fetched from Google for page
+        ///   loads) and `AutofillServerCommunication` (form field predictions
+        ///   from Google).
         ///
-        /// Features turned off: `MediaRouter` (Cast discovery on the local
-        /// network), `OptimizationHints` (hints fetched from Google for page
-        /// loads) and `AutofillServerCommunication` (form field predictions
-        /// from Google).
+        /// Everything else is as in ``init()``: ``persistsSessionCookies`` is
+        /// off, offscreen rendering is off, and the sandbox is on.
         ///
         /// Set ``Services/protectedMedia`` to ``CefRuntime/Configuration/Services/ProtectedMedia/automatic`` to play
         /// protected media; it turns the component updater back on.
@@ -277,15 +277,27 @@ extension CefRuntime {
             return configuration
         }
 
-        /// A configuration for building a full web browser: persistent session
-        /// state (``persistsSessionCookies``), and none of Chromium's first-run
-        /// or default-browser prompts (`no-first-run`,
-        /// `no-default-browser-check`). Everything else stays as Chromium has
-        /// it and as users set it in `chrome://settings`: extensions, internal
-        /// pages, component updates and Widevine
-        /// (``CefRuntime/Configuration/Services/ProtectedMedia/automatic``), translation, preloading, cookies,
-        /// HTTPS-First, the password manager and autofill.
-        public static var browser: CefRuntime.Configuration {
+        /// Chromium's services as Chrome runs them, with Chrome's session
+        /// behavior: what an app that shows arbitrary sites, with Chrome's
+        /// internal pages and settings, starts from. Compared with ``init()``:
+        ///
+        /// - ``persistsSessionCookies``: on, so session cookies survive a
+        ///   relaunch as they do when Chrome restores a session.
+        /// - Switches (``extraCommandLineSwitches``): `no-first-run` and
+        ///   `no-default-browser-check`, so Chromium shows neither its
+        ///   first-run nor its default-browser prompt.
+        ///
+        /// Everything else is as in ``init()``, which is as Chromium has it
+        /// and as users set it in `chrome://settings`:
+        /// ``processPolicy`` ``CefRuntime/ProcessPolicy/automatic`` (a spare
+        /// renderer is kept running); component updates, Widevine
+        /// (``CefRuntime/Configuration/Services/ProtectedMedia/automatic``) and
+        /// translation on; background networking and Chrome's default features
+        /// on; preloading, third-party cookies, hyperlink auditing, HTTPS-First,
+        /// DNS over HTTPS, the password manager and autofill as Chromium decides;
+        /// extensions and internal pages available to Chrome-style browsers;
+        /// offscreen rendering off; the sandbox on.
+        public static var chrome: CefRuntime.Configuration {
             var configuration = CefRuntime.Configuration()
             configuration.persistsSessionCookies = true
             configuration.extraCommandLineSwitches["no-first-run"] = .some(nil)

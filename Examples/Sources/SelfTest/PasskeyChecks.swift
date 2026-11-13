@@ -35,7 +35,7 @@ extension SelfTest {
         var configuration = CefBrowser.Configuration()
         configuration.attachments = [CefPasskeyController(policy: .app(store), delegate: policy)]
         let browser = CefBrowser(url: url, configuration: configuration)
-        var window: CefBrowserWindow?
+        var window: CefWindow?
         var view: CefWindowedBrowserView?
         if style == "Alloy" {
             let hosted = CefWindowedBrowserView(browser: browser)
@@ -43,7 +43,7 @@ extension SelfTest {
             SelfTest.window.contentView!.addSubview(hosted)
             view = hosted
         } else {
-            window = CefBrowserWindow(browser: browser)
+            window = CefWindow(browser: browser)
             window?.show()
         }
         defer {
@@ -158,8 +158,8 @@ extension SelfTest {
             configuration.attachments = [CefPasskeyController(
                 policy: mode == "disabled" ? .disabled : .app(CefInMemoryPasskeyStore()), delegate: policy)]
             let opener = CefBrowser(url: url, configuration: configuration)
-            let window = CefBrowserWindow(browser: opener)
-            var popups: [CefBrowserWindow] = []
+            let window = CefWindow(browser: opener)
+            var popups: [CefWindow] = []
             window.onPopup = { popup in
                 popups.append(popup)
                 popup.show()
@@ -215,7 +215,7 @@ extension SelfTest {
         var configuration = CefBrowser.Configuration()
         configuration.attachments = [CefPasskeyController(policy: .disabled, delegate: policy)]
         let browser = CefBrowser(url: url, configuration: configuration)
-        let window = CefBrowserWindow(browser: browser)
+        let window = CefWindow(browser: browser)
         window.show()
         _ = await loaded(browser, title: "passkeys", timeout: .seconds(20))
         let start = ContinuousClock.now
@@ -297,7 +297,7 @@ extension SelfTest {
         var configuration = CefBrowser.Configuration()
         configuration.attachments = [CefPasskeyController(policy: .app(store), delegate: policy)]
         let browser = CefBrowser(url: url, configuration: configuration)
-        let window = CefBrowserWindow(browser: browser)
+        let window = CefWindow(browser: browser)
         window.show()
         defer { window.close() }
         guard await loaded(browser, title: "passkeys", timeout: .seconds(20)) else {
@@ -327,13 +327,13 @@ extension SelfTest {
     }
 
     /// The Passkeys button in Chrome's autofill settings opens a tab of
-    /// Chromium's own; it must reach `onOpenBrowser`, not a window.
+    /// Chromium's own; it must reach `onChromeTab`, not a window.
     private static func passkeySettingsChecks() async {
         var opened: [URL] = []
-        CefRuntime.shared.onOpenBrowser = { opened.append($0.url); return .close }
-        defer { CefRuntime.shared.onOpenBrowser = nil }
+        CefRuntime.shared.onChromeTab = { opened.append($0.url); return .close }
+        defer { CefRuntime.shared.onChromeTab = nil }
         let browser = CefBrowser(url: URL(string: "chrome://settings/autofill")!)
-        let window = CefBrowserWindow(browser: browser)
+        let window = CefWindow(browser: browser)
         window.show()
         _ = await waitUntil { browser.title.contains("Autofill") && !browser.isLoading }
         let clicked = await waitUntilAsync {
@@ -352,7 +352,7 @@ extension SelfTest {
         let present = Set(NSApp.windows.filter(\.isVisible).map(ObjectIdentifier.init))
         var sawWindow: String?
         let arrived = await waitUntil {
-            let ours = Set(CefBrowserWindow.all.compactMap(\.window).map(ObjectIdentifier.init))
+            let ours = Set(CefWindow.all.compactMap(\.window).map(ObjectIdentifier.init))
             if sawWindow == nil, let shown = NSApp.windows.first(where: {
                 $0.isVisible && $0.alphaValue > 0.05 && $0.styleMask.contains(.titled) && $0.parent == nil
                     && $0 !== SelfTest.window && !ours.contains(ObjectIdentifier($0)) && !present.contains(ObjectIdentifier($0))

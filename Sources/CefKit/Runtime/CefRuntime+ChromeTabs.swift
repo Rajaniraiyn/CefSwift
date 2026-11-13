@@ -3,7 +3,7 @@ import CCef
 import CefBase
 
 /// A browser Chromium opened in one of its own tabbed windows, passed to
-/// ``CefRuntime/onOpenBrowser``.
+/// ``CefRuntime/onChromeTab``.
 ///
 /// Chromium opens these by itself: a link from `chrome://settings` to the
 /// password manager, a ⌘-click or ⇧-click that a Chrome-style browser's
@@ -12,7 +12,7 @@ import CefBase
 /// from an earlier session. The browser exists and has started loading;
 /// its window is kept off screen until the handler answers.
 @MainActor
-public struct CefOpenBrowserRequest {
+public struct CefChromeTabRequest {
     /// The browser Chromium created. It is live, and listed in
     /// ``CefRuntime/browsers``.
     public let browser: CefBrowser
@@ -29,29 +29,29 @@ public struct CefOpenBrowserRequest {
     public let disposition: CefWindowOpenDisposition
 }
 
-/// The answer to a ``CefOpenBrowserRequest``.
-public enum CefOpenBrowserDecision: Sendable, Equatable {
+/// The answer to a ``CefChromeTabRequest``.
+public enum CefChromeTabDecision: Sendable, Equatable {
     /// Show the browser in Chromium's window, with Chrome's tab strip and
     /// toolbar. The browser then reaches ``CefRuntime/onBrowserCreated``.
-    case showInChromium
+    case showInChromeWindow
     /// Close the browser, and Chromium's window with it unless that window
     /// shows other tabs. Return this once you have opened
-    /// ``CefOpenBrowserRequest/url`` in your own UI.
+    /// ``CefChromeTabRequest/url`` in your own UI.
     case close
 }
 
-@MainActor private var openBrowserHandler: ((CefOpenBrowserRequest) -> CefOpenBrowserDecision)?
+@MainActor private var chromeTabHandler: ((CefChromeTabRequest) -> CefChromeTabDecision)?
 @MainActor private var pendingOpens = CefPendingChromiumOpens()
 
 extension CefRuntime {
     /// Decides what happens to each browser Chromium opens in a tabbed
-    /// window of its own design (see ``CefOpenBrowserRequest``). Open the
+    /// window of its own design (see ``CefChromeTabRequest``). Open the
     /// request's URL in your own window or tab and answer
-    /// ``CefOpenBrowserDecision/close``, or answer
-    /// ``CefOpenBrowserDecision/showInChromium``:
+    /// ``CefChromeTabDecision/close``, or answer
+    /// ``CefChromeTabDecision/showInChromeWindow``:
     ///
     /// ```swift
-    /// CefRuntime.shared.onOpenBrowser = { request in
+    /// CefRuntime.shared.onChromeTab = { request in
     ///     tabs.open(request.url, profile: request.profile, after: request.opener)
     ///     return .close
     /// }
@@ -63,9 +63,9 @@ extension CefRuntime {
     /// browser has no back-forward list yet, and a form submission
     /// (POST) opened in a new tab is loaded again as a plain request.
     ///
-    /// Popups and new tabs a ``CefBrowserWindow`` opens in a view of its
+    /// Popups and new tabs a ``CefWindow`` opens in a view of its
     /// own — `window.open`, and links with `target=_blank` — do not come
-    /// here: ``CefBrowserWindow/onPopup`` takes those browsers themselves,
+    /// here: ``CefWindow/onPopup`` takes those browsers themselves,
     /// with their opener and history. DevTools does not come here either.
     /// Pages CefKit keeps in hidden windows (internal service hosts, for
     /// tab discarding and CefChromium's stores) that Chromium restores
@@ -75,9 +75,9 @@ extension CefRuntime {
     /// it `nil` in apps that use
     /// ``openChromeWindow(url:frame:configuration:delegate:)``, whose new tabs
     /// Chromium opens the same way.
-    public var onOpenBrowser: ((CefOpenBrowserRequest) -> CefOpenBrowserDecision)? {
-        get { openBrowserHandler }
-        set { openBrowserHandler = newValue }
+    public var onChromeTab: ((CefChromeTabRequest) -> CefChromeTabDecision)? {
+        get { chromeTabHandler }
+        set { chromeTabHandler = newValue }
     }
 
     /// Notes that `opener`'s page asked Chromium to open `url`; the browser
@@ -94,18 +94,18 @@ extension CefRuntime {
     }
 
     /// Hands `browser`, which Chromium just created without an opener, to
-    /// ``onOpenBrowser``. Returns whether it did; otherwise the browser is
+    /// ``onChromeTab``. Returns whether it did; otherwise the browser is
     /// announced through ``onBrowserCreated`` at once.
     ///
     /// Either way, a restored service page is closed: Chromium saves the
-    /// hidden windows of ``CefInternalServices`` in its session like any
+    /// hidden windows of ``CefServiceHosts`` in its session like any
     /// other and reopens them after a crash.
     func routeChromiumBrowser(_ browser: CefBrowser, profile: CefProfile?) -> Bool {
         guard browser.opener == nil else { return false }
         let entry = pendingOpens.take(now: .now)
-        guard openBrowserHandler != nil else {
+        guard chromeTabHandler != nil else {
             Task {
-                if let url = await browser.firstNavigationURL(), CefInternalServices.isServicePage(url) {
+                if let url = await browser.firstNavigationURL(), CefServiceHosts.isServicePage(url) {
                     browser.close(force: true)
                 }
             }
@@ -115,18 +115,18 @@ extension CefRuntime {
         Task {
             let url = await browser.firstNavigationURL() ?? entry?.url
             guard browser.state != .closed else { return hider.stop() }
-            guard let url, !CefInternalServices.isServicePage(url), let handler = openBrowserHandler else {
+            guard let url, !CefServiceHosts.isServicePage(url), let handler = chromeTabHandler else {
                 browser.close(force: true)
                 return
             }
-            let request = CefOpenBrowserRequest(
+            let request = CefChromeTabRequest(
                 browser: browser, url: url, profile: profile,
                 opener: entry.flatMap { self.browser(withIdentifier: $0.openerID) },
                 disposition: entry?.disposition ?? .unknown)
             switch handler(request) {
             case .close:
                 browser.close(force: true)
-            case .showInChromium:
+            case .showInChromeWindow:
                 hider.reveal()
                 onBrowserCreated?(browser)
             }

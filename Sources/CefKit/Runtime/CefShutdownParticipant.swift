@@ -8,7 +8,7 @@
 /// were added, then releases the profiles' request contexts and shuts
 /// Chromium down. A participant is called once.
 @MainActor
-package protocol CefShutdownParticipant: AnyObject {
+protocol CefShutdownParticipant: AnyObject {
     /// Release every CEF reference held, and stop anything that would
     /// make new ones.
     func runtimeWillShutDown()

@@ -7,7 +7,7 @@ import Testing
 @Suite struct ProtectedMediaTests {
     @Test func presetsChooseWhetherChromiumFetchesWidevine() {
         #expect(CefRuntime.Configuration().services.protectedMedia == .automatic)
-        #expect(CefRuntime.Configuration.browser.services.protectedMedia == .automatic)
+        #expect(CefRuntime.Configuration.chrome.services.protectedMedia == .automatic)
         #expect(CefRuntime.Configuration.embedded.services.protectedMedia == .disabled)
         // The switch follows the typed options rather than the preset's list.
         #expect(CefRuntime.Configuration.embedded.extraCommandLineSwitches["disable-component-update"] == nil)

@@ -1,10 +1,17 @@
 # Guide
 
-Task-oriented reference for CefSwift. Snippets assume `import CefSwiftUI`,
-which re-exports `CefKit`; an AppKit app imports `CefKit` alone (see
-[In AppKit](#in-appkit)), and passkey snippets also `import CefPasskeys`,
-an optional library product. The runtime, browser, window and profile APIs
-are `@MainActor`.
+Task-oriented reference for CefSwift, a library that embeds CEF in any
+macOS app and exposes CEF's and Chromium's capabilities to Swift. The core,
+`CefKit`, covers the runtime, browsers, profiles, views and windows;
+`CefSwiftUI` adds SwiftUI; `CefPasskeys` and `CefChromium` are optional
+libraries. What a browser product decides (its UI, defaults, when to use a
+capability) is the app's: the Browser example in `Examples/` shows one
+built this way.
+
+Snippets assume `import CefSwiftUI`, which re-exports `CefKit`; an AppKit
+app imports `CefKit` alone (see [In AppKit](#in-appkit)), and passkey and
+Chromium-store snippets also `import CefPasskeys` or `import CefChromium`.
+The runtime, browser, window and profile APIs are `@MainActor`.
 
 - [Starting Chromium](#starting-chromium)
   - [Configuration](#configuration)
@@ -37,7 +44,7 @@ are `@MainActor`.
   - [File choosers](#file-choosers)
   - [Passkeys](#passkeys)
 - [Context menu](#context-menu)
-- [Building a browser](#building-a-browser)
+- [Chrome-style windows](#chrome-style-windows)
   - [Connection security](#connection-security)
   - [Client certificates](#client-certificates)
   - [Toolbar and window](#toolbar-and-window)
@@ -130,7 +137,7 @@ Start from a preset and change what you need:
 | Preset | Use |
 |---|---|
 | `CefRuntime.Configuration.embedded` | Showing your own or trusted web content. Turns off background networking, component updates, Widevine, sync, translation, preloading, hyperlink auditing, password saving and autofill, first-run and default-browser prompts, and starts renderer processes only when a page needs one. |
-| `CefRuntime.Configuration.browser` | A general-purpose browser. Keeps session cookies across launches and skips first-run and default-browser prompts; everything else is as Chromium has it and as users set it in `chrome://settings`, Widevine included. |
+| `CefRuntime.Configuration.chrome` | Arbitrary sites with Chrome's services. Keeps session cookies across launches and skips first-run and default-browser prompts; everything else is as Chromium has it and as users set it in `chrome://settings`, Widevine included. |
 | `CefRuntime.Configuration()` | Chromium's defaults. |
 
 Common options:
@@ -228,7 +235,7 @@ typed option that sets the same preference.
 | `credentials.autofill` | `.automatic`, `.disabled` | `autofill.profile_enabled`, `autofill.credit_card_enabled` | Every profile |
 
 ```swift
-var configuration = CefRuntime.Configuration.browser
+var configuration = CefRuntime.Configuration.chrome
 configuration.privacy.thirdPartyCookies = .block
 configuration.security.httpsFirst = .balanced
 configuration.network.secureDNS = .secure(templates: ["https://dns.example/dns-query{?dns}"])
@@ -327,10 +334,8 @@ describes what the running app's signature, entitlements and Info.plist let
 Chromium do, so the app can adapt its UI:
 
 ```swift
-import CefPasskeys
-
 let capabilities = CefRuntime.shared.capabilities
-if !capabilities.passkeyAuthenticators.contains(.iCloudKeychain) {
+if !capabilities.webAuthnAuthenticators.contains(.iCloudKeychain) {
     // Offer the app's own passkeys (CefPasskeyController) instead.
 }
 ```
@@ -342,7 +347,7 @@ if !capabilities.passkeyAuthenticators.contains(.iCloudKeychain) {
 | `isHardenedRuntime`, `isAppSandboxed` | From the signature's flags and entitlements. |
 | `entitlements`, `keychainAccessGroups` | The entitlements the signature grants. |
 | `usageDescriptions` | The `NS…UsageDescription` keys in the Info.plist. |
-| `passkeyAuthenticators` (CefPasskeys) | `.securityKey`, `.hybrid`, `.touchID`, `.iCloudKeychain`: what Chromium's own passkeys can offer. |
+| `webAuthnAuthenticators` | `.securityKey`, `.hybrid`, `.touchID`, `.iCloudKeychain`: Chromium's native WebAuthn authenticators the app has. |
 | `canLoadWidevine` | Whether the base helper can load Google's Widevine CDM: false for a team-signed hardened helper without `disable-library-validation` (the `protectedMedia` capability). |
 | `resolvedSafeStorage(_:)` | The safe-storage policy Chromium gets for a configured one. |
 
@@ -659,7 +664,7 @@ goes away.
 
 Views embed browsers in the Alloy runtime style, which has no `chrome://`
 pages, extensions or history. For those, use a
-[`CefBrowserWindow`](#building-a-browser).
+[`CefWindow`](#chrome-style-windows).
 
 ### In AppKit
 
@@ -749,40 +754,41 @@ In return the host drives the browser as AppKit drives a view:
 With `CefBrowser.Configuration.allowsBackForwardNavigationGestures`, a two-finger swipe that
 starts sideways (when the system's "Swipe between pages" setting allows it)
 and the dedicated navigation swipe go back and forward, in `CefWebView`,
-both renderings, and in `CefBrowserWindow`, where Chrome's own swipe
+both renderings, and in `CefWindow`, where Chrome's own swipe
 handling does the work. It is off by default everywhere.
 
 While a swipe is in progress, `browser.navigationGestureProgress` moves from
 0 toward -1 (back) or 1 (forward); at ±1 and beyond, releasing navigates.
-`CefBrowser.Configuration.navigationGestureIndicator` chooses what is drawn over the page:
-
-| Indicator | Drawing |
-|---|---|
-| `.automatic` (default) | CefSwift's: a chevron in a circle that slides in from the edge, resists past the commit point, and fills with the accent color once releasing navigates. |
-| `.chromium` | Chrome's own arrow, in `CefBrowserWindow`; `.automatic` elsewhere. |
-| `.hidden` | Nothing; draw your own from `navigationGestureProgress`. |
-
-To replace the indicator with a SwiftUI view:
+Draw an indicator of your own from it. In a `CefWindow`, Chromium shows its
+own arrow unless `CefBrowser.Configuration.showsChromiumNavigationGestureIndicator`
+is turned off; lay yours over the page with `pageOverlay` (or
+`setPageOverlay(_:)` in SwiftUI). Over a `CefWebView`, an `.overlay` does
+it, in both renderings:
 
 ```swift
 CefWebView(browser)
-    .navigationGestureIndicator { progress in
+    .overlay {
+        let progress = browser.navigationGestureProgress
         Image(systemName: progress < 0 ? "chevron.left" : "chevron.right")
             .padding(12)
             .background(.regularMaterial, in: .circle)
             .frame(maxWidth: .infinity, alignment: progress < 0 ? .leading : .trailing)
             .opacity(min(1, abs(progress)))
+            .allowsHitTesting(false)
     }
 
-window.setNavigationGestureIndicator { progress in MyIndicator(progress: progress) }   // a CefBrowserWindow
+browserConfiguration.showsChromiumNavigationGestureIndicator = false   // a CefWindow
+window.setPageOverlay { MyIndicator(browser: window.browser) }
 ```
 
-In AppKit, `CefWindowedBrowserView` and `CefOffscreenBrowserView` turn the
-built-in indicator off with `showsBuiltInGestureIndicator = false`, and
-`CefBrowserWindow.navigationGestureIndicatorView` takes a view of your own.
+In AppKit, place a view of your own over `CefWindowedBrowserView` or
+`CefOffscreenBrowserView`, as a sibling above it, and have it return `nil`
+from `hitTest(_:)`. The Browser example's `SwipeIndicator` is a complete
+one: a chevron that slides in from the edge, resists past the commit
+point and fills with the accent color once releasing navigates.
 
 A view claims a swipe as it begins, when there is history in its direction,
-so the page does not also scroll sideways; in a `CefBrowserWindow`, Chrome
+so the page does not also scroll sideways; in a `CefWindow`, Chrome
 lets the page scroll first and swipes only at its edge.
 
 ### Offscreen accessibility
@@ -928,7 +934,7 @@ just before it was discarded, for a tab preview or to show while it loads.
 
 What a discard keeps:
 
-| | `CefBrowserWindow`, Chrome UI windows | `CefWebView` |
+| | `CefWindow`, Chrome UI windows | `CefWebView` |
 |---|---|---|
 | URL, title, favicon, zoom, profile, delegate | Kept | Kept |
 | Back/forward list | Kept | Starts again from the current page |
@@ -1165,7 +1171,7 @@ struct Person: Codable { var name: String }
 
 let bridge = CefBridge(name: "app")
 bridge.handle("greet") { (person: Person) in "Hello, \(person.name)!" }
-bridge.handle("save") { (document: Document, call: CefBridgeCall) in
+bridge.handle("save") { (document: Document, call: CefBridge.Call) in
     guard call.origin == "https://app.example.com" else { throw AppError.forbidden }
     try documents.save(document)
 }
@@ -1185,7 +1191,7 @@ const stop = app.on("themeChanged", theme => apply(theme));
 - `bridge.emit("themeChanged", theme)` delivers an event to `app.on`
   listeners, in every browser the bridge is attached to or in one
   (`to: browser`).
-- `CefBridgeCall` describes the caller: `browser`, `method`, `origin` and
+- `CefBridge.Call` describes the caller: `browser`, `method`, `origin` and
   `isMainFrame`. The browser process establishes the origin from its own
   record of the frame's address, so neither a page nor a compromised
   renderer can claim another one. `about:blank` and `srcdoc` frames have
@@ -1315,7 +1321,7 @@ Return one of:
 |---|---|
 | `.allowNativePopup` | Chromium opens the window or tab itself. Offscreen browsers cannot, so for them this acts as `.openInCurrentBrowser`, or `.deny` without a URL. |
 | `.openInCurrentBrowser` | Loads the URL in the requesting browser. |
-| `.handled` | You opened it yourself, for example in a new `CefBrowserWindow`. |
+| `.handled` | You opened it yourself, for example in a new `CefWindow`. |
 | `.deny` | Ignores the request. |
 
 `CefWindowOpenDecision.default(for:)`, the default, chooses
@@ -1421,10 +1427,9 @@ it can ([bundling](bundling.md#features)):
 | Chromium's own profile passkeys (Touch ID) | Not available: CEF 156 checks for a keychain access group without a team prefix, which no provisioning profile can authorize. |
 
 An ad hoc signed app gets security keys and, with the Bluetooth key,
-phones. `CefRuntime.shared.capabilities.passkeyAuthenticators`, from
-CefPasskeys, lists what the running app gets. Chromium shows its dialog
+phones. `CefRuntime.shared.capabilities.webAuthnAuthenticators` lists what the running app gets. Chromium shows its dialog
 ("Use your security key with example.com") as a window attached to a
-`CefBrowserWindow`, or as a free-standing window for a `CefWebView`.
+`CefWindow`, or as a free-standing window for a `CefWebView`.
 
 With `.app(store)`, the controller's `delegate`, a `CefPasskeyDelegate`
 it holds weakly, decides each call while the page waits at it:
@@ -1508,7 +1513,7 @@ password manager.
 
 Chrome's settings link to Chromium's password manager from Autofill and
 passwords → Passkeys. That tab arrives through
-[`onOpenBrowser`](#tabs-chromium-opens-itself) like the other
+[`onChromeTab`](#tabs-chromium-opens-itself) like the other
 password-manager links.
 
 The Browser example has a Passkeys setting (Chromium or the browser
@@ -1545,19 +1550,19 @@ and edits the `CefMenuModel` directly, and handle your command IDs in
 `CefMenuModel.userCommandIDs`; `items` use IDs from its start and Inspect
 Element its last ID.
 
-## Building a browser
+## Chrome-style windows
 
-`CefBrowserWindow` is a window with one Chrome-style browser: the full
-Chrome runtime with `chrome://settings`, `chrome://extensions`, history,
+`CefWindow` is a CEF Views window (`cef_window_t`) with one Chrome-style
+browser: the full Chrome runtime with `chrome://settings`, `chrome://extensions`, history,
 downloads, the password manager, autofill, extensions and PDF viewing.
 Chromium provides Chrome style only in windows it creates, so the window owns
 its `NSWindow` instead of living in a SwiftUI scene.
 
 ```swift
 let browser = CefBrowser(url: home, delegate: controller)
-var configuration = CefBrowserWindow.Configuration()
+var configuration = CefWindow.Configuration()
 configuration.tabbingIdentifier = "tabs"
-let window = CefBrowserWindow(browser: browser, configuration: configuration)
+let window = CefWindow(browser: browser, configuration: configuration)
 window.setToolbar {
     NavigationButtons(browser: browser)   // beside the window buttons
 } principal: {
@@ -1586,13 +1591,13 @@ struct TabIcon: View {
 }
 ```
 
-The window starts hidden; call `show()`. `CefBrowserWindow.all` lists the
+The window starts hidden; call `show()`. `CefWindow.all` lists the
 open windows and keeps them alive, `close()` closes one (its page's
 `beforeunload` handler may keep it open), and `onClose` runs after it is
 destroyed. `window.window` is the `NSWindow`: Chromium owns its lifetime,
 and its frame, title, ordering and tabbing are yours.
 
-`CefBrowserWindow.Configuration`:
+`CefWindow.Configuration`:
 
 | Property | Effect |
 |---|---|
@@ -1695,9 +1700,26 @@ equivalents and menus behave as in any AppKit window. `contentInsets`
 reserves space around the page for native views; the window background
 shows around a page with insets or rounded corners.
 
+Over the page, `pageOverlay` takes one view of your own (`setPageOverlay(_:)`
+from SwiftUI): a swipe indicator, a status bubble, a banner. It is sized to
+the page, clipped to its corners, and never receives events, so clicks and
+scrolls reach the page. To show several, put them in one view:
+
+```swift
+window.setPageOverlay {
+    ZStack {
+        LinkStatus(browser: window.browser)     // views that read the browser's state in body
+        MyIndicator(browser: window.browser)
+    }
+}
+```
+
+As with the toolbar, the closure runs once: views in it that show browser
+state read it in their own `body`.
+
 ### Tabs
 
-Each `CefBrowserWindow` holds one browser. A tabbed browser is one window per
+Each `CefWindow` holds one browser. A tabbed browser is one window per
 tab, grouped by a shared `tabbingIdentifier`. To show the "+" button in the
 native tab bar, implement `newWindowForTab(_:)` in your app delegate. To put
 a new tab in a specific group, call `addTabbedWindow(_:ordered:)` on a window
@@ -1705,9 +1727,9 @@ of that group with the new `window.window`.
 
 ### Popups
 
-When a page in a `CefBrowserWindow` opens a popup (`window.open` with window
+When a page in a `CefWindow` opens a popup (`window.open` with window
 features, sign-in flows) and the delegate lets Chromium open it, the popup
-arrives through `onPopup` as a hidden `CefBrowserWindow` of its own, still
+arrives through `onPopup` as a hidden `CefWindow` of its own, still
 connected to its opener. `popup.browser.popupFeatures` holds the origin and
 size the page asked for, and `popup.browser.opener` is the opening browser.
 Without `onPopup`, Chromium shows the popup in a window of its own design
@@ -1751,7 +1773,7 @@ and `showsPageActionIcons`.
 
 ### Chromium's own interface
 
-Chromium shows some of its interface over a `CefBrowserWindow` in windows
+Chromium shows some of its interface over a `CefWindow` in windows
 of its own: bubbles such as the QR code generator and Cast, the HTTP
 sign-in dialog, the find bar, the status bubble with a hovered link's
 address. Without Chrome's toolbar, Chromium hangs the toolbar's bubbles
@@ -1760,7 +1782,7 @@ from the top right of the page. That is all CefKit does with them.
 The optional `CefChromium` library
 (`.product(name: "CefChromium", package: "CefSwift")`) lets the app take
 them over. They are surfaces, `CefChromiumSurface`, of a `Kind`, and
-`window.chromiumUI` decides, per kind, how each is presented:
+`window.chromiumSurfacePolicy` decides, per kind, how each is presented:
 
 | Presentation | Effect |
 |---|---|
@@ -1773,20 +1795,20 @@ Anchors put Chromium's surfaces under your controls:
 ```swift
 import CefChromium
 
-window.chromiumUI.anchor = .view(addressField, alignment: .trailing)  // every toolbar surface
-window.chromiumUI.anchors[.qrCode] = .view(qrButton, alignment: .trailing)
-window.chromiumUI[.statusBubble] = .hidden
+window.chromiumSurfacePolicy.anchor = .view(addressField, alignment: .trailing)  // every toolbar surface
+window.chromiumSurfacePolicy.anchors[.qrCode] = .view(qrButton, alignment: .trailing)
+window.chromiumSurfacePolicy[.statusBubble] = .hidden
 ```
 
 CefChromium recognizes surfaces by overriding methods of Chromium's
 private AppKit classes (`CefNSWindow`, `NativeWidgetMacNSWindow`) and by
 the class names Chromium's views report through accessibility, so it is
 bound to the pinned CEF; SelfTest fails when an update renames them. It
-starts following surfaces, in every browser window, the first time the app
-uses any of its window API (`chromiumUI`, `configuration.chromiumUI`,
-`chromiumSurfaces`, `setCustomPresentation(for:_:)`, `statusBubbleView`,
+starts following surfaces, in every `CefWindow`, the first time the app
+uses any of its window API (`chromiumSurfacePolicy`, `configuration.chromiumSurfacePolicy`,
+`chromiumSurfaces`, `setCustomPresentation(for:_:)`, `setStatusBubble(_:)`,
 `chromiumSurfaceAnchor(_:alignment:)`, …); surfaces already on screen then
-are taken up as they are. Set `chromiumUI` before showing the window, so
+are taken up as they are. Set `chromiumSurfacePolicy` before showing the window, so
 nothing shows before it applies. Until then Chromium's interface shows as
 it does without the library.
 
@@ -1795,14 +1817,16 @@ switched off in Chromium when the browser is created
 (`cef_browser_settings_t`'s `chrome_status_bubble` and
 `chrome_zoom_bubble`), so Chromium never creates its window, and
 `browser.statusText` still follows the pointer. Hidden later, through
-`window.chromiumUI`, Chromium's window is created and kept invisible:
+`window.chromiumSurfacePolicy`, Chromium's window is created and kept invisible:
 
 ```swift
-var configuration = CefBrowserWindow.Configuration()
-var ui = CefBrowserWindow.ChromiumUI()
-ui[.statusBubble] = .hidden
-configuration.chromiumUI = ui              // window.chromiumUI starts as this
-let window = CefBrowserWindow(browser: browser, configuration: configuration)
+import CefChromium
+
+var configuration = CefWindow.Configuration()
+var policy = CefChromiumSurface.Policy()
+policy[.statusBubble] = .hidden
+configuration.chromiumSurfacePolicy = policy              // window.chromiumSurfacePolicy starts as this
+let window = CefWindow(browser: browser, configuration: configuration)
 ```
 
 In SwiftUI, mark the views in your toolbar:
@@ -1834,7 +1858,7 @@ Chromium's window is hidden before it is seen. In SwiftUI:
 
 ```swift
 window.setFindBar { session in FindBar(session: session) }      // under the toolbar, as in Safari
-window.setStatusBubble { text in StatusBubble(text: text) }      // over the page
+window.setStatusBubble { text in StatusBubble(text: text) }      // over the page, as its pageOverlay
 window.setCustomPresentation(for: .qrCode) { surface in         // in a panel at the kind's anchor
     QRCodeView(url: surface.url).frame(width: 200, height: 200).padding()
 }
@@ -1848,7 +1872,7 @@ A surface carries what a replacement needs: `kind`, `title`, `browser`,
 `url` (the address a QR code encodes, or the page's), `anchorRect`,
 `position(_:)` to place a window of yours as Chromium would, and
 `dismiss()`. A panel from the SwiftUI method closes on Esc, on a click
-elsewhere, and when the surface is dismissed. `presentationForSurface`
+elsewhere, and when the surface is dismissed. `presentationForChromiumSurface`
 decides per surface as it appears, `chromiumSurfaces` lists those on
 screen, and `onChromiumSurface` hears about each one, custom ones without
 a presenter included.
@@ -1860,7 +1884,7 @@ a presenter included.
 | Cast | `.cast` | Yes | `url`; `CefMediaRouter.shared` lists `sinks` and `routes` and casts Cast apps and presentation URLs | Mirroring a tab needs Chromium's dialog. |
 | Share | `.share` | No: Chromium's share menu needs its toolbar | `url`, `title` | By default the command opens macOS's share menu at the anchor. |
 | HTTP sign-in | `.signIn` | Yes | No: the credentials go to Chromium's dialog | Only with `authenticationPrompt = .chromium`; by default the delegate answers. Dismissing cancels the sign-in. |
-| Status bubble | `.statusBubble` | Yes | `browser.statusText` | `setStatusBubble(_:)` or `statusBubbleView`. Not anchorable. |
+| Status bubble | `.statusBubble` | Yes | `browser.statusText` | `setStatusBubble(_:)`, or `.hidden` and your own `pageOverlay`. Not anchorable. |
 | Fullscreen notice | `.fullscreenNotice` | Yes | `browser.isFullscreen` | |
 | Downloads | `.downloads` | Yes | `browser.downloads` and the delegate's download decisions | |
 | Permission prompt | `.permissionPrompt` | No | `browser(_:decidePermissionFor:)` | CefSwift answers every request through the delegate. |
@@ -1885,15 +1909,15 @@ Chrome's tab strip and toolbar:
 | Tabs restored from an earlier session | none | `.unknown` |
 | A ⌘-click (`.newBackgroundTab`) or ⇧-click (`.newWindow`) in a Chrome-style browser whose delegate answers `.allowNativePopup` | the clicked page's browser | as clicked |
 
-`CefRuntime.shared.onOpenBrowser` decides what happens to each. The request
+`CefRuntime.shared.onChromeTab` decides what happens to each. The request
 carries the browser Chromium created (live, and in `CefRuntime.shared.browsers`),
 the URL it opens, its `CefProfile` (`nil` for one Chromium made itself,
 such as its own incognito profile), the browser whose page asked for it,
 and the disposition. Open the URL in your own UI and answer `.close`, or
-answer `.showInChromium`:
+answer `.showInChromeWindow`:
 
 ```swift
-CefRuntime.shared.onOpenBrowser = { request in
+CefRuntime.shared.onChromeTab = { request in
     // Your tab UI; open it in request.profile, next to request.opener.
     openTab(request.url, inBackground: request.disposition == .newBackgroundTab)
     return .close
@@ -1904,21 +1928,21 @@ Chromium's window, the one holding that browser's view, stays off screen
 until the handler answers; other windows are left alone, and so is a
 Chromium window already on screen that the tab joined. `.close` closes
 the browser, and its window when that window shows no other tab;
-`.showInChromium` shows the window and announces the browser through
+`.showInChromeWindow` shows the window and announces the browser through
 `onBrowserCreated`. CEF cannot move a browser out of Chromium's tab strip,
 so the tab you open is a new browser that starts from the URL: it has no
 back-forward list, and a form submission opened in a new tab loads again
-as a plain request. When `onOpenBrowser` is `nil`, Chromium shows these
+as a plain request. When `onChromeTab` is `nil`, Chromium shows these
 browsers itself. Leave it `nil` in apps that use `openChromeWindow`, whose
 new tabs Chromium opens the same way.
 
-Popups and links with `target=_blank` from a `CefBrowserWindow` open in a
-browser view of their own, which `CefBrowserWindow.onPopup` adopts with
-its opener and history intact; they never reach `onOpenBrowser`.
+Popups and links with `target=_blank` from a `CefWindow` open in a
+browser view of their own, which `CefWindow.onPopup` adopts with
+its opener and history intact; they never reach `onChromeTab`.
 
 Every other browser Chromium creates on its own, popups and DevTools
 included, is passed to `CefRuntime.shared.onBrowserCreated`. Assign a
-delegate there to manage it. Browsers that `onOpenBrowser` closes do not
+delegate there to manage it. Browsers that `onChromeTab` closes do not
 reach `onBrowserCreated`. `CefRuntime.shared.browsers` lists every live
 browser.
 
@@ -2189,7 +2213,7 @@ let recent = try await profile.bookmarks.recent(limit: 12)
 for await _ in profile.bookmarks.changes { /* refresh your UI */ }
 
 let visits = try await profile.history.search("swift", limit: 20)
-let topSites = try await profile.history.mostVisited()
+let topSites = try await profile.history.topSites()
 try await profile.history.remove(visits)
 
 let suggestions = try await profile.autocomplete.suggestions(for: "cef")
@@ -2201,7 +2225,7 @@ let suggestions = try await profile.autocomplete.suggestions(for: "cef")
   this API and in Chrome's UI; edits made while the consumer is busy are
   reported once, as one signal to read again.
 - `history` groups visits by day, as `chrome://history` does. It records
-  only visits made in Chrome-style browsers. `mostVisited()` includes visits
+  only visits made in Chrome-style browsers. `topSites()` includes visits
   made up to the call and takes up to a second.
 - `history.favicon(for:size:)` returns the icon Chromium keeps for a page
   that is not open, such as a history entry, bookmark or most-visited site,
@@ -2250,14 +2274,14 @@ latency the median of five calls.
 | `bookmarks` reads, `changes` while the host is closed | none (Chromium's file) | 0 | – | – |
 | `bookmarks` changes and searches | `chrome://bookmarks` | 21 MB | 137 ms | 1 ms |
 | `history.search`, `remove` | `chrome://history` | 27 MB | 175 ms | 2 ms |
-| `history.mostVisited()` | `chrome://new-tab-page-third-party` | 21 MB | 127 ms | 1 ms |
+| `history.topSites()` | `chrome://new-tab-page-third-party` | 21 MB | 127 ms | 1 ms |
 | `history.favicon(for:size:)` | `chrome://bookmarks` or `chrome://history`, whichever runs | 0 when one runs | 16 ms | 2 ms |
 | `autocomplete` | `chrome://omnibox` | 23 MB | 234 ms | 9 ms |
 | Discarding | `chrome://discards` | 22 MB | 122 ms | 1 ms |
 
 The Browser example uses them for address-field suggestions
 (`AddressSuggestions.swift`), a bookmark star, Bookmarks and History menus,
-and a start page whose tiles come from `mostVisited()` and
+and a start page whose tiles come from `topSites()` and
 `bookmarks.recent()` through a `CefBridge` (`BrowserLibrary.swift`). It
 reads history when the menu bar opens, so at launch it starts no host.
 
@@ -2394,8 +2418,8 @@ CefSwift's changes them, and some need a different Chromium build:
   check with "allowed", so `navigator.mediaDevices.enumerateDevices()`
   lists every camera, microphone and speaker before the user grants
   anything, where Chrome lists one of each kind. Chrome-style browsers
-  (`CefBrowserWindow`) list what Chrome lists. Browse the web in
-  `CefBrowserWindow`.
+  (`CefWindow`) list what Chrome lists. Browse the web in
+  `CefWindow`.
 - **The window**: `outerHeight - innerHeight` is your window's title bar
   and toolbar, not Chrome's; it is what the window is.
 
@@ -2537,7 +2561,7 @@ directory, `<rootCacheDirectory>/WidevineCdm/`, on the user's Mac.
 
 | `services.protectedMedia` | Effect |
 |---|---|
-| `.automatic` | The component updater runs and fetches Widevine, whatever `services.componentUpdates` says. The default, and the `.browser` preset's. |
+| `.automatic` | The component updater runs and fetches Widevine, whatever `services.componentUpdates` says. The default, and the `.chrome` preset's. |
 | `.disabled` | CefSwift does not ask for the CDM. With `services.componentUpdates = .disabled`, as in the `.embedded` preset, Chromium registers no component, neither downloads the CDM nor loads one already on disk, and refuses `com.widevine.alpha`. With component updates on, Chromium registers Widevine with its other components, and its updater has no way to leave one out: it downloads the CDM at its first check, about a minute after start-up, and pages can use it from then on. |
 | `.preinstalled(widevineDirectory:)` | As `.automatic`, and copies a CDM your app carries into the profile before Chromium starts, so protected media works on first launch and offline. Only for apps licensed by Google to distribute the CDM. |
 
@@ -2720,12 +2744,12 @@ measurement).
 
 ### What the presets turn off
 
-| | `Configuration()` | `.embedded` | `.browser` |
+| | `Configuration()` | `.embedded` | `.chrome` |
 |---|---|---|---|
 | Background networking, sync, default apps, domain reliability | On | Off | On |
 | Component updates (`services.componentUpdates`), Widevine (`services.protectedMedia`) | On | Off | On |
 | Translation, preloading, hyperlink auditing, password saving, autofill | On | Off | On |
-| Media Router (Cast), optimization hints, Autofill server predictions, on-device model execution | On | Off | On |
+| Media Router (Cast), optimization hints, Autofill server predictions | On | Off | On |
 | First-run and default-browser prompts | On | Off | Off |
 | Spare renderer (`processPolicy`) | `.automatic` | `.onDemand` | `.automatic` |
 | Session cookies across launches | Off | Off | On |
@@ -2753,7 +2777,7 @@ the switches measured and not used.
 ## Known limits
 
 - Chrome style (`chrome://` pages, extensions, history, the password manager)
-  exists only in `CefBrowserWindow` and Chrome UI windows, a Chromium
+  exists only in `CefWindow` and Chrome UI windows, a Chromium
   constraint on macOS. `CefWebView` uses the Alloy style.
 - Each Chrome-style window holds one browser; build tabs from native window
   tabs.
@@ -2780,12 +2804,12 @@ the switches measured and not used.
   experimental, and `CefBookmarks`, `CefHistory` and `CefAutocomplete`
   depend on Chromium-internal WebUI hosts, and `CefBookmarks` on the format
   of Chromium's `Bookmarks` file.
-- CefChromium's `chromiumUI` and swipe navigation in `CefBrowserWindow`
+- CefChromium's `chromiumSurfacePolicy` and swipe navigation in `CefWindow`
   depend on Chromium's AppKit classes and the view class names its
   accessibility reports
   ([architecture](architecture.md#chromiums-appkit-classes)). If a
   CEF update renames them, surfaces show as Chromium draws them, where it
-  puts them, with unknown ones reported as `.other`, and browser windows
+  puts them, with unknown ones reported as `.other`, and `CefWindow`s
   swipe as Chrome does, with its arrow, whatever the options say. Commands
   that open surfaces (`.find`, `.createQRCode`, …) still reach custom
   presenters. SelfTest fails on such an update.

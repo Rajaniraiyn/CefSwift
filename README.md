@@ -1,10 +1,13 @@
 # CefSwift
 
-CefSwift brings Chromium to Swift apps on macOS, built on the
+CefSwift embeds Chromium in any macOS app written in Swift, through the
 [Chromium Embedded Framework](https://github.com/chromiumembedded/cef) (CEF).
-Use it to show web content in a SwiftUI or AppKit app, or to build a tabbed
-browser with Chrome's own settings, extensions, history and password manager
-under a toolbar you write in SwiftUI.
+It exposes what CEF and Chromium can do as Swift types: browsers in SwiftUI
+and AppKit views, windowed or offscreen; Chrome-style windows with Chrome's
+own pages, settings and extensions; profiles, requests, DevTools, custom
+schemes and a JavaScript bridge. Optional libraries add passkeys the app
+answers and Chromium's bookmark, history and suggestion stores. That is
+enough for a full web browser; the Browser example below is one.
 
 ![The Browser example](docs/images/browser.png)
 
@@ -63,10 +66,11 @@ struct MyApp: CefSwiftApp {
 `CefSwiftApp` takes the place of `App`: it starts Chromium before SwiftUI
 runs.
 
-### Build a tabbed browser
+### Use Chrome-style windows
 
-Each tab is a `CefBrowserWindow`, a Chrome-style window that macOS groups
-with others under a native tab bar. The toolbar is SwiftUI. This app uses
+Chromium shows Chrome's own pages and UI only in windows it creates. A
+`CefWindow` is one, holding one browser; macOS can group several under a
+native tab bar. The toolbar is SwiftUI. This app uses
 `defaultLaunchBehavior(_:)`, so set `platforms: [.macOS(.v15)]`.
 
 ```swift
@@ -76,11 +80,11 @@ import SwiftUI
 
 @main
 struct MyBrowser: CefSwiftApp {
-    static var runtimeConfiguration: CefRuntime.Configuration { .browser }
+    static var runtimeConfiguration: CefRuntime.Configuration { .chrome }
     @NSApplicationDelegateAdaptor private var appDelegate: AppDelegate
 
     var body: some Scene {
-        // Browser windows are not SwiftUI scenes. Settings is the only
+        // `CefWindow`s are not SwiftUI scenes. Settings is the only
         // scene, so keep SwiftUI from opening it at launch.
         Settings { EmptyView() }
             .defaultLaunchBehavior(.suppressed)   // macOS 15
@@ -100,9 +104,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func openTab() {
         let browser = CefBrowser(url: URL(string: "https://www.swift.org")!)
-        var configuration = CefBrowserWindow.Configuration()
+        var configuration = CefWindow.Configuration()
         configuration.tabbingIdentifier = "tabs"
-        let window = CefBrowserWindow(browser: browser, configuration: configuration)
+        let window = CefWindow(browser: browser, configuration: configuration)
         window.setToolbar {
             BackButton(browser: browser)
         } principal: {
@@ -147,14 +151,27 @@ Add `.cef/` and `dist/` to `.gitignore`. [Bundling](docs/bundling.md)
 covers identifiers, signing, entitlements, notarization and the bundle layout;
 `swift package cef doctor <App.app>` reports what a built bundle can do.
 
-## Two kinds of app
+## Two starting points
 
-| | Showing web content | Building a browser |
+| | Your own or trusted content | Arbitrary sites, with Chrome's services |
 |---|---|---|
-| Configuration | `CefRuntime.Configuration.embedded` | `CefRuntime.Configuration.browser` |
-| Host | `CefWebView` in your own windows | `CefBrowserWindow`, or `CefRuntime.shared.openChromeWindow(url:)` for Chrome's complete UI |
+| Configuration | `CefRuntime.Configuration.embedded` | `CefRuntime.Configuration.chrome` |
+| Host | `CefWebView` in your own windows (Alloy style) | `CefWindow` (Chrome style), or `CefRuntime.shared.openChromeWindow(url:)` for Chrome's complete UI |
 | Chrome runtime (`chrome://` pages, extensions, history) | No | Yes |
 | Background services | Off | On |
+
+## Where things live
+
+| Where | What | Examples |
+|---|---|---|
+| `CefKit` (core) | What any app embedding CEF needs and could not write itself: the runtime, browsers, profiles, the AppKit host views, CEF Views windows (`CefWindow`), handlers and delegates, offscreen rendering and its accessibility, discarding | `CefRuntime`, `CefBrowser`, `CefProfile`, `CefOffscreenBrowserView`, `CefWindow` |
+| `CefSwiftUI` | SwiftUI on top of `CefKit`, nothing else | `CefSwiftApp`, `CefWebView`, `setToolbar`, `setPageOverlay` |
+| `CefPasskeys`, `CefChromium` (optional) | Capabilities on Chromium internals some apps want: passkeys the app answers; Chromium's bookmark, history and suggestion stores and its bubbles | `CefPasskeyController`, `CefBookmarks`, `CefChromiumSurface` |
+| `Examples` | Product decisions written against the public API: UI, defaults, heuristics for when to use a capability | the Browser's toolbar, swipe indicator, Memory Saver, permission names |
+
+The rule: the library holds what an app cannot write against its public
+API, because it calls the CEF C API, hooks Chromium or works around a CEF
+or Chromium limit. Everything else belongs to the app.
 
 ## Features
 
@@ -167,16 +184,16 @@ covers identifiers, signing, entitlements, notarization and the bundle layout;
 | Typed calls between JavaScript and Swift | `CefBridge` | [Bridge](docs/guide.md#bridge) |
 | Asynchronous decisions: permissions, dialogs, downloads, certificate errors | `CefBrowserDelegate` | [Decisions](docs/guide.md#decisions) |
 | Context menu | `CefBrowser.Configuration.ContextMenu` | [Context menu](docs/guide.md#context-menu) |
-| Chrome-style windows, SwiftUI toolbars, popups, native tabs | `CefBrowserWindow` | [Building a browser](docs/guide.md#building-a-browser) |
+| Chrome-style windows (CEF Views), SwiftUI toolbars, a view over the page, popups, native tabs | `CefWindow`, `pageOverlay` | [Chrome-style windows](docs/guide.md#chrome-style-windows) |
 | Chrome commands and Chrome UI trimming | `CefChromeCommand`, `CefRuntime.Configuration.ChromeToolbar` | [Chrome commands](docs/guide.md#chrome-commands) |
 | Rebranded and restyled `chrome://` pages | `productName`, `stringOverrides`, `CefUserScript.styleSheet(_:matching:includingShadowRoots:)` | [Chromium's own pages](docs/guide.md#customizing-chromiums-own-pages) |
 | Profiles, cookies, Chromium preferences | `CefProfile` | [Profiles](docs/guide.md#profiles) |
 | The app's own requests through Chromium's network stack, sharing a profile's cookies, cache and proxy | `CefProfile.data(for:)`, `bytes(for:)` | [Requests through Chromium's network stack](docs/guide.md#requests-through-chromiums-network-stack) |
-| Bookmarks, history, address-bar suggestions (the `CefChromium` library) | `CefBookmarks`, `CefHistory`, `CefAutocomplete` | [Bookmarks, history and suggestions](docs/guide.md#bookmarks-history-and-suggestions) |
-| Discarding hidden browsers to free memory, and restoring them when shown; when to discard is the app's policy | `discard()`, `discardBlockers()`, `lifecycle`, `lifecycleChangedAt` | [Discarding browsers](docs/guide.md#discarding-browsers) |
+| Chromium's bookmarks, history and omnibox suggestions (the optional `CefChromium` library) | `CefBookmarks`, `CefHistory`, `CefAutocomplete` | [Bookmarks, history and suggestions](docs/guide.md#bookmarks-history-and-suggestions) |
+| Discarding hidden browsers to free memory, and restoring them when shown (when to discard is the app's choice) | `discard()`, `discardBlockers()`, `lifecycle`, `lifecycleChangedAt` | [Discarding browsers](docs/guide.md#discarding-browsers) |
 | Chrome DevTools Protocol, in-process | `CefDevTools` | [DevTools](docs/guide.md#devtools) |
 | Your own set-up code for every browser of a configuration, before its first page if it must | `CefBrowserAttachment` | [Attachments](docs/guide.md#attachments) |
-| Passkeys answered by the app from its own store, or refused (the `CefPasskeys` library) | `CefPasskeyController`, `CefPasskeyStore` | [Passkeys](docs/guide.md#passkeys) |
+| Passkeys answered by the app from its own store, or refused (the optional `CefPasskeys` library) | `CefPasskeyController`, `CefPasskeyStore` | [Passkeys](docs/guide.md#passkeys) |
 | Content served from your own URL scheme | `CefSchemeHandler` | [Serving your own content](docs/guide.md#serving-your-own-content) |
 | Protected media: Widevine in Chromium; the Browser example shows FairPlay services in the system's WebKit beside it | `CefRuntime.Configuration.services.protectedMedia` | [Playing streaming services](docs/guide.md#playing-streaming-services) |
 
@@ -184,9 +201,10 @@ covers identifiers, signing, entitlements, notarization and the bundle layout;
 
 [`Examples/`](Examples/README.md) is a separate package with five apps:
 
-- **Browser**: a tabbed browser with a SwiftUI toolbar, address-bar
-  suggestions, bookmarks, history, private tabs, downloads, popups, and a
-  Memory Saver that puts background tabs to sleep.
+- **Browser**: a tabbed browser built on the public API: a SwiftUI
+  toolbar, address-bar suggestions, bookmarks, history, private tabs,
+  downloads, popups, a swipe indicator, and a Memory Saver that puts
+  background tabs to sleep.
 - **Showcase**: three demos of embedding web content in SwiftUI.
 - **Minimal**: one `CefWebView` on the `.embedded` configuration, and the
   lean case of the footprint benchmark.

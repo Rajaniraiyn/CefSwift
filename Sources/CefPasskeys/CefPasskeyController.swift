@@ -5,7 +5,7 @@ import CefKit
 ///
 /// Without a controller, Chromium answers with its own dialog and
 /// authenticators: security keys, phones, and iCloud Keychain when the app
-/// has the entitlement for it (see ``CefAppCapabilities/passkeyAuthenticators``).
+/// has the entitlement for it (see ``CefAppCapabilities/webAuthnAuthenticators``).
 /// Attach a controller to answer from the app's own store, or to refuse
 /// every request:
 ///

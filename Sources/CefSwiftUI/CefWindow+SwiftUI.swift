@@ -2,7 +2,7 @@ import AppKit
 import CefKit
 import SwiftUI
 
-extension CefBrowserWindow {
+extension CefWindow {
     /// Gives the window a unified title-bar toolbar built from SwiftUI
     /// views, laid out the way Safari's is: `leading` beside the window
     /// buttons, `principal` centered (your address field), `trailing` at the
@@ -59,11 +59,57 @@ extension CefBrowserWindow {
     }
 }
 
+extension CefWindow {
+    /// Lays a SwiftUI view over the page, as ``CefWindow/pageOverlay``:
+    /// sized to the page, and passing every click and scroll through to it.
+    ///
+    /// `content` runs once, as ``setToolbar(leading:principal:trailing:)``'s
+    /// closures do; the view it builds updates with the observable state it
+    /// reads in its `body`, such as ``CefBrowser/navigationGestureProgress``
+    /// or ``CefBrowser/statusText``. Call the method again to replace it, or
+    /// set ``CefWindow/pageOverlay`` to `nil` to remove it.
+    ///
+    /// ```swift
+    /// window.setPageOverlay { SwipeIndicator(browser: window.browser) }
+    ///
+    /// struct SwipeIndicator: View {
+    ///     let browser: CefBrowser
+    ///     var body: some View {
+    ///         let progress = browser.navigationGestureProgress
+    ///         Image(systemName: progress < 0 ? "chevron.left" : "chevron.right")
+    ///             .frame(maxWidth: .infinity, alignment: progress < 0 ? .leading : .trailing)
+    ///             .opacity(min(1, abs(progress)))
+    ///     }
+    /// }
+    /// ```
+    public func setPageOverlay(@ViewBuilder _ content: () -> some View) {
+        let hosting = NSHostingView(rootView: content().allowsHitTesting(false))
+        hosting.wantsLayer = true
+        hosting.layer?.backgroundColor = .clear
+        pageOverlay = PassthroughHostingContainer(hosting)
+    }
+}
+
+/// Holds a hosting view and lets every event through to the page.
+private final class PassthroughHostingContainer: NSView {
+    init(_ content: NSView) {
+        super.init(frame: .zero)
+        content.frame = bounds
+        content.autoresizingMask = [.width, .height]
+        addSubview(content)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { nil }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
 extension ToolbarItemProvider {
     /// Makes a toolbar of this provider's items the window's toolbar.
     func install(in nsWindow: NSWindow) {
         let provider = self
-        let toolbar = NSToolbar(identifier: "CefBrowserWindow.toolbar")
+        let toolbar = NSToolbar(identifier: "CefWindow.toolbar")
         toolbar.delegate = provider
         toolbar.displayMode = .iconOnly
         toolbar.centeredItemIdentifiers = [ToolbarItemProvider.principal]
@@ -84,9 +130,9 @@ extension ToolbarItemProvider {
 @MainActor
 private final class ToolbarItemProvider: NSObject, NSToolbarDelegate {
     nonisolated(unsafe) static var associationKey = 0
-    static let leading = NSToolbarItem.Identifier("CefBrowserWindow.leading")
-    static let principal = NSToolbarItem.Identifier("CefBrowserWindow.principal")
-    static let trailing = NSToolbarItem.Identifier("CefBrowserWindow.trailing")
+    static let leading = NSToolbarItem.Identifier("CefWindow.leading")
+    static let principal = NSToolbarItem.Identifier("CefWindow.principal")
+    static let trailing = NSToolbarItem.Identifier("CefWindow.trailing")
 
     private let views: [NSToolbarItem.Identifier: NSView]
 

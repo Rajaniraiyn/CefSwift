@@ -3,19 +3,21 @@ import CCef
 import Foundation
 import CefBase
 
-/// The kind of media element a context menu was invoked on.
-public enum CefContextMenuMediaType: Sendable, Equatable {
-    case none, image, video, audio, canvas, file, plugin
+extension CefContextMenuTarget {
+    /// The kind of media element a context menu was invoked on.
+    public enum MediaType: Sendable, Equatable {
+        case none, image, video, audio, canvas, file, plugin
 
-    init(cefValue: cef_context_menu_media_type_t) {
-        switch cefValue {
-        case CM_MEDIATYPE_IMAGE: self = .image
-        case CM_MEDIATYPE_VIDEO: self = .video
-        case CM_MEDIATYPE_AUDIO: self = .audio
-        case CM_MEDIATYPE_CANVAS: self = .canvas
-        case CM_MEDIATYPE_FILE: self = .file
-        case CM_MEDIATYPE_PLUGIN: self = .plugin
-        default: self = .none
+        init(cefValue: cef_context_menu_media_type_t) {
+            switch cefValue {
+            case CM_MEDIATYPE_IMAGE: self = .image
+            case CM_MEDIATYPE_VIDEO: self = .video
+            case CM_MEDIATYPE_AUDIO: self = .audio
+            case CM_MEDIATYPE_CANVAS: self = .canvas
+            case CM_MEDIATYPE_FILE: self = .file
+            case CM_MEDIATYPE_PLUGIN: self = .plugin
+            default: self = .none
+            }
         }
     }
 }
@@ -33,7 +35,7 @@ public struct CefContextMenuTarget: Sendable, Equatable {
     /// The selected text, or an empty string when nothing is selected.
     public var selectedText: String
     /// The media element type the menu was invoked on.
-    public var mediaType: CefContextMenuMediaType
+    public var mediaType: CefContextMenuTarget.MediaType
     /// Whether the node is editable, such as a text field.
     public var isEditable: Bool
 
@@ -43,7 +45,7 @@ public struct CefContextMenuTarget: Sendable, Equatable {
         sourceURL: URL? = nil,
         pageURL: URL? = nil,
         selectedText: String = "",
-        mediaType: CefContextMenuMediaType = .none,
+        mediaType: CefContextMenuTarget.MediaType = .none,
         isEditable: Bool = false
     ) {
         self.location = location
@@ -68,7 +70,7 @@ extension CefContextMenuTarget {
             sourceURL: url(params.pointee.get_source_url(params)),
             pageURL: url(params.pointee.get_page_url(params)),
             selectedText: CefStringUtil.takingUserFree(params.pointee.get_selection_text(params)) ?? "",
-            mediaType: CefContextMenuMediaType(cefValue: params.pointee.get_media_type(params)),
+            mediaType: CefContextMenuTarget.MediaType(cefValue: params.pointee.get_media_type(params)),
             isEditable: params.pointee.is_editable(params) != 0
         )
     }

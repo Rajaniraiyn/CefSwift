@@ -3,17 +3,37 @@
 How CefSwift works inside, and why. For how to use it, see the
 [guide](guide.md).
 
+CefSwift is a library for embedding CEF in a macOS app. The core, `CefKit`,
+wraps CEF's C API and the Chromium behavior an embedder has to work with or
+around: the runtime and its processes, browsers and their handlers,
+profiles, AppKit host views, CEF Views windows, offscreen rendering and its
+accessibility, discarding. `CefSwiftUI` adds SwiftUI. `CefPasskeys` and
+`CefChromium` are optional modules that reach Chromium internals some apps
+want. Browser-product decisions (UI, defaults, heuristics) live in the
+examples.
+
+| Where | What | Examples |
+|---|---|---|
+| `CefKit` (core) | What any app embedding CEF needs and could not write itself: the runtime, browsers, profiles, the AppKit host views, CEF Views windows (`CefWindow`), handlers and delegates, offscreen rendering and its accessibility, discarding | `CefRuntime`, `CefBrowser`, `CefProfile`, `CefOffscreenBrowserView`, `CefWindow` |
+| `CefSwiftUI` | SwiftUI on top of `CefKit`, nothing else | `CefSwiftApp`, `CefWebView`, `setToolbar`, `setPageOverlay` |
+| `CefPasskeys`, `CefChromium` (optional) | Capabilities on Chromium internals some apps want: passkeys the app answers; Chromium's bookmark, history and suggestion stores and its bubbles | `CefPasskeyController`, `CefBookmarks`, `CefChromiumSurface` |
+| `Examples` | Product decisions written against the public API: UI, defaults, heuristics for when to use a capability | the Browser's toolbar, swipe indicator, Memory Saver, permission names |
+
+The rule: the library holds what an app cannot write against its public
+API, because it calls the CEF C API, hooks Chromium or works around a CEF
+or Chromium limit. Everything else belongs to the app.
+
 ## Modules
 
 ```
 CefSwiftUI   CefSwiftApp, CefWebView (over CefKit's host views), SwiftUI modifiers,
-    │        CefBrowserWindow.setToolbar and setTabAccessory
+    │        CefWindow.setToolbar, setTabAccessory and setPageOverlay
     │  CefPasskeys  optional: CefPasskeyController (a CefBrowserAttachment), passkey
     │     │         stores and the passkey sheet
     │     │  CefChromium  optional, bound to the pinned CEF: CefBookmarks, CefHistory,
     │     │     │         CefAutocomplete (on CefKit's service hosts); CefChromiumSurface,
-    │     │     │         chromiumUI and their SwiftUI glue (on Chromium's AppKit classes)
-CefKit       CefRuntime, CefBrowser, CefBrowserWindow, CefBrowserDelegate, CefBridge,
+    │     │     │         chromiumSurfacePolicy and their SwiftUI glue (on Chromium's AppKit classes)
+CefKit       CefRuntime, CefBrowser, CefWindow, CefBrowserDelegate, CefBridge,
     │        CefDevTools, CefProfile, CefBrowserAttachment, configuration and policy types; the AppKit
     │        host views CefWindowedBrowserView and CefOffscreenBrowserView
     │        (with its compositor and accessibility elements), the internal
@@ -45,32 +65,33 @@ CefPasskeys or CefChromium, plugs into it at these points:
   Such a browser's native popups are opened in a browser CefKit creates
   (`openPopupInNewBrowser`), since Chromium runs a native popup's first
   document before anything can attach to it.
-- `CefShutdownParticipant` (package): an object holding CEF references
-  outside any browser adds itself with
-  `CefRuntime.addShutdownParticipant(_:)`, held weakly, and is told to
-  release them after the last browser and window and before the
-  profiles' request contexts and `cef_shutdown()`. The internal-page
-  service hosts and the media router are participants.
 - `CefProfile.moduleState(_:make:)` (package): one object per type that a
   module keeps for a profile, made on first use.
-- `CefBrowserWindow.moduleState(_:make:)` and `existingModuleState(_:)`
-  (package): the same for a browser window. A state object that is a
-  `CefBrowserWindowParticipant` is told when the window is destroyed
-  (`browserWindowDidClose(_:)`).
-- `CefBrowserWindow.addChromeCommandInterceptor(_:)` (package): decides
-  Chrome commands in every browser window, from Chrome's UI and from
+- `CefWindow.moduleState(_:make:)` and `existingModuleState(_:)`
+  (package): the same for a `CefWindow`. A state object that is a
+  `CefWindowParticipant` is told when the window is destroyed
+  (`windowDidClose(_:)`).
+- `CefWindow.addChromeCommandInterceptor(_:)` (package): decides
+  Chrome commands in every `CefWindow`, from Chrome's UI and from
   `CefBrowser.execute(_:disposition:)`, after the browser's delegate and
   before Chromium runs them.
-- `CefBrowserWindow.Configuration.moduleValues` (package): values a module
+- `CefWindow.Configuration.moduleValues` (package): values a module
   keeps in a window configuration, by type, dropped for the window's
   popups; `showsChromiumStatusBubble` and `showsChromiumZoomBubble`
   (package) set the browser's `chrome_status_bubble` and
-  `chrome_zoom_bubble`. `statusOverlayView` (package) is a view laid over
-  the page beneath the swipe indicator.
-- The internal service hosts (package): `CefInternalServices`
-  (`CefProfile.services`), `CefServiceHost` and `CefServiceModule`. A module
+  `chrome_zoom_bubble`. CefChromium's status bubble uses the public
+  `pageOverlay`.
+- The internal service hosts (package): `CefServiceHosts`
+  (`CefProfile.serviceHosts`), `CefServiceHost` and `CefServiceHost.Module`. A module
   declares its own hosts and modules and calls them
   ([Internal-page services](#internal-page-services)).
+
+Inside CefKit, an object holding CEF references outside any browser is a
+`CefShutdownParticipant`: it adds itself with
+`CefRuntime.addShutdownParticipant(_:)`, held weakly, and is told to
+release them after the last browser and window and before the profiles'
+request contexts and `cef_shutdown()`. The service hosts (a module's
+included) and the media router are participants.
 
 A module also uses a few `package` members of CefKit that are not public
 API: `CefDevTools.addListener(for:_:)`, `removeListener(_:for:)` and
@@ -78,14 +99,14 @@ API: `CefDevTools.addListener(for:_:)`, `removeListener(_:for:)` and
 `CefBrowser.decision(_:_:)` with `CefBrowser.DecisionScope` (a question
 cancelled when its page or browser goes), `CefDialogPresenter.run(_:in:)`
 (an alert that dismisses itself on cancellation), `CefLog`,
-`CefBrowserWindow.owning(_:)`, `CefProfile.directory`, and `CefObjCHook`
+`CefWindow.owning(_:)`, `CefProfile.directory`, and `CefObjCHook`
 for overrides of Chromium's AppKit classes.
 
 **CefChromium** wraps Chromium's own browser features, which are bound to
 Chromium-private interfaces of the pinned CEF: its stores
 (`profile.bookmarks`, `history` and `autocomplete`, kept weakly in the
 profile's module state) and the surfaces of Chrome-style windows
-(`window.chromiumUI`, kept in the window's module state). It depends on
+(`window.chromiumSurfacePolicy`, kept in the window's module state). It depends on
 CefKit and on CCef and CefBase for Chromium's command and string
 identifiers. Its surface handling starts on the first use of its window
 API: that installs the AppKit overrides and the command interceptor once,
@@ -238,8 +259,8 @@ identifier in `CefRuntime`'s registry. Such browsers are wrapped as they
 appear: a popup inherits its opener's delegate, which hears about it through
 `browser(_:didOpen:)`. A browser in one of Chromium's own tabbed windows
 arrives on the default client (`get_default_client`) without a browser
-view, so CEF cannot move it into a `CefBrowserWindow`; it goes to
-`CefRuntime.onOpenBrowser` when that is set, with its window kept off
+view, so CEF cannot move it into a `CefWindow`; it goes to
+`CefRuntime.onChromeTab` when that is set, with its window kept off
 screen until the handler answers. Its opener is the browser whose
 `on_open_urlfrom_tab` (⌘- and ⇧-clicks) or `on_before_popup` CefKit left
 to Chromium just before, which CEF does not report itself. The rest are passed to `CefRuntime.onBrowserCreated`.
@@ -260,11 +281,11 @@ in every browser, since Chromium keeps one level per site.
 |---|---|---|
 | `CefWebView`, `.windowed` | Alloy | Chromium's native `NSView` as a subview of `CefWindowedBrowserView` |
 | `CefWebView`, `.offscreen` | Alloy | Frames in a shared `IOSurface`, copied into a surface of its own and set as layer contents by `CefOffscreenBrowserView`, which forwards input |
-| `CefBrowserWindow` | Chrome | A CEF Views window; your toolbar is an `NSToolbar` and your accessory a title-bar accessory view |
+| `CefWindow` | Chrome | A CEF Views window; your toolbar is an `NSToolbar` and your accessory a title-bar accessory view |
 | `CefRuntime.openChromeWindow` | Chrome | Chrome's own window and UI |
 
 macOS provides Chrome style only in windows Chromium creates, which is why
-the Chrome-style hosts own their `NSWindow`. A `CefBrowserWindow` draws the
+the Chrome-style hosts own their `NSWindow`. A `CefWindow` draws the
 whole content area in one layer, so `contentInsets` and
 `contentCornerRadius` are drawn by a native view laid over the page that
 paints everything except the page's rectangle and passes events through.
@@ -287,7 +308,7 @@ alone.
 
 **Surfaces.** Chromium's bubbles, dialogs, find bar and status bubble are
 Views widgets, each in a `NativeWidgetMacNSWindow` that Chromium attaches to
-the browser window as a child window. Every CEF Views window is a
+the `CefWindow` as a child window. Every CEF Views window is a
 `CefNSWindow`, a subclass; `CefSurfaceTracker` overrides its
 `-addChildWindow:ordered:` and `-removeChildWindow:`. As Chromium attaches a
 widget, the window's surface controller makes it transparent; once attached, it reads
@@ -326,7 +347,7 @@ custom status bubble reads `on_status_message`; the Cast picker uses CEF's
 CEF's own hooks do not cover placement: `cef_window_delegate_t` and
 `cef_browser_view_delegate_t` have no say in where bubbles go, and Chromium
 anchors them to its toolbar's buttons. `CEF_CTT_NORMAL` and
-`CEF_CTT_LOCATION` do not change where they appear in a `CefBrowserWindow`,
+`CEF_CTT_LOCATION` do not change where they appear in a `CefWindow`,
 which does not add Chrome's toolbar view (`get_chrome_toolbar`) to its
 window; adding it would draw Chrome's toolbar.
 
@@ -339,12 +360,14 @@ two-finger swipes into navigation and draws progress with a
 `allowsBackForwardNavigationGestures`, and the controller's
 `-initForMode:`, `-showPanelForView:`, `-setProgress:finished:` and
 `-dismiss`, to report progress to `navigationGestureProgress` and to skip
-Chrome's overlay unless `.chromium` is chosen. Alloy-style browsers have no
+Chrome's overlay unless `showsChromiumNavigationGestureIndicator` is on. Alloy-style browsers have no
 such delegate; views track swipes themselves with
 `NSEvent.trackSwipeEvent`, the offscreen view from its own scroll events
 and the windowed view from a local event monitor, since Chromium's view
-receives the events. The built-in indicator is a layer-backed view over the
-page that never takes events.
+receives the events. CefKit draws no indicator of its own; apps draw one
+from `navigationGestureProgress`, over a `CefWindow`'s page in its
+`pageOverlay`, which is a view laid over the content view, clipped to the
+page and passing every event through.
 
 ## Frame timing
 
@@ -860,13 +883,13 @@ once, for the call waiting on it.
 
 CEF has no API for bookmarks, history, most-visited sites, omnibox
 suggestions or tab discarding, but Chromium's own WebUI pages reach those
-services. `CefInternalServices`, one per profile, calls them from hidden
+services. `CefServiceHosts`, one per profile, calls them from hidden
 Chrome-style browsers it calls service hosts. The engine is CefKit's,
 since native tab discarding uses it; the bookmark, history, most-visited
 and omnibox hosts and modules are CefChromium's, declared there and
 registered with the engine by being called.
 
-`CefHistory.mostVisited()` binds a new most-visited page handler for each
+`CefHistory.topSites()` binds a new most-visited page handler for each
 call. Chromium's `TopSites` reads the list from history once, shortly after
 it loads, and then hourly, and a handler's `updateMostVisitedInfo` returns
 that cached list; creating a handler is what makes `TopSites` read history
@@ -885,7 +908,7 @@ Chromium locks a WebUI renderer to its host, and neither
 |---|---|---|
 | `chrome://bookmarks` | `chrome.bookmarks`, `chrome.tabs`, `chrome://favicon2` | `CefBookmarks`, `CefHistory.favicon` |
 | `chrome://history` | `history.mojom.PageHandler`, `chrome://favicon2` | `CefHistory.search`, `remove` |
-| `chrome://new-tab-page-third-party` | `most_visited.mojom.MostVisitedPageHandlerFactory` | `CefHistory.mostVisited` |
+| `chrome://new-tab-page-third-party` | `most_visited.mojom.MostVisitedPageHandlerFactory` | `CefHistory.topSites` |
 | `chrome://omnibox` | `mojom.OmniboxPageHandler` | `CefAutocomplete` |
 | `chrome://discards` | `discards.mojom.DetailsProvider` | Discarding |
 
@@ -905,7 +928,7 @@ Chromium serves it there. Its renderer has the host's bindings and none of
 the app's scripts, styles or elements. A host starts in about a tenth of a
 second.
 
-**Services as modules.** A `CefServiceModule` names the hosts that can
+**Services as modules.** A `CefServiceHost.Module` names the hosts that can
 serve it and a JavaScript `setup` that builds a service object once per
 document — a bound Mojo remote, or an extension API with listeners. A
 call evaluates a function against that object in the host's renderer, as
@@ -922,7 +945,7 @@ profile's last browser closes (except the default profile's), and when
 the app quits. A call that times out, or a renderer that dies, closes the
 host; the call throws and the next one starts the host again. Service
 browsers are left out of `CefRuntime.browsers` and
-`CefBrowserWindow.all`. Their windows are 1 × 1 point, since a hidden
+`CefWindow.all`. Their windows are 1 × 1 point, since a hidden
 window's compositor keeps buffers the size of the window, about 11 MB of
 GPU memory for a default-sized one, and they are transparent, ignore the
 mouse and are ordered out whenever Chromium shows them, as it does when it
@@ -1014,7 +1037,7 @@ what WebAuthn gives it: the credential ID, the public key, the user handle
 and signatures.
 
 Chromium's own WebAuthn dialog (a browser without a controller) is a views widget: a child
-window of a `CefBrowserWindow`, or a free-standing window for a browser in
+window of a `CefWindow`, or a free-standing window for a browser in
 a view. CefSwift leaves it alone; closing it from AppKit crashes Chromium.
 The iCloud Keychain authenticator in Chromium (`device/fido/mac`) calls
 AuthenticationServices itself and checks for the
@@ -1126,7 +1149,7 @@ animated page and `document.visibilityState`:
 | Host | Window covered | Minimized | Ordered out, or a tab not selected | App hidden |
 |---|---|---|---|---|
 | Alloy, in an app's view | Hidden by Chromium | Stays visible | Stays visible | Stays visible, 60 frames a second |
-| Chrome style (`CefBrowserWindow`) | Hidden by Chromium | Hidden by Chromium | Hidden by Chromium | Hidden by Chromium |
+| Chrome style (`CefWindow`) | Hidden by Chromium | Hidden by Chromium | Hidden by Chromium | Hidden by Chromium |
 | Offscreen | Hidden by the view (`was_hidden`) | Same | Same | Same |
 
 `was_hidden` does nothing for windowed browsers in CEF 156. For an Alloy

@@ -24,7 +24,7 @@ import Observation
 /// }
 /// ```
 ///
-/// In a ``CefBrowserWindow`` whose find bar CefChromium presents with your
+/// In a ``CefWindow`` whose find bar CefChromium presents with your
 /// own interface (`setCustomPresentation(for: .findBar)` or `setFindBar(_:)`),
 /// ⌘F and ``CefChromeCommand/find`` begin the session instead of showing
 /// Chromium's find bar.

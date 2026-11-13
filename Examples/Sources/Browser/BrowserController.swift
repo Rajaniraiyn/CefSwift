@@ -3,7 +3,7 @@ import CefSwiftUI
 import SystemEngine
 import SwiftUI
 
-/// Owns the browser's tabs. Each tab is one ``CefBrowserWindow``; macOS
+/// Owns the browser's tabs. Each tab is one ``CefWindow``; macOS
 /// groups them into a native tab bar.
 @MainActor
 @Observable
@@ -11,7 +11,7 @@ final class BrowserController: CefBrowserDelegate {
     static let defaultNewTabPage = BrowserPages.start.absoluteString
     static let tabbingIdentifier = "browser"
 
-    private(set) var windows: [CefBrowserWindow] = []
+    private(set) var windows: [CefWindow] = []
     /// Tabs shown by WebKit (`SystemEngineTabs.swift`).
     private(set) var systemTabs: [SystemEngineTab] = []
 
@@ -70,8 +70,10 @@ final class BrowserController: CefBrowserDelegate {
         }
         configuration.userScripts = Self.internalPageStyles
         configuration.bridges = [library.startPageBridge]
-        // Two-finger swipes go back and forward, with CefSwift's indicator.
+        // Two-finger swipes go back and forward, with the browser's own
+        // indicator (SwipeIndicator) in place of Chromium's arrow.
         configuration.allowsBackForwardNavigationGestures = true
+        configuration.showsChromiumNavigationGestureIndicator = false
         configuration.contextMenu.showsInspectElement = true
         configuration.contextMenu.hiddenCommands = [.viewSource]
         configuration.contextMenu.items = [
@@ -84,11 +86,11 @@ final class BrowserController: CefBrowserDelegate {
         ]
         let browser = CefBrowser(url: url ?? newTabPage, configuration: configuration, delegate: self)
 
-        var windowConfiguration = CefBrowserWindow.Configuration()
+        var windowConfiguration = CefWindow.Configuration()
         windowConfiguration.tabbingIdentifier = Self.tabbingIdentifier
         windowConfiguration.title = Self.tabTitle(for:)
         windowConfiguration.frame = windows.last?.window?.frame
-        let window = CefBrowserWindow(browser: browser, configuration: windowConfiguration)
+        let window = CefWindow(browser: browser, configuration: windowConfiguration)
         window.setToolbar {
             NavigationButtons(browser: browser)
         } principal: {
@@ -192,10 +194,10 @@ final class BrowserController: CefBrowserDelegate {
     /// `chrome://settings` to the password manager, for instance. Show those
     /// as tabs here, in the same profile, instead of in Chrome's window.
     func adoptTabsOpenedByChromium() {
-        CefRuntime.shared.onOpenBrowser = { [weak self] request in
+        CefRuntime.shared.onChromeTab = { [weak self] request in
             // A profile Chromium made itself, such as its own incognito
             // one, stays in Chromium's window.
-            guard let self, request.profile != nil else { return .showInChromium }
+            guard let self, request.profile != nil else { return .showInChromeWindow }
             self.openTab(
                 url: request.url, inBackground: !request.disposition.prefersForeground,
                 sharingProfileOf: request.opener ?? request.browser)
@@ -330,20 +332,22 @@ final class BrowserController: CefBrowserDelegate {
 /// and closed along with it.
 @MainActor
 enum PopupPresenter {
-    static func hostPopups(of window: CefBrowserWindow) {
+    static func hostPopups(of window: CefWindow) {
         window.onPopup = { [weak window] popup in
             guard let window else { return }
             present(popup, over: window)
         }
     }
 
-    private static func present(_ popup: CefBrowserWindow, over opener: CefBrowserWindow) {
+    private static func present(_ popup: CefWindow, over opener: CefWindow) {
         guard let parent = opener.window, let panel = popup.window else {
             popup.show()
             return
         }
         // Popups of popups are layered the same way.
         hostPopups(of: popup)
+        let browser = popup.browser
+        popup.setPageOverlay { SwipeIndicator(browser: browser) }
         panel.tabbingMode = .disallowed
         panel.standardWindowButton(.miniaturizeButton)?.isHidden = true
         panel.standardWindowButton(.zoomButton)?.isHidden = true
@@ -375,7 +379,7 @@ enum PopupPresenter {
 
     /// Keeps the site a popup shows in its title bar, as browsers must: a
     /// sign-in popup's page could claim to be anyone.
-    private static func showSite(of popup: CefBrowserWindow) {
+    private static func showSite(of popup: CefWindow) {
         guard !popup.isClosed else { return }
         let host = withObservationTracking {
             popup.browser.url?.host()

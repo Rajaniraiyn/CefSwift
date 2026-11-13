@@ -190,18 +190,27 @@ Guidelines](https://www.swift.org/documentation/api-design-guidelines/), with
 these conventions on top. Follow them for new API, so that the library keeps
 reading as one.
 
+- **CEF's and Chromium's terms win over product words.** CefSwift embeds
+  CEF; it is not a browser framework, so a name says what CEF or Chromium
+  calls the thing, or what it turns on: `CefWindow` (CEF's `cef_window_t`),
+  the `.chrome` runtime preset (Chrome's services), `onChromeTab` (tabs
+  Chromium opens in its own window), `webAuthnAuthenticators`. Words such
+  as "browser window" or "browser preset" describe a product an app builds.
 - **Principal types** carry the `Cef` prefix: `CefRuntime`, `CefBrowser`,
-  `CefBrowserWindow`, `CefProfile`, `CefDevTools`. So do types several owners
+  `CefWindow`, `CefProfile`, `CefDevTools`. So do types several owners
   share, and the values delegate methods take and return (`CefNavigationAction`,
   `CefDownload`, `CefPermissionRequest`).
 - **Types that belong to one owner nest in it**, without the prefix:
   `CefBrowser.Configuration`, `CefBrowser.FindResult`,
   `CefRuntime.ProcessPolicy`, `CefChromiumSurface.Anchor`,
   `CefPermissionRequest.Kinds`. A runtime-wide option nests in `CefRuntime`,
-  a browser option in `CefBrowser`, a window option in `CefBrowserWindow`.
+  a browser option in `CefBrowser`, a window option in `CefWindow`. So
+  does a value only one type produces or takes: `CefHistory.Entry`,
+  `CefHistory.TopSite`, `CefAutocomplete.Suggestion`, `CefMediaRouter.Sink`,
+  `CefBridge.Call`, `CefChromiumSurface.Policy`.
 - **`Configuration`** is the creation-time value bag of a principal type:
   `CefRuntime.Configuration`, `CefBrowser.Configuration`,
-  `CefBrowserWindow.Configuration`, `CefBrowser.PDFConfiguration` for one
+  `CefWindow.Configuration`, `CefBrowser.PDFConfiguration` for one
   operation. Its property is `configuration`, and so is the initializer
   label. Never `Options`.
 - **Groups** inside a configuration are named for their topic, without a
@@ -234,11 +243,17 @@ reading as one.
   identifiers) and name their types as CefKit does
   (`CefPasskeyController`, `CefPasskeyStore`, `CefBookmarks`).
   CefKit never names them: a module plugs in through an extension point
-  (`CefBrowserAttachment`, a shutdown participant, per-profile or
+  (`CefBrowserAttachment`, per-profile or
   per-window module state, a Chrome-command interceptor, the service-host
   engine) and gets its own delegate (`CefPasskeyDelegate`) rather than
   members on `CefBrowserDelegate`. What it needs from CefKit and apps
-  should not use is `package`, not public.
+  should not use is `package`, not public; what no other module uses any
+  more goes back to internal.
+- **What an app could write itself stays out of the library**: UI copy
+  (names to show for permissions), product defaults, and heuristics for
+  when to use a capability belong in the app, or in `Examples` to show
+  how. The library holds what calls the CEF C API, hooks Chromium, or works
+  around a CEF or Chromium limit.
 - **Booleans** read as assertions: `isRunning`, `isDiscarded`,
   `showsToolbarButtons`, `usesSafeBrowsing`.
 - **No abbreviations** beyond terms of art (`URL`, `PDF`, `DNS`, `HTTPS`,

@@ -9,12 +9,12 @@ extension SelfTest {
     static func capabilityChecks() {
         let capabilities = CefRuntime.shared.capabilities
         let consistent = capabilities.signature.hasAppleTeam == (capabilities.teamIdentifier != nil)
-            && capabilities.passkeyAuthenticators.contains(.securityKey)
+            && capabilities.webAuthnAuthenticators.contains(.securityKey)
             && (capabilities.teamIdentifier != nil
                 || capabilities.resolvedSafeStorage(.automatic) == .mockKeychain)
         check("capabilities: signature (\(capabilities.signature.rawValue)" +
               (capabilities.isHardenedRuntime ? ", hardened runtime" : "") + ") and passkey authenticators (" +
-              capabilities.passkeyAuthenticators.map(\.description).sorted().joined(separator: ", ") + ")",
+              capabilities.webAuthnAuthenticators.map(\.description).sorted().joined(separator: ", ") + ")",
               consistent && capabilities.signature != .unsigned)
     }
 
@@ -23,7 +23,7 @@ extension SelfTest {
     /// The `app` bridge's handlers, which the windowed and discard groups
     /// call. Installed at start-up so that each group also runs by itself.
     static func installBridgeHandlers() {
-        bridge.handle("greet") { (person: Person, call: CefBridgeCall) in
+        bridge.handle("greet") { (person: Person, call: CefBridge.Call) in
             "Hello, \(person.name) from \(call.isMainFrame ? "main" : "sub")!"
         }
         bridge.handle("fail") { (_: CefJSON) -> String in throw CefError.operationFailed("nope") }
@@ -181,7 +181,7 @@ extension SelfTest {
         // Scheme handlers registered with CefRuntime serve every profile.
         var configuration = CefBrowser.Configuration()
         configuration.profile = isolated
-        let privateWindow = CefBrowserWindow(
+        let privateWindow = CefWindow(
             browser: CefBrowser(url: URL(string: "selftest://app/second.html")!, configuration: configuration))
         check("profile: custom scheme serves an incognito profile",
               await loaded(privateWindow.browser, title: "second"), detail: privateWindow.browser.title)
@@ -189,7 +189,7 @@ extension SelfTest {
         _ = await waitUntil { privateWindow.isClosed }
     }
 
-    static func browserWindowChecks() async {
+    static func windowChecks() async {
         var configuration = CefBrowser.Configuration()
         configuration.userScripts = [
             CefUserScript(source: "window.__scoped = 1", matching: "chrome://version/*"),
@@ -197,19 +197,19 @@ extension SelfTest {
             .styleSheet("body { --cefswift-probe: 7 }", matching: "chrome://*"),
         ]
         let browser = CefBrowser(url: URL(string: "chrome://version")!, configuration: configuration)
-        let browserWindow = CefBrowserWindow(browser: browser)
-        var popups: [CefBrowserWindow] = []
+        let browserWindow = CefWindow(browser: browser)
+        var popups: [CefWindow] = []
         browserWindow.onPopup = { popups.append($0) }
         browserWindow.show()
 
-        check("browser window: chrome:// page loads", await loaded(browser) && !browser.title.isEmpty, detail: browser.title)
-        check("browser window: has NSWindow", browserWindow.window != nil)
-        await expect("browser window: product name override") {
+        check("window: chrome:// page loads", await loaded(browser) && !browser.title.isEmpty, detail: browser.title)
+        check("window: has NSWindow", browserWindow.window != nil)
+        await expect("window: product name override") {
             let text = try await browser.evaluateJavaScript("document.body.innerText").stringValue ?? ""
             return text.contains("SelfTestBrowser")
         }
-        check("browser window: chrome commands", browser.canExecute(.find))
-        await expect("browser window: ad-hoc signed builds use the mock keychain") {
+        check("window: chrome commands", browser.canExecute(.find))
+        await expect("window: ad-hoc signed builds use the mock keychain") {
             // Local builds must never touch the login keychain (no password prompts).
             let text = try await browser.evaluateJavaScript("document.body.innerText").stringValue ?? ""
             return text.contains("--use-mock-keychain")
@@ -224,16 +224,16 @@ extension SelfTest {
             try await browser.evaluateJavaScript(
                 "getComputedStyle(document.body).getPropertyValue('--cefswift-probe').trim()").stringValue == "7"
         }
-        await expect("browser window: popup is hosted by the app") {
+        await expect("window: popup is hosted by the app") {
             try await browser.evaluateJavaScript("window.open('about:blank', '_blank', 'width=320,height=240'); 0", userGesture: true)
             let arrived = await waitUntil(timeout: .seconds(5)) { !popups.isEmpty }
             return arrived && popups[0].window != nil && popups[0].browser.opener === browser
         }
         for popup in popups { popup.close() }
-        check("browser window: popup closes", await waitUntil { popups.allSatisfy(\.isClosed) })
+        check("window: popup closes", await waitUntil { popups.allSatisfy(\.isClosed) })
 
         browserWindow.close()
-        check("browser window: closes", await waitUntil { browserWindow.isClosed && browser.state == .closed })
+        check("window: closes", await waitUntil { browserWindow.isClosed && browser.state == .closed })
     }
 
     /// Bookmarks, history, most-visited and autocomplete reach Chromium
@@ -292,7 +292,7 @@ extension SelfTest {
 
         // Visit a page in a Chrome-style browser so Chromium records it.
         let visitedURL = URL(string: "selftest://app/history-probe.html")!
-        let visitor = CefBrowserWindow(browser: CefBrowser(url: visitedURL))
+        let visitor = CefWindow(browser: CefBrowser(url: visitedURL))
         check("history: page visited", await loaded(visitor.browser, title: "CefSwift History Probe"))
         // Most visited has eight places, and earlier checks visit other
         // pages; visit this one more often than any of them.
@@ -304,7 +304,7 @@ extension SelfTest {
         _ = await waitUntil { visitor.isClosed }
 
         let history = profile.history
-        var entry: CefHistoryEntry?
+        var entry: CefHistory.Entry?
         check("history: visit found", await waitUntilAsync(timeout: .seconds(15)) {
             entry = try? await history.search("History Probe").first { $0.url == visitedURL }
             return entry != nil
@@ -315,7 +315,7 @@ extension SelfTest {
         }
         var tiles: [URL] = []
         check("history: most visited includes the visit", await waitUntilAsync(timeout: .seconds(20)) {
-            tiles = (try? await history.mostVisited().map(\.url)) ?? []
+            tiles = (try? await history.topSites().map(\.url)) ?? []
             return tiles.contains(visitedURL)
         }, detail: "\(tiles.count) tiles: \(tiles.map(\.absoluteString))")
 
@@ -329,8 +329,8 @@ extension SelfTest {
         }
 
         check("internal pages: service browsers stay out of public lists",
-              CefRuntime.shared.browsers.isEmpty && CefBrowserWindow.all.isEmpty,
-              detail: "\(CefRuntime.shared.browsers.count) browsers, \(CefBrowserWindow.all.count) windows")
+              CefRuntime.shared.browsers.isEmpty && CefWindow.all.isEmpty,
+              detail: "\(CefRuntime.shared.browsers.count) browsers, \(CefWindow.all.count) windows")
 
         if let entry {
             await expect("history: remove") {
@@ -359,7 +359,7 @@ extension SelfTest {
     /// Chromium's profile file saves (`Bookmarks` among them) wait while
     /// the app shows no page, as a group run on its own may not.
     static func withVisiblePage<T>(_ body: @MainActor () async -> T) async -> T {
-        let window = CefBrowserWindow(browser: CefBrowser(url: URL(string: "selftest://app/second.html")!))
+        let window = CefWindow(browser: CefBrowser(url: URL(string: "selftest://app/second.html")!))
         window.show()
         _ = await loaded(window.browser, title: "second")
         let result = await body()

@@ -12,7 +12,6 @@ struct SiteSettingsTests {
         #expect(Set(types).count == types.count)
         for permission in CefSitePermission.allCases {
             #expect(CefSitePermission(contentType: permission.contentType) == permission)
-            #expect(!permission.localizedName.isEmpty)
             #expect(!permission.supportedSettings.contains(.default))
         }
         #expect(CefSitePermission(contentType: CEF_CONTENT_SETTING_TYPE_SITE_ENGAGEMENT) == nil)

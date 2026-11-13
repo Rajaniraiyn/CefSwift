@@ -67,7 +67,7 @@ extension SelfTest {
         await expect("service hosts: calls across services run concurrently") {
             async let search = profile.bookmarks.search("CefSwift")
             async let visits = profile.history.search(limit: 5)
-            async let tiles = profile.history.mostVisited()
+            async let tiles = profile.history.topSites()
             async let suggestions = profile.autocomplete.suggestions(for: "selftest")
             // An image is not `Sendable`, so its call stays on the main actor.
             let icon = Task { @MainActor in
@@ -122,7 +122,7 @@ extension SelfTest {
         var changes = 0
         let watcher = Task { for await _ in profile.bookmarks.changes { changes += 1 } }
         defer { watcher.cancel() }
-        let manager = CefBrowserWindow(browser: CefBrowser(url: URL(string: "chrome://bookmarks/strings.m.js")!))
+        let manager = CefWindow(browser: CefBrowser(url: URL(string: "chrome://bookmarks/strings.m.js")!))
         _ = await loaded(manager.browser)
         try? await Task.sleep(for: .milliseconds(500))
         let created = try? await manager.browser.evaluateJavaScript(

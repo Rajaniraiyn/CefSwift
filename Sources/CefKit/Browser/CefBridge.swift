@@ -54,7 +54,7 @@ import Foundation
 /// origin `"null"` and never matches ``Access/origins(_:)``. `about:blank`
 /// and `srcdoc` frames have their parent frame's origin, and a `blob:`
 /// document the origin in its address. Each handler can also inspect
-/// ``CefBridgeCall/origin``.
+/// ``CefBridge/Call/origin``.
 @MainActor
 public final class CefBridge {
 
@@ -64,7 +64,7 @@ public final class CefBridge {
         case mainFrame
         /// Documents, in any frame, whose origin is listed, e.g.
         /// `"https://app.example.com"` or `"app://start"`. The origin is
-        /// the one ``CefBridgeCall/origin`` describes; an opaque one never
+        /// the one ``CefBridge/Call/origin`` describes; an opaque one never
         /// matches.
         case origins(Set<String>)
         /// Every frame of every page. Use only for browsers that load
@@ -88,7 +88,7 @@ public final class CefBridge {
     /// A method: decodes the call's argument from the payload, in place,
     /// and returns the work that runs the handler and encodes its result
     /// into a reply.
-    private typealias Handler = @MainActor (CefWireDecoder, CefBridgeCall) throws -> Work
+    private typealias Handler = @MainActor (CefWireDecoder, CefBridge.Call) throws -> Work
     private typealias Work = @MainActor (CefWireEncoder) async throws -> Void
     private var handlers: [String: Handler] = [:]
     /// The browsers whose options list this bridge.
@@ -113,7 +113,7 @@ public final class CefBridge {
     /// `Input`; the returned value is encoded as the promise's result.
     public func handle<Input: Decodable, Output: Encodable>(
         _ method: String,
-        _ handler: @escaping @MainActor (Input, CefBridgeCall) async throws -> Output
+        _ handler: @escaping @MainActor (Input, CefBridge.Call) async throws -> Output
     ) {
         handlers[method] = { decoder, call in
             let input = try decoder.decode(Input.self)
@@ -126,13 +126,13 @@ public final class CefBridge {
         _ method: String,
         _ handler: @escaping @MainActor (Input) async throws -> Output
     ) {
-        handle(method) { (input: Input, _: CefBridgeCall) in try await handler(input) }
+        handle(method) { (input: Input, _: CefBridge.Call) in try await handler(input) }
     }
 
     /// Exposes a `method` that returns nothing; its promise resolves to `null`.
     public func handle<Input: Decodable>(
         _ method: String,
-        _ handler: @escaping @MainActor (Input, CefBridgeCall) async throws -> Void
+        _ handler: @escaping @MainActor (Input, CefBridge.Call) async throws -> Void
     ) {
         handlers[method] = { decoder, call in
             let input = try decoder.decode(Input.self)
@@ -148,7 +148,7 @@ public final class CefBridge {
         _ method: String,
         _ handler: @escaping @MainActor (Input) async throws -> Void
     ) {
-        handle(method) { (input: Input, _: CefBridgeCall) in try await handler(input) }
+        handle(method) { (input: Input, _: CefBridge.Call) in try await handler(input) }
     }
 
     /// Stops exposing `method`.
@@ -225,7 +225,7 @@ public final class CefBridge {
         let established = Self.establishedOrigin(
             claimed: origin, url: url, isMainFrame: isMainFrame, localSchemes: Self.localSchemes
         ) { Self.ancestorURLs(of: frame.pointer) }
-        let call = CefBridgeCall(browser: browser, method: method, origin: established.origin ?? "null", isMainFrame: isMainFrame)
+        let call = CefBridge.Call(browser: browser, method: method, origin: established.origin ?? "null", isMainFrame: isMainFrame)
         guard established != .inconsistent, isPermitted(call, origin: established) else {
             fail("\(name).\(method): caller is not permitted to use this bridge")
             return
@@ -255,7 +255,7 @@ public final class CefBridge {
         }
     }
 
-    private func isPermitted(_ call: CefBridgeCall, origin: EstablishedOrigin) -> Bool {
+    private func isPermitted(_ call: CefBridge.Call, origin: EstablishedOrigin) -> Bool {
         switch access {
         case .mainFrame: return call.isMainFrame
         case .origins(let allowed):
@@ -398,23 +398,25 @@ private struct WeakBrowser {
     weak var browser: CefBrowser?
 }
 
-/// Describes one JavaScript → Swift bridge call.
-@MainActor
-public struct CefBridgeCall {
-    /// The browser the call came from.
-    public let browser: CefBrowser
-    /// The method being called.
-    public let method: String
-    /// The calling document's origin (`"https://example.com"`), as the
-    /// browser process establishes it from the frame's address: the
-    /// address's origin; for `about:blank` and `about:srcdoc`, the nearest
-    /// parent frame's; for `blob:https://example.com/…`, the one it names;
-    /// `"file://"` for a top-level `file:` page (a `file:` subframe is
-    /// opaque, as is one of a custom scheme registered with `.local`).
-    /// `"null"` when the origin is opaque or the address cannot confirm it:
-    /// `data:` documents, sandboxed documents, and a top-level
-    /// `about:blank` such as a new popup's, whose opener CEF does not say.
-    public let origin: String
-    /// Whether the caller is the top-level document.
-    public let isMainFrame: Bool
+extension CefBridge {
+    /// Describes one JavaScript → Swift bridge call.
+    @MainActor
+    public struct Call {
+        /// The browser the call came from.
+        public let browser: CefBrowser
+        /// The method being called.
+        public let method: String
+        /// The calling document's origin (`"https://example.com"`), as the
+        /// browser process establishes it from the frame's address: the
+        /// address's origin; for `about:blank` and `about:srcdoc`, the nearest
+        /// parent frame's; for `blob:https://example.com/…`, the one it names;
+        /// `"file://"` for a top-level `file:` page (a `file:` subframe is
+        /// opaque, as is one of a custom scheme registered with `.local`).
+        /// `"null"` when the origin is opaque or the address cannot confirm it:
+        /// `data:` documents, sandboxed documents, and a top-level
+        /// `about:blank` such as a new popup's, whose opener CEF does not say.
+        public let origin: String
+        /// Whether the caller is the top-level document.
+        public let isMainFrame: Bool
+    }
 }

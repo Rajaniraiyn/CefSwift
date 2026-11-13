@@ -30,7 +30,7 @@ struct StoreTests {
         let changes = profile.bookmarks.changes
         // Subscribing hands the live events to a task; let it start.
         try await Task.sleep(for: .milliseconds(50))
-        for _ in 0..<10 { profile.services.deliver(module: CefBookmarks.module.name, name: "changed", payload: .null) }
+        for _ in 0..<10 { profile.serviceHosts.deliver(module: CefBookmarks.module.name, name: "changed", payload: .null) }
         try await Task.sleep(for: .milliseconds(100))
         var count = 0
         let reader = Task { @MainActor in

@@ -12,7 +12,7 @@ extension SelfTest {
 
     static func faviconChecks() async {
         let browser = CefBrowser(url: URL(string: "selftest://edge/favicon.html")!)
-        let window = CefBrowserWindow(browser: browser)
+        let window = CefWindow(browser: browser)
         window.show()
         check("favicon: downloaded as an image", await waitUntil { browser.favicon != nil },
               detail: "\(String(describing: browser.faviconURL))")
@@ -49,7 +49,7 @@ extension SelfTest {
 
     static func toolbarAndZoomChecks() async {
         let browser = CefBrowser(url: URL(string: "selftest://app/second.html")!)
-        let window = CefBrowserWindow(browser: browser)
+        let window = CefWindow(browser: browser)
         let renders = RenderLog()
         window.setToolbar { TitleProbe(browser: browser, log: renders) }
         window.setTabAccessory { TitleProbe(browser: browser, log: renders) }
@@ -96,11 +96,11 @@ extension SelfTest {
         // established for the caller.
         let probe = CefBridge(name: "probe")
         probe.access = .anyFrame
-        probe.handle("origin") { (_: CefJSON, call: CefBridgeCall) in call.origin }
+        probe.handle("origin") { (_: CefJSON, call: CefBridge.Call) in call.origin }
         var configuration = CefBrowser.Configuration()
         configuration.bridges = [bridge, probe]
         let browser = CefBrowser(url: URL(string: "selftest://app/second.html")!, configuration: configuration)
-        let window = CefBrowserWindow(browser: browser)
+        let window = CefWindow(browser: browser)
         window.show()
         _ = await loaded(browser, title: "second")
         await expect("bridge scope: a permitted origin gets the bridge, not its raw binding") {
@@ -264,11 +264,11 @@ extension SelfTest {
         scoped.handle("ping") { (_: CefJSON) in "pong" }
         let probe = CefBridge(name: "probe")
         probe.access = .anyFrame
-        probe.handle("origin") { (_: CefJSON, call: CefBridgeCall) in call.origin }
+        probe.handle("origin") { (_: CefJSON, call: CefBridge.Call) in call.origin }
         var configuration = CefBrowser.Configuration()
         configuration.bridges = [scoped, probe]
         let browser = CefBrowser(url: file, configuration: configuration)
-        let window = CefBrowserWindow(browser: browser)
+        let window = CefWindow(browser: browser)
         window.show()
         // The page's origin when it reaches the `.origins` bridge; `nil`
         // when it must not (an opaque origin, even with "null" listed).
@@ -329,7 +329,7 @@ extension SelfTest {
         var configuration = CefBrowser.Configuration()
         configuration.bridges = [wire]
         let browser = CefBrowser(url: URL(string: "selftest://app/second.html")!, configuration: configuration)
-        let window = CefBrowserWindow(browser: browser)
+        let window = CefWindow(browser: browser)
         window.show()
         guard await waitUntil({ browser.title == "second" }) else {
             check("bridge wire: page loads", false, detail: browser.title)
@@ -402,7 +402,7 @@ extension SelfTest {
             released = profile
             var configuration = CefBrowser.Configuration()
             configuration.profile = profile
-            let window = CefBrowserWindow(browser: CefBrowser(url: URL(string: "selftest://app/second.html")!, configuration: configuration))
+            let window = CefWindow(browser: CefBrowser(url: URL(string: "selftest://app/second.html")!, configuration: configuration))
             check("service lifetime: incognito tab loads", await loaded(window.browser, title: "second"))
             // Starts the profile's suggestions host.
             await expect("service lifetime: incognito suggestions answer") {

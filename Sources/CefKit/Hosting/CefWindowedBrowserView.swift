@@ -28,16 +28,6 @@ public final class CefWindowedBrowserView: NSView {
         }
     }
 
-    /// Whether the view draws the built-in swipe indicator that
-    /// ``CefBrowser/Configuration/navigationGestureIndicator`` chooses. Turn
-    /// it off to draw an indicator of your own.
-    public var showsBuiltInGestureIndicator = true {
-        didSet {
-            gestureIndicator = updatedGestureIndicator(gestureIndicator, browser: browser, isAllowed: showsBuiltInGestureIndicator)
-        }
-    }
-
-    private var gestureIndicator: CefNavigationGestureIndicatorView?
     private var swipeMonitor: Any?
 
     /// Whether ``tearDown()`` closes the browser. `CefWebView(url:)` sets
@@ -60,7 +50,6 @@ public final class CefWindowedBrowserView: NSView {
             previous.removeFromSuperview()
         }
         hostBrowserIfPossible()
-        gestureIndicator = updatedGestureIndicator(gestureIndicator, browser: browser, isAllowed: showsBuiltInGestureIndicator)
         updateSwipeMonitor()
     }
 
@@ -68,14 +57,6 @@ public final class CefWindowedBrowserView: NSView {
         super.viewDidMoveToWindow()
         hostBrowserIfPossible()
         updateSwipeMonitor()
-    }
-
-    /// Keeps the indicator above Chromium's view, which is added later.
-    public override func didAddSubview(_ subview: NSView) {
-        super.didAddSubview(subview)
-        if let gestureIndicator, subview !== gestureIndicator {
-            addSubview(gestureIndicator, positioned: .above, relativeTo: nil)
-        }
     }
 
     /// Chromium's view takes scroll events directly, so swipes are claimed

@@ -1,7 +1,7 @@
 import AppKit
 import CefSwiftUI
 
-/// Checks of what a browser built on `CefBrowserWindow` relies on: popups,
+/// Checks of what a browser built on `CefWindow` relies on: popups,
 /// closing in awkward moments, downloads, `beforeunload`, load errors,
 /// renderer crashes and Chromium's own pages.
 extension SelfTest {
@@ -32,7 +32,7 @@ extension SelfTest {
         var configuration = CefBrowser.Configuration()
         configuration.bridges = [counter]
         let browser = CefBrowser(url: URL(string: "selftest://edge/tab.html")!, configuration: configuration)
-        let window = CefBrowserWindow(browser: browser)
+        let window = CefWindow(browser: browser)
         window.show()
         _ = await loaded(browser, title: "tab")
         await expect("bridge: typed round trip in a Chrome-style window") {
@@ -48,8 +48,8 @@ extension SelfTest {
 
     static func popupChecks() async {
         let browser = CefBrowser(url: URL(string: "selftest://edge/opener.html")!)
-        let opener = CefBrowserWindow(browser: browser)
-        var popups: [CefBrowserWindow] = []
+        let opener = CefWindow(browser: browser)
+        var popups: [CefWindow] = []
         opener.onPopup = { popup in
             popups.append(popup)
             if let parent = opener.window, let panel = popup.window {
@@ -96,14 +96,14 @@ extension SelfTest {
 
     static func closingChecks() async {
         let slow = CefBrowser(url: URL(string: "selftest://edge/slow.html")!)
-        let loading = CefBrowserWindow(browser: slow)
+        let loading = CefWindow(browser: slow)
         loading.show()
         _ = await waitUntil(timeout: .seconds(3)) { slow.isLoading }
         loading.close()
         check("closing: a window still loading closes", await waitUntil { loading.isClosed && slow.state == .closed })
 
         let windows = (0..<8).map { index in
-            CefBrowserWindow(browser: CefBrowser(url: URL(string: "selftest://edge/tab.html?\(index)")!))
+            CefWindow(browser: CefBrowser(url: URL(string: "selftest://edge/tab.html?\(index)")!))
         }
         windows.forEach { $0.show() }
         check("closing: many tabs opened at once all load",
@@ -128,7 +128,7 @@ extension SelfTest {
         let recorder = Recorder()
         recorder.downloadDestination = directory
         let browser = CefBrowser(url: URL(string: "selftest://edge/tab.html")!, delegate: recorder)
-        let window = CefBrowserWindow(browser: browser)
+        let window = CefWindow(browser: browser)
         window.show()
         _ = await loaded(browser, title: "tab")
 
@@ -153,7 +153,7 @@ extension SelfTest {
     static func leavingChecks() async {
         let recorder = Recorder()
         let browser = CefBrowser(url: URL(string: "selftest://edge/leave.html")!, delegate: recorder)
-        let window = CefBrowserWindow(browser: browser)
+        let window = CefWindow(browser: browser)
         window.show()
         _ = await loaded(browser, title: "leave")
         // beforeunload needs the page to have seen a user gesture.
@@ -175,7 +175,7 @@ extension SelfTest {
     static func loadFailureChecks() async {
         let recorder = Recorder()
         let browser = CefBrowser(url: URL(string: "https://nonexistent.invalid/")!, delegate: recorder)
-        let window = CefBrowserWindow(browser: browser)
+        let window = CefWindow(browser: browser)
         window.show()
         check("load error: reported through didFailLoad",
               await waitUntil { recorder.loadErrors.contains { !$0.isCancellation } },
@@ -189,7 +189,7 @@ extension SelfTest {
     static func rendererCrashChecks() async {
         let recorder = Recorder()
         let browser = CefBrowser(url: URL(string: "selftest://edge/tab.html")!, delegate: recorder)
-        let window = CefBrowserWindow(browser: browser)
+        let window = CefWindow(browser: browser)
         window.show()
         _ = await loaded(browser, title: "tab")
         browser.load(URL(string: "chrome://crash")!)
@@ -219,7 +219,7 @@ extension SelfTest {
         var configuration = CefBrowser.Configuration()
         configuration.userScripts = [.styleSheet(settingsStyles, matching: "chrome://settings/*")]
         let browser = CefBrowser(url: URL(string: "chrome://settings/")!, configuration: configuration)
-        let window = CefBrowserWindow(browser: browser)
+        let window = CefWindow(browser: browser)
         window.show()
         _ = await waitUntil { browser.title == "Settings" && !browser.isLoading }
         let visibility = """
@@ -259,8 +259,8 @@ extension SelfTest {
         // The password manager link opens a tab Chromium creates itself.
         var opened: [URL] = []
         var sawChromiumWindow = false
-        CefRuntime.shared.onOpenBrowser = { opened.append($0.url); return .close }
-        defer { CefRuntime.shared.onOpenBrowser = nil }
+        CefRuntime.shared.onChromeTab = { opened.append($0.url); return .close }
+        defer { CefRuntime.shared.onChromeTab = nil }
         browser.load(URL(string: "chrome://settings/autofill")!)
         _ = await waitUntil { browser.title.contains("Autofill") && !browser.isLoading }
         _ = await waitUntilAsync {
@@ -274,7 +274,7 @@ extension SelfTest {
                 })()
                 """).boolValue) == true
         }
-        let ours = Set(CefBrowserWindow.all.compactMap(\.window).map(ObjectIdentifier.init))
+        let ours = Set(CefWindow.all.compactMap(\.window).map(ObjectIdentifier.init))
         let arrived = await waitUntil {
             sawChromiumWindow = sawChromiumWindow || NSApp.windows.contains {
                 $0.isVisible && $0.alphaValue > 0.05 && $0.styleMask.contains(.titled) && $0.parent == nil

@@ -14,7 +14,7 @@ open Examples/dist/Browser.app
 ## Browser
 
 A tabbed browser (`Sources/Browser`). Each tab is a Chrome-style
-`CefBrowserWindow`, and the tabs are grouped as native macOS tabs.
+`CefWindow`, and the tabs are grouped as native macOS tabs.
 
 - A SwiftUI toolbar in three parts. The address field shows the site and its
   security, edits the full address, and offers Chromium-ranked suggestions
@@ -30,7 +30,9 @@ A tabbed browser (`Sources/Browser`). Each tab is a Chrome-style
   Settings, so are the QR code bubble and the Cast picker
   (`ChromiumPanels.swift`). These, and the suggestions, bookmarks and
   history below, use the `CefChromium` library.
-- Two-finger swipes go back and forward, with CefSwift's swipe indicator.
+- Two-finger swipes go back and forward, with the browser's own swipe
+  indicator (`SwipeIndicator.swift`) laid over the page in the window's
+  `pageOverlay`, in place of Chromium's arrow.
 - A bookmark star (⌘D), Bookmarks and History menus, and a start page at
   `browser://start/` with frequently visited sites and recent bookmarks,
   whose data comes through a `CefBridge`.
@@ -92,7 +94,7 @@ One page in one kind of host with chosen CefSwift features on
 (`Sources/Compat`), for the web-compatibility matrix that
 `Scripts/compat-matrix.py` runs: what pages can observe about each host
 and feature, next to stock Google Chrome. `-host window|windowed|offscreen`
-picks a `CefBrowserWindow` or a view, `-preset default|browser|embedded`
+picks a `CefWindow` or a view, `-preset default|chrome|embedded`
 the configuration, and `-features` a comma-separated list of `devtools`,
 `runtime`, `page`, `bridge`, `userscript`, `evaluate`,
 `passkeys` and `accessibility`. The script's documentation lists the rest.

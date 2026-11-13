@@ -4,16 +4,24 @@ import CefSwiftUI
 import SwiftUI
 
 /// The browser's own interface in place of some of Chromium's: a find bar
-/// under the toolbar and a link status bubble always, and, when the
+/// under the toolbar and, over the page, a link status bubble and the swipe
+/// indicator always, and, when the
 /// "Use the browser's QR code and Cast panels" setting is on, a QR code
 /// panel and a Cast picker. Chromium's other bubbles hang from the toolbar.
 @MainActor
 enum ChromiumPanels {
     static let customPanelsKey = "customChromiumPanels"
 
-    static func configure(_ window: CefBrowserWindow) {
+    static func configure(_ window: CefWindow) {
         window.setFindBar { session in FindBar(session: session) }
-        window.setStatusBubble { text in StatusBubble(text: text) }
+        window.chromiumSurfacePolicy[.statusBubble] = .hidden
+        let browser = window.browser
+        window.setPageOverlay {
+            ZStack {
+                StatusBubble(browser: browser)
+                SwipeIndicator(browser: browser)
+            }
+        }
         guard UserDefaults.standard.bool(forKey: customPanelsKey) else { return }
         window.setCustomPresentation(for: .qrCode) { surface in QRCodePanel(surface: surface) }
         window.setCustomPresentation(for: .cast) { surface in CastPicker(surface: surface) }
@@ -55,11 +63,18 @@ private struct FindBar: View {
     }
 }
 
-/// The address of the link under the pointer, at the page's lower left.
+/// The address of the link under the pointer, at the page's lower left,
+/// while there is one.
 private struct StatusBubble: View {
-    let text: String
+    let browser: CefBrowser
 
     var body: some View {
+        if !browser.statusText.isEmpty {
+            bubble(browser.statusText)
+        }
+    }
+
+    private func bubble(_ text: String) -> some View {
         Text(text)
             .font(.caption)
             .lineLimit(1)
@@ -123,7 +138,7 @@ private struct CastPicker: View {
             Divider()
             // Mirroring a tab needs Chromium's own dialog.
             Button("Use Chromium's Cast Dialog…") {
-                guard let window = surface.browserWindow else { return }
+                guard let window = surface.parentWindow else { return }
                 surface.dismiss()
                 window.setCustomPresentation(for: .cast, nil)
                 window.browser.execute(.castMedia)

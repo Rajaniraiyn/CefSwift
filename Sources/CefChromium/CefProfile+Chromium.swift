@@ -8,7 +8,7 @@ import Foundation
 //   pages (CefBookmarks, CefHistory, CefAutocomplete).
 // - Chromium's surfaces in Chrome-style windows, its bubbles, find bar and
 //   status bubble, recognized through overrides of Chromium's AppKit
-//   classes (CefChromiumSurface, CefBrowserWindow.chromiumUI), with their
+//   classes (CefChromiumSurface, CefWindow.chromiumSurfacePolicy), with their
 //   SwiftUI glue.
 //
 // Both are bound to interfaces Chromium keeps private: the Mojo handlers
@@ -64,7 +64,7 @@ extension CefProfile {
     /// Calls the history service with `timeout`, starting its host if it
     /// is not running.
     @_spi(Testing) public func pingHistoryService(timeout: Duration) async throws {
-        _ = try await services.call(CefHistory.historyModule, "async () => true", timeout: timeout)
+        _ = try await serviceHosts.call(CefHistory.historyModule, "async () => true", timeout: timeout)
     }
 }
 

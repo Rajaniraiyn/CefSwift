@@ -47,7 +47,7 @@ PORT = 8765
 # Hosts: (name, Compat -host, -preset). "chrome" is stock Google Chrome.
 COLUMNS = [
     ("chrome", None, None),
-    ("window", "window", "browser"),
+    ("window", "window", "chrome"),
     ("windowed", "windowed", "embedded"),
     ("offscreen", "offscreen", "embedded"),
 ]
@@ -64,7 +64,7 @@ ROWS = [
     ("passkeys .app", "passkeys", None),
     ("accessibility", "accessibility", None),
     ("preset default", "", "default"),
-    ("preset browser", "", "browser"),
+    ("preset chrome", "", "chrome"),
     ("preset embedded", "", "embedded"),
 ]
 

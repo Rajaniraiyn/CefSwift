@@ -97,8 +97,9 @@ struct OverlayDemo: View {
 
     var body: some View {
         CefWebView(browser)
-            // A swipe indicator of the app's own, in place of the built-in one.
-            .navigationGestureIndicator { value in
+            // A swipe indicator drawn from the browser's swipe progress.
+            .overlay {
+                let value = browser.navigationGestureProgress
                 let progress = min(1, abs(value))
                 Image(systemName: value < 0 ? "chevron.left" : "chevron.right")
                     .font(.title2.weight(.semibold))
@@ -108,6 +109,7 @@ struct OverlayDemo: View {
                     .opacity(progress)
                     .padding(28)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: value < 0 ? .leading : .trailing)
+                    .allowsHitTesting(false)
             }
             .clipShape(.rect(cornerRadius: 16))
             .padding()

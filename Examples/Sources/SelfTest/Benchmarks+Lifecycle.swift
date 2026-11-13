@@ -13,7 +13,7 @@ enum BenchmarkHost: String, CaseIterable {
 final class HostedBenchmarkBrowser {
     let browser: CefBrowser
     let window: NSWindow
-    private var browserWindow: CefBrowserWindow?
+    private var browserWindow: CefWindow?
 
     init?(_ host: BenchmarkHost, url: URL, frame: CGRect = CGRect(x: 200, y: 200, width: 640, height: 480)) async {
         var configuration = CefBrowser.Configuration()
@@ -26,9 +26,9 @@ final class HostedBenchmarkBrowser {
         }
         switch host {
         case .chromeStyle:
-            var configuration = CefBrowserWindow.Configuration()
+            var configuration = CefWindow.Configuration()
             configuration.frame = frame
-            let browserWindow = CefBrowserWindow(browser: browser, configuration: configuration)
+            let browserWindow = CefWindow(browser: browser, configuration: configuration)
             self.browserWindow = browserWindow; browserWindow.show()
             guard await SelfTest.waitUntil({ browserWindow.window != nil }), let window = browserWindow.window else { return nil }
             self.window = window; window.level = .floating
@@ -55,7 +55,7 @@ final class HostedBenchmarkBrowser {
         browser.close(force: true)
         _ = await SelfTest.waitUntil { browser.state == .closed }
         if browserWindow == nil { window.close() }
-        _ = await SelfTest.waitUntil { CefBrowserWindow.all.isEmpty }
+        _ = await SelfTest.waitUntil { CefWindow.all.isEmpty }
     }
 }
 

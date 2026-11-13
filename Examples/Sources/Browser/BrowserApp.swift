@@ -5,14 +5,14 @@ import SwiftUI
 
 /// A complete tabbed web browser in a few hundred lines.
 ///
-/// Every tab is a Chrome-style ``CefBrowserWindow`` — so `chrome://settings`,
+/// Every tab is a Chrome-style ``CefWindow`` — so `chrome://settings`,
 /// `chrome://extensions`, history, downloads, passwords and PDF viewing all
 /// work — with a SwiftUI toolbar on top. Windows share a tabbing identifier,
 /// so macOS presents them as native tabs.
 @main
 struct BrowserApp: CefSwiftApp {
     static var runtimeConfiguration: CefRuntime.Configuration {
-        var configuration = CefRuntime.Configuration.browser
+        var configuration = CefRuntime.Configuration.chrome
         configuration.productName = "CefSwift Browser"
         // Chrome's own UI is replaced by the SwiftUI toolbar; keep its
         // internal pages free of buttons that would open Chrome windows.

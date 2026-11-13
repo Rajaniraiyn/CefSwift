@@ -195,11 +195,11 @@ extension CefBrowser {
     /// Runs one of Chrome's own commands — open history, zoom, find, print,
     /// bookmark, and so on. Chrome-style browsers only.
     ///
-    /// In a ``CefBrowserWindow``, a command whose surface the window
-    /// presents with your interface or hides (CefChromium's `chromiumUI`)
+    /// In a ``CefWindow``, a command whose surface the window
+    /// presents with your interface or hides (CefChromium's `chromiumSurfacePolicy`)
     /// goes there instead of to Chrome.
     public func execute(_ command: CefChromeCommand, disposition: CefWindowOpenDisposition = .currentTab) {
-        if let window = CefBrowserWindow.hosting(self), window.intercept(command) { return }
+        if let window = CefWindow.hosting(self), window.intercept(command) { return }
         guard !isDiscarded else {
             whenRestored { [weak self] in self?.execute(command, disposition: disposition) }
             return

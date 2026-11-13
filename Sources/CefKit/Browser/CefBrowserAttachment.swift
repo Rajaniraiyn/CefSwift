@@ -46,7 +46,7 @@ public protocol CefBrowserAttachment: AnyObject {
     /// open (``CefWindowOpenDecision/allowNativePopup``) open instead in a
     /// browser CefKit creates with the opener's configuration. That popup
     /// arrives as a native one does (``CefBrowserDelegate/browser(_:didOpen:)``,
-    /// then the opener's window's ``CefBrowserWindow/onPopup``), but the
+    /// then the opener's window's ``CefWindow/onPopup``), but the
     /// page cannot script it: `window.open` returns `null`, the popup has
     /// no `window.opener`, and a popup without a URL is refused. Browsers
     /// Chromium opens without a page asking, such as a tab from Chrome's

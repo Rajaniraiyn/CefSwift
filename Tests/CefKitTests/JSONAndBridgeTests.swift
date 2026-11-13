@@ -188,7 +188,7 @@ import Testing
     /// Chromium sets `navigator.webdriver` for these; no preset may.
     @Test func noPresetMarksTheBrowserAsAutomated() {
         let automation: Set<String> = ["enable-automation", "headless", "remote-debugging-pipe", "remote-debugging-port"]
-        for configuration in [CefRuntime.Configuration(), .embedded, .browser] {
+        for configuration in [CefRuntime.Configuration(), .embedded, .chrome] {
             #expect(automation.isDisjoint(with: configuration.extraCommandLineSwitches.keys))
             #expect(configuration.remoteDebuggingPort == nil)
         }
@@ -202,6 +202,6 @@ import Testing
     }
 
     @Test func browserPresetKeepsSessions() {
-        #expect(CefRuntime.Configuration.browser.persistsSessionCookies)
+        #expect(CefRuntime.Configuration.chrome.persistsSessionCookies)
     }
 }
