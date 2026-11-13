@@ -50,7 +50,8 @@ three) on a build without the passkey and Chromium-panel code:
 them under load; the numbers below are from 2026-11-14, before and after
 the changes described under
 [Calls](architecture.md#internal-page-services), on AC power with other
-apps open, the second of two runs after. Main-thread time and allocations
+apps open (three runs after; where they differ by more than noise, the
+range). Main-thread time and allocations
 are the app's main thread, which is also Chromium's UI thread, so they
 include Chromium's own work there: an autocomplete query's 2 250
 allocations are nearly all its controller's.
@@ -67,25 +68,31 @@ allocations are nearly all its controller's.
 | Bookmark tree (40 nodes), host | 0.72 / 1.22 ms | 0.53 / 0.68 ms | 201 → 100 |
 | Bookmark add and remove (two calls) | 1.10 / 1.73 ms | 1.16 / 1.66 ms | 210 → 186 a call |
 | A change through the API → `changes` | 3.9 / 35.6 ms | 2.7 / 11.5 ms | |
-| 5 000 history entries (synthetic, history host) | 152 / 172 ms; main thread 52 ms | 65 / 84 ms; main thread 4.5 ms | 205 000 → 20 100 |
-| Bookmark tree of 10 000, host | 511 / 3 512 ms; main thread 122 ms | 288 / 322 ms; main thread 27 ms | 331 000 → 20 200 |
-| Bookmark tree of 10 000, `Bookmarks` file | 36 ms, on the main thread | FILE_AFTER | 90 200 → FILE_ALLOCS |
+| 5 000 history entries (synthetic, history host) | 152 / 172 ms; main thread 52 ms | 31 / 39 ms; main thread 3.4 ms | 205 000 → 20 100 |
+| Bookmark tree of 10 000, host | 511 / 3 512 ms; main thread 122 ms | 182 / 321 ms; main thread 31 ms | 331 000 → 20 200 |
+| Bookmark tree of 10 000, `Bookmarks` file | 36 ms, on the main thread | 0.10 ms until Chromium saves again; then 27 ms, off the main thread | 90 200 → 126 |
 
 Where the large results' time went, per call:
 
 | 5 000 history entries | Before | After |
 |---|---|---|
-| Value → wire in the renderer (`V8Wire`), IPC | 98 ms | 10 ms (plus the JavaScript encoder, inside the renderer's 48 ms with building the records) |
-| Decoding in Swift | 45 ms (wire → `CefJSON` → JSON text → `JSONDecoder`), main thread | 6.9 ms, wire → records, off the main thread |
+| Building the records and encoding them in the renderer | 1.6 ms building; encoding is the next row's | 19 ms, both |
+| Value → wire through the V8 C API (`V8Wire`), and IPC | 98 ms | 8 ms (the `ArrayBuffer` copied once) |
+| Decoding in Swift | 45 ms (wire → `CefJSON` → JSON text → `JSONDecoder`), main thread | 6.8 ms, wire → records, off the main thread |
+
+The encoder first wrote every string with `TextEncoder.encodeInto`;
+copying short ASCII strings, most keys and values, unit by unit instead
+took the renderer's time from 48 to 19 ms for the 5 000 entries and from
+254 to 134 ms for the 10 000 bookmarks.
 
 Under load:
 
 | Load | Before | After |
 |---|---|---|
-| 200 queries 20 ms apart, each cancelling the one before | cancelled queries resumed about 5 ms after their cancel; main thread busy 20% | 0.10 ms (p50, 0.24 ms p95); 13% |
-| The same through `results(following:)` | – | a result for each text 1.7 ms after it (p50), complete for the last text 117 ms after it; nothing from superseded texts |
-| 1 000 concurrent calls across the hosts | 730 ms; favicons p50 484 ms | 209 ms; favicons 202 ms |
-| 10 000 bookmark adds, 32 in flight | 5.1 s; 9 550 change events delivered | 2.9 s; 599 |
+| 200 queries 20 ms apart, each cancelling the one before | cancelled queries resumed about 5 ms after their cancel; main thread busy 20% | 0.10–0.25 ms (p50, under 0.4 ms p95); 10–20% |
+| The same through `results(following:)` | – | a first result for each text 1.7–4.4 ms after it (p50), complete for the last text 117–154 ms after it; nothing from superseded texts |
+| 1 000 concurrent calls across the hosts | 730 ms; favicons p50 484 ms | 194–209 ms; favicons 202 ms |
+| 10 000 bookmark adds, 32 in flight | 5.1 s; 9 550 change events delivered | 2.9 s; about 600 |
 | 10 000 calls, then the host's JavaScript heap | 36.2 → 37.7 MB | 22.6 → 13.3 MB |
 | Pending operations and the census after each load | 0, clean | 0, clean |
 
@@ -119,9 +126,10 @@ Measured and left alone:
   persistent wire stream) would still reach the browser process through
   CEF process messages, one created per send; CEF has no other channel
   from a renderer, so there is nothing to keep open.
-- `chrome.bookmarks.getTree()` itself takes 250 ms for 10 000 bookmarks,
-  in Chromium's extension bindings. `children(of:)` reads one folder at a
-  time, and the `Bookmarks` file serves trees while the host is closed.
+- `chrome.bookmarks.getTree()` and the encoding take 130 ms for 10 000
+  bookmarks, most of it Chromium's extension bindings building the tree
+  as JavaScript objects. `children(of:)` reads one folder at a time, and
+  the `Bookmarks` file serves trees while the host is closed.
 - Chromium's autocomplete runs on its UI thread, the app's main thread.
   Debouncing would spare it work, but how long to wait is an app's call;
   the latest-wins API stops every superseded query instead.

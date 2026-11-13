@@ -944,7 +944,7 @@ line, `__cefswiftServices.invoke(handle, args, call)`, sent as an
 `evaluate` message. The runtime encodes the function's value in the wire
 format itself, into one `ArrayBuffer`, with JIT-compiled code; walking the
 value through the V8 C API (`V8Wire`) costs about a microsecond a value,
-which for 5 000 history entries was 95 ms of the call. The reply carries
+which for 5 000 history entries was 98 ms of a 152 ms call (now 31 ms). The reply carries
 the buffer as one bytes value. The browser process checks its structure
 with the same validator as any renderer payload, and `CefWireDecoder`
 decodes the caller's type straight from it: no `CefJSON` tree, no JSON
