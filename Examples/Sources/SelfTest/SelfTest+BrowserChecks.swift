@@ -1,5 +1,6 @@
 import AppKit
 @_spi(Testing) import CefKit
+import CefPasskeys
 import CefSwiftUI
 
 extension SelfTest {

@@ -98,10 +98,10 @@ public final class CefBrowserWindow: Identifiable {
     /// it your toolbar, add it to a tab group, and show it.
     ///
     /// When `nil`, Chromium shows popups in a window of its own design.
-    /// With ``CefBrowser/PasskeyPolicy/app(_:)`` or
-    /// ``CefBrowser/PasskeyPolicy/disabled`` passkeys, the popup is one
-    /// CefKit created instead, not connected to its opener's page; see
-    /// ``CefBrowser/PasskeyPolicy``.
+    /// When an attachment of the opener must prepare before the first
+    /// document, the popup is one CefKit created instead, not connected to
+    /// its opener's page; see
+    /// ``CefBrowserAttachment/preparesBeforeFirstDocument``.
     @ObservationIgnored public var onPopup: ((CefBrowserWindow) -> Void)?
 
     public nonisolated var id: ObjectIdentifier { ObjectIdentifier(self) }

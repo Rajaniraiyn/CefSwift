@@ -1,15 +1,16 @@
+import CefKit
 import Foundation
 import Security
 
 /// Where an app keeps the passkeys it answers WebAuthn requests with.
 ///
-/// Pass a store to ``CefBrowser/PasskeyPolicy/app(_:)``. CefKit reads it when a page
+/// Pass a store to ``CefPasskeyController/Policy/app(_:)``. The controller reads it when a page
 /// asks to sign in, saves a passkey after a registration, and saves it
 /// again after each sign-in with its new ``CefPasskey/signCount``. List and
 /// remove passkeys through the store itself, for example in a settings
 /// screen.
 ///
-/// Two stores come with CefKit: ``CefInMemoryPasskeyStore`` and
+/// Two stores come with CefPasskeys: ``CefInMemoryPasskeyStore`` and
 /// ``CefKeychainPasskeyStore``. Adopt the protocol to keep passkeys
 /// elsewhere, such as in a password manager.
 @MainActor
@@ -20,7 +21,7 @@ public protocol CefPasskeyStore: AnyObject {
     func save(_ passkey: CefPasskey) async throws
     /// Removes `passkey`. Removing one that is not stored does nothing.
     func remove(_ passkey: CefPasskey) async throws
-    /// Throws if the store cannot save a passkey now. CefKit calls it
+    /// Throws if the store cannot save a passkey now. The controller calls it
     /// before it asks the delegate about a registration, and refuses the
     /// registration when it throws: once the page has its new credential,
     /// a failed save cannot be taken back. The default reads

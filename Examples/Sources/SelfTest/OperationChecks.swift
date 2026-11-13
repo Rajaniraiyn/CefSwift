@@ -1,5 +1,6 @@
 import AppKit
 @_spi(Testing) import CefKit
+import CefPasskeys
 import CefSwiftUI
 import Observation
 import os
@@ -91,19 +92,25 @@ extension SelfTest {
     /// `ready()` waits for a browser's set-up, not just its creation.
     static func readinessChecks() async {
         var configuration = CefBrowser.Configuration()
-        // Taking WebAuthn over sets the browser up before its first page.
-        configuration.passkeys = .disabled
+        // An attachment that prepares first sets the browser up before
+        // its first page.
+        let attachment = SlowAttachment()
+        configuration.attachments = [attachment]
         let window = CefBrowserWindow(
             browser: CefBrowser(url: URL(string: "selftest://edge/ready.html")!, configuration: configuration))
         window.show()
         await expect("operations: ready() returns once the browser's set-up has finished") {
             try await window.browser.ready()
-            return !window.browser.isSettingUp
+            return !window.browser.isSettingUp && attachment.created == 1
         }
+        check("operations: an attachment that prepares first runs before the first page, with DevTools usable",
+              attachment.pageDuringSetUp == "about:blank", detail: attachment.pageDuringSetUp ?? "nil")
         check("operations: the set-up browser loads its page",
               await loaded(window.browser, title: "ready"), detail: window.browser.title)
         window.close()
         _ = await waitUntil { window.isClosed }
+        check("operations: the attachment hears the browser close", attachment.closed == 1,
+              detail: "\(attachment.closed)")
     }
 
     /// Two browsers in one renderer number their evaluations alike: a
@@ -307,9 +314,32 @@ func isBrowserClosed(_ error: Error?) -> Bool {
     return false
 }
 
+/// An attachment, written with public API only, that takes its time to
+/// set a browser up and records what it saw.
+@MainActor
+final class SlowAttachment: CefBrowserAttachment {
+    private(set) var created = 0
+    private(set) var closed = 0
+    /// The document the browser had while the attachment set it up.
+    private(set) var pageDuringSetUp: String?
+
+    var preparesBeforeFirstDocument: Bool { true }
+
+    func browserDidCreate(_ browser: CefBrowser) async {
+        try? await Task.sleep(for: .milliseconds(300))
+        let page = try? await browser.devTools.send("Runtime.evaluate", ["expression": "location.href", "returnByValue": true])
+        pageDuringSetUp = page?["result"]["value"].stringValue
+        created += 1
+    }
+
+    func browserDidClose(_ browser: CefBrowser) {
+        closed += 1
+    }
+}
+
 /// Answers nothing until its task is cancelled.
 @MainActor
-final class StallingDelegate: CefBrowserDelegate {
+final class StallingDelegate: CefBrowserDelegate, CefPasskeyDelegate {
     private(set) var started = 0
     private(set) var cancelled = 0
     private(set) var permissionRequests = 0

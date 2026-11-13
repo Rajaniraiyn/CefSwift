@@ -92,6 +92,22 @@ public final class CefProfile {
 
     private static var persistentProfiles: [String: CefProfile] = [:]
 
+    // MARK: Module state
+
+    /// What a module built on CefKit keeps for this profile: one object
+    /// per type, made by `make` on first use and kept as long as the
+    /// profile. Hold the profile weakly from it, or the two keep each
+    /// other alive.
+    package func moduleState<State: AnyObject>(_ type: State.Type = State.self, make: () -> State) -> State {
+        let key = ObjectIdentifier(type)
+        if let state = moduleStates[key] as? State { return state }
+        let state = make()
+        moduleStates[key] = state
+        return state
+    }
+
+    private var moduleStates: [ObjectIdentifier: AnyObject] = [:]
+
     // MARK: Bookmarks, history, autocomplete
     // Built on Chromium's internal services; see CefInternalServices.swift.
     // Each service object holds its profile, so a profile stays alive while

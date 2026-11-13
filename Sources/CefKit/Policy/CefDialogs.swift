@@ -111,7 +111,7 @@ public enum CefDialogPresenter {
     /// is visible, a modal alert otherwise; a task cancelled already shows
     /// nothing. Every default presenter that shows an alert uses this, so
     /// each dismisses itself both ways.
-    static func run(_ alert: NSAlert, in window: NSWindow?) async -> NSApplication.ModalResponse {
+    package static func run(_ alert: NSAlert, in window: NSWindow?) async -> NSApplication.ModalResponse {
         guard !Task.isCancelled else { return .abort }
         let dismiss = { @MainActor @Sendable in
             if let parent = alert.window.sheetParent {

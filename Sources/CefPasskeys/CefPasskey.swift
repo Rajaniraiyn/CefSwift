@@ -3,8 +3,8 @@ import Foundation
 /// A passkey kept by the app: a WebAuthn discoverable credential for one
 /// site and one account, with its private key.
 ///
-/// Passkeys of this kind belong to a ``CefPasskeyStore`` and are used when
-/// a browser's ``CefBrowser/Configuration/passkeys`` is ``CefBrowser/PasskeyPolicy/app(_:)``.
+/// Passkeys of this kind belong to a ``CefPasskeyStore`` and are used by a
+/// ``CefPasskeyController`` whose policy is ``CefPasskeyController/Policy/app(_:)``.
 /// They are software keys (ECDSA P-256): the app holds the private key, and
 /// Chromium holds a copy only while it answers one request.
 public struct CefPasskey: Sendable, Hashable, Identifiable, Codable {
@@ -58,7 +58,7 @@ public struct CefPasskey: Sendable, Hashable, Identifiable, Codable {
 
 /// A WebAuthn request a page made with `navigator.credentials.create()` or
 /// `navigator.credentials.get()`, delivered to
-/// ``CefBrowserDelegate/browser(_:decidePasskeyFor:)``.
+/// ``CefPasskeyDelegate/browser(_:decidePasskeyFor:)``.
 public struct CefPasskeyRequest: Sendable, Equatable {
     /// What the page asks for.
     public enum Kind: Sendable, Equatable {
@@ -115,11 +115,11 @@ public enum CefPasskeyDecision: Sendable, Equatable {
     case ignore
 }
 
-/// A ``CefPasskeyStore`` call that failed while CefKit answered a WebAuthn
-/// request, delivered to
-/// ``CefBrowserDelegate/browser(_:passkeyStoreDidFail:)``.
+/// A ``CefPasskeyStore`` call that failed while a ``CefPasskeyController``
+/// answered a WebAuthn request, delivered to
+/// ``CefPasskeyDelegate/browser(_:passkeyStoreDidFail:)``.
 public struct CefPasskeyStoreError: Error, Sendable, CustomStringConvertible {
-    /// What CefKit asked the store to do.
+    /// What the controller asked the store to do.
     public enum Operation: Sendable, Equatable {
         /// ``CefPasskeyStore/checkAvailability()`` before a registration.
         /// The page's call was refused with `NotAllowedError`.
@@ -145,44 +145,6 @@ public struct CefPasskeyStoreError: Error, Sendable, CustomStringConvertible {
 
     public var description: String {
         "passkey store \(operation) failed for \(origin): \(message)"
-    }
-}
-
-extension CefBrowser {
-    /// Who answers a browser's WebAuthn requests.
-    ///
-    /// ``app(_:)`` and ``disabled`` take each document's calls over before
-    /// its first script runs, in every browser CefKit creates. A page's
-    /// popups, new tabs and windows that the delegate lets Chromium open
-    /// (``CefWindowOpenDecision/allowNativePopup``) are not left to
-    /// Chromium with these policies: Chromium would run the popup's first
-    /// document before interception could attach, so CefKit opens the URL
-    /// in a browser of its own with the opener's configuration instead. That
-    /// popup arrives as a native one does, but the page cannot script it:
-    /// `window.open` returns `null`, the popup has no `window.opener`, and a
-    /// popup without a URL is refused. Browsers Chromium opens without a
-    /// page asking, such as a tab from Chrome's own UI, have the default
-    /// configuration and so ``chromium``.
-    public enum PasskeyPolicy {
-        /// Chromium, with its own dialog and authenticators: security keys, and
-        /// iCloud Keychain when the app has the entitlement for it. The default.
-        case chromium
-        /// The app, from this store, through
-        /// ``CefBrowserDelegate/browser(_:decidePasskeyFor:)``. Chromium's
-        /// dialog and its other authenticators are not used.
-        case app(any CefPasskeyStore)
-        /// Every request is refused.
-        case disabled
-
-        var store: (any CefPasskeyStore)? {
-            if case .app(let store) = self { return store }
-            return nil
-        }
-
-        var isChromium: Bool {
-            if case .chromium = self { return true }
-            return false
-        }
     }
 }
 

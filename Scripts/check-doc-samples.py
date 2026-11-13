@@ -2,7 +2,7 @@
 """Compiles the Swift samples in README.md and docs/*.md against CefSwift.
 
 Each fenced ```swift block becomes a file of a scratch package that depends
-on this checkout's CefSwiftUI, and the package is built for macOS 14, the
+on this checkout's CefSwiftUI and CefPasskeys, and the package is built for macOS 14, the
 oldest system CefSwift supports. A block compiles as one of:
 
 - declarations (types, `@main` apps): inside an enum of its own, with
@@ -41,6 +41,7 @@ DOCUMENTS = [ROOT / "README.md", *sorted((ROOT / "docs").glob("*.md"))]
 
 PRELUDE = """\
 import AppKit
+import CefPasskeys
 import CefSwiftUI
 import SwiftUI
 
@@ -188,6 +189,7 @@ let package = Package(
     targets: [
         .target(name: "DocSamples", dependencies: [
             .product(name: "CefSwiftUI", package: "CefSwift"),
+            .product(name: "CefPasskeys", package: "CefSwift"),
         ]),
     ]
 )

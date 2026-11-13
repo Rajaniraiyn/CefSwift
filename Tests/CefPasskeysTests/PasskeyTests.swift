@@ -3,6 +3,7 @@ import LocalAuthentication
 import Testing
 
 @testable import CefKit
+@testable import CefPasskeys
 
 /// Passkey model, encodings and the in-memory store.
 @MainActor
@@ -126,7 +127,7 @@ struct PasskeyTests {
         let request = CefPasskeyRequest(kind: .registration, origin: "https://example.com")
         var asked = false
         var failures: [CefPasskeyStoreError] = []
-        let decision = await CefPasskeyAuthenticator.decide(request, mode: .app(FailingPasskeyStore())) { _ in
+        let decision = await CefPasskeySession.decide(request, policy: .app(FailingPasskeyStore())) { _ in
             asked = true
             return .createPasskey
         } failed: { failures.append($0) }
@@ -138,7 +139,7 @@ struct PasskeyTests {
     @Test func anUnreadableStoreRefusesAnAssertion() async {
         let request = CefPasskeyRequest(kind: .assertion, origin: "https://example.com")
         var failures: [CefPasskeyStoreError] = []
-        let decision = await CefPasskeyAuthenticator.decide(request, mode: .app(FailingPasskeyStore())) { _ in
+        let decision = await CefPasskeySession.decide(request, policy: .app(FailingPasskeyStore())) { _ in
             .signIn(with: Self.sample)
         } failed: { failures.append($0) }
         #expect(decision == .deny)
@@ -148,15 +149,15 @@ struct PasskeyTests {
     @Test func aWorkingStoreReachesTheDelegateWithItsPasskeys() async {
         let request = CefPasskeyRequest(kind: .assertion, origin: "https://www.example.com")
         var seen: [CefPasskey] = []
-        let decision = await CefPasskeyAuthenticator.decide(
-            request, mode: .app(CefInMemoryPasskeyStore(passkeys: [Self.sample]))
+        let decision = await CefPasskeySession.decide(
+            request, policy: .app(CefInMemoryPasskeyStore(passkeys: [Self.sample]))
         ) { request in
             seen = request.passkeys
             return .signIn(with: request.passkeys[0])
         } failed: { _ in Issue.record("no failure expected") }
         #expect(decision == .signIn(with: Self.sample))
         #expect(seen == [Self.sample])
-        #expect(await CefPasskeyAuthenticator.decide(request, mode: .disabled) { _ in .createPasskey } failed: { _ in } == .deny)
+        #expect(await CefPasskeySession.decide(request, policy: .disabled) { _ in .createPasskey } failed: { _ in } == .deny)
     }
 }
 

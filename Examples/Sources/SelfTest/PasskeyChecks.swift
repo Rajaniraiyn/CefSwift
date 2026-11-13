@@ -1,8 +1,9 @@
 import AppKit
 @_spi(Testing) import CefKit
+import CefPasskeys
 import CefSwiftUI
 
-/// Passkeys answered by the app (`CefBrowser.PasskeyPolicy.app`), in both browser
+/// Passkeys answered by the app (`CefPasskeyController.Policy.app`), in both browser
 /// styles, on a page served from `http://localhost`, which WebAuthn treats
 /// as a secure context. The store is in memory: nothing touches the
 /// keychain.
@@ -32,8 +33,8 @@ extension SelfTest {
         let store = CefInMemoryPasskeyStore()
         let policy = PasskeyPolicy()
         var configuration = CefBrowser.Configuration()
-        configuration.passkeys = .app(store)
-        let browser = CefBrowser(url: url, configuration: configuration, delegate: policy)
+        configuration.attachments = [CefPasskeyController(policy: .app(store), delegate: policy)]
+        let browser = CefBrowser(url: url, configuration: configuration)
         var window: CefBrowserWindow?
         var view: CefWindowedBrowserView?
         if style == "Alloy" {
@@ -148,15 +149,16 @@ extension SelfTest {
     }
 
     /// A popup a page opens calls `navigator.credentials` from its first
-    /// script. With `.disabled` and `.app`, CefKit's interception answers
+    /// script. With `.disabled` and `.app`, the controller's interception answers
     /// it, not Chromium's authenticator, which would wait at least ten
     /// seconds (the page asks for three) or show its dialog.
     private static func popupPasskeyChecks(url: URL) async {
         for mode in ["disabled", "app"] {
             let policy = PasskeyPolicy()
             var configuration = CefBrowser.Configuration()
-            configuration.passkeys = mode == "disabled" ? .disabled : .app(CefInMemoryPasskeyStore())
-            let opener = CefBrowser(url: url, configuration: configuration, delegate: policy)
+            configuration.attachments = [CefPasskeyController(
+                policy: mode == "disabled" ? .disabled : .app(CefInMemoryPasskeyStore()), delegate: policy)]
+            let opener = CefBrowser(url: url, configuration: configuration)
             let window = CefBrowserWindow(browser: opener)
             var popups: [CefBrowserWindow] = []
             window.onPopup = { popup in
@@ -191,7 +193,7 @@ extension SelfTest {
             let elapsed = ContinuousClock.now - start
             let answeredByCefKit = early == "NotAllowedError" && elapsed < .seconds(9)
             if mode == "disabled" {
-                check("\(name): a first-script request is refused by CefKit",
+                check("\(name): a first-script request is refused by the controller",
                       answeredByCefKit && policy.requests.isEmpty,
                       detail: "\(early ?? "nil") after \(elapsed), \(policy.requests.count) asked")
             } else {
@@ -212,8 +214,8 @@ extension SelfTest {
     private static func disabledPasskeyChecks(url: URL) async {
         let policy = PasskeyPolicy()
         var configuration = CefBrowser.Configuration()
-        configuration.passkeys = .disabled
-        let browser = CefBrowser(url: url, configuration: configuration, delegate: policy)
+        configuration.attachments = [CefPasskeyController(policy: .disabled, delegate: policy)]
+        let browser = CefBrowser(url: url, configuration: configuration)
         let window = CefBrowserWindow(browser: browser)
         window.show()
         _ = await loaded(browser, title: "passkeys", timeout: .seconds(20))
@@ -230,10 +232,11 @@ extension SelfTest {
     /// A passkey decision is a tracked one: leaving the page or closing the
     /// browser ends it, and the default sheet goes with it.
     private static func passkeyDecisionCancellationChecks(url: URL) async {
-        var configuration = CefBrowser.Configuration()
-        configuration.passkeys = .app(CefInMemoryPasskeyStore())
         let delegate = StallingDelegate()
-        let browser = CefBrowser(url: url, configuration: configuration, delegate: delegate)
+        let controller = CefPasskeyController(policy: .app(CefInMemoryPasskeyStore()), delegate: delegate)
+        var configuration = CefBrowser.Configuration()
+        configuration.attachments = [controller]
+        let browser = CefBrowser(url: url, configuration: configuration)
         let view = hostWindowed(browser)
         defer { view.removeFromSuperview() }
         if await loaded(browser, title: "passkeys", timeout: .seconds(20)) {
@@ -254,6 +257,7 @@ extension SelfTest {
 
         // The default delegate's sheet, for a click's sign-in with no
         // saved passkey, goes when the browser closes.
+        configuration.attachments = [CefPasskeyController(policy: .app(CefInMemoryPasskeyStore()))]
         let sheetBrowser = CefBrowser(url: url, configuration: configuration)
         view.browser = sheetBrowser
         guard await loaded(sheetBrowser, title: "passkeys", timeout: .seconds(20)) else {
@@ -292,8 +296,8 @@ extension SelfTest {
         let policy = PasskeyPolicy()
         policy.answer = { request in request.passkeys.first.map { .signIn(with: $0) } ?? .createPasskey }
         var configuration = CefBrowser.Configuration()
-        configuration.passkeys = .app(store)
-        let browser = CefBrowser(url: url, configuration: configuration, delegate: policy)
+        configuration.attachments = [CefPasskeyController(policy: .app(store), delegate: policy)]
+        let browser = CefBrowser(url: url, configuration: configuration)
         let window = CefBrowserWindow(browser: browser)
         window.show()
         defer { window.close() }
@@ -405,7 +409,7 @@ enum PasskeyChecks {
 
 /// Answers passkey requests as a test says, and records them.
 @MainActor
-final class PasskeyPolicy: CefBrowserDelegate {
+final class PasskeyPolicy: CefPasskeyDelegate {
     var answer: (CefPasskeyRequest) -> CefPasskeyDecision = { _ in .deny }
     private(set) var requests: [CefPasskeyRequest] = []
     private(set) var storeFailures: [CefPasskeyStoreError] = []

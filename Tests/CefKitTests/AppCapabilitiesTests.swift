@@ -20,20 +20,17 @@ import Testing
     @Test func unsigned() {
         let capabilities = CefAppCapabilities(signingInformation: nil, infoDictionary: [:])
         #expect(capabilities.signature == .unsigned)
-        #expect(capabilities.passkeyAuthenticators == [.securityKey])
         #expect(capabilities.resolvedSafeStorage(.automatic) == .mockKeychain)
     }
 
-    @Test func adHocOffersSecurityKeysAndUsesTheMockKeychain() {
+    @Test func adHocUsesTheMockKeychain() {
         let capabilities = CefAppCapabilities(signingInformation: signing(flags: 0x2), infoDictionary: [:])
         #expect(capabilities.signature == .adHoc)
         #expect(capabilities.teamIdentifier == nil)
         #expect(!capabilities.isHardenedRuntime)
-        #expect(capabilities.passkeyAuthenticators == [.securityKey])
         #expect(capabilities.resolvedSafeStorage(.automatic) == .mockKeychain)
         #expect(capabilities.resolvedSafeStorage(.keychain) == .keychain)
         let summary = capabilities.limitationsSummary() ?? ""
-        #expect(summary.contains("only security keys"))
         #expect(summary.contains("mock keychain"))
     }
 
@@ -48,20 +45,10 @@ import Testing
                                    baseHelperSigningInformation: helper).canLoadWidevine)
     }
 
-    @Test func bluetoothUsageEnablesHybrid() {
-        let info = ["NSBluetoothAlwaysUsageDescription": "Phones as passkeys"]
-        let plain = CefAppCapabilities(signingInformation: signing(flags: 0x2), infoDictionary: info)
-        #expect(plain.passkeyAuthenticators.contains(.hybrid))
-        #expect(plain.usageDescriptions == ["NSBluetoothAlwaysUsageDescription"])
-
-        // Under the hardened runtime the Bluetooth entitlement is needed too.
-        let hardened = CefAppCapabilities(signingInformation: signing(flags: 0x10002), infoDictionary: info)
-        #expect(hardened.isHardenedRuntime)
-        #expect(!hardened.passkeyAuthenticators.contains(.hybrid))
-        let entitled = CefAppCapabilities(
-            signingInformation: signing(flags: 0x10002, entitlements: ["com.apple.security.device.bluetooth": true]),
-            infoDictionary: info)
-        #expect(entitled.passkeyAuthenticators.contains(.hybrid))
+    @Test func usageDescriptionsAreListed() {
+        let info = ["NSBluetoothAlwaysUsageDescription": "Phones as passkeys", "CFBundleName": "Browser"]
+        let capabilities = CefAppCapabilities(signingInformation: signing(flags: 0x2), infoDictionary: info)
+        #expect(capabilities.usageDescriptions == ["NSBluetoothAlwaysUsageDescription"])
     }
 
     @Test func entitlementsWithFalseAreLeftOut() {
@@ -75,7 +62,7 @@ import Testing
         #expect(capabilities.isAppSandboxed)
     }
 
-    @Test func teamSignatureWithTheEntitlementOffersICloudKeychain() {
+    @Test func aSelfSignedTeamIsNoAppleTeam() {
         // A team identifier without a certificate classifies as `.other`,
         // which has no Apple team; tests cannot make a SecCertificate, so
         // check the name classification separately.
@@ -89,13 +76,11 @@ import Testing
             infoDictionary: [:])
         #expect(selfSigned.signature == .other)
         #expect(selfSigned.teamIdentifier == nil)
-        #expect(!selfSigned.passkeyAuthenticators.contains(.iCloudKeychain))
     }
 
     @Test func theTestRunnerHasASignature() {
         // swift test runs an ad hoc (linker) signed or unsigned binary.
         let current = CefAppCapabilities.current
         #expect([.adHoc, .unsigned, .development, .other].contains(current.signature))
-        #expect(current.passkeyAuthenticators.contains(.securityKey))
     }
 }

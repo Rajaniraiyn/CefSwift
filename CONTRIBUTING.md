@@ -25,7 +25,7 @@ The default build system links the helper-startup library without the
 Address Sanitizer runtime, so that one uses the native build system.
 
 The Command Line Tools are enough; Xcode is not required. `CefKitTests`
-covers CefKit, `CefSwiftUITests` the views, and `CefPluginTests` the
+covers CefKit, `CefPasskeysTests` the passkeys library, `CefSwiftUITests` the views, and `CefPluginTests` the
 plugin's signing, distribution and bundle-assembly logic; none of them
 starts Chromium.
 
@@ -209,7 +209,7 @@ reading as one.
 - **An option's type is named for its property**: `rendering: Rendering`,
   `localization: Localization`, `userAgent: UserAgent`. When the option
   chooses who answers or when CefKit acts, the type ends in `Policy`
-  (`passkeys: PasskeyPolicy`, `unresponsivePages: UnresponsivePagePolicy`,
+  (`clientCertificates: ClientCertificatePolicy`, `unresponsivePages: UnresponsivePagePolicy`,
   `safeStorage: SafeStoragePolicy`); a live runtime knob of that kind is a
   `…Policy` property too (`CefRuntime.shared.energyPolicy`).
 - **Case names**: `.automatic` leaves a choice to Chromium (or to the user in
@@ -227,6 +227,13 @@ reading as one.
   supplies a value (a credential, a certificate, whether to proceed, what to
   do with a hung page) rather than allowing or denying a request, so do not
   rename them or wrap their answers in new enums for uniformity.
+- **Optional modules** (`CefPasskeys`) depend on CefKit alone and name
+  their types as CefKit does (`CefPasskeyController`, `CefPasskeyStore`).
+  CefKit never names them: a module plugs in through an extension point
+  (`CefBrowserAttachment`, a shutdown participant, per-profile module
+  state) and gets its own delegate (`CefPasskeyDelegate`) rather than
+  members on `CefBrowserDelegate`. What it needs from CefKit and apps
+  should not use is `package`, not public.
 - **Booleans** read as assertions: `isRunning`, `isDiscarded`,
   `showsToolbarButtons`, `usesSafeBrowsing`.
 - **No abbreviations** beyond terms of art (`URL`, `PDF`, `DNS`, `HTTPS`,

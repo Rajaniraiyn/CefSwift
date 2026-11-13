@@ -85,7 +85,7 @@ struct CefServiceModule: Sendable {
 ///   every Chrome-style window in its session and reopens them after a
 ///   crash, and ``CefRuntime`` closes the ones it recognizes by it.
 @MainActor
-final class CefInternalServices {
+final class CefInternalServices: CefShutdownParticipant {
     /// The fragment that marks a service page's address.
     nonisolated static let addressMarker = "cefswift-service"
 
@@ -115,7 +115,10 @@ final class CefInternalServices {
     init(profile: CefProfile) {
         self.profile = profile
         Self.memoryPressure.watch(self)
+        CefRuntime.shared.addShutdownParticipant(self)
     }
+
+    func runtimeWillShutDown() { stopAll() }
 
     // MARK: Calling
 

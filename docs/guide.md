@@ -1,7 +1,8 @@
 # Guide
 
 Task-oriented reference for CefSwift. Snippets assume `import CefSwiftUI`,
-which re-exports `CefKit`. The runtime, browser, window and profile APIs
+which re-exports `CefKit`; passkey snippets also `import CefPasskeys`, an
+optional library product. The runtime, browser, window and profile APIs
 are `@MainActor`.
 
 - [Starting Chromium](#starting-chromium)
@@ -14,6 +15,7 @@ are `@MainActor`.
   - [Relaunching](#relaunching)
 - [Browsers](#browsers)
   - [PDF](#pdf)
+  - [Attachments](#attachments)
 - [Showing a browser](#showing-a-browser)
   - [Offscreen rendering](#offscreen-rendering)
   - [Swipe navigation](#swipe-navigation)
@@ -323,9 +325,11 @@ describes what the running app's signature, entitlements and Info.plist let
 Chromium do, so the app can adapt its UI:
 
 ```swift
+import CefPasskeys
+
 let capabilities = CefRuntime.shared.capabilities
 if !capabilities.passkeyAuthenticators.contains(.iCloudKeychain) {
-    // Offer the app's own passkeys (CefBrowser.PasskeyPolicy.app) instead.
+    // Offer the app's own passkeys (CefPasskeyController) instead.
 }
 ```
 
@@ -336,12 +340,12 @@ if !capabilities.passkeyAuthenticators.contains(.iCloudKeychain) {
 | `isHardenedRuntime`, `isAppSandboxed` | From the signature's flags and entitlements. |
 | `entitlements`, `keychainAccessGroups` | The entitlements the signature grants. |
 | `usageDescriptions` | The `NS…UsageDescription` keys in the Info.plist. |
-| `passkeyAuthenticators` | `.securityKey`, `.hybrid`, `.touchID`, `.iCloudKeychain`: what `.chromium` passkeys can offer. |
+| `passkeyAuthenticators` (CefPasskeys) | `.securityKey`, `.hybrid`, `.touchID`, `.iCloudKeychain`: what Chromium's own passkeys can offer. |
 | `canLoadWidevine` | Whether the base helper can load Google's Widevine CDM: false for a team-signed hardened helper without `disable-library-validation` (the `protectedMedia` capability). |
 | `resolvedSafeStorage(_:)` | The safe-storage policy Chromium gets for a configured one. |
 
 At start-up CefSwift logs one line (subsystem `CefSwift`) naming what the
-signature leaves out, such as "Chromium passkeys offer only security keys".
+signature leaves out, such as "safe storage uses a mock keychain".
 `swift package cef doctor <App.app>` reports the same for a bundle on disk.
 
 ### Preferences
@@ -568,6 +572,56 @@ Header and footer templates fill in elements with the classes `date`,
 `title`, `url`, `pageNumber` and `totalPages`; give them a font size, since
 Chromium sets none. A page range past the last page, or ranges that leave
 no page, make the call throw.
+
+### Attachments
+
+`CefBrowser.Configuration.attachments` adds code of your own that sets up
+every browser made with the configuration: objects adopting
+`CefBrowserAttachment`. CefKit tells each one when Chromium has created a
+browser, when a discarded browser is created anew, and when a browser
+closes. One attachment serves every browser made with its configuration,
+popups included, since a popup gets its opener's configuration, so keep
+what belongs to one browser keyed by the browser:
+
+```swift
+final class ConsoleRecorder: CefBrowserAttachment {
+    private var tasks: [ObjectIdentifier: Task<Void, Never>] = [:]
+
+    func browserDidCreate(_ browser: CefBrowser) async {
+        let messages = browser.devTools.events("Runtime.consoleAPICalled")
+        try? await browser.devTools.send("Runtime.enable")
+        tasks[ObjectIdentifier(browser)] = Task {
+            for await message in messages { print(message["type"].stringValue ?? "") }
+        }
+    }
+
+    func browserDidClose(_ browser: CefBrowser) {
+        tasks.removeValue(forKey: ObjectIdentifier(browser))?.cancel()
+    }
+}
+```
+
+| Member | Called |
+|---|---|
+| `browserDidCreate(_:) async` | Once Chromium has created the browser, before its first page starts loading. |
+| `browserDidRestore(_:) async` | Once a browser discarded by closing it is created anew; its page loads again after this returns. Domains enabled through `devTools` are on again by then and event streams go on, but what the old Chromium browser held, such as scripts added with `Page.addScriptToEvaluateOnNewDocument`, is gone. |
+| `browserDidClose(_:)` | When the browser has closed, before its DevTools session ends. Not for a discard. |
+| `preparesBeforeFirstDocument` | `false` by default. `true` holds the first page until `browserDidCreate(_:)` returns. |
+
+When an attachment `preparesBeforeFirstDocument`, the browser starts on
+`about:blank` and loads its page once every attachment has been told of
+its creation; `ready()` waits for that, and DevTools calls and JavaScript
+the attachment makes meanwhile go through. A native popup cannot be held
+that way, since Chromium creates it and runs its first document at once.
+So a popup, tab or window the delegate lets Chromium open
+(`.allowNativePopup`) opens instead in a browser CefKit creates with the
+opener's configuration. It arrives as a native popup does
+(`browser(_:didOpen:)`, then `onPopup` or a window of its own), but the
+page cannot script it: `window.open` returns `null`, the popup has no
+`window.opener`, and a blank popup is refused. Browsers Chromium opens
+without a page asking, such as a tab from Chrome's own UI, have the
+default configuration and so no attachments. [Passkeys](#passkeys) are
+built this way.
 
 ## Showing a browser
 
@@ -1158,7 +1212,6 @@ final class Policy: CefBrowserDelegate {
 | `browser(_:selectClientCertificateFor:) async` | Native sheet; asked only with `CefBrowser.Configuration.clientCertificates = .delegate`, otherwise Chromium's picker. See [Client certificates](#client-certificates) |
 | `browserPageIsUnresponsive(_:) async` | Native sheet; Chrome-style browsers show Chromium's dialog instead. See [Unresponsive pages](#unresponsive-pages) |
 | `browser(_:decideDestinationFor:suggestedName:) async` | `.saveToDownloadsFolder`: `~/Downloads` |
-| `browser(_:decidePasskeyFor:) async` | Native passkey sheet; see [Passkeys](#passkeys) |
 | `browser(_:decidePolicyFor:)` | `.allow` |
 | `browser(_:decideWindowOpenFor:)` | `CefWindowOpenDecision.default(for:)` |
 | `browser(_:handleKeyEvent:isBeforePage:)` | `false` |
@@ -1166,7 +1219,7 @@ final class Policy: CefBrowserDelegate {
 | `browser(_:handleChromeCommand:disposition:)` | `false`: Chrome runs the command |
 
 An `async` decision that stops mattering before you answer is cancelled:
-a dialog, permission, certificate or passkey decision when the page
+a dialog, permission or certificate decision when the page
 navigates away, and every decision when the browser closes. The task
 running your method is cancelled and its answer is ignored; the default
 sheets dismiss themselves.
@@ -1286,31 +1339,43 @@ no API for opening a file panel on the app's behalf: use `NSOpenPanel`.
 
 ### Passkeys
 
-`CefBrowser.Configuration.passkeys` chooses who answers a page's WebAuthn calls,
-`navigator.credentials.create()` and `.get()`:
+Chromium answers a page's WebAuthn calls, `navigator.credentials.create()`
+and `.get()`, with its own dialog and authenticators. The optional
+`CefPasskeys` library (`.product(name: "CefPasskeys", package: "CefSwift")`)
+answers them instead: attach a `CefPasskeyController` to the browser's
+configuration ([attachments](#attachments)) with one of two policies.
 
-| Mode | Who answers |
+| Who answers | How |
 |---|---|
-| `.chromium` (default) | Chromium, with its own dialog and authenticators. |
-| `.app(store)` | Your app, from a `CefPasskeyStore`, through the delegate. Chromium's dialog and authenticators are not used. |
-| `.disabled` | Nobody: every call rejects with `NotAllowedError`. |
+| Chromium, with its own dialog and authenticators | No controller, the default. |
+| Your app, from a `CefPasskeyStore`, through the controller's delegate. Chromium's dialog and authenticators are not used. | `CefPasskeyController(policy: .app(store))` |
+| Nobody: every call rejects with `NotAllowedError`. | `CefPasskeyController(policy: .disabled)` |
 
-`.app` and `.disabled` take the calls over through the DevTools Protocol,
-with a debugger that stops each document as it starts; pages can observe
-both ([Compatibility with bot protection](#compatibility-with-bot-protection)).
-Use them for browsers that show your own or trusted pages.
+```swift
+import CefPasskeys
 
-Chromium creates a native popup and runs its first document before
-DevTools can attach to it, so with `.app` and `.disabled` a popup, tab or
-window the delegate lets Chromium open (`.allowNativePopup`) is opened in a
-browser CefKit creates instead, with the opener's configuration and the
-calls taken over from its first document. It arrives as a native popup
-does (`browser(_:didOpen:)`, then `onPopup` or a window of its own), but
-the page cannot script it: `window.open` returns `null`, the popup has no
-`window.opener`, and a blank popup is refused. A sign-in flow that posts
-its result back to the opener needs `.chromium`.
+let passkeys = CefPasskeyController(policy: .app(CefKeychainPasskeyStore()))
+var browserConfiguration = CefBrowser.Configuration()
+browserConfiguration.attachments.append(passkeys)
+```
 
-With `.chromium`, what Chromium can offer depends on how the app is
+One controller serves every browser it is attached to, and a page's popups
+get it with their opener's configuration.
+
+A controller takes the calls over through the DevTools Protocol, with a
+debugger that stops each document as it starts, and a page can observe
+that a debugger is attached
+([Compatibility with bot protection](#compatibility-with-bot-protection)).
+Use one for browsers that show your own or trusted pages.
+
+The controller sets each browser up before its first document, so a
+popup, tab or window the delegate lets Chromium open (`.allowNativePopup`)
+opens in a browser CefKit creates instead, with the calls taken over from
+its first document; the page cannot script it
+([attachments](#attachments)). A sign-in flow that posts its result back
+to the opener needs Chromium's passkeys: no controller.
+
+Without a controller, what Chromium can offer depends on how the app is
 signed and configured. The `passkeys` capability of `cef bundle` adds what
 it can ([bundling](bundling.md#features)):
 
@@ -1322,27 +1387,27 @@ it can ([bundling](bundling.md#features)):
 | Chromium's own profile passkeys (Touch ID) | Not available: CEF 156 checks for a keychain access group without a team prefix, which no provisioning profile can authorize. |
 
 An ad hoc signed app gets security keys and, with the Bluetooth key,
-phones. `CefRuntime.shared.capabilities.passkeyAuthenticators` lists what
-the running app gets, and CefSwift logs a line at start-up when it is only
-part of the list. Chromium shows its dialog ("Use your security key with
-example.com") as a window attached to a `CefBrowserWindow`, or as a
-free-standing window for a `CefWebView`.
+phones. `CefRuntime.shared.capabilities.passkeyAuthenticators`, from
+CefPasskeys, lists what the running app gets. Chromium shows its dialog
+("Use your security key with example.com") as a window attached to a
+`CefBrowserWindow`, or as a free-standing window for a `CefWebView`.
 
-With `.app(store)`, the delegate decides each call while the page waits at
-it:
+With `.app(store)`, the controller's `delegate`, a `CefPasskeyDelegate`
+it holds weakly, decides each call while the page waits at it:
 
 ```swift
-var browserConfiguration = CefBrowser.Configuration()
-browserConfiguration.passkeys = .app(CefKeychainPasskeyStore())
+import CefPasskeys
 
-func browser(_ browser: CefBrowser, decidePasskeyFor request: CefPasskeyRequest) async -> CefPasskeyDecision {
-    guard request.hasUserGesture else { return .ignore }   // conditional requests wait
-    switch request.kind {
-    case .registration:
-        return await confirm("Save a passkey for \(request.host)?") ? .createPasskey : .deny
-    case .assertion:
-        guard let passkey = await choose(from: request.passkeys) else { return .deny }
-        return .signIn(with: passkey)
+final class PasskeyPolicy: CefPasskeyDelegate {
+    func browser(_ browser: CefBrowser, decidePasskeyFor request: CefPasskeyRequest) async -> CefPasskeyDecision {
+        guard request.hasUserGesture else { return .ignore }   // conditional requests wait
+        switch request.kind {
+        case .registration:
+            return await confirm("Save a passkey for \(request.host)?") ? .createPasskey : .deny
+        case .assertion:
+            guard let passkey = await choose(from: request.passkeys) else { return .deny }
+            return .signIn(with: passkey)
+        }
     }
 }
 ```
@@ -1359,8 +1424,11 @@ func browser(_ browser: CefBrowser, decidePasskeyFor request: CefPasskeyRequest)
   leaves it waiting until the page aborts it or its timeout passes, which
   suits conditional requests (passkeys offered in an autofill list).
 - The page stays stopped at its call until you answer, as it does for
-  `alert()`. JavaScript you evaluate in it meanwhile waits too.
-- The default, `CefPasskeyPresenter.present(_:in:verifier:)`, ignores
+  `alert()`. JavaScript you evaluate in it meanwhile waits too. When the
+  page navigates away or the browser closes first, the task running your
+  method is cancelled and its answer is ignored.
+- Without a delegate, `CefPasskeyPresenter.present(_:in:verifier:)`
+  answers: it ignores
   requests without a user gesture, shows a sheet naming the site (with an
   account menu when several passkeys fit), and verifies the user before
   answering. The verifier, `CefUserVerifier.deviceOwner` by default, asks
@@ -1372,8 +1440,8 @@ func browser(_ browser: CefBrowser, decidePasskeyFor request: CefPasskeyRequest)
   so that no system prompt appears.
 
 Store failures fail closed. Before it asks the delegate about a
-registration, CefKit calls the store's `checkAvailability()` (by default
-a read of `passkeys()`), and before an assertion it reads the usable
+registration, the controller calls the store's `checkAvailability()` (by
+default a read of `passkeys()`), and before an assertion it reads the usable
 passkeys; if either throws, the call rejects with `NotAllowedError`
 without asking. A save happens after Chromium has handed the page its
 answer, so a save that fails cannot reject the call: the site holds a
@@ -1388,6 +1456,9 @@ the user; the default logs it.
 dates. List and remove passkeys through the store, for a settings screen:
 
 ```swift
+import CefPasskeys
+
+let store = CefKeychainPasskeyStore()
 let saved = try await store.passkeys()
 try await store.remove(saved[0])
 ```
@@ -1407,8 +1478,8 @@ passwords → Passkeys. That tab arrives through
 password-manager links.
 
 The Browser example has a Passkeys setting (Chromium or the browser
-itself) and lists and removes saved passkeys in its Settings window
-(`BrowserPasskeys.swift`).
+itself, through a `CefPasskeyController`) and lists and removes saved
+passkeys in its Settings window (`BrowserPasskeys.swift`).
 
 ## Context menu
 
@@ -1606,9 +1677,10 @@ arrives through `onPopup` as a hidden `CefBrowserWindow` of its own, still
 connected to its opener. `popup.browser.popupFeatures` holds the origin and
 size the page asked for, and `popup.browser.opener` is the opening browser.
 Without `onPopup`, Chromium shows the popup in a window of its own design
-with a location bar. With `.app` or `.disabled` passkeys the popup is a
-browser CefKit created, not connected to the opener's page; see
-[Passkeys](#passkeys).
+with a location bar. When an attachment prepares the opener before its
+first document, as a passkey controller does, the popup is a browser
+CefKit created, not connected to the opener's page; see
+[Attachments](#attachments).
 
 ```swift
 window.onPopup = { [weak window] popup in
@@ -2206,7 +2278,7 @@ measurement a page can make.
 | Feature | What attaches | What a page can observe |
 |---|---|---|
 | `browser.devTools` | Whatever you send; CefKit's features share the session, and a domain stays enabled until every `X.enable` sent through it has had its `X.disable` | `Runtime.enable` makes every `console` call serialize its arguments: logging a large object takes 2–3 times as long. `Debugger.enable` stops the page at `debugger` statements. `Page.enable`, `Network.enable` and the like: nothing measured. |
-| `CefBrowser.PasskeyPolicy.app` and `.disabled` | `WebAuthn`, `Debugger`, `Page` and `Runtime`, for the browser's lifetime | Each `debugger` statement takes about 10 ms (CefKit resumes at once), and `console` calls serialize their arguments as above. Use `.chromium` for browsers that show sites you do not control. |
+| CefPasskeys' `CefPasskeyController` | `WebAuthn`, `Debugger`, `Page` and `Runtime`, for the browser's lifetime | Each `debugger` statement takes about 10 ms (the controller resumes at once), and `console` calls serialize their arguments as above. Leave passkeys to Chromium (no controller) for browsers that show sites you do not control. |
 | `evaluateJavaScript(_:userGesture: true)` | `Runtime.evaluate`, no domain | The gesture itself. |
 | `snapshot()` of a windowed browser | `Page.captureScreenshot`, no domain | Nothing measured. An offscreen browser's snapshot is the frame its view shows, with an open `<select>` list or date picker drawn in, and uses no protocol. |
 | `discard()` | `Runtime.evaluate` and `DOMDebugger.getEventListeners`, no domain | Nothing measured; the page is about to be unloaded. |
@@ -2658,24 +2730,24 @@ the switches measured and not used.
   swipe as Chrome does, with its arrow, whatever the options say. Commands
   that open surfaces (`.find`, `.createQRCode`, …) still reach custom
   presenters. SelfTest fails on such an update.
-- Passkeys answered by the app (`CefBrowser.PasskeyPolicy.app`) are software keys the
+- Passkeys answered by the app (`CefPasskeyController` with `.app`) are software keys the
   app keeps, not iCloud Keychain passkeys, and their attestation is
   "none". CEF offers no way to hand a request's options to
   AuthenticationServices and return its answer to the page, so iCloud
   Keychain passkeys are available only through Chromium's own
-  authenticator (`.chromium`, with the entitlement). The app's
+  authenticator (no controller, and the entitlement). The app's
   authenticator is a platform authenticator: a request that asks for a
   cross-platform one (`authenticatorAttachment: "cross-platform"`) waits
   until its timeout. Calls from cross-site iframes, which run in a
   DevTools target of their own, also wait until their timeout without
-  reaching the delegate. The app's mode uses the browser's DevTools `Debugger` and
+  reaching the delegate. The controller uses the browser's DevTools `Debugger` and
   `WebAuthn` domains; do not use those domains yourself in such a browser.
-- A registration in the app's mode is saved to the store after the page
-  receives its credential; CefKit cannot withdraw it. A store that passes
+- A registration the app answers is saved to the store after the page
+  receives its credential; the controller cannot withdraw it. A store that passes
   `checkAvailability()` and then fails to save leaves the site with a
   credential the app cannot use; `browser(_:passkeyStoreDidFail:)` gets
   the unsaved passkey.
-- Chromium's profile passkey authenticator (Touch ID, `.chromium`) is not
+- Chromium's profile passkey authenticator (Touch ID, without a controller) is not
   available: CEF 156 compiles in Chromium's keychain access group,
   `.org.chromium.Chromium.webauthn`, with an empty team identifier, and
   macOS lets a signed app claim only groups its provisioning profile

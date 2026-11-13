@@ -1,7 +1,8 @@
+import CefKit
 import Foundation
 
-/// Answers one browser's WebAuthn requests for ``CefBrowser/PasskeyPolicy/app(_:)``
-/// and ``CefBrowser/PasskeyPolicy/disabled``, through the DevTools Protocol.
+/// Answers one browser's WebAuthn requests for a ``CefPasskeyController``,
+/// through the DevTools Protocol.
 ///
 /// - `WebAuthn.enable`, without Chromium's UI, puts the browser's pages in a
 ///   virtual authenticator environment: Chromium's own dialog, security
@@ -26,9 +27,10 @@ import Foundation
 ///   `credentialAsserted`), which goes to the store, and the authenticator
 ///   is removed.
 @MainActor
-final class CefPasskeyAuthenticator {
+final class CefPasskeySession {
     private weak var browser: CefBrowser?
-    private let mode: CefBrowser.PasskeyPolicy
+    private weak var controller: CefPasskeyController?
+    private let policy: CefPasskeyController.Policy
 
     private struct Context {
         var origin: String
@@ -57,9 +59,15 @@ final class CefPasskeyAuthenticator {
     /// The address the document-start script reports its pause under.
     nonisolated static let holdScriptURL = "cefswift://passkeys/document-start.js"
 
-    init(browser: CefBrowser, mode: CefBrowser.PasskeyPolicy) {
+    init(browser: CefBrowser, controller: CefPasskeyController) {
         self.browser = browser
-        self.mode = mode
+        self.controller = controller
+        self.policy = controller.policy
+    }
+
+    /// Who answers: the controller's delegate, or the default one.
+    private var delegate: any CefPasskeyDelegate {
+        controller?.delegate ?? CefDefaultPasskeyDelegate.shared
     }
 
     /// Installs the environment and the breakpoints. Called before the
@@ -102,7 +110,7 @@ final class CefPasskeyAuthenticator {
     /// Listens synchronously, so events are handled in the order Chromium
     /// sends them: a script's `scriptParsed` before the pause in it.
     private func listen(
-        _ devTools: CefDevTools, _ event: String, _ handler: @escaping @MainActor (CefPasskeyAuthenticator, CefJSON) -> Void
+        _ devTools: CefDevTools, _ event: String, _ handler: @escaping @MainActor (CefPasskeySession, CefJSON) -> Void
     ) {
         let token = devTools.addListener(for: event) { [weak self] parameters in
             guard let self else { return }
@@ -221,9 +229,10 @@ final class CefPasskeyAuthenticator {
         guard let browser, browser.state == .live else { return }
         // A tracked decision: a navigation or closing ends it, which
         // dismisses the default sheet, and its answer is then dropped.
-        let mode = mode
-        let decided = await browser.decision(.page) { delegate in
-            await Self.decide(request, mode: mode) { request in
+        let policy = policy
+        let delegate = delegate
+        let decided = await browser.decision(.page) {
+            await Self.decide(request, policy: policy) { request in
                 await delegate.browser(browser, decidePasskeyFor: request)
             } failed: { error in
                 delegate.browser(browser, passkeyStoreDidFail: error)
@@ -268,11 +277,11 @@ final class CefPasskeyAuthenticator {
     /// a key the page receives cannot be withdrawn once its save fails, and
     /// an assertion needs the store's passkeys.
     static func decide(
-        _ request: CefPasskeyRequest, mode: CefBrowser.PasskeyPolicy,
+        _ request: CefPasskeyRequest, policy: CefPasskeyController.Policy,
         ask: (CefPasskeyRequest) async -> CefPasskeyDecision,
         failed: (CefPasskeyStoreError) -> Void
     ) async -> CefPasskeyDecision {
-        guard case .app(let store) = mode else { return .deny }
+        guard case .app(let store) = policy else { return .deny }
         var request = request
         do {
             switch request.kind {
@@ -291,7 +300,7 @@ final class CefPasskeyAuthenticator {
     }
 
     private func save(_ passkey: CefPasskey, for request: CefPasskeyRequest) async {
-        guard let store = mode.store else { return }
+        guard case .app(let store) = policy else { return }
         do {
             try await store.save(passkey)
         } catch {
@@ -302,7 +311,7 @@ final class CefPasskeyAuthenticator {
     private func storeFailed(_ operation: CefPasskeyStoreError.Operation, _ request: CefPasskeyRequest, _ passkey: CefPasskey?, _ message: String) {
         let error = CefPasskeyStoreError(operation: operation, origin: request.origin, passkey: passkey, message: message)
         guard let browser else { return CefLog.error("passkeys: \(error)") }
-        (browser.delegate ?? CefDefaultBrowserDelegate.shared).browser(browser, passkeyStoreDidFail: error)
+        delegate.browser(browser, passkeyStoreDidFail: error)
     }
 
     private func addAuthenticator(holding passkey: CefPasskey? = nil) async -> String? {

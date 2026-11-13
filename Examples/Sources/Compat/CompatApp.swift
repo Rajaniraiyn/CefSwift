@@ -1,5 +1,6 @@
 import AppKit
 @_spi(Testing) import CefKit
+import CefPasskeys
 import CefSwiftUI
 
 /// Shows one page in one kind of host with one set of CefSwift features
@@ -67,7 +68,7 @@ enum CompatApp {
             browserConfiguration.userScripts = [CefUserScript(source: "addEventListener('DOMContentLoaded', () => { document.documentElement.dataset.compat = '1'; });")]
         }
         if features.contains("passkeys") {
-            browserConfiguration.passkeys = .app(CefInMemoryPasskeyStore())
+            browserConfiguration.attachments = [CefPasskeyController(policy: .app(CefInMemoryPasskeyStore()))]
         }
         if features.contains("accessibility") {
             browserConfiguration.offscreenAccessibility = .enabled
