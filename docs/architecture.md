@@ -289,8 +289,8 @@ which CEF reports as an initialized context like any other.
 
 A context created that way reports `on_request_context_initialized`
 once Chromium has loaded the profile, asynchronously for a disk profile
-(at once for an in-memory one, possibly before `create_context`
-returns). `CefProfile.readiness` follows it, `.pending`, `.loading`, then
+(an incognito context is usable as soon as `create_context` returns, so
+CefKit counts it ready then). `CefProfile.readiness` follows it, `.pending`, `.loading`, then
 `.ready` or `.failed(reason)`: the callback checks that the context's
 `get_cache_path` is the directory asked for and that the directory now
 exists, which is how Chromium's silent fall-back to memory is caught. A

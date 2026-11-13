@@ -298,14 +298,18 @@ public final class CefProfile {
                 ccef_string_clear(&settings.cache_path)
                 ccef_string_clear(&settings.accept_language_list)
             }
-            // Chromium creates or loads a disk profile asynchronously, and
-            // an in-memory one at once, possibly reporting it before
-            // create_context returns.
+            // Chromium creates or loads a disk profile asynchronously. An
+            // in-memory one it makes within create_context, usable at once,
+            // though it reports it later.
             readiness = .loading
             let handler = ContextHandler { [weak self] path in self?.contextDidInitialize(cachePath: path) }.makeHandler()
             let created = CefRef(adopting: cef_request_context_create_context(&settings, handler))
             if case .failed = readiness { return nil }
             context = created
+            if kind == .incognito, readiness == .loading {
+                readiness = .ready
+                applyConfigured()
+            }
             // Scheme handlers registered with CefRuntime reach only the
             // global context by themselves.
             Self.profilesWithOwnContext.append(WeakProfile(profile: self))

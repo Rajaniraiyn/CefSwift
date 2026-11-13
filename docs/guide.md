@@ -17,6 +17,8 @@ The runtime, browser, window and profile APIs are `@MainActor`.
   - [Configuration](#configuration)
   - [Languages](#languages)
   - [Services and privacy](#services-and-privacy)
+  - [System notifications](#system-notifications)
+  - [Prompts macOS shows](#prompts-macos-shows)
   - [Keychain access](#keychain-access)
   - [Enterprise policies](#enterprise-policies)
   - [Preferences](#preferences)
@@ -56,6 +58,7 @@ The runtime, browser, window and profile APIs are `@MainActor`.
   - [Tabs Chromium opens itself](#tabs-chromium-opens-itself)
 - [Customizing Chromium's own pages](#customizing-chromiums-own-pages)
 - [Profiles](#profiles)
+  - [Loading a persistent profile](#loading-a-persistent-profile)
   - [Network maintenance](#network-maintenance)
   - [Requests through Chromium's network stack](#requests-through-chromiums-network-stack)
   - [Site settings](#site-settings)
@@ -2212,7 +2215,7 @@ anything uses it in a launch, and creates its directory the first time
 ever; the default and incognito profiles are ready at once. What waits,
 and what does not:
 
-| While the profile loads | |
+| Called while the profile loads | What happens |
 |---|---|
 | Browsers, in every host (`CefWebView`, the AppKit views, `CefWindow`, `openChromeWindow`) and their popups | Wait, and are created once it is loaded. The browser stays `.pending`, and `load(_:)`, `ready()` and `waitUntilLoaded(timeout:)` work as for any browser being created. A `CefWindow` opens at once and gets its page when the browser comes. |
 | `cookies(for:)`, `setCookie(_:)`, `deleteCookies(for:named:)` | Chromium queues them until the profile is loaded. |
