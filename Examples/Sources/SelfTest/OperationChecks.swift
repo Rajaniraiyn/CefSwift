@@ -9,7 +9,6 @@ import os
 /// `browserClosed`, and pending delegate decisions end with their page.
 extension SelfTest {
     static func operationChecks() async {
-        CefRuntime.shared.registerSchemeHandler(scheme: "selftest", domain: "edge", handler: EdgePages())
         await cancellationChecks()
         await readinessChecks()
         await sharedRendererChecks()

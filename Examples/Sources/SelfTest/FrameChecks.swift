@@ -7,7 +7,6 @@ import CefSwiftUI
 /// at once.
 extension SelfTest {
     static func frameChecks() async {
-        CefRuntime.shared.registerSchemeHandler(scheme: "selftest", domain: "bench", handler: BenchmarkPages())
         CefRuntime.shared.energyPolicy = .disabled
         defer { CefRuntime.shared.energyPolicy = .automatic }
         let frameWindow = NSWindow(

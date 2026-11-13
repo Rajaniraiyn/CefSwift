@@ -5,7 +5,6 @@ import CefSwiftUI
 /// The task manager and recovering a page that stopped responding.
 extension SelfTest {
     static func processChecks() async {
-        CefRuntime.shared.registerSchemeHandler(scheme: "https", domain: "cefswift.test", handler: CapabilityPages())
         let manager = CefRuntime.shared.taskManager
         let recorder = HangRecorder()
         let browser = CefBrowser(url: capabilityOrigin.appending(path: "busy.html"))

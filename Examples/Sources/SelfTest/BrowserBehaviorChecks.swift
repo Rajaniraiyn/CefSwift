@@ -7,7 +7,6 @@ import Network
 /// renderer crashes and Chromium's own pages.
 extension SelfTest {
     static func browserBehaviorChecks() async {
-        CefRuntime.shared.registerSchemeHandler(scheme: "selftest", domain: "edge", handler: EdgePages())
         await bridgeRoundTripChecks()
         await popupChecks()
         await closingChecks()

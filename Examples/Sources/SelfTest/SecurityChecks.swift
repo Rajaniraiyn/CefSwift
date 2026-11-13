@@ -8,7 +8,6 @@ import Security
 /// skipped as environment.
 extension SelfTest {
     static func securityChecks() async {
-        CefRuntime.shared.registerSchemeHandler(scheme: "https", domain: "cefswift.test", handler: CapabilityPages())
         let recorder = SecurityRecorder()
         var configuration = CefBrowser.Configuration()
         configuration.clientCertificates = .delegate

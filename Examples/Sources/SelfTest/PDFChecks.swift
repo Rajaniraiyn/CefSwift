@@ -6,7 +6,6 @@ import PDFKit
 /// PDF export with its options, read back with PDFKit.
 extension SelfTest {
     static func pdfChecks() async {
-        CefRuntime.shared.registerSchemeHandler(scheme: "https", domain: "cefswift.test", handler: CapabilityPages())
         let browser = CefBrowser(url: capabilityOrigin.appending(path: "print.html"))
         let view = CefWindowedBrowserView()
         view.frame = window.contentView!.bounds

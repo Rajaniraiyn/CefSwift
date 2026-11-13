@@ -10,7 +10,6 @@ extension SelfTest {
     static let capabilityOrigin = URL(string: "https://cefswift.test")!
 
     static func siteSettingsChecks() async {
-        CefRuntime.shared.registerSchemeHandler(scheme: "https", domain: "cefswift.test", handler: CapabilityPages())
         let profile = CefProfile.default
         let settings = profile.siteSettings
         let site = URL(string: "https://settings.cefswift.test/page")!

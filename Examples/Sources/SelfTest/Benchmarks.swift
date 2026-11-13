@@ -18,18 +18,10 @@ enum Benchmarks {
     static func run(_ name: String) async {
         switch name {
         case "requests": await requests()
-        case "lifecycle":
-            CefRuntime.shared.registerSchemeHandler(scheme: "selftest", domain: "bench", handler: BenchmarkPages())
-            await lifecycleCPU()
-        case "visibility":
-            CefRuntime.shared.registerSchemeHandler(scheme: "selftest", domain: "bench", handler: BenchmarkPages())
-            await windowedVisibility()
-        case "probes":
-            CefRuntime.shared.registerSchemeHandler(scheme: "selftest", domain: "bench", handler: BenchmarkPages())
-            await probes()
-        case "frames":
-            CefRuntime.shared.registerSchemeHandler(scheme: "selftest", domain: "bench", handler: BenchmarkPages())
-            await frames()
+        case "lifecycle": await lifecycleCPU()
+        case "visibility": await windowedVisibility()
+        case "probes": await probes()
+        case "frames": await frames()
         case "compositor": await compositor()
         case "bridge", "evaluate", "codec", "axingest", "devtools": await transport(name)
         default: print("bench error: unknown benchmark \(name)")
@@ -39,7 +31,6 @@ enum Benchmarks {
     // MARK: Requests
 
     static func requests() async {
-        CefRuntime.shared.registerSchemeHandler(scheme: "selftest", domain: "bench", handler: BenchmarkPages())
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("cefswift-bench-\(getpid()).bin")
         FileManager.default.createFile(atPath: file.path, contents: nil)
         if let handle = try? FileHandle(forWritingTo: file) {

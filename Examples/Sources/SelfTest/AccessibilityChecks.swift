@@ -6,7 +6,6 @@ import CefSwiftUI
 /// read it: through the NSAccessibility protocol of the host view.
 extension SelfTest {
     static func offscreenAccessibilityChecks() async {
-        CefRuntime.shared.registerSchemeHandler(scheme: "selftest", domain: "ax", handler: AccessibilityPages())
         await accessibilityTreeChecks()
         await accessibilityDisabledChecks()
         await accessibilityDiscardChecks()
@@ -183,7 +182,6 @@ extension SelfTest {
     /// read it through the system's AXUIElement API, and reports whether
     /// that client's request turned the tree on.
     static func accessibilityExternalClientSession() async {
-        CefRuntime.shared.registerSchemeHandler(scheme: "selftest", domain: "ax", handler: AccessibilityPages())
         var configuration = CefBrowser.Configuration()
         configuration.rendering = .offscreen
         let browser = CefBrowser(url: URL(string: "selftest://ax/page.html")!, configuration: configuration)

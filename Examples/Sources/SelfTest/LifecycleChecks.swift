@@ -8,7 +8,6 @@ import CefSwiftUI
 /// kind of host; and the energy saver's offscreen frame rate.
 extension SelfTest {
     static func lifecycleChecks() async {
-        CefRuntime.shared.registerSchemeHandler(scheme: "selftest", domain: "bench", handler: BenchmarkPages())
         window.orderOut(nil)
         defer { window.orderFront(nil) }
         for host in BenchmarkHost.allCases {
