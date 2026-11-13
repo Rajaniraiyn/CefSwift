@@ -31,11 +31,12 @@ extension SelfTest {
             try? await Task.sleep(for: .seconds(1))
             return probe.paints.count - before
         }
-        // In Low Power Mode macOS slows Chromium's timers, so a rate that
-        // is off then says nothing about CefSwift.
+        // In Low Power Mode macOS slows Chromium's timers, and a virtual
+        // machine's display has no steady refresh, so a rate that is off
+        // then says nothing about CefSwift.
         func rateCheck(_ name: String, _ passed: Bool, _ rate: Int) {
-            if !passed, ProcessInfo.processInfo.isLowPowerModeEnabled {
-                skip(name, because: "\(rate) a second with Low Power Mode on", .environment)
+            if !passed, let reason = SelfTestReport.unsteadyFrameRateReason {
+                skip(name, because: "\(rate) a second; \(reason)", .environment)
             } else {
                 check(name, passed, detail: "\(rate) a second")
             }

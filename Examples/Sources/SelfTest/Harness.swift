@@ -117,6 +117,30 @@ final class SelfTestResults: @unchecked Sendable {
 enum SelfTestReport {
     static var isStrict: Bool { ProcessInfo.processInfo.environment["SELFTEST_STRICT"] == "1" }
 
+    /// `SELFTEST_EXPECTED_SKIPS`: the starts of check names, separated by
+    /// semicolons, whose environment skips strict mode accepts, for a
+    /// machine that is known not to be able to run them.
+    static var expectedSkips: [String] {
+        (ProcessInfo.processInfo.environment["SELFTEST_EXPECTED_SKIPS"] ?? "")
+            .split(separator: ";").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+    }
+
+    /// Whether macOS runs in a virtual machine, where the display has no
+    /// steady refresh for frame rates to follow.
+    static let isVirtualMachine: Bool = {
+        var present: Int32 = 0
+        var size = MemoryLayout<Int32>.size
+        return sysctlbyname("kern.hv_vmm_present", &present, &size, nil, 0) == 0 && present != 0
+    }()
+
+    /// Why a frame rate that is off says nothing about CefSwift here, if
+    /// it does not.
+    static var unsteadyFrameRateReason: String? {
+        if ProcessInfo.processInfo.isLowPowerModeEnabled { return "Low Power Mode is on" }
+        if isVirtualMachine { return "macOS runs in a virtual machine" }
+        return nil
+    }
+
     /// Prints the summary and writes `SELFTEST_JSON`. Returns how many
     /// checks failed, strict skips included.
     @discardableResult
@@ -125,7 +149,11 @@ enum SelfTestReport {
         let skips = checks.filter { $0.status == .skip }
         func count(_ category: SkipCategory) -> Int { skips.filter { $0.category == category }.count }
         var failed = failures
-        let strictSkips = skips.filter { $0.category != .limitation }
+        // Skips the environment is known to cause (`SELFTEST_EXPECTED_SKIPS`)
+        // are not failures; any other skip without the limitation category is.
+        let strictSkips = skips.filter { skip in
+            skip.category != .limitation && !expectedSkips.contains { skip.name.hasPrefix($0) }
+        }
         if isStrict, !strictSkips.isEmpty {
             failed += strictSkips.count
             Swift.print("FAIL strict: \(strictSkips.count) skip(s) without the limitation category count as " +

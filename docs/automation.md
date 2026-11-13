@@ -142,7 +142,10 @@ The `ci` job:
    downloaded archive instead of downloading it again.
 9. Run SelfTest with `SELFTEST_ISOLATED=1` (each group in a process of its
    own), `SELFTEST_STRICT=1` (a skip for a reason of the environment
-   fails) and `SELFTEST_JSON`. Its `FAIL` and `SKIP` lines and the counts
+   fails) and `SELFTEST_JSON`. `SELFTEST_EXPECTED_SKIPS` names the checks a
+   hosted runner cannot run, being a virtual machine: frame rates that
+   follow a display's refresh, and FairPlay playback. Those skips do not
+   fail the run; they are verified on a Mac only. Its `FAIL` and `SKIP` lines and the counts
    go to the run summary. On failure, the log, the JSON results and the
    crash reports written during the run are uploaded as the
    `selftest-diagnostics` artifact.

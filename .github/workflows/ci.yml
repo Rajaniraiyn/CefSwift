@@ -149,6 +149,9 @@ jobs:
         env:
           SELFTEST_ISOLATED: "1"
           SELFTEST_STRICT: "1"
+          # What a hosted runner, a virtual machine, cannot run: frame rates
+          # that follow a display's refresh, and FairPlay playback.
+          SELFTEST_EXPECTED_SKIPS: "frames: ;compatibility: an offscreen page gets animation frames;system engine: FairPlay playback"
           SELFTEST_JSON: ${{ runner.temp }}/selftest.json
         run: |
           set -o pipefail

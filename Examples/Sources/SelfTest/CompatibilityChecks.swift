@@ -111,16 +111,18 @@ extension SelfTest {
             return reported == expected
         }
         if window.occlusionState.contains(.visible) {
-            await expect("compatibility: an offscreen page gets animation frames as a window does") {
-                let rate = try await browser.evaluateJavaScript("""
-                    new Promise(resolve => {
-                      let frames = 0; const start = performance.now();
-                      const tick = () => { frames++; performance.now() - start < 1000 ? requestAnimationFrame(tick) : resolve(frames); };
-                      requestAnimationFrame(tick);
-                    })
-                    """).intValue ?? 0
-                if rate < 50 { print("NOTE offscreen animation frames: \(rate) per second") }
-                return rate >= 50
+            let name = "compatibility: an offscreen page gets animation frames as a window does"
+            let rate = (try? await browser.evaluateJavaScript("""
+                new Promise(resolve => {
+                  let frames = 0; const start = performance.now();
+                  const tick = () => { frames++; performance.now() - start < 1000 ? requestAnimationFrame(tick) : resolve(frames); };
+                  requestAnimationFrame(tick);
+                })
+                """, timeout: .seconds(10)).intValue) ?? 0
+            if rate < 50, let reason = SelfTestReport.unsteadyFrameRateReason {
+                skip(name, because: "\(rate) frames a second; \(reason)", .environment)
+            } else {
+                check(name, rate >= 50, detail: "\(rate) frames a second")
             }
         }
         await closeHosted(browser, view)

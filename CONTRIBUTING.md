@@ -95,7 +95,9 @@ seen. CI runs it on every pull request. Add a check in
   category: `.environment` when this machine could not run it (offline, an
   occluded window, an assistive app running), `.limitation` when CEF cannot
   do what it needs. `SELFTEST_STRICT=1`, which CI sets, counts environment
-  skips, and SKIP lines without a category, as failures.
+  skips, and SKIP lines without a category, as failures, except those
+  whose names start with an entry of `SELFTEST_EXPECTED_SKIPS` (separated
+  by semicolons), which CI uses for what a virtual machine cannot run.
 - `SELFTEST_ISOLATED=1` runs each group in a process of its own, with its
   own cache directory, and kills one that outlives its deadline; no group
   then depends on what an earlier one left behind. It takes longer, and CI
