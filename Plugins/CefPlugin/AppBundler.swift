@@ -211,9 +211,10 @@ struct AppBundler {
     }
 
     /// `cp -R`, which keeps a framework's symlinks.
+    /// Copies with `cp -R`, cloning files where the volume can (`-c`).
     private func copyPreservingLinks(_ source: URL, to destination: URL) throws {
         try Shell.runChecked(
-            "/bin/cp", ["-R", source.path, destination.path],
+            "/bin/cp", ["-Rc", source.path, destination.path],
             hint: "Could not copy \(source.lastPathComponent) into the app bundle. Check disk space and permissions."
         )
     }

@@ -60,34 +60,27 @@ struct HelperBuilder {
         try fm.copyItem(at: builtStartup, to: startupLibrary)
         try fm.copyItem(at: builtHelper, to: executable)
         try setInstallName(of: startupLibrary, to: Self.startupLibraryPathFromHelper)
-        try changeLibraryPath(of: executable, from: installName(of: builtStartup), to: Self.startupLibraryPathFromHelper)
-        try changeLibraryPath(
-            of: executable,
-            from: installName(of: framework.appendingPathComponent("Chromium Embedded Framework")),
-            to: Self.frameworkPathFromHelper)
+        try Shell.runChecked(
+            "/usr/bin/xcrun", ["install_name_tool",
+                               "-change", installName(of: builtStartup), Self.startupLibraryPathFromHelper,
+                               "-change", installName(of: framework.appendingPathComponent("Chromium Embedded Framework")),
+                               Self.frameworkPathFromHelper,
+                               executable.path],
+            hint: "Could not set the library paths of \(executable.lastPathComponent).")
         return Products(executable: executable, startupLibrary: startupLibrary)
     }
 
-    /// A library's install name, as `otool -D` prints it.
+    /// A library's install name (`LC_ID_DYLIB`).
     private func installName(of library: URL) throws -> String {
-        let result = try Shell.runChecked(
-            "/usr/bin/xcrun", ["otool", "-D", library.path],
-            hint: "Could not read the install name of \(library.path).")
-        guard let name = result.stdout.split(separator: "\n").dropFirst().first else {
+        guard let name = MachOFile(contentsOf: library)?.slices.first?.installName else {
             throw CefPluginError("\(library.path) has no install name. Run 'swift package cef clean' and bundle again.")
         }
-        return String(name)
+        return name
     }
 
     private func setInstallName(of library: URL, to name: String) throws {
         try Shell.runChecked(
             "/usr/bin/xcrun", ["install_name_tool", "-id", name, library.path],
             hint: "Could not set the install name of \(library.lastPathComponent).")
-    }
-
-    private func changeLibraryPath(of binary: URL, from old: String, to new: String) throws {
-        try Shell.runChecked(
-            "/usr/bin/xcrun", ["install_name_tool", "-change", old, new, binary.path],
-            hint: "Could not set the library paths of \(binary.lastPathComponent).")
     }
 }
