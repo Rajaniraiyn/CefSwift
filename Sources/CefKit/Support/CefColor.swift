@@ -1,6 +1,15 @@
 import CCef
 import CoreGraphics
 
+extension CGColor {
+    /// The color as an opaque `cef_color_t`; white when it cannot be
+    /// converted.
+    var opaqueCefColor: cef_color_t {
+        let value = cefColor(self)
+        return value == 0 && alpha > 0 ? 0xFFFF_FFFF : value | 0xFF00_0000
+    }
+}
+
 /// A color as CEF's sRGB ARGB `cef_color_t`, or transparent black when the
 /// color cannot be converted.
 func cefColor(_ color: CGColor) -> cef_color_t {

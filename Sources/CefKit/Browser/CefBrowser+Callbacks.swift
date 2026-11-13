@@ -63,17 +63,34 @@ extension CefBrowser {
             favicon = nil
             return
         }
-        let callback = FaviconDownload { [weak self] image in
+        let callback = ImageDownload { [weak self] image in
             // A newer icon, or a new page, may have replaced this one.
             guard let self, self.faviconURL == url else { return }
             self.favicon = image
         }.makeCallback()
         let started: Void? = withHost { host in
             CefStringUtil.withCefString(url.absoluteString) {
-                host.pointee.download_image(host, $0, 1, UInt32(FaviconDownload.maximumSize), 0, callback)
+                host.pointee.download_image(host, $0, 1, UInt32(ImageDownload.maximumFaviconSize), 0, callback)
             }
         }
         if started == nil { cefRelease(callback) }
+    }
+
+    /// The image at `url`, as Chromium decodes it for the page, at its
+    /// full size; `nil` when it cannot be loaded.
+    func downloadImage(_ url: URL) async -> NSImage? {
+        await withCheckedContinuation { (continuation: CheckedContinuation<NSImage?, Never>) in
+            let callback = ImageDownload { image in continuation.resume(returning: image) }.makeCallback()
+            let started: Void? = withHost { host in
+                CefStringUtil.withCefString(url.absoluteString) {
+                    host.pointee.download_image(host, $0, 0, 0, 0, callback)
+                }
+            }
+            if started == nil {
+                cefRelease(callback)
+                continuation.resume(returning: nil)
+            }
+        }
     }
 
     func mainFrameDidFinishLoad(status: Int) {
@@ -314,11 +331,12 @@ extension CefBrowser {
     }
 }
 
-/// Receives a favicon from `download_image` and converts it to an
-/// `NSImage` with one representation per scale factor Chromium decoded.
-private final class FaviconDownload: Sendable {
-    /// The largest icon asked for, in points.
-    static let maximumSize = 32
+/// Receives an image, such as a favicon, from `download_image` and
+/// converts it to an `NSImage` with one representation per scale factor
+/// Chromium decoded.
+final class ImageDownload: Sendable {
+    /// The largest favicon asked for, in points.
+    static let maximumFaviconSize = 32
 
     private let completion: @MainActor @Sendable (NSImage?) -> Void
 
@@ -331,9 +349,9 @@ private final class FaviconDownload: Sendable {
         let callback = cefAllocate(cef_download_image_callback_t.self, owner: self)
         callback.pointee.on_download_image_finished = { s, _, _, image in
             defer { cefRelease(image) }
-            guard let owner = cefOwner(FaviconDownload.self, s) else { return }
+            guard let owner = cefOwner(ImageDownload.self, s) else { return }
             nonisolated(unsafe) let image = image
-            MainActor.assumeIsolated { owner.completion(image.flatMap(FaviconDownload.makeImage)) }
+            MainActor.assumeIsolated { owner.completion(image.flatMap(ImageDownload.makeImage)) }
         }
         return callback
     }

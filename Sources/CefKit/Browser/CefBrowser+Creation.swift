@@ -33,9 +33,11 @@ extension CefBrowser {
         var settings = cef_browser_settings_t()
         settings.size = MemoryLayout<cef_browser_settings_t>.stride
         settings.windowless_frame_rate = Int32(frameRate)
-        if let color = configuration.backgroundColor {
-            settings.background_color = cefColor(color.cgColor)
-        }
+        // Alpha 0 asks CEF for its default: white for a windowed browser,
+        // but a transparent canvas for an offscreen one. So the color is
+        // always opaque, unless an offscreen page is to be see-through.
+        settings.background_color = offscreenHost != nil && !configuration.drawsBackground
+            ? 0 : canvasColor.opaqueCefColor
 
         // Bridges and user scripts reach the renderer with the browser
         // itself (extra_info). Attachments that must prepare before any
@@ -52,6 +54,22 @@ extension CefBrowser {
             url: url,
             requestContext: (configuration.profile ?? .default).makeRequestContext(),
             extraInfo: pageScripting.makeExtraInfo())
+    }
+
+    /// ``Configuration/backgroundColor`` as an opaque color, in the app's
+    /// appearance.
+    var canvasColor: CGColor {
+        var color = configuration.backgroundColor.cgColor
+        NSApp?.effectiveAppearance.performAsCurrentDrawingAppearance {
+            color = configuration.backgroundColor.cgColor
+        }
+        return color.copy(alpha: 1) ?? color
+    }
+
+    /// What the view behind the page shows: the canvas color, or nothing
+    /// for a see-through offscreen page.
+    var hostBackgroundColor: CGColor {
+        !configuration.drawsBackground && configuration.rendering != .windowed ? .clear : canvasColor
     }
 
     /// Shows the browser as a native child view of `parentView`: creates it

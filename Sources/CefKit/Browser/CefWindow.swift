@@ -436,7 +436,30 @@ public final class CefWindow: Identifiable {
 
     // MARK: Delegate callbacks
 
+    /// Paints the browser's canvas (``CefBrowser/Configuration/backgroundColor``)
+    /// behind its page. A Chrome-style page leaves its canvas transparent,
+    /// and what shows there is the web contents view's background, the
+    /// theme's `kColorWebContentsBackground`: white in a light appearance,
+    /// dark gray in a dark one, so unstyled pages turned dark with the app.
+    /// Chromium resets theme colors when the theme changes, before
+    /// `on_theme_colors_changed`, which applies this again.
+    func applyCanvasColor(to window: UnsafeMutablePointer<cef_window_t>, notifying: Bool) {
+        window.pointee.set_theme_color(
+            window, Int32(CEF_ColorWebContentsBackground.rawValue), browser.canvasColor.opaqueCefColor)
+        if notifying { window.pointee.theme_changed(window) }
+    }
+
+    /// The color Chromium paints behind the page, from the window's theme.
+    @_spi(Testing) public var webContentsBackgroundColor: UInt32? {
+        browserView.map { view in
+            view.pointer.withMemoryRebound(to: cef_view_t.self, capacity: 1) {
+                $0.pointee.get_theme_color($0, Int32(CEF_ColorWebContentsBackground.rawValue))
+            }
+        }
+    }
+
     func windowCreated(_ window: UnsafeMutablePointer<cef_window_t>) {
+        applyCanvasColor(to: window, notifying: true)
         if let browserView {
             // add_child_view consumes a reference to the view.
             cefAddRef(browserView.pointer)

@@ -24,6 +24,19 @@ final class Bookmarks: BrowserFeature {
         Task { await observe() }
     }
 
+    /// Adds Bookmark Link to a link's context menu, after Copy Link Address.
+    func configure(_ configuration: inout CefBrowser.Configuration) {
+        let profile = profile
+        configuration.contextMenu.customize { menu, target in
+            guard let link = target.linkURL, Self.canBookmark(link) else { return }
+            // A right-click selects the link's text.
+            let title = target.selectedText.isEmpty ? (link.host() ?? link.absoluteString) : target.selectedText
+            menu.insert(CefContextMenu.Item("Bookmark Link") { _, _ in
+                do { try await profile.bookmarks.add(link, title: title) } catch { NSSound.beep() }
+            }, after: .copyLinkAddress)
+        }
+    }
+
     func isBookmarked(_ url: URL?) -> Bool {
         url.map(bookmarkedURLs.contains) ?? false
     }

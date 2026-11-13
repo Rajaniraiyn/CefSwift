@@ -26,8 +26,27 @@ extension CefBrowser {
     public struct Configuration {
         /// How the browser renders when hosted in a `CefWebView`.
         public var rendering: CefBrowser.Rendering = .windowed
-        /// Background shown before the page paints.
-        public var backgroundColor: NSColor?
+        /// The canvas: the color shown where the page paints nothing, as
+        /// before its first paint, behind a page with no background of its
+        /// own, and in the area a resize uncovers until the page repaints.
+        ///
+        /// White, as in Chrome and `WKWebView`, whatever the app's or the
+        /// system's appearance. A page that opts into a dark color scheme
+        /// (`<meta name="color-scheme" content="dark">`, or `light dark`
+        /// while the app's appearance is dark) gets Chromium's dark
+        /// canvas instead, as in Chrome, except in a Chrome-style browser,
+        /// whose page has no canvas of its own and shows this color behind
+        /// it (see the guide's "Background"). Chromium paints only opaque
+        /// canvases, so the color's alpha is ignored; for a see-through
+        /// page, turn off ``drawsBackground``. A dynamic color is resolved
+        /// in the app's appearance when the browser is created.
+        public var backgroundColor: NSColor = .white
+        /// Whether Chromium paints the canvas. `false` leaves the parts of
+        /// the page that paint nothing transparent, showing what is behind
+        /// the view, as `WKWebView`'s `drawsBackground`. Offscreen browsers
+        /// only: Chromium keeps the canvas of a windowed or Chrome-style
+        /// browser opaque, and ignores this for them.
+        public var drawsBackground = true
         /// The profile (cookies, storage, cache, preferences) to browse with.
         /// `nil` uses ``CefProfile/default``.
         public var profile: CefProfile?

@@ -182,6 +182,11 @@ final class WindowDelegate: Sendable {
             nonisolated(unsafe) let created = window
             WindowDelegate.with(s, window, default: ()) { $0.windowCreated(created) }
         }
+        d.pointee.on_theme_colors_changed = { s, window, _ in
+            guard let window else { return }
+            nonisolated(unsafe) let changed = window
+            WindowDelegate.with(s, window, default: ()) { $0.applyCanvasColor(to: changed, notifying: false) }
+        }
         d.pointee.on_window_destroyed = { s, window in
             WindowDelegate.with(s, window, default: ()) { $0.windowDestroyed() }
         }

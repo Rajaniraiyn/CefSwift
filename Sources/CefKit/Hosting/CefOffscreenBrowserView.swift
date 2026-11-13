@@ -94,9 +94,6 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
     }
     var keyInput = KeyInputState()
 
-    /// The completion of the context menu being shown.
-    var pendingContextMenuCompletion: CefContextMenuCompletion?
-
     /// The operations allowed for the page-initiated drag in progress.
     var currentDragAllowedOperations: CefDragOperation = .none
 
@@ -110,7 +107,9 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
         wantsLayer = true
         layerContentsRedrawPolicy = .onSetNeedsDisplay
         let root = CALayer()
-        root.backgroundColor = NSColor.white.cgColor
+        // The canvas until Chromium's first frame, and behind see-through
+        // pages; Chromium paints its own.
+        root.backgroundColor = browser.hostBackgroundColor
         contentLayer.contentsGravity = .resize
         popupLayer.contentsGravity = .resize
         popupLayer.isHidden = true
@@ -137,6 +136,7 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
         if let oldValue, oldValue.hostView === self {
             oldValue.hostViewDidHide()
         }
+        if let browser { layer?.backgroundColor = browser.hostBackgroundColor }
         hostBrowserIfPossible()
         updateVisibility(notifyingBrowser: true)
         accessibilityBridge.browserDidChange()

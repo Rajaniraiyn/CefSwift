@@ -197,6 +197,8 @@ enum SelfTest {
         ("security", securityChecks),
         ("pageIntegration", pageIntegrationChecks),
         ("discard", discardChecks),
+        ("contextMenu", contextMenuChecks),
+        ("background", backgroundChecks),
     ]
 
     static func runChecks() async {
