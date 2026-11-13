@@ -125,18 +125,16 @@ public final class CefMediaRouter {
         guard let router, let sinkObject = sinkObjects[sink.id],
               let sourceObject = mediaSource(source, router: router)
         else { throw CefMediaRouteError(message: "No such device or source") }
-        return try await withCheckedThrowingContinuation { continuation in
-            let callback = RouteCreated { [weak self] result, error, route in
-                guard let route, result == CEF_MRCR_OK else {
-                    continuation.resume(throwing: CefMediaRouteError(message: error.isEmpty ? "Casting failed" : error))
-                    return
-                }
-                let value = Self.describe(route.pointer, source: source)
-                self?.routeObjects[value.id] = route
-                continuation.resume(returning: value)
-            }.makeCallback()
+        let (result, error, route) = await withCheckedContinuation { continuation in
+            let callback = RouteCreated(continuation).makeCallback()
             router.pointer.pointee.create_route(router.pointer, sourceObject.retainedPointer(), sinkObject.retainedPointer(), callback)
         }
+        guard let route, result == CEF_MRCR_OK else {
+            throw CefMediaRouteError(message: error.isEmpty ? "Casting failed" : error)
+        }
+        let value = Self.describe(route.pointer, source: source)
+        routeObjects[value.id] = route
+        return value
     }
 
     /// Ends `route`.
@@ -228,22 +226,21 @@ private final class MediaObserver: Sendable {
     }
 }
 
-/// Owner of a `cef_media_route_create_callback_t`.
+/// Owner of a `cef_media_route_create_callback_t`, which resumes with
+/// `CEF_MRCR_UNKNOWN_ERROR` if CEF drops the callback without calling it.
 private final class RouteCreated: Sendable {
-    typealias Completion = @MainActor @Sendable (cef_media_route_create_result_t, String, CefRef<cef_media_route_t>?) -> Void
-    private let completion: Completion
+    typealias Outcome = (cef_media_route_create_result_t, String, CefRef<cef_media_route_t>?)
+    private let continuation: CefResumeOnce<Outcome>
 
-    init(_ completion: @escaping Completion) {
-        self.completion = completion
+    init(_ continuation: CheckedContinuation<Outcome, Never>) {
+        self.continuation = CefResumeOnce(continuation, fallback: (CEF_MRCR_UNKNOWN_ERROR, "", nil))
     }
 
     func makeCallback() -> UnsafeMutablePointer<cef_media_route_create_callback_t> {
         let c = cefAllocate(cef_media_route_create_callback_t.self, owner: self)
         c.pointee.on_media_route_create_finished = { s, result, error, route in
-            let message = CefStringUtil.string(from: error)
-            let object = CefRef(adopting: route)
-            guard let owner = cefOwner(RouteCreated.self, s) else { return }
-            MainActor.assumeIsolated { owner.completion(result, message, object) }
+            let outcome = (result, CefStringUtil.string(from: error), CefRef(adopting: route))
+            cefOwner(RouteCreated.self, s)?.continuation.resume(returning: outcome)
         }
         return c
     }
