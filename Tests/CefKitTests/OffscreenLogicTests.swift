@@ -24,11 +24,4 @@ struct OffscreenLogicTests {
         #expect(CefKeyCodes.windowsKeyCode(forMacKeyCode: 0x00, characters: "a") == 0x41)
         #expect(CefKeyCodes.windowsKeyCode(forMacKeyCode: 0x12, characters: "1") == 0x31)
     }
-
-    // MARK: Menu titles
-
-    @Test func menuTitleDropsMnemonics() {
-        #expect(CefOffscreenBrowserView.menuTitle(fromCefTitle: "&Copy") == "Copy")
-        #expect(CefOffscreenBrowserView.menuTitle(fromCefTitle: "Save && &Quit") == "Save & Quit")
-    }
 }

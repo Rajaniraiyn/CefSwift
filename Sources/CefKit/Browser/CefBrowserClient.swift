@@ -41,9 +41,6 @@ final class CefBrowserClient {
     /// `on_before_popup` until the popup's browser is wrapped.
     var pendingPopupFeatures: CefPopupFeatures?
 
-    /// The most recent context-menu target, for commands that arrive later.
-    var contextMenuTarget = CefContextMenuTarget()
-
     init(browser: CefBrowser?, requestFilter: CefRequestFilter?, chromeToolbar: CefRuntime.Configuration.ChromeToolbar) {
         self.primary = browser
         self.pending = browser

@@ -319,7 +319,6 @@ final class FrameProbeView: NSView, CefOffscreenHost {
     func offscreenPopupDidResize(_ rect: CGRect) {}
     func offscreenDidChangeCompositionRange(_ range: NSRange, characterBounds: [CGRect]) {}
     func offscreenDidChangeSelection(_ selectedText: String, selectedRange: NSRange) {}
-    func offscreenShowContextMenu(_ menu: CefMenuModel, at point: CGPoint, completion: CefContextMenuCompletion) {}
 }
 
 extension BenchmarkPages {

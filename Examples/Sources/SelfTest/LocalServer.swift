@@ -172,6 +172,13 @@ final class LocalServer: Sendable {
             status = "204 No Content"
         case "/accept-language":
             html("<title>accept-language \(request.headers["accept-language"] ?? "")</title>")
+        case let path where path.hasPrefix("/menu/"):
+            if let (type, content) = MenuPages.content(for: String(path.dropFirst("/menu/".count))) {
+                headers = [("Content-Type", type)]
+                body = content
+            } else {
+                status = "404 Not Found"
+            }
         case let path where path.hasPrefix("/passkeys"):
             html(PasskeyChecks.page)
         case let path where path.hasSuffix(".txt"):

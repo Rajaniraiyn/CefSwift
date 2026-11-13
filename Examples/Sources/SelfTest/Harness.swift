@@ -215,6 +215,7 @@ extension SelfTest {
         "discard": .seconds(90),
         "processes": .seconds(120),
         "security": .seconds(120),
+        "contextMenu": ProcessInfo.processInfo.environment["SELFTEST_MENU_DUMP"] == nil ? .seconds(420) : .seconds(1500),
     ]
     static let defaultGroupDeadline: Duration = .seconds(60)
 

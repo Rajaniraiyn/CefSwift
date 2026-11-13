@@ -13,13 +13,6 @@ import SwiftUI
 struct ChromiumPanels: BrowserFeature {
     static let customPanelsKey = "customChromiumPanels"
 
-    func configure(_ configuration: inout CefBrowser.Configuration) {
-        configuration.contextMenu.items.append(
-            CefContextMenuItem("Create QR Code for This Page", isVisible: { $0.linkURL == nil && !$0.isEditable }) { browser, _ in
-                browser.execute(.createQRCode)
-            })
-    }
-
     func windowDidOpen(_ window: CefWindow) {
         guard UserDefaults.standard.bool(forKey: Self.customPanelsKey) else { return }
         window.setCustomPresentation(for: .qrCode) { surface in QRCodePanel(surface: surface) }

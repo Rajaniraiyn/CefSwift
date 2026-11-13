@@ -91,13 +91,6 @@ final class BrowserController: CefBrowserDelegate {
         // Tabs opened from a private tab stay in its private session.
         configuration.profile = source?.configuration.profile ?? (isPrivate ? .incognito() : .default)
         configuration.allowsBackForwardNavigationGestures = true
-        configuration.contextMenu.showsInspectElement = true
-        configuration.contextMenu.hiddenCommands = [.viewSource]
-        configuration.contextMenu.items = [
-            CefContextMenuItem("Open Link in New Tab", isVisible: { $0.linkURL != nil }) { [weak self] browser, target in
-                self?.openTab(url: target.linkURL, inBackground: true, sharingProfileOf: browser)
-            },
-        ]
         features.configure(&configuration)
         let browser = CefBrowser(url: url ?? newTabPage, configuration: configuration, delegate: self)
 
@@ -241,7 +234,11 @@ final class BrowserController: CefBrowserDelegate {
         // Real popups (sign-in windows and the like) keep Chromium's handling
         // and arrive through the window's onPopup.
         guard request.disposition != .newPopup, let url = request.targetURL else { return .allowNativePopup }
-        openTab(url: url, inBackground: request.disposition == .newBackgroundTab, sharingProfileOf: browser)
+        // Open Link in Incognito Window, from the context menu, opens a
+        // private tab.
+        let isPrivate = request.disposition == .offTheRecord
+        openTab(url: url, isPrivate: isPrivate, inBackground: request.disposition == .newBackgroundTab,
+                sharingProfileOf: isPrivate ? nil : browser)
         return .handled
     }
 

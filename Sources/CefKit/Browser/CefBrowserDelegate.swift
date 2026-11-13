@@ -63,10 +63,6 @@ public protocol CefBrowserDelegate: AnyObject {
     /// A key event, before (`isBeforePage`) or after the page saw it. Return
     /// `true` to consume it.
     func browser(_ browser: CefBrowser, handleKeyEvent event: CefKeyEvent, isBeforePage: Bool) -> Bool
-    /// Customize the context menu before it is shown.
-    func browser(_ browser: CefBrowser, configureContextMenu menu: CefMenuModel, for target: CefContextMenuTarget)
-    /// A context-menu command was chosen. Return `true` if you handled it.
-    func browser(_ browser: CefBrowser, handleContextMenuCommand commandID: Int, for target: CefContextMenuTarget) -> Bool
     /// Chrome is about to run one of its commands (see ``CefChromeCommand``)
     /// — new tab, find, print, zoom, … Return `true` to handle it yourself.
     /// Chrome-style browsers only.
@@ -74,6 +70,12 @@ public protocol CefBrowserDelegate: AnyObject {
 
     // MARK: Asynchronous policy
 
+    /// Show a context menu, already shaped by
+    /// ``CefBrowser/Configuration/contextMenu``, and return the item the
+    /// user chose, or `nil` for none. CefKit then runs it: your item's
+    /// action, or Chromium's command. The default shows a native menu at
+    /// the click (``CefContextMenuPresenter``).
+    func browser(_ browser: CefBrowser, runContextMenu menu: CefContextMenu, for target: CefContextMenuTarget) async -> CefContextMenu.Item?
     /// Present `alert` / `confirm` / `prompt`. The default shows a native sheet.
     func browser(_ browser: CefBrowser, runJavaScriptDialog dialog: CefJavaScriptDialog) async -> CefJavaScriptDialogResponse
     /// Confirm leaving a page with a `beforeunload` handler. Return `true` to
@@ -139,14 +141,13 @@ extension CefBrowserDelegate {
         .default(for: request)
     }
     public func browser(_ browser: CefBrowser, handleKeyEvent event: CefKeyEvent, isBeforePage: Bool) -> Bool { false }
-    public func browser(_ browser: CefBrowser, configureContextMenu menu: CefMenuModel, for target: CefContextMenuTarget) {}
-    public func browser(_ browser: CefBrowser, handleContextMenuCommand commandID: Int, for target: CefContextMenuTarget) -> Bool {
-        false
-    }
     public func browser(_ browser: CefBrowser, handleChromeCommand command: CefChromeCommand, disposition: CefWindowOpenDisposition) -> Bool {
         false
     }
 
+    public func browser(_ browser: CefBrowser, runContextMenu menu: CefContextMenu, for target: CefContextMenuTarget) async -> CefContextMenu.Item? {
+        await CefContextMenuPresenter.present(menu, for: target, in: browser)
+    }
     public func browser(_ browser: CefBrowser, runJavaScriptDialog dialog: CefJavaScriptDialog) async -> CefJavaScriptDialogResponse {
         await CefDialogPresenter.present(dialog, in: browser.hostWindow)
     }

@@ -724,7 +724,8 @@ open one loads in the same browser instead (see
 
 To draw offscreen frames in a view of your own, adopt `CefOffscreenHost` and
 call `browser.host(offscreenIn:size:)`. The host receives frames, cursors,
-IME ranges, context menus and drags. A frame's `IOSurface` comes from
+IME ranges and drags; CefKit shows context menus over the host view (see
+[Context menu](#context-menu)). A frame's `IOSurface` comes from
 Chromium's pool and is valid only during the call: Chromium renders later
 frames into it, even while a layer still shows it, so copy it into a
 surface of your own before returning, as `CefOffscreenBrowserView` does
@@ -1261,7 +1262,7 @@ final class Policy: CefBrowserDelegate {
 | `browser(_:decidePolicyFor:)` | `.allow` |
 | `browser(_:decideWindowOpenFor:)` | `CefWindowOpenDecision.default(for:)` |
 | `browser(_:handleKeyEvent:isBeforePage:)` | `false` |
-| `browser(_:configureContextMenu:for:)`, `browser(_:handleContextMenuCommand:for:)` | No change |
+| `browser(_:runContextMenu:for:) async` | Native menu at the click (`CefContextMenuPresenter`); see [Context menu](#context-menu) |
 | `browser(_:handleChromeCommand:disposition:)` | `false`: Chrome runs the command |
 
 An `async` decision that stops mattering before you answer is cancelled:
@@ -1295,6 +1296,7 @@ for some cases by calling its presenter:
 | Unresponsive page | `browserPageIsUnresponsive(_:)` | `CefUnresponsivePagePresenter` |
 | File chooser | `browser(_:runFileDialog:)` | `CefFileDialogPresenter` |
 | Download save panel | `browser(_:decideDestinationFor:)` | `CefDownloadPresenter` |
+| Context menu | `browser(_:runContextMenu:for:)` | `CefContextMenuPresenter` |
 | Passkeys | `CefPasskeyDelegate.browser(_:decidePasskeyFor:)` | `CefPasskeyPresenter` |
 
 The context menu's Inspect item is a configuration
@@ -1644,34 +1646,107 @@ passkeys in its Settings window (`Features/Passkeys/Passkeys.swift`).
 
 ## Context menu
 
-Shape the menu without a delegate through `CefBrowser.Configuration.contextMenu`:
+For each right-click, CefKit reads the menu Chromium builds into a
+`CefContextMenu`, a value the configuration changes, and shows it the same
+way in every browser, windowed or offscreen, Alloy or Chrome style: as a
+native `NSMenu` at the click, with the system's Services.
+
+With no configuration the menu is Chromium's, titled in Chromium's
+language (`CefRuntime.locale`):
+
+- Chrome-style browsers (`CefWindow`) show Chrome's menu: Open Link in New
+  Tab, New Window and Incognito Window, Save Link As, Copy Link Address,
+  the image, audio and video items, Look Up, Search, Create QR Code, Emoji &
+  Symbols, spelling suggestions, Speech, Writing Direction, Print, View Page
+  Source and Inspect. An item that opens something goes where a page's
+  request would: a tab or window to `browser(_:decideWindowOpenFor:)`,
+  with its disposition (`.newBackgroundTab`, `.newWindow`,
+  `.offTheRecord`), one of Chromium's pages to
+  [`onChromeTab`](#tabs-chromium-opens-itself), a file to
+  `browser(_:decideDestinationFor:)`.
+- Alloy-style browsers (views) show CEF's shorter menu (Back, Forward,
+  Print, View Page Source, the editing commands, spelling suggestions)
+  completed with Chrome's link, image, audio and video items, Look Up and
+  Emoji & Symbols, and, in windowed views, Speech and Writing Direction.
+  CefKit runs these the same ways: View Page Source and the Open … items
+  ask `browser(_:decideWindowOpenFor:)`, the Save … As items start a
+  download, the Copy … items write to the general pasteboard.
+
+Change the menu with `contextMenu.customize`. Each customization gets the
+menu the ones before it left, and what was clicked:
 
 ```swift
-browserConfiguration.contextMenu.hiddenCommands = [.viewSource, .print]
-browserConfiguration.contextMenu.showsInspectElement = true
-browserConfiguration.contextMenu.items = [
-    CefContextMenuItem("Search Notes", isVisible: { !$0.selectedText.isEmpty }) { _, target in
-        search(target.selectedText)
-    },
-]
+browserConfiguration.contextMenu.customize { menu, target in
+    menu.remove(.viewSource, .print)
+    if let link = target.linkURL {
+        menu.insert(CefContextMenu.Item("Copy as Markdown") { browser, _ in
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString("[\(browser.title)](\(link.absoluteString))", forType: .string)
+        }, after: .copyLinkAddress)
+    }
+    if !target.selectedText.isEmpty {
+        menu.appendSection([
+            CefContextMenu.Item("Search Notes") { _, target in search(target.selectedText) },
+        ])
+    }
+}
 ```
 
-- `hiddenCommands` removes Chromium's items (`CefContextMenuCommand`: back,
-  reload, copy, paste, find, print, view source, …).
-- `items` are added below Chromium's. `isVisible` decides per click, from
-  the `CefContextMenuTarget`: `linkURL`, `sourceURL`, `pageURL`,
-  `selectedText`, `mediaType`, `isEditable`, `location`.
-- `showsInspectElement` adds Chromium's Inspect item, which opens DevTools
-  on the clicked element, titled in Chromium's locale as the rest of the
-  menu.
-- `isEnabled = false` removes the menu.
+- A `CefContextMenu` is its `items`. An item has a `title`, `isEnabled`,
+  `isChecked`, and is a command, a `submenu` or a separator
+  (`isSeparator`). Chromium's items carry their `command`, a
+  `CefContextMenuCommand`; yours have an `action`, which gets the browser
+  and the target and may `await`. Make yours with
+  `CefContextMenu.Item(_:action:)`, `CefContextMenu.Item(_:submenu:)` and
+  `.separator`.
+- `contains(_:)`, `menu[.saveLinkAs]` (set it to change the item, `nil`
+  to remove it), `remove(_:)`, `removeAll(where:)`, `insert(_:after:)`,
+  `insert(_:before:)` and `handle(_:with:)` find items in submenus too;
+  `appendSection(_:)` adds items below a separator, and `commands` lists
+  Chromium's. Separators left at the ends or next to each other, and empty
+  submenus, are dropped when the menu shows.
+- `CefContextMenuCommand` names Chromium's commands (`.openLinkInNewTab`,
+  `.copyImage`, `.lookUp`, `.spellingSuggestion(0)`, `.inspectElement`,
+  …) the same in Alloy and Chrome style. Its raw value is Chrome's
+  command ID; one CefKit does not name, as a later Chromium may add,
+  keeps its value, and its item shows and runs.
+- A chosen Chromium item runs natively. To run your own code instead,
+  keeping Chromium's title, give the item an action:
 
-For menus that depend on app state, implement
-`browser(_:configureContextMenu:for:)`, which runs after the configuration
-and edits the `CefMenuModel` directly, and handle your command IDs in
-`browser(_:handleContextMenuCommand:for:)`. Take IDs from
-`CefMenuModel.userCommandIDs`; `items` use IDs from its start and Inspect
-its last ID.
+```swift
+browserConfiguration.contextMenu.customize { menu, _ in
+    menu.handle(.openLinkInNewTab) { _, target in openTab(target.linkURL, inBackground: true) }
+}
+```
+
+- `CefContextMenuTarget` describes the click: `location`, `linkURL`,
+  `sourceURL` and `mediaType` (image, video, audio, canvas…), `mediaState`,
+  `pageURL`, `frameURL` (in a subframe), `titleText`, `selectedText`,
+  `isEditable`, `editing` (what the field allows), `misspelledWord` and
+  `spellingSuggestions`.
+- `showsInspectElement` adds Inspect where Chromium has none (Alloy
+  style). `isEnabled = false` shows no menu.
+
+To show the menu yourself, implement `browser(_:runContextMenu:for:)`: it
+gets the menu as it will show and returns the item the user chose, or
+`nil` for none; CefKit runs it. The value is all a custom `NSMenu` or
+SwiftUI menu needs. `CefContextMenuPresenter` is the stock menu:
+
+```swift
+final class MenuPolicy: CefBrowserDelegate {
+    func browser(_ browser: CefBrowser, runContextMenu menu: CefContextMenu, for target: CefContextMenuTarget) async -> CefContextMenu.Item? {
+        // No menu over the app's drawing canvas; the stock menu elsewhere.
+        if target.mediaType == .canvas { return nil }
+        return await CefContextMenuPresenter.present(menu, for: target, in: browser)
+    }
+}
+```
+
+What Chrome has that CEF does not let an Alloy-style menu offer: Loop,
+Show Controls and Picture in Picture on media, Copy Video Frame, the
+canvas's Save Image As and Copy Image, Search and Lens (Alloy has no
+search engine), Translate, Create QR Code, and Speech and Writing
+Direction in offscreen views. Use a Chrome-style browser for those.
 
 ## Chrome-style windows
 

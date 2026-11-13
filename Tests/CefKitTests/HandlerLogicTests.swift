@@ -59,10 +59,6 @@ struct HandlerLogicTests {
         #expect(mask & UInt32(CEF_MEDIA_PERMISSION_DEVICE_VIDEO_CAPTURE.rawValue) != 0)
     }
 
-    @Test func menuModelUserCommandRange() {
-        #expect(CefMenuModel.userCommandIDs == 26500...28500)
-    }
-
     // MARK: Key event mapping
 
     @Test func keyEventMapping() {

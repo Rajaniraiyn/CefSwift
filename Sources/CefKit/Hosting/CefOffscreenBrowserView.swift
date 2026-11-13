@@ -94,9 +94,6 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
     }
     var keyInput = KeyInputState()
 
-    /// The completion of the context menu being shown.
-    var pendingContextMenuCompletion: CefContextMenuCompletion?
-
     /// The operations allowed for the page-initiated drag in progress.
     var currentDragAllowedOperations: CefDragOperation = .none
 

@@ -130,9 +130,6 @@ public protocol CefOffscreenHost: AnyObject {
     func offscreenDidChangeCompositionRange(_ range: NSRange, characterBounds: [CGRect])
     /// The text selection changed.
     func offscreenDidChangeSelection(_ selectedText: String, selectedRange: NSRange)
-    /// The page asks for a context menu at `point`, in view points. Present
-    /// `menu`, then report the choice through `completion`.
-    func offscreenShowContextMenu(_ menu: CefMenuModel, at point: CGPoint, completion: CefContextMenuCompletion)
     /// The page started dragging `data` from `point`, in view points. Begin
     /// a system drag session and, when it ends, call
     /// ``CefBrowser/draggingSessionEnded(at:operation:)``. Return `false` to
