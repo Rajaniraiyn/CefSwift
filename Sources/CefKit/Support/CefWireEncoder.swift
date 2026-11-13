@@ -112,14 +112,14 @@ final class CefWireEncoder: Encoder {
     fileprivate func write(_ value: String) { buffer.append(value) }
     fileprivate func write(_ value: Double) { buffer.append(value) }
 
-    fileprivate func write<I: BinaryInteger>(_ value: I, path: [any CodingKey]) throws {
+    fileprivate func write<I: BinaryInteger>(_ value: I, path: @autoclosure () -> [any CodingKey]) throws {
         if let small = Int32(exactly: value) {
             buffer.append(small)
         } else if let double = Double(exactly: value), abs(double) <= 9_007_199_254_740_992 {
             buffer.append(double)
         } else {
             throw EncodingError.invalidValue(value, .init(
-                codingPath: path, debugDescription: "\(value) cannot be represented exactly as a JavaScript number"))
+                codingPath: path(), debugDescription: "\(value) cannot be represented exactly as a JavaScript number"))
         }
     }
 
