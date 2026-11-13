@@ -353,7 +353,7 @@ struct AccessibilityTreeTests {
 
     @Test func foundationObjectsConvert() throws {
         let object = try JSONSerialization.jsonObject(with: Data(#"{"a":true,"b":1,"c":2.5,"d":"x","e":[false,null]}"#.utf8))
-        #expect(CefJSON(foundationObject: object) == ["a": true, "b": 1, "c": 2.5, "d": "x", "e": [false, nil]])
+        #expect(CefJSON(foundationValue: object) == ["a": true, "b": 1, "c": 2.5, "d": "x", "e": [false, nil]])
     }
 
     @Test func transformStrings() {

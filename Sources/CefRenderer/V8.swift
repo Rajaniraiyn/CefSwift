@@ -25,8 +25,7 @@ final class V8Value {
 
     /// The value with a reference added for CEF, which consumes it.
     func retained() -> UnsafeMutablePointer<cef_v8_value_t> {
-        cefAddRef(raw)
-        return raw
+        reference.retainedPointer()
     }
 
     // MARK: Creating values
@@ -61,26 +60,12 @@ final class V8Value {
     // MARK: Reading values
 
     var isUndefined: Bool { raw.pointee.is_undefined(raw) != 0 }
-    var isNull: Bool { raw.pointee.is_null(raw) != 0 }
-    var isBool: Bool { raw.pointee.is_bool(raw) != 0 }
-    var isInt: Bool { raw.pointee.is_int(raw) != 0 }
-    var isUInt: Bool { raw.pointee.is_uint(raw) != 0 }
-    var isDouble: Bool { raw.pointee.is_double(raw) != 0 }
-    var isDate: Bool { raw.pointee.is_date(raw) != 0 }
     var isString: Bool { raw.pointee.is_string(raw) != 0 }
     var isObject: Bool { raw.pointee.is_object(raw) != 0 }
-    var isArray: Bool { raw.pointee.is_array(raw) != 0 }
-    var isArrayBuffer: Bool { raw.pointee.is_array_buffer(raw) != 0 }
     var isFunction: Bool { raw.pointee.is_function(raw) != 0 }
     var isPromise: Bool { raw.pointee.is_promise(raw) != 0 }
 
-    var boolValue: Bool { raw.pointee.get_bool_value(raw) != 0 }
-    var intValue: Int32 { raw.pointee.get_int_value(raw) }
-    var uintValue: UInt32 { raw.pointee.get_uint_value(raw) }
-    var doubleValue: Double { raw.pointee.get_double_value(raw) }
     var stringValue: String { CefStringUtil.takingUserFree(raw.pointee.get_string_value(raw)) ?? "" }
-    /// A Date's time in milliseconds since 1970.
-    var dateMilliseconds: Double { Self.milliseconds(of: raw.pointee.get_date_value(raw)) }
 
     /// A `cef_basetime_t` in milliseconds since 1970.
     nonisolated static func milliseconds(of basetime: cef_basetime_t) -> Double {
@@ -97,20 +82,6 @@ final class V8Value {
 
     subscript(key: String) -> V8Value? {
         V8Value(adopting: CefStringUtil.withCefString(key) { raw.pointee.get_value_bykey(raw, $0) })
-    }
-
-    subscript(index: Int) -> V8Value? {
-        V8Value(adopting: raw.pointee.get_value_byindex(raw, Int32(index)))
-    }
-
-    var arrayLength: Int { Int(raw.pointee.get_array_length(raw)) }
-
-    /// The object's own enumerable string keys.
-    var keys: [String] {
-        guard let list = cef_string_list_alloc() else { return [] }
-        defer { cef_string_list_free(list) }
-        guard raw.pointee.get_keys(raw, list) != 0 else { return [] }
-        return cefStrings(from: list)
     }
 
     // MARK: Changing values
@@ -190,8 +161,7 @@ final class V8Context {
     /// The context with a reference added for CEF, which consumes every
     /// object passed to it.
     func retained() -> UnsafeMutablePointer<cef_v8_context_t> {
-        cefAddRef(raw)
-        return raw
+        reference.retainedPointer()
     }
 
     var isValid: Bool { raw.pointee.is_valid(raw) != 0 }

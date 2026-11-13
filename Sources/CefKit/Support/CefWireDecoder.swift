@@ -101,12 +101,6 @@ final class CefWireDecoder: Decoder {
 
     fileprivate func peekTag() -> CefWireTag? { try? reader.peekTag() }
 
-    fileprivate func readNil() -> Bool {
-        guard peekTag() == .null else { return false }
-        offset += 1
-        return true
-    }
-
     fileprivate func readBool(_ key: (any CodingKey)? = nil) throws -> Bool {
         switch peekTag() {
         case .true: offset += 1; return true

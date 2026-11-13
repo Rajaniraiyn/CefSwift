@@ -175,12 +175,13 @@ public final class CefRuntime {
     /// passkeys beyond security keys; at info level when nothing is.
     private func logCapabilities() {
         let capabilities = CefAppCapabilities.current
-        if let summary = capabilities.limitationsSummary(passkeysUseChromium: true) {
-            CefLog.notice(summary)
+        let limitations = capabilities.limitationsSummary()
+        if let limitations {
+            CefLog.notice(limitations)
         }
         CefLog.info("CefSwift: Chromium's sandbox is \(configuration?.isSandboxEnabled == true ? "on" : "off"); " +
                     "locale \(locale ?? "en-US")")
-        if capabilities.limitationsSummary(passkeysUseChromium: true) == nil {
+        if limitations == nil {
             CefLog.info("CefSwift: signed \(capabilities.signature.rawValue), team " +
                         "\(capabilities.teamIdentifier ?? "none"); passkeys: " +
                         CefAppCapabilities.PasskeyAuthenticator.allCases
@@ -482,7 +483,8 @@ public final class CefRuntime {
     }
 
     /// Low Power Mode and the thermal state as the energy policy should see
-    /// them, instead of the system's; `nil` reads the system's.
+    /// them, instead of the system's, until
+    /// ``stopSimulatingEnergyConditions()``.
     @_spi(Testing) public func simulateEnergyConditions(lowPowerMode: Bool, thermalState: ProcessInfo.ThermalState) {
         lifecycleCoordinator.simulatedConditions = CefEnergyConditions(
             isLowPowerModeEnabled: lowPowerMode, thermalState: thermalState)

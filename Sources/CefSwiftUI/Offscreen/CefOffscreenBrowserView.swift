@@ -340,15 +340,8 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
             contents = copy
         case let .cpu(buffer, width, height, _):
             // The buffer is only valid during this call; the image copies it.
-            let bytesPerRow = width * 4
-            let bitmapInfo = CGBitmapInfo(
-                rawValue: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue)
-            guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
-                  let provider = CGDataProvider(data: Data(bytes: buffer, count: bytesPerRow * height) as CFData),
-                  let image = CGImage(
-                      width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32,
-                      bytesPerRow: bytesPerRow, space: colorSpace, bitmapInfo: bitmapInfo,
-                      provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)
+            guard let image = Self.bgraImage(
+                Data(bytes: buffer, count: width * 4 * height), width: width, height: height, bytesPerRow: width * 4)
             else { return }
             contents = image
         }
@@ -363,8 +356,7 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
         guard !popupLayer.isHidden, let popup = Self.image(of: popupLayer.contents), bounds.width > 0,
               let context = CGContext(
                   data: nil, width: page.width, height: page.height, bitsPerComponent: 8, bytesPerRow: 0,
-                  space: page.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!,
-                  bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue)
+                  space: page.colorSpace ?? Self.sRGB, bitmapInfo: Self.bgraBitmapInfo.rawValue)
         else { return page }
         // View points, origin at the top left, to image pixels, origin at
         // the bottom left.
@@ -392,12 +384,23 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
         let data = Data(bytes: IOSurfaceGetBaseAddress(surface), count: bytesPerRow * height)
         let space = IOSurfaceCopyValue(surface, kIOSurfaceColorSpace).flatMap {
             CGColorSpace(propertyListPlist: $0 as CFPropertyList)
-        } ?? CGColorSpace(name: CGColorSpace.sRGB)!
+        } ?? sRGB
+        return bgraImage(data, width: width, height: height, bytesPerRow: bytesPerRow, space: space)
+    }
+
+    /// Chromium's pixel format: BGRA, premultiplied.
+    private static let bgraBitmapInfo = CGBitmapInfo(
+        rawValue: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue)
+    private static let sRGB = CGColorSpace(name: CGColorSpace.sRGB)!
+
+    /// An image of BGRA pixels in Chromium's format.
+    private static func bgraImage(
+        _ data: Data, width: Int, height: Int, bytesPerRow: Int, space: CGColorSpace = sRGB
+    ) -> CGImage? {
         guard let provider = CGDataProvider(data: data as CFData) else { return nil }
         return CGImage(
             width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: bytesPerRow,
-            space: space,
-            bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue),
+            space: space, bitmapInfo: bgraBitmapInfo,
             provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)
     }
 

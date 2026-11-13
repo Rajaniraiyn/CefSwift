@@ -5,7 +5,6 @@
 #include <stdatomic.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <string.h>
 
 typedef struct ccef_object_header_t {
   _Atomic(int32_t) ref_count;
@@ -74,14 +73,6 @@ void* ccef_object_alloc(size_t struct_size, void* swift_object,
 
 void* ccef_object_get_swift(void* cef_self) {
   return ccef_header(cef_self)->swift_object;
-}
-
-void ccef_object_add_ref(void* cef_self) {
-  ccef_base_add_ref((cef_base_ref_counted_t*)cef_self);
-}
-
-int ccef_object_release(void* cef_self) {
-  return ccef_base_release((cef_base_ref_counted_t*)cef_self);
 }
 
 int ccef_object_ref_count(void* cef_self) {

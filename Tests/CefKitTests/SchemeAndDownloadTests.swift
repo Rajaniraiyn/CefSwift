@@ -28,10 +28,9 @@ import CefBase
     /// The helper executable reads the same switch, and skips what the
     /// browser process's parser would.
     @Test func helperReadsTheSchemeSwitch() {
-        #expect(CefHelper.schemesSwitch == "--\(CefCustomScheme.childProcessSwitchName)=")
-        let parsed = CefHelper.parseSchemes(CefCustomScheme.serialize([
+        let parsed = CefSchemeList.entries(inArguments: ["--type=renderer", "--cefswift-schemes=" + CefCustomScheme.serialize([
             CefCustomScheme(name: "myapp"), CefCustomScheme(name: "assets", options: [.standard, .local]),
-        ]) + ",broken,:4,odd:x")
+        ]) + ",broken,:4,odd:x"])
         #expect(parsed.map(\.name) == ["myapp", "assets"])
         #expect(parsed.map(\.options) == [89, 3])
     }

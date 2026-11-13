@@ -93,11 +93,13 @@ enum JSONValue: Equatable {
                 cef_string_list_free(keys)
             }
             _ = dictionary.pointee.get_keys(dictionary, keys)
-            self = .object(cefStrings(from: keys).map { key in
-                let item = CefStringUtil.withCefString(key) { dictionary.pointee.get_value(dictionary, $0) }
+            var members: [(String, JSONValue)] = []
+            cefForEachString(in: keys) { key in
+                let item = dictionary.pointee.get_value(dictionary, key)
                 defer { cefRelease(item) }
-                return (key, item.map(JSONValue.init) ?? .null)
-            })
+                members.append((CefStringUtil.string(from: key), item.map(JSONValue.init) ?? .null))
+            }
+            self = .object(members)
         default:
             self = .null
         }

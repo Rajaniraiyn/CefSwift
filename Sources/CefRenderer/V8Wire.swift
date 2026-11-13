@@ -58,7 +58,7 @@ enum V8Wire {
         } else if v.is_double(value) != 0 {
             buffer.append(v.get_double_value(value))
         } else if v.is_string(value) != 0 {
-            appendString(v.get_string_value(value), to: &buffer)
+            buffer.append(utf16: value)
         } else if v.is_date(value) != 0 {
             buffer.append(JSONValue.isoDate(milliseconds: V8Value.milliseconds(of: v.get_date_value(value))))
         } else if v.is_array_buffer(value) != 0 {
@@ -105,32 +105,17 @@ enum V8Wire {
         if let keys = cef_string_list_alloc() {
             defer { cef_string_list_free(keys) }
             if object.pointee.get_keys(object, keys) != 0 {
-                for index in 0..<cef_string_list_size(keys) {
-                    var key = cef_string_t()
-                    defer { cef_string_utf16_clear(&key) }
-                    guard cef_string_list_value(keys, index, &key) != 0,
-                          let member = object.pointee.get_value_bykey(object, &key)
-                    else { continue }
+                cefForEachString(in: keys) { key in
+                    guard let member = object.pointee.get_value_bykey(object, key) else { return }
                     defer { cefRelease(member) }
-                    guard !isOmitted(member) else { continue }
-                    buffer.append(key: UnsafeBufferPointer(start: key.str, count: key.length))
+                    guard !isOmitted(member) else { return }
+                    buffer.append(key: UnsafeBufferPointer(start: key.pointee.str, count: key.pointee.length))
                     _ = write(member, to: &buffer, ancestors: &ancestors)
                     members += 1
                 }
             }
         }
         buffer.close(container, count: members)
-    }
-
-    /// Transcodes a string CEF returned straight into the buffer, then
-    /// frees it.
-    private static func appendString(_ string: cef_string_userfree_t?, to buffer: inout CefWireBuffer) {
-        guard let string else {
-            buffer.append(utf16: UnsafeBufferPointer(start: nil, count: 0))
-            return
-        }
-        defer { cef_string_userfree_utf16_free(string) }
-        buffer.append(utf16: UnsafeBufferPointer(start: string.pointee.str, count: string.pointee.length))
     }
 
     private static func isSame(_ a: Value, _ b: Value) -> Bool {

@@ -114,11 +114,59 @@ extension CefRef {
 
 /// The strings in a borrowed `cef_string_list_t`.
 package func cefStrings(from list: cef_string_list_t?) -> [String] {
-    guard let list else { return [] }
-    return (0..<cef_string_list_size(list)).compactMap { index in
+    var strings: [String] = []
+    cefForEachString(in: list) { strings.append(CefStringUtil.string(from: $0)) }
+    return strings
+}
+
+/// Calls `body` with each string in a borrowed `cef_string_list_t`, as a
+/// `cef_string_t` valid for the call, so a key can be looked up with CEF's
+/// own string and decoded at most once.
+package func cefForEachString(in list: cef_string_list_t?, _ body: (UnsafePointer<cef_string_t>) -> Void) {
+    guard let list else { return }
+    for index in 0..<cef_string_list_size(list) {
         var value = cef_string_t()
         defer { cef_string_utf16_clear(&value) }
-        guard cef_string_list_value(list, index, &value) != 0 else { return nil }
-        return CefStringUtil.string(from: value)
+        guard cef_string_list_value(list, index, &value) != 0 else { continue }
+        body(&value)
     }
+}
+
+/// HTTP header fields read into a new `cef_string_multimap_t` by `fill`
+/// (such as `get_header_map`). A name that repeats has its values joined
+/// with ", ", as HTTP allows.
+package func cefHeaderFields(_ fill: (cef_string_multimap_t) -> Void) -> [String: String] {
+    guard let map = cef_string_multimap_alloc() else { return [:] }
+    defer { cef_string_multimap_free(map) }
+    fill(map)
+    var fields: [String: String] = [:]
+    for index in 0..<cef_string_multimap_size(map) {
+        var key = cef_string_t()
+        var value = cef_string_t()
+        defer {
+            cef_string_utf16_clear(&key)
+            cef_string_utf16_clear(&value)
+        }
+        guard cef_string_multimap_key(map, index, &key) != 0, cef_string_multimap_value(map, index, &value) != 0
+        else { continue }
+        let name = CefStringUtil.string(from: key)
+        let field = CefStringUtil.string(from: value)
+        fields[name] = fields[name].map { "\($0), \(field)" } ?? field
+    }
+    return fields
+}
+
+/// Runs `body` with a temporary `cef_string_multimap_t` holding `fields`
+/// (such as for `set_header_map`, which copies it).
+package func withCefStringMultimap(
+    _ fields: some Sequence<(name: String, value: String)>, _ body: (cef_string_multimap_t) -> Void
+) {
+    guard let map = cef_string_multimap_alloc() else { return }
+    defer { cef_string_multimap_free(map) }
+    for (name, value) in fields {
+        CefStringUtil.withCefString(name) { name in
+            CefStringUtil.withCefString(value) { value in _ = cef_string_multimap_append(map, name, value) }
+        }
+    }
+    body(map)
 }

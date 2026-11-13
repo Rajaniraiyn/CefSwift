@@ -382,16 +382,10 @@ final class SchemeResourceHandler: Sendable {
             if head.mimeType.hasPrefix("text/") || head.mimeType.hasSuffix("json") {
                 CefStringUtil.withCefString("utf-8") { cefResponse.pointee.set_charset(cefResponse, $0) }
             }
-            if !head.headers.isEmpty, let map = cef_string_multimap_alloc() {
-                for (name, value) in head.headers {
-                    CefStringUtil.withCefString(name) { cefName in
-                        CefStringUtil.withCefString(value) { cefValue in
-                            _ = cef_string_multimap_append(map, cefName, cefValue)
-                        }
-                    }
+            if !head.headers.isEmpty {
+                withCefStringMultimap(head.headers.lazy.map { (name: $0.key, value: $0.value) }) {
+                    cefResponse.pointee.set_header_map(cefResponse, $0)
                 }
-                cefResponse.pointee.set_header_map(cefResponse, map)
-                cef_string_multimap_free(map)
             }
             // -1: read until the body ends.
             responseLength?.pointee = Int64(head.length ?? -1)
@@ -433,24 +427,7 @@ final class SchemeResourceHandler: Sendable {
         let urlString = CefStringUtil.takingUserFree(request.pointee.get_url(request)) ?? ""
         let method = CefStringUtil.takingUserFree(request.pointee.get_method(request)) ?? "GET"
 
-        var headers: [String: String] = [:]
-        if let map = cef_string_multimap_alloc() {
-            request.pointee.get_header_map(request, map)
-            for index in 0..<cef_string_multimap_size(map) {
-                var key = cef_string_t()
-                var value = cef_string_t()
-                if cef_string_multimap_key(map, index, &key) != 0,
-                   cef_string_multimap_value(map, index, &value) != 0
-                {
-                    let name = CefStringUtil.string(from: key)
-                    let headerValue = CefStringUtil.string(from: value)
-                    headers[name] = headers[name].map { "\($0), \(headerValue)" } ?? headerValue
-                }
-                cef_string_utf16_clear(&key)
-                cef_string_utf16_clear(&value)
-            }
-            cef_string_multimap_free(map)
-        }
+        let headers = cefHeaderFields { request.pointee.get_header_map(request, $0) }
 
         var body: Data?
         if let postData = request.pointee.get_post_data(request) {

@@ -199,15 +199,11 @@ extension CefJSON {
         guard let dictionary, let keys = cef_string_list_alloc() else { return [:] }
         defer { cef_string_list_free(keys) }
         _ = dictionary.pointee.get_keys(dictionary, keys)
-        let count = cef_string_list_size(keys)
         var members: [String: CefJSON] = [:]
-        members.reserveCapacity(count)
+        members.reserveCapacity(cef_string_list_size(keys))
         // Each key is looked up with CEF's own string, and decoded once.
-        for index in 0..<count {
-            var key = cef_string_t()
-            defer { cef_string_utf16_clear(&key) }
-            guard cef_string_list_value(keys, index, &key) != 0 else { continue }
-            let element = dictionary.pointee.get_value(dictionary, &key)
+        cefForEachString(in: keys) { key in
+            let element = dictionary.pointee.get_value(dictionary, key)
             defer { cefRelease(element) }
             members[CefStringUtil.string(from: key)] = CefJSON(cefValue: element)
         }
@@ -247,5 +243,29 @@ extension CefJSON {
             _ = value.pointee.set_dictionary(value, dictionary)
         }
         return value
+    }
+}
+
+extension CefJSON {
+    /// Converts Foundation values: the output of `JSONSerialization`, or
+    /// what WebKit returns from JavaScript (NSNumber, NSString, NSArray,
+    /// NSDictionary, NSNull, NSDate or nil).
+    package init(foundationValue value: Any?) {
+        switch value {
+        case nil, is NSNull:
+            self = .null
+        case let number as NSNumber:
+            self = CFGetTypeID(number) == CFBooleanGetTypeID() ? .bool(number.boolValue) : .number(number.doubleValue)
+        case let string as String:
+            self = .string(string)
+        case let array as [Any]:
+            self = .array(array.map(CefJSON.init(foundationValue:)))
+        case let dictionary as [String: Any]:
+            self = .object(dictionary.mapValues(CefJSON.init(foundationValue:)))
+        case let date as Date:
+            self = .number(date.timeIntervalSince1970 * 1000)
+        case let other?:
+            self = .string(String(describing: other))
+        }
     }
 }

@@ -60,26 +60,11 @@ public struct CefCustomScheme: Sendable, Equatable {
 // MARK: - Registration in every process
 
 extension CefCustomScheme {
-    /// The switch that carries the scheme list to helper processes, as
-    /// `--cefswift-schemes=name:options,name:options`. The helper's parser
-    /// is `CefHelper.parseSchemes` in `Sources/CefRenderer/CefHelper.swift`.
-    static let childProcessSwitchName = "cefswift-schemes"
+    /// The scheme as `CefSchemeList` carries it to helper processes.
+    var entry: CefSchemeList.Entry { (name, options.rawValue) }
 
-    /// Encodes a scheme list as the switch value.
+    /// Encodes a scheme list as the value of the helper switch.
     static func serialize(_ schemes: [CefCustomScheme]) -> String {
-        schemes.map { "\($0.name):\($0.options.rawValue)" }.joined(separator: ",")
-    }
-
-    /// Registers `schemes` from `on_register_custom_schemes`. The registrar
-    /// is not reference-counted and is only borrowed.
-    static func register(
-        _ schemes: [CefCustomScheme],
-        with registrar: UnsafeMutablePointer<cef_scheme_registrar_t>
-    ) {
-        for scheme in schemes {
-            CefStringUtil.withCefString(scheme.name) { name in
-                _ = registrar.pointee.add_custom_scheme(registrar, name, scheme.options.rawValue)
-            }
-        }
+        CefSchemeList.encode(schemes.map(\.entry))
     }
 }

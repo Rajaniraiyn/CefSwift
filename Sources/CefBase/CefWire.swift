@@ -262,11 +262,6 @@ package struct CefWireBuffer: ~Copyable {
         return Container(position: position, logicalStart: count + deferredBytes)
     }
 
-    /// Counts one more element of `container`.
-    package mutating func addElement(to container: inout Container) {
-        container.count += 1
-    }
-
     /// Writes `container`'s length and count.
     package mutating func close(_ container: Container) {
         let length = UInt32(count + deferredBytes - container.logicalStart)
