@@ -118,7 +118,7 @@ extension SelfTest {
         // Chromium downloads only from network schemes, so these come from a
         // local server.
         guard let server = try? await LocalServer.start() else {
-            print("SKIP [environment] download: could not start a local HTTP server")
+            skip("download", because: "could not start a local HTTP server", .environment)
             return
         }
         defer { server.stop() }

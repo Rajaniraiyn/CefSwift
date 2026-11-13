@@ -30,7 +30,7 @@ extension SelfTest {
         check("accessibility: page loads offscreen", await waitUntil { browser.title == "ax" }, detail: browser.title)
         let assistiveAppPresent = NSWorkspace.shared.isVoiceOverEnabled || CefApplication.isAccessibilityRequested
         if assistiveAppPresent {
-            print("SKIP [environment] accessibility: tree stays off until asked — an assistive app is already running")
+            skip("accessibility: tree stays off until asked", because: "an assistive app is already running", .environment)
         } else {
             check("accessibility: tree stays off until asked", !browser.isAccessibilityEnabled)
         }

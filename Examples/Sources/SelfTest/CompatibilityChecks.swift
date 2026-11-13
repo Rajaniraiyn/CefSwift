@@ -93,7 +93,7 @@ extension SelfTest {
         _ = await waitUntil { browser.title == "compat" && !browser.isLoading }
 
         guard let screen = window.screen else {
-            print("SKIP [environment] compatibility: offscreen geometry — the test window has no screen")
+            skip("compatibility: offscreen geometry", because: "the test window has no screen", .environment)
             return
         }
         let primaryHeight = NSScreen.screens.first?.frame.height ?? screen.frame.maxY

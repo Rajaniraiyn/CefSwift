@@ -78,7 +78,7 @@ extension SelfTest {
 
     static func bubbleChecks() async {
         guard let server = try? await LocalServer.start() else {
-            print("SKIP [environment] surfaces: could not start a local HTTP server")
+            skip("surfaces", because: "could not start a local HTTP server", .environment)
             return
         }
         defer { server.stop() }

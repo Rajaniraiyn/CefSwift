@@ -132,7 +132,7 @@ extension SelfTest {
     static func fairPlayPlaybackCheck(in browser: CefSystemBrowser) async {
         browser.load(URL(string: "https://example.com/")!)
         guard await waitUntil(timeout: .seconds(10), { browser.url?.host == "example.com" && !browser.isLoading }) else {
-            print("SKIP [environment] system engine: FairPlay playback — example.com did not load (offline?)")
+            skip("system engine: FairPlay playback", because: "example.com did not load (offline?)", .environment)
             return
         }
         _ = try? await browser.evaluateJavaScript("location.hash = 'second'")
@@ -149,8 +149,8 @@ extension SelfTest {
         let license = result?["license"].intValue ?? 0
         let advanced = result?["advanced"].doubleValue ?? 0
         if result == nil || result?["error"].stringValue == "offline" {
-            print("SKIP [environment] system engine: FairPlay playback — the player or test stream did not load " +
-                  "(\(result?["detail"].stringValue ?? failure))")
+            skip("system engine: FairPlay playback", because: "the player or test stream did not load " +
+                 "(\(result?["detail"].stringValue ?? failure))", .environment)
             return
         }
         check("system engine: FairPlay test stream plays (licence \(license), \(String(format: "%.1f", advanced)) s played)",
