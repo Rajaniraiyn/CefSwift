@@ -733,23 +733,48 @@ Chromium) and start a `cef_urlrequest_t` on the profile's request context
 from the IO thread. `on_download_data` hands over a pointer into
 Chromium's buffer, valid for the call. For `data(for:)` it is appended to
 one `Data`, reserved from `Content-Length`, so each byte is copied once.
-For `bytes(for:)` each chunk becomes its own `Data` (one copy) in an
-`AsyncThrowingStream`. `cef_urlrequest_t` has no way to pause a body, and
-blocking the IO thread until the reader catches up is not allowed, so
-the stream counts unread bytes and fails the request with
-`ERR_INSUFFICIENT_RESOURCES` past `streamBufferLimit` (16 MB). Real back
+For `bytes(for:)` each chunk becomes its own `Data` (one copy) in a
+`URLRequestStreamBuffer`, a lock-protected state machine tested without
+Chromium. `cef_urlrequest_t` has no way to pause a body, and blocking
+the IO thread until the reader catches up is not allowed; real back
 pressure would need a `cef_thread_t` per stream to block in
-`on_download_data`; a `cef_thread_t` must be stopped and released on the
-thread that created it, which a stream that ends at quit cannot promise.
-A 64 MB body read off the main actor arrives in about 800 chunks, with
-at most 1.5 MB unread and the footprint 1–3 MB higher. The client struct
+`on_download_data`, and a `cef_thread_t` must be stopped and released on
+the thread that created it, which a stream that ends at quit cannot
+promise. So the buffer never refuses a chunk for being slow to read:
+it keeps up to `streamMemoryLimit` (16 MB) in memory, hands a chunk
+straight to a reader that waits, and past the limit queues each chunk,
+as it is, for a serial queue that appends the queued chunks to a spill
+file in batches of up to 64 (`pwritev`). Once anything has spilled,
+later chunks are queued too, until the reader has caught up; the file
+is then truncated and chunks stay in memory again, so order holds
+whatever the interleaving. The reader takes memory first, then written
+bytes in 1 MB reads on the same queue, then a queued chunk directly when
+nothing written is left before it, so a reader that keeps up never
+waits for the disk. Queued chunks are memory until they are written:
+while the network outruns the disk (a local server can deliver 64 MB
+in the 30–50 ms the disk needs to take it) they pile up, by as much as
+40 MB of a 64 MB body in SelfTest, and are released as the disk catches
+up. A `.spillToDisk(limit:)` cap bounds that too. The end of
+the body, or the request's error, is the reader's after every byte
+before it. The file is opened on the first spill, in the profile's
+directory or, for an incognito profile, the temporary directory, and
+unlinked at once, so a crash leaves nothing; cancelling, leaving the
+loop, dropping the body, a quit and the end of the body close it.
+`.spillToDisk(limit:)` caps the file and `.fail` keeps the body off disk;
+past either the request fails with `ERR_INSUFFICIENT_RESOURCES`.
+`download(for:to:)` does not use the buffer: each chunk goes to a queue
+that writes it into the destination. A 64 MB body read off the main
+actor arrives in about 800 chunks, usually with under 2.5 MB in memory;
+a reader that waits 1 ms per chunk takes all of it through the spill
+file, with 1 MB in memory and the footprint a few MB higher once written. The client struct
 owns the loader; the loader holds the `cef_urlrequest_t` until the request
 completes, which breaks the cycle through CEF's reference to the client.
 Each loader is registered from the moment it takes a request-context
 reference. Quitting closes the registry, cancels every registered loader
 on the IO thread and waits, suspended on the main actor while Chromium's
 message loop keeps running, until each has cancelled its
-`cef_urlrequest_t` and released its CEF references there; only then does
+`cef_urlrequest_t` and released its CEF references there, and has
+closed its spill file or removed its partial download; only then does
 shutdown begin. Their callers get `CefError.shutDown`. A drain that has
 not finished after five seconds is abandoned with a log line, and what is
 left is cancelled without waiting, so a stuck IO thread cannot stop the

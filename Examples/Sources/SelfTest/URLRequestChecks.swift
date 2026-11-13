@@ -219,30 +219,75 @@ extension SelfTest {
         let sampler = MemorySampler()
         sampler.start()
         do {
-            let limit = CefProfile.RequestConfiguration().streamBufferLimit
+            let limit = CefProfile.RequestConfiguration().streamMemoryLimit
             let (body, response) = try await profile.bytes(for: URLRequest(url: URL(string: "\(base)/large?\(size)")!))
             // Read off the main actor, as a parser would.
-            let (received, chunks) = try await count(body)
+            let read = try await readLarge(body)
             sampler.stop()
             let growth = sampler.peakMB - sampler.startMB
-            print(String(format: "NOTE urlRequest: 64 MB streamed in %d chunks, at most %d bytes unread, footprint +%.0f MB",
-                         chunks, body.peakUnreadBytes, growth))
+            print(String(format: "NOTE urlRequest: 64 MB streamed in %d chunks, at most %d bytes unread in memory, %lld on disk and %d waiting for the disk, footprint +%.0f MB",
+                         read.chunks, body.peakUnreadBytesInMemory, body.peakUnreadBytesOnDisk, body.peakUnwrittenBytes, growth))
             check("urlRequest: a 64 MB body streams whole",
-                  response.statusCode == 200 && response.expectedContentLength == Int64(size) && received == size,
-                  detail: "\(received) bytes in \(chunks) chunks")
-            check("urlRequest: the stream's unread bytes stay under its limit", body.peakUnreadBytes <= limit,
-                  detail: "peak \(body.peakUnreadBytes) bytes")
-            check("urlRequest: streaming 64 MB does not hold the body in memory", growth < 40,
-                  detail: String(format: "footprint +%.0f MB", growth))
+                  response.statusCode == 200 && response.expectedContentLength == Int64(size) && read.bytes == size && read.isExact,
+                  detail: "\(read.bytes) bytes in \(read.chunks) chunks, exact \(read.isExact)")
+            check("urlRequest: the stream's unread bytes in memory stay under its limit", body.peakUnreadBytesInMemory <= limit,
+                  detail: "peak \(body.peakUnreadBytesInMemory) bytes")
+            let unwrittenMB = Double(body.peakUnwrittenBytes) / 1_048_576
+            check("urlRequest: streaming 64 MB does not hold the body in memory", growth - unwrittenMB < 40,
+                  detail: String(format: "footprint +%.0f MB, at most %.0f MB waiting for the disk", growth, unwrittenMB))
         } catch {
             sampler.stop()
             check("urlRequest: a 64 MB body streams whole", false, detail: "\(error)")
         }
 
-        // A consumer that falls behind past the limit ends the request.
-        await expect("urlRequest: a reader past the stream's limit gets ERR_INSUFFICIENT_RESOURCES") {
+        // A reader far slower than the network: the rest waits on disk, and
+        // it still gets every byte.
+        let slowSampler = MemorySampler()
+        slowSampler.start()
+        do {
             var configuration = CefProfile.RequestConfiguration()
-            configuration.streamBufferLimit = 256 << 10
+            configuration.streamMemoryLimit = 1 << 20
+            let (body, _) = try await profile.bytes(for: URLRequest(url: URL(string: "\(base)/large?\(size)")!), configuration: configuration)
+            let read = try await readLarge(body, pause: .milliseconds(100), every: 1, delay: .milliseconds(1))
+            slowSampler.stop()
+            let growth = slowSampler.peakMB - slowSampler.startMB
+            print(String(format: "NOTE urlRequest: a slow reader took 64 MB in %d chunks; %lld bytes went through disk, at most %lld at once and %d waiting for the disk; footprint +%.0f MB",
+                         read.chunks, body.spilledBytes, body.peakUnreadBytesOnDisk, body.peakUnwrittenBytes, growth))
+            check("urlRequest: a slow reader gets every byte of a 64 MB body, in order",
+                  read.bytes == size && read.isExact, detail: "\(read.bytes) bytes, exact \(read.isExact)")
+            check("urlRequest: a slow reader's stream spills to disk, keeping memory under its limit",
+                  body.spilledBytes > 0 && body.peakUnreadBytesInMemory <= configuration.streamMemoryLimit,
+                  detail: "\(body.spilledBytes) spilled, peak \(body.peakUnreadBytesInMemory) in memory")
+            // Chunks wait in memory only until the disk takes them: from a
+            // local server the network can outrun the disk for a while.
+            let unwrittenMB = Double(body.peakUnwrittenBytes) / 1_048_576
+            check("urlRequest: a slow reader's 64 MB do not stay in memory once written", growth - unwrittenMB < 24,
+                  detail: String(format: "footprint +%.0f MB, at most %.0f MB waiting for the disk", growth, unwrittenMB))
+        } catch {
+            slowSampler.stop()
+            check("urlRequest: a slow reader gets every byte of a 64 MB body, in order", false, detail: "\(error)")
+        }
+
+        // The same reader on the main actor, against the default profile's
+        // directory.
+        await expect("urlRequest: a stream spills into a persistent profile's directory and leaves nothing there") {
+            var configuration = CefProfile.RequestConfiguration()
+            configuration.streamMemoryLimit = 256 << 10
+            let persistent = CefProfile.default
+            let (body, _) = try await persistent.bytes(for: URLRequest(url: URL(string: "\(base)/large?\(8 << 20)")!), configuration: configuration)
+            try await Task.sleep(for: .milliseconds(300))
+            var check = LargeBodyCheck()
+            for try await chunk in body { check.feed(chunk) }
+            let leftovers = spillFiles(in: persistent.spillDirectory)
+            return (check.bytes == 8 << 20 && check.isExact && body.spilledBytes > 0 && leftovers.isEmpty,
+                    "\(check.bytes) bytes, exact \(check.isExact), \(body.spilledBytes) spilled into \(persistent.spillDirectory.path), left \(leftovers)")
+        }
+
+        // Without spilling, a reader that falls behind ends the request.
+        await expect("urlRequest: with .fail, a reader past the stream's memory limit gets ERR_INSUFFICIENT_RESOURCES") {
+            var configuration = CefProfile.RequestConfiguration()
+            configuration.streamMemoryLimit = 256 << 10
+            configuration.streamOverflow = .fail
             let (body, _) = try await profile.bytes(for: URLRequest(url: URL(string: "\(base)/large?\(32 << 20)")!), configuration: configuration)
             var outcome = "finished"
             do {
@@ -250,7 +295,71 @@ extension SelfTest {
             } catch let error as CefLoadError {
                 outcome = "\(error.code)"
             }
-            return (outcome == "-12", outcome)
+            return (outcome == "-12" && body.spilledBytes == 0, "\(outcome), \(body.spilledBytes) spilled")
+        }
+
+        // A capped spill fails the same way once the file is full.
+        await expect("urlRequest: a reader past the spill limit gets ERR_INSUFFICIENT_RESOURCES after the bytes before it") {
+            var configuration = CefProfile.RequestConfiguration()
+            configuration.streamMemoryLimit = 256 << 10
+            configuration.streamOverflow = .spillToDisk(limit: 1 << 20)
+            let (body, _) = try await profile.bytes(for: URLRequest(url: URL(string: "\(base)/large?\(32 << 20)")!), configuration: configuration)
+            try await Task.sleep(for: .milliseconds(300))
+            var check = LargeBodyCheck()
+            var outcome = "finished"
+            do {
+                for try await chunk in body { check.feed(chunk) }
+            } catch let error as CefLoadError {
+                outcome = "\(error.code)"
+            }
+            return (outcome == "-12" && check.isExact && check.bytes >= 1 << 20 && body.peakUnreadBytesOnDisk <= 1 << 20,
+                    "\(outcome) after \(check.bytes) bytes (exact \(check.isExact)), peak \(body.peakUnreadBytesOnDisk) on disk")
+        }
+
+        // Cancelling while the reader is behind and the rest is on disk.
+        let closedBeforeSpill = server.closedSlowConnections
+        let spilling = SpillProbe()
+        let spillTask = Task { @MainActor () -> String in
+            do {
+                var configuration = CefProfile.RequestConfiguration()
+                configuration.streamMemoryLimit = 256 << 10
+                let (body, _) = try await profile.bytes(for: URLRequest(url: URL(string: "\(base)/burst?\(8 << 20)")!), configuration: configuration)
+                spilling.body = body
+                for try await _ in body { try await Task.sleep(for: .seconds(30)) }
+                return "finished"
+            } catch is CancellationError {
+                return "cancelled"
+            } catch {
+                return "\(error)"
+            }
+        }
+        let spilled = await waitUntil(timeout: .seconds(5)) { (spilling.body?.spilledBytes ?? 0) >= 4 << 20 }
+        let hadFile = spilling.body?.hasSpillFile == true && CefProfile.ResponseBody.openSpillFileCount > 0
+        spillTask.cancel()
+        let spillOutcome = await spillTask.value
+        check("urlRequest: cancelling mid-spill throws CancellationError", spilled && hadFile && spillOutcome == "cancelled",
+              detail: "\(spillOutcome), \(spilling.body?.spilledBytes ?? -1) spilled, file \(hadFile)")
+        check("urlRequest: cancelling mid-spill closes the spill file and the connection",
+              await waitUntil(timeout: .seconds(5)) {
+                  CefProfile.ResponseBody.openSpillFileCount == 0 && spilling.body?.hasSpillFile == false
+                      && server.closedSlowConnections > closedBeforeSpill
+              },
+              detail: "\(CefProfile.ResponseBody.openSpillFileCount) open")
+        spilling.body = nil
+
+        check("urlRequest: no spill file is left open or on disk",
+              await waitUntil(timeout: .seconds(5)) { CefProfile.ResponseBody.openSpillFileCount == 0 }
+                  && spillFiles(in: profile.spillDirectory).isEmpty,
+              detail: "\(CefProfile.ResponseBody.openSpillFileCount) open, \(spillFiles(in: profile.spillDirectory)) in \(profile.spillDirectory.path)")
+
+        // A download goes straight to its file, however large.
+        let bigDownload = FileManager.default.temporaryDirectory.appending(path: "selftest-download-\(UUID().uuidString).bin")
+        defer { try? FileManager.default.removeItem(at: bigDownload) }
+        await expect("urlRequest: a 64 MB download is written whole") {
+            let response = try await profile.download(for: URLRequest(url: URL(string: "\(base)/large?\(size)")!), to: bigDownload)
+            var check = LargeBodyCheck()
+            check.feed(try Data(contentsOf: bigDownload, options: .alwaysMapped))
+            return (response.statusCode == 200 && check.bytes == size && check.isExact, "\(check.bytes) bytes, exact \(check.isExact)")
         }
 
         // Cancelling the task mid-body.
@@ -301,15 +410,26 @@ extension SelfTest {
         }
     }
 
-    /// The bytes and chunks in `body`, read on Swift's concurrent executor.
-    nonisolated static func count(_ body: CefProfile.ResponseBody) async throws -> (bytes: Int, chunks: Int) {
-        var bytes = 0
+    /// Reads a `/large` body on Swift's concurrent executor, checking each
+    /// byte: after `pause`, then waiting `delay` every `every` chunks.
+    nonisolated static func readLarge(_ body: CefProfile.ResponseBody, pause: Duration = .zero, every: Int = 0, delay: Duration = .zero)
+        async throws -> (bytes: Int, chunks: Int, isExact: Bool)
+    {
+        if pause > .zero { try await Task.sleep(for: pause) }
+        var check = LargeBodyCheck()
         var chunks = 0
         for try await chunk in body {
-            bytes += chunk.count
+            check.feed(chunk)
             chunks += 1
+            if every > 0, chunks % every == 0 { try await Task.sleep(for: delay) }
         }
-        return (bytes, chunks)
+        return (check.bytes, chunks, check.isExact)
+    }
+
+    /// Spill files CefKit left by name in `directory`; they are unlinked
+    /// as soon as they are made, so there should be none.
+    static func spillFiles(in directory: URL) -> [String] {
+        ((try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []).filter { $0.hasPrefix(".cefswift-response-") }
     }
 
     // MARK: Errors
@@ -371,6 +491,33 @@ extension SelfTest {
 
 // MARK: - Recorders
 
+/// Compares a `/large` body with what the server sends, as it arrives.
+struct LargeBodyCheck {
+    private(set) var bytes = 0
+    private(set) var isExact = true
+
+    mutating func feed(_ chunk: Data) {
+        let pattern = LocalServer.chunk
+        chunk.withUnsafeBytes { received in
+            pattern.withUnsafeBytes { expected in
+                var offset = 0
+                while offset < received.count, isExact {
+                    let position = (bytes + offset) % expected.count
+                    let count = min(received.count - offset, expected.count - position)
+                    if memcmp(received.baseAddress! + offset, expected.baseAddress! + position, count) != 0 { isExact = false }
+                    offset += count
+                }
+            }
+        }
+        bytes += chunk.count
+    }
+}
+
+/// The body of a request a check cancels from outside.
+@MainActor private final class SpillProbe {
+    var body: CefProfile.ResponseBody?
+}
+
 /// The names of the threads a callback ran on.
 private final class ThreadNames: Sendable {
     private let recorded = OSAllocatedUnfairLock(initialState: [String]())
@@ -404,6 +551,8 @@ extension SelfTest {
     /// the runtime's state when their callers heard of it.
     static var stalledRequestEndings: [String: (error: String, isShutDown: Bool, state: CefRuntime.State)] = [:]
     static var stalledRequestServer: LocalServer?
+    /// Kept, unread, so that its request is in flight with a spill file.
+    static var stalledSpillingBody: CefProfile.ResponseBody?
 
     /// Leaves two profile requests running for the quit: one stalled before
     /// its headers, one in the middle of its body. Quitting must end both
@@ -435,11 +584,21 @@ extension SelfTest {
                 record("mid-stream", CefError.operationFailed("it finished"))
             } catch { record("mid-stream", error) }
         }
+        // A stream whose reader is behind, with the rest in a spill file.
+        Task { @MainActor in
+            do {
+                var configuration = CefProfile.RequestConfiguration()
+                configuration.streamMemoryLimit = 256 << 10
+                let (body, _) = try await profile.bytes(for: URLRequest(url: URL(string: "\(base)/burst?\(4 << 20)")!), configuration: configuration)
+                stalledSpillingBody = body
+            } catch { record("spilling", error) }
+        }
         let started = await waitUntil(timeout: .seconds(5)) {
             server.slowRequests.contains("/stall?quit") && server.slowRequests.contains("/slow?quit")
+                && (stalledSpillingBody?.spilledBytes ?? 0) >= 2 << 20
         }
-        check("quit: requests stalled before headers and mid-stream are running", started,
-              detail: "\(server.slowRequests)")
+        check("quit: requests stalled before headers, mid-stream and mid-spill are running", started,
+              detail: "\(server.slowRequests), \(stalledSpillingBody?.spilledBytes ?? -1) spilled")
     }
 
     /// Checks made once Chromium has shut down.
@@ -456,6 +615,10 @@ extension SelfTest {
                   detail: "\(String(describing: inFlight)) in flight, \(endings)")
             let census = CefDiagnostics.census().filter { $0.key.localizedCaseInsensitiveContains("urlrequest") }
             check("quit: no request objects are left after shutdown", census.isEmpty, detail: "\(census)")
+            check("quit: quitting closed the spill file of a stream in flight",
+                  stalledSpillingBody?.hasSpillFile == false && CefProfile.ResponseBody.openSpillFileCount == 0,
+                  detail: "\(CefProfile.ResponseBody.openSpillFileCount) open")
+            stalledSpillingBody = nil
             stalledRequestServer?.stop()
         }
         // Without Chromium, observing a preference makes no observer to leak.

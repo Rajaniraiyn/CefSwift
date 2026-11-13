@@ -133,13 +133,4 @@ import Testing
         #expect(CefProfile.TransferProgress(completed: 5, total: nil).fractionCompleted == nil)
         #expect(CefProfile.TransferProgress(completed: 0, total: 0).fractionCompleted == nil)
     }
-
-    @Test func theStreamBufferCountsUnreadBytes() {
-        let buffer = URLRequestStreamBuffer()
-        #expect(buffer.received(10) == 10)
-        #expect(buffer.received(5) == 15)
-        buffer.consumed(10)
-        #expect(buffer.received(1) == 6)
-        #expect(buffer.peak == 15)
-    }
 }

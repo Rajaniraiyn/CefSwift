@@ -215,6 +215,21 @@ final class LocalServer: Sendable {
             }
             DispatchQueue.global().asyncAfter(deadline: .now() + 30) { connection.cancel() }
             return
+        case "/burst":
+            // The first part of a `/large` body at once, then nothing: a
+            // stream still in flight while its reader is behind.
+            log.withLock { $0.slowRequests.append(request.target) }
+            let size = Int(request.query) ?? 0
+            let head = "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: \(size + (1 << 20))\r\nConnection: close\r\n\r\n"
+            connection.send(content: Data(head.utf8), completion: .contentProcessed { _ in
+                sendLarge(remaining: size, finishing: false, on: connection)
+            })
+            connection.receive(minimumIncompleteLength: 1, maximumLength: 1) { _, _, isComplete, error in
+                if isComplete || error != nil { log.withLock { $0.closedSlowConnections += 1 } }
+                connection.cancel()
+            }
+            DispatchQueue.global().asyncAfter(deadline: .now() + 60) { connection.cancel() }
+            return
         default:
             status = "404 Not Found"
         }
@@ -232,11 +247,14 @@ final class LocalServer: Sendable {
                         })
     }
 
-    private static let chunk = Data((0..<(256 << 10)).map { UInt8($0 % 251) })
+    /// A `/large` body repeats this: byte `i` is `(i % 262144) % 251`.
+    static let chunk = Data((0..<(256 << 10)).map { UInt8($0 % 251) })
 
-    /// Sends the next part of a `/large` body once the last one has gone.
-    private static func sendLarge(remaining: Int, on connection: NWConnection) {
+    /// Sends the next part of a `/large` body once the last one has gone,
+    /// and ends the response after it unless `finishing` is false.
+    private static func sendLarge(remaining: Int, finishing: Bool = true, on connection: NWConnection) {
         guard remaining > 0 else {
+            guard finishing else { return }
             connection.send(content: nil, contentContext: .finalMessage, isComplete: true, completion: .contentProcessed { _ in
                 DispatchQueue.global().asyncAfter(deadline: .now() + 5) { connection.cancel() }
             })
@@ -245,7 +263,7 @@ final class LocalServer: Sendable {
         let part = remaining >= chunk.count ? chunk : chunk.prefix(remaining)
         connection.send(content: part, completion: .contentProcessed { error in
             guard error == nil else { return connection.cancel() }
-            sendLarge(remaining: remaining - part.count, on: connection)
+            sendLarge(remaining: remaining - part.count, finishing: finishing, on: connection)
         })
     }
 }

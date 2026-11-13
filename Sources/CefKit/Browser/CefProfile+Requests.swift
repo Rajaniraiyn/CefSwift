@@ -29,7 +29,7 @@ extension CefProfile {
     /// throws `CancellationError` when its task is cancelled, and
     /// ``CefError/notInitialized`` before Chromium has started.
     public func data(for request: URLRequest, configuration: RequestConfiguration = RequestConfiguration()) async throws -> (Data, HTTPURLResponse) {
-        let loader = try makeLoader(for: request, configuration: configuration, mode: .collect)
+        let loader = try makeLoader(for: URLRequestPlan(request, configuration: configuration), configuration: configuration, mode: .collect)
         return try await loader.collect()
     }
 
@@ -51,51 +51,55 @@ extension CefProfile {
     /// ```
     ///
     /// Each chunk is copied once, from Chromium's buffer into its `Data`.
-    /// `cef_urlrequest_t` pushes chunks and cannot be paused, so the body
-    /// holds at most ``RequestConfiguration/streamBufferLimit`` bytes the loop
-    /// has not taken yet: a loop that falls further behind ends the request
-    /// with ``CefLoadError`` `ERR_INSUFFICIENT_RESOURCES`. Read the body
-    /// off the main actor when it is large and the network fast. Leaving
-    /// the loop early, or dropping the body, cancels the request;
+    /// `cef_urlrequest_t` pushes chunks and cannot be paused, so chunks the
+    /// loop has not taken yet wait in memory, up to
+    /// ``RequestConfiguration/streamMemoryLimit`` bytes, and then, by
+    /// default, in a temporary file the loop reads next
+    /// (``RequestConfiguration/StreamOverflowPolicy/spillToDisk(limit:)``).
+    /// However slowly it reads, the loop gets every byte, in order, and
+    /// then the end or the request's error. The file is unlinked as soon
+    /// as it is made and closed when the body ends, is cancelled or the
+    /// app quits; see ``RequestConfiguration/streamOverflow`` for where it
+    /// is made, and for ``RequestConfiguration/StreamOverflowPolicy/fail``,
+    /// which keeps the body off disk and fails a loop that falls behind.
+    ///
+    /// Leaving the loop early, or dropping the body, cancels the request;
     /// cancelling the loop's task does too, and the loop throws
-    /// `CancellationError`.
+    /// `CancellationError`. Either way unread bytes are dropped.
     ///
     /// Chromium reports headers with the first part of the body, so this
     /// returns when the first chunk arrives or the body turns out empty.
     public func bytes(for request: URLRequest, configuration: RequestConfiguration = RequestConfiguration()) async throws -> (ResponseBody, HTTPURLResponse) {
-        let loader = try makeLoader(for: request, configuration: configuration, mode: .stream(limit: max(configuration.streamBufferLimit, 1)))
+        let plan = try URLRequestPlan(request, configuration: configuration)
+        let limits = URLRequestStreamBuffer.Limits(
+            memory: configuration.streamMemoryLimit, overflow: configuration.streamOverflow,
+            spillDirectory: spillDirectory, url: plan.url)
+        let loader = try makeLoader(for: plan, configuration: configuration, mode: .stream(limits))
         return try await loader.stream()
     }
 
     /// Loads `request` into a file at `destination`, replacing what is
-    /// there, and returns the response. The body is written as it arrives,
-    /// so a large one is never in memory whole.
+    /// there, and returns the response once the whole body is written.
     ///
-    /// A failed or cancelled download removes the partial file.
+    /// Chunks go straight from Chromium's IO thread to a queue that writes
+    /// them, each copied once, so a large body is never in memory whole
+    /// and the download cannot fall behind; the stream settings of
+    /// `configuration` do not apply. A failed or cancelled download
+    /// removes the partial file; one that cannot be written fails with
+    /// the `CocoaError`.
     public func download(for request: URLRequest, to destination: URL, configuration: RequestConfiguration = RequestConfiguration()) async throws -> HTTPURLResponse {
-        let (body, response) = try await bytes(for: request, configuration: configuration)
-        try await Self.write(body, to: destination)
-        return response
+        let loader = try makeLoader(for: URLRequestPlan(request, configuration: configuration), configuration: configuration, mode: .file(destination))
+        return try await loader.download()
     }
 
-    /// Writes `body` to `destination`, off the main actor.
-    private nonisolated static func write(_ body: ResponseBody, to destination: URL) async throws {
-        let manager = FileManager.default
-        _ = manager.createFile(atPath: destination.path, contents: nil)
-        do {
-            let handle = try FileHandle(forWritingTo: destination)
-            defer { try? handle.close() }
-            for try await chunk in body {
-                try handle.write(contentsOf: chunk)
-            }
-        } catch {
-            try? manager.removeItem(at: destination)
-            throw error
-        }
+    /// Where a streamed body spills: the profile's directory, or for an
+    /// incognito profile (which has none) the temporary directory.
+    @_spi(Testing) public var spillDirectory: URL {
+        if kind == .incognito { return FileManager.default.temporaryDirectory }
+        return directory ?? FileManager.default.temporaryDirectory
     }
 
-    private func makeLoader(for request: URLRequest, configuration: RequestConfiguration, mode: URLRequestLoader.Mode) throws -> URLRequestLoader {
-        let plan = try URLRequestPlan(request, configuration: configuration)
+    private func makeLoader(for plan: URLRequestPlan, configuration: RequestConfiguration, mode: URLRequestLoader.Mode) throws -> URLRequestLoader {
         guard let context = requestContext() else { throw CefError.notInitialized }
         let loader = URLRequestLoader(plan: plan, configuration: configuration, context: context, mode: mode)
         // Registered while it holds the context reference, so that quitting
@@ -147,9 +151,53 @@ extension CefProfile {
         public var downloadProgress: (@CefIOActor @Sendable (TransferProgress) -> Void)?
 
         /// For ``CefProfile/bytes(for:configuration:)``: how many received
-        /// bytes the loop may leave unread before the request fails.
-        /// 16 MB by default.
-        public var streamBufferLimit = 16 << 20
+        /// bytes the loop has not read are kept in memory before
+        /// ``streamOverflow`` decides what happens to the next ones.
+        /// 16 MB by default. A chunk is always kept when none is waiting,
+        /// so memory can pass this by one chunk's size when it is smaller.
+        public var streamMemoryLimit = 16 << 20
+
+        /// For ``CefProfile/bytes(for:configuration:)``: what happens to
+        /// received bytes once ``streamMemoryLimit`` of them wait for the
+        /// loop. ``StreamOverflowPolicy/spillToDisk(limit:)`` without a
+        /// limit by default, so a loop that reads slowly still gets every
+        /// byte.
+        ///
+        /// A spilled body goes to a file in the profile's directory, or for
+        /// an incognito profile in `FileManager.default.temporaryDirectory`
+        /// (never in a profile's directory, which an incognito profile
+        /// does not have). The file is unlinked as soon as it is opened,
+        /// so it has no name on disk and a crash leaves nothing behind,
+        /// but its bytes are on disk until it closes. A request whose body
+        /// must not touch disk, such as one in an incognito profile with
+        /// sensitive data, uses ``StreamOverflowPolicy/fail``.
+        public var streamOverflow = StreamOverflowPolicy.spillToDisk(limit: nil)
+
+        /// What a streamed body does with bytes its loop has not read once
+        /// ``RequestConfiguration/streamMemoryLimit`` of them are in memory.
+        /// Chromium cannot pause a body, so they are either kept on disk
+        /// or the request ends.
+        public enum StreamOverflowPolicy: Sendable, Equatable {
+            /// Further bytes go to a temporary file, which the loop reads
+            /// once it has taken those in memory; when it has read the file
+            /// to its end, bytes are kept in memory again. `limit` is the
+            /// most bytes the file may hold at once: past it the request
+            /// fails with ``CefLoadError`` `ERR_INSUFFICIENT_RESOURCES`,
+            /// after the loop has read what arrived before. `nil`, the
+            /// default, sets none.
+            ///
+            /// Chunks are written as they are, in batches, on a queue of
+            /// their own; until written they are in memory, which matters
+            /// only while the network is faster than the disk (a local
+            /// server can be). `limit` bounds those bytes too.
+            case spillToDisk(limit: Int64?)
+            /// The request fails with ``CefLoadError``
+            /// `ERR_INSUFFICIENT_RESOURCES`, after the loop has read what
+            /// arrived before: the body never touches disk, and a loop
+            /// that falls further behind than the memory limit (the main
+            /// actor during a fast download, say) loses the rest.
+            case fail
+        }
 
         public init() {}
     }
@@ -178,44 +226,85 @@ extension CefProfile {
     public struct ResponseBody: AsyncSequence, Sendable {
         public typealias Element = Data
 
-        let chunks: AsyncThrowingStream<Data, any Error>
         let buffer: URLRequestStreamBuffer
-        /// Cancels the request unless it has finished.
-        let cancel: @Sendable () -> Void
+        /// Cancels the body and the request when the last copy of the body
+        /// and its iterators goes.
+        let lifetime: Cancellation
 
-        /// The most received bytes that were waiting for the loop at once.
-        @_spi(Testing) public var peakUnreadBytes: Int { buffer.peak }
+        init(buffer: URLRequestStreamBuffer, cancelRequest: @escaping @Sendable () -> Void) {
+            self.buffer = buffer
+            lifetime = Cancellation(buffer: buffer, request: cancelRequest)
+        }
+
+        /// The most received bytes that waited for the loop in memory at once.
+        @_spi(Testing) public var peakUnreadBytesInMemory: Int { buffer.statistics.peakMemoryBytes }
+
+        /// The most received bytes that waited for the loop in the spill
+        /// file at once; 0 when the body never spilled.
+        @_spi(Testing) public var peakUnreadBytesOnDisk: Int64 { buffer.statistics.peakSpilledBytes }
+
+        /// The most spilled bytes that waited in memory for the disk at once.
+        @_spi(Testing) public var peakUnwrittenBytes: Int { buffer.statistics.peakUnwrittenBytes }
+
+        /// All the bytes that went through the spill file.
+        @_spi(Testing) public var spilledBytes: Int64 { buffer.statistics.spilledBytes }
+
+        /// Whether the body has a spill file open.
+        @_spi(Testing) public var hasSpillFile: Bool { buffer.hasSpillFile }
+
+        /// Spill files open in the process, for checks that none is left.
+        @_spi(Testing) public static var openSpillFileCount: Int { URLRequestStreamBuffer.openFileCount }
 
         /// The body is read once; a second iterator finds it consumed.
         public func makeAsyncIterator() -> Iterator {
-            Iterator(chunks: chunks.makeAsyncIterator(), buffer: buffer, iteration: Iteration(cancel: cancel))
+            Iterator(buffer: buffer, lifetime: lifetime, iteration: Iteration(lifetime))
         }
 
         public struct Iterator: AsyncIteratorProtocol {
-            var chunks: AsyncThrowingStream<Data, any Error>.AsyncIterator
             let buffer: URLRequestStreamBuffer
+            let lifetime: Cancellation
             let iteration: Iteration
 
             /// The next chunk; `nil` at the end of the body. Throws the
             /// request's error, or `CancellationError` when the task is
             /// cancelled.
             public mutating func next() async throws -> Data? {
-                guard let chunk = try await chunks.next() else {
-                    // The stream ends quietly when the task is cancelled.
+                let chunk = try await withTaskCancellationHandler {
+                    try await buffer.next()
+                } onCancel: { [lifetime] in
+                    lifetime.cancel()
+                }
+                guard let chunk else {
+                    // A cancelled body ends quietly.
                     try Task.checkCancellation()
                     return nil
                 }
-                buffer.consumed(chunk.count)
                 return chunk
             }
         }
 
-        /// One loop over the body: leaving it early, which drops the
-        /// iterator, cancels the request.
-        final class Iteration: Sendable {
-            private let cancel: @Sendable () -> Void
-            init(cancel: @escaping @Sendable () -> Void) { self.cancel = cancel }
+        /// Ends the body, dropping what is unread, and cancels the request
+        /// unless it has finished; when it is called, or when it goes.
+        final class Cancellation: Sendable {
+            private let buffer: URLRequestStreamBuffer
+            private let request: @Sendable () -> Void
+            init(buffer: URLRequestStreamBuffer, request: @escaping @Sendable () -> Void) {
+                self.buffer = buffer
+                self.request = request
+            }
+            func cancel() {
+                buffer.cancel()
+                request()
+            }
             deinit { cancel() }
+        }
+
+        /// One loop over the body: leaving it early, which drops the
+        /// iterator, cancels the body.
+        final class Iteration: Sendable {
+            private let lifetime: Cancellation
+            init(_ lifetime: Cancellation) { self.lifetime = lifetime }
+            deinit { lifetime.cancel() }
         }
     }
 }
@@ -349,27 +438,4 @@ struct URLRequestPlan: Equatable, Sendable {
         default: UR_FLAG_NONE.rawValue
         }
     }
-}
-
-// MARK: - Stream buffer
-
-/// How many bytes of a streamed body have arrived and not been read.
-final class URLRequestStreamBuffer: Sendable {
-    private let state = OSAllocatedUnfairLock(initialState: (unread: 0, peak: 0))
-
-    /// Adds `count` received bytes; returns the unread total.
-    func received(_ count: Int) -> Int {
-        state.withLock { state in
-            state.unread += count
-            state.peak = max(state.peak, state.unread)
-            return state.unread
-        }
-    }
-
-    func consumed(_ count: Int) {
-        state.withLock { $0.unread -= count }
-    }
-
-    /// The most bytes that were unread at once.
-    var peak: Int { state.withLock { $0.peak } }
 }

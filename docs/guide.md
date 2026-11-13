@@ -1926,16 +1926,35 @@ closest `URLError`. Cancelling the task cancels the request and throws
 `CancellationError`; so does leaving a `bytes(for:)` loop early or
 dropping its body. Without a `credential` closure a challenge is not
 answered, and its 401 or 407 is the response. A request body is bytes
-or a file (`options.bodyFile`, which Chromium reads itself): an
+or a file (`bodyFile`, which Chromium reads itself): an
 `httpBodyStream` cannot be sent.
 
-Chromium hands a streamed body over as it reads it and cannot be paused,
-so a body from `bytes(for:)` holds at most `streamBufferLimit` bytes
-(16 MB) the loop has not read; a loop that falls further behind ends
-the request with `ERR_INSUFFICIENT_RESOURCES`. Read a large body off the
-main actor: on a fast connection the main thread can fall megabytes
-behind. `data(for:)` copies each chunk once, into a `Data` sized from
-`Content-Length`.
+Chromium hands a streamed body over as it reads it and cannot be paused.
+A body from `bytes(for:)` keeps up to `streamMemoryLimit` bytes (16 MB)
+the loop has not read in memory, and by default puts the rest in a
+temporary file that the loop reads next, so a slow loop, even one on a
+busy main actor, still gets every byte in order, then the end or the
+request's error. The file is made in the profile's directory, or for an
+incognito profile in the temporary directory; it is unlinked as soon as
+it is opened, so a crash leaves nothing named on disk, and closed when
+the body ends, is cancelled, or the app quits. `streamOverflow` chooses:
+
+```swift
+var streaming = CefProfile.RequestConfiguration()
+streaming.streamOverflow = .spillToDisk(limit: 512 << 20)   // at most 512 MB waiting on disk
+streaming.streamOverflow = .fail                            // never on disk: falling 16 MB behind fails
+let (feed, _) = try await profile.bytes(for: URLRequest(url: url), configuration: streaming)
+for try await chunk in feed { print(chunk.count) }
+```
+
+Past either limit the request fails with `ERR_INSUFFICIENT_RESOURCES`,
+after the loop has read what arrived before. Chunks on their way to the
+file are in memory until the disk takes them, which matters only when
+the network is faster than the disk, as a local server can be. Use `.fail` for a body
+that must not touch disk, such as sensitive data in an incognito
+profile. `download(for:to:)` writes each chunk straight into its file
+and never falls behind. `data(for:)` copies each chunk once, into a
+`Data` sized from `Content-Length`.
 
 Redirects are followed or, with `stopsAtRedirects`, returned; Chromium
 does not report the ones it follows. Requests are the profile's, not a

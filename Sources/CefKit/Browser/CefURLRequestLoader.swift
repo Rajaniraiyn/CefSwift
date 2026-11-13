@@ -3,8 +3,9 @@ import CefBase
 import Foundation
 import os
 
-/// One request made with ``CefProfile/data(for:configuration:)`` or
-/// ``CefProfile/bytes(for:configuration:)``, and the owner of its
+/// One request made with ``CefProfile/data(for:configuration:)``,
+/// ``CefProfile/bytes(for:configuration:)`` or
+/// ``CefProfile/download(for:to:configuration:)``, and the owner of its
 /// `cef_urlrequest_client_t`.
 ///
 /// Everything happens on Chromium's IO thread. `cef_urlrequest_create`
@@ -25,24 +26,28 @@ final class URLRequestLoader {
     enum Mode: Sendable {
         /// Collect the body into one `Data`.
         case collect
-        /// Hand chunks to a ``CefProfile/ResponseBody``, failing when more
-        /// than `limit` bytes are unread.
-        case stream(limit: Int)
+        /// Hand chunks to a ``CefProfile/ResponseBody`` through a
+        /// ``URLRequestStreamBuffer`` with these limits.
+        case stream(URLRequestStreamBuffer.Limits)
+        /// Write chunks into the file at this URL.
+        case file(URL)
     }
 
     /// Why CefKit ended a request.
     enum Stop: Sendable {
         case cancelled
         case timedOut
-        case bufferLimit(Int)
+        case overflow(URLRequestStreamBuffer.Overflow)
+        /// A spill file or download destination could not be written.
+        case failed(any Error)
         case shutdown
 
         func error(url: URL) -> any Error {
             switch self {
             case .cancelled: CancellationError()
             case .timedOut: CefLoadError(netError: -7, url: url, detail: "no progress within the request's timeoutInterval")
-            case .bufferLimit(let limit):
-                CefLoadError(netError: -12, url: url, detail: "more than \(limit) received bytes were not read; raise RequestConfiguration.streamBufferLimit or read faster")
+            case .overflow(let overflow): CefLoadError(netError: -12, url: url, detail: overflow.detail)  // INSUFFICIENT_RESOURCES
+            case .failed(let error): error
             case .shutdown: CefError.shutDown
             }
         }
@@ -51,7 +56,6 @@ final class URLRequestLoader {
     nonisolated let plan: URLRequestPlan
     nonisolated let configuration: CefProfile.RequestConfiguration
     nonisolated let mode: Mode
-    nonisolated let buffer = URLRequestStreamBuffer()
 
     /// Needed only to create the request.
     private var context: CefRef<cef_request_context_t>?
@@ -68,9 +72,13 @@ final class URLRequestLoader {
 
     // .stream
     private var headWaiter: CheckedContinuation<(CefProfile.ResponseBody, HTTPURLResponse), any Error>?
-    private var chunks: AsyncThrowingStream<Data, any Error>.Continuation?
+    private var buffer: URLRequestStreamBuffer?
     /// The body until it is handed to the caller with the response.
     private var responseBody: CefProfile.ResponseBody?
+
+    // .file
+    private var writer: URLRequestFileWriter?
+    private var downloader: CheckedContinuation<HTTPURLResponse, any Error>?
 
     nonisolated init(plan: URLRequestPlan, configuration: CefProfile.RequestConfiguration, context: CefRef<cef_request_context_t>, mode: Mode) {
         self.plan = plan
@@ -80,11 +88,18 @@ final class URLRequestLoader {
     }
 
     deinit {
+        // A finished request has handed on its result; the body may still
+        // be read from the buffer.
+        guard !isFinished else { return }
         // CEF released the client without completing the request.
         let error = CefError.operationFailed("Chromium dropped the request to \(plan.url) without finishing it")
         collector?.resume(throwing: error)
         headWaiter?.resume(throwing: error)
-        chunks?.finish(throwing: error)
+        buffer?.abort(error)
+        if let writer {
+            let downloader = downloader
+            writer.discard { downloader?.resume(throwing: error) }
+        }
     }
 
     // MARK: Starting
@@ -101,16 +116,16 @@ final class URLRequestLoader {
     }
 
     func stream() async throws -> (CefProfile.ResponseBody, HTTPURLResponse) {
-        let (stream, continuation) = AsyncThrowingStream<Data, any Error>.makeStream()
-        chunks = continuation
-        responseBody = CefProfile.ResponseBody(chunks: stream, buffer: buffer) { [weak self] in
-            guard let self else { return }
-            Task { @CefIOActor in self.halt(.cancelled) }
+        guard case .stream(let limits) = mode else { preconditionFailure("stream() needs a .stream loader") }
+        let buffer = URLRequestStreamBuffer(limits: limits)
+        buffer.onFileFailure { [weak self] error in
+            Task { @CefIOActor in self?.halt(.failed(error)) }
         }
-        // The caller left the loop early or dropped the body.
-        continuation.onTermination = { [weak self] termination in
-            guard case .cancelled = termination, let self else { return }
-            Task { @CefIOActor in self.halt(.cancelled) }
+        self.buffer = buffer
+        // The caller cancelled the loop's task, left the loop early or
+        // dropped the body.
+        responseBody = CefProfile.ResponseBody(buffer: buffer) { [weak self] in
+            Task { @CefIOActor in self?.halt(.cancelled) }
         }
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
@@ -120,6 +135,31 @@ final class URLRequestLoader {
         } onCancel: {
             Task { @CefIOActor in self.halt(.cancelled) }
         }
+    }
+
+    func download() async throws -> HTTPURLResponse {
+        guard case .file(let destination) = mode else { preconditionFailure("download() needs a .file loader") }
+        let writer = URLRequestFileWriter(destination: destination)
+        writer.onFailure { [weak self] error in
+            Task { @CefIOActor in self?.halt(.failed(error)) }
+        }
+        self.writer = writer
+        writer.open()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                downloader = continuation
+                start()
+            }
+        } onCancel: {
+            Task { @CefIOActor in self.halt(.cancelled) }
+        }
+    }
+
+    /// Returns once the spill file or download destination has had every
+    /// operation queued so far, such as the close a halt queued.
+    func fileOperationsFinished() async {
+        await buffer?.fileOperationsFinished()
+        await writer?.operationsFinished()
     }
 
     private func start() {
@@ -225,6 +265,8 @@ final class URLRequestLoader {
                 self.responseBody = nil
                 waiter.resume(returning: (responseBody, head))
             }
+        case .file:
+            break
         }
     }
 
@@ -234,11 +276,14 @@ final class URLRequestLoader {
         switch mode {
         case .collect:
             body.append(base.assumingMemoryBound(to: UInt8.self), count: bytes.count)
-        case .stream(let limit):
-            let chunk = Data(bytes: base, count: bytes.count)
-            let unread = buffer.received(chunk.count)
-            chunks?.yield(chunk)
-            if unread > limit { halt(.bufferLimit(limit)) }
+        case .stream:
+            // The one copy; the buffer keeps it, hands it to the reader or
+            // queues it for its spill file.
+            if case .overflowed(let overflow)? = buffer?.append(Data(bytes: base, count: bytes.count)) {
+                halt(.overflow(overflow))
+            }
+        case .file:
+            writer?.write(Data(bytes: base, count: bytes.count))
         }
     }
 
@@ -280,15 +325,29 @@ final class URLRequestLoader {
             collector?.resume(returning: (data, head))
             // An empty body: no chunk brought the head.
             if let waiter = headWaiter, let responseBody { waiter.resume(returning: (responseBody, head)) }
-            chunks?.finish()
+            // The reader gets the end after every byte before it.
+            buffer?.finish()
+            if let writer, let downloader {
+                writer.finish { result in downloader.resume(with: result.map { head }) }
+            }
         case .failure(let error):
             collector?.resume(throwing: error)
             headWaiter?.resume(throwing: error)
-            chunks?.finish(throwing: error)
+            switch stopReason {
+            // Cancelling and quitting drop what is unread, and the spill file.
+            case .cancelled?: buffer?.cancel()
+            case .shutdown?: buffer?.abort(error)
+            // A failed request's error comes after the bytes before it.
+            default: buffer?.fail(error)
+            }
+            if let writer {
+                let downloader = downloader
+                writer.discard { downloader?.resume(throwing: error) }
+            }
         }
         collector = nil
         headWaiter = nil
-        chunks = nil
+        downloader = nil
         responseBody = nil
     }
 
@@ -400,13 +459,16 @@ final class URLRequestRegistry: Sendable {
 
     /// No new requests start; those in flight are cancelled on the IO
     /// thread. Returns once each has cancelled its `cef_urlrequest_t` and
-    /// released its CEF references there, so Chromium can shut down after
+    /// released its CEF references there, and closed its spill file or
+    /// removed its partial download, so Chromium can shut down after
     /// it; their callers get ``CefError/shutDown``. Suspends rather than
     /// blocks: the main thread keeps running Chromium's message loop.
     func drainForShutdown() async {
         let loaders = close()
         guard !loaders.isEmpty else { return }
         await Self.halt(loaders)
+        // Spill files closed, partial downloads removed.
+        for loader in loaders { await loader.fileOperationsFinished() }
         // Callers awaiting on the IO actor resume there first; a second,
         // empty job runs after them, so they have handed their errors on
         // to their own callers before this returns.
