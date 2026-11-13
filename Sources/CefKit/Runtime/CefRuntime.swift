@@ -293,7 +293,7 @@ public final class CefRuntime {
     /// Adds `participant`, held weakly, to the objects that release what
     /// they hold of Chromium when it shuts down; see
     /// ``CefShutdownParticipant``. Adding one twice adds it once.
-    package func addShutdownParticipant(_ participant: any CefShutdownParticipant) {
+    func addShutdownParticipant(_ participant: any CefShutdownParticipant) {
         shutdownParticipants.removeAll { $0.participant == nil }
         guard !shutdownParticipants.contains(where: { $0.participant === participant }) else { return }
         shutdownParticipants.append(WeakShutdownParticipant(participant: participant))

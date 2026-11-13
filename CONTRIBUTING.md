@@ -234,7 +234,7 @@ reading as one.
   identifiers) and name their types as CefKit does
   (`CefPasskeyController`, `CefPasskeyStore`, `CefBookmarks`).
   CefKit never names them: a module plugs in through an extension point
-  (`CefBrowserAttachment`, a shutdown participant, per-profile or
+  (`CefBrowserAttachment`, per-profile or
   per-window module state, a Chrome-command interceptor, the service-host
   engine) and gets its own delegate (`CefPasskeyDelegate`) rather than
   members on `CefBrowserDelegate`. What it needs from CefKit and apps

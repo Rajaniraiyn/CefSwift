@@ -362,11 +362,11 @@ public final class CefProfile {
     // MARK: Storage layout
 
     /// Where a profile keeps its data.
-    package struct Storage: Equatable {
+    struct Storage: Equatable {
         /// Chromium's directory for the profile: `nil` for the default
         /// profile, which lives at the configuration's cache directory, and
         /// for an in-memory one.
-        package var chromiumDirectory: URL?
+        var chromiumDirectory: URL?
     }
 
     /// The one storage layout for a profile kind under `rootCacheDirectory`
@@ -406,7 +406,7 @@ public final class CefProfile {
     }
 
     /// This profile's storage under the running configuration's root.
-    package var storage: Storage {
+    var storage: Storage {
         let root = (CefRuntime.shared.configuration ?? CefRuntime.Configuration()).resolvedRootCacheDirectory
         return Self.storage(for: kind, rootCacheDirectory: root)
     }

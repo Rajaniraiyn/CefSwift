@@ -110,7 +110,7 @@ public final class CefMediaRouter: CefShutdownParticipant {
     }
 
     /// Releases every Chromium object, before Chromium shuts down.
-    package func runtimeWillShutDown() {
+    func runtimeWillShutDown() {
         stopDiscovery()
         sinkObjects = [:]
         routeObjects = [:]

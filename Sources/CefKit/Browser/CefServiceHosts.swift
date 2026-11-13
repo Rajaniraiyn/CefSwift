@@ -114,7 +114,7 @@ package final class CefServiceHosts: CefShutdownParticipant {
         CefRuntime.shared.addShutdownParticipant(self)
     }
 
-    package func runtimeWillShutDown() { stopAll() }
+    func runtimeWillShutDown() { stopAll() }
 
     // MARK: Calling
 
@@ -191,7 +191,7 @@ package final class CefServiceHosts: CefShutdownParticipant {
     }
 
     /// Closes every host; the next call starts its host again.
-    package func stopAll() {
+    func stopAll() {
         hosts.values.forEach { $0.stop() }
     }
 

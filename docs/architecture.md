@@ -45,12 +45,6 @@ CefPasskeys or CefChromium, plugs into it at these points:
   Such a browser's native popups are opened in a browser CefKit creates
   (`openPopupInNewBrowser`), since Chromium runs a native popup's first
   document before anything can attach to it.
-- `CefShutdownParticipant` (package): an object holding CEF references
-  outside any browser adds itself with
-  `CefRuntime.addShutdownParticipant(_:)`, held weakly, and is told to
-  release them after the last browser and window and before the
-  profiles' request contexts and `cef_shutdown()`. The internal-page
-  service hosts and the media router are participants.
 - `CefProfile.moduleState(_:make:)` (package): one object per type that a
   module keeps for a profile, made on first use.
 - `CefWindow.moduleState(_:make:)` and `existingModuleState(_:)`
@@ -71,6 +65,13 @@ CefPasskeys or CefChromium, plugs into it at these points:
   (`CefProfile.serviceHosts`), `CefServiceHost` and `CefServiceHost.Module`. A module
   declares its own hosts and modules and calls them
   ([Internal-page services](#internal-page-services)).
+
+Inside CefKit, an object holding CEF references outside any browser is a
+`CefShutdownParticipant`: it adds itself with
+`CefRuntime.addShutdownParticipant(_:)`, held weakly, and is told to
+release them after the last browser and window and before the profiles'
+request contexts and `cef_shutdown()`. The service hosts (a module's
+included) and the media router are participants.
 
 A module also uses a few `package` members of CefKit that are not public
 API: `CefDevTools.addListener(for:_:)`, `removeListener(_:for:)` and
