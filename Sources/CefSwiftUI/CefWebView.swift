@@ -83,9 +83,9 @@ public struct CefWebView: View {
             Group {
                 switch browser.configuration.rendering {
                 case .windowed:
-                    WindowedRepresentable(browser: browser, ownsBrowser: ownsBrowser, showsBuiltInIndicator: showsBuiltIn)
+                    BrowserRepresentable<CefWindowedBrowserView>(browser: browser, ownsBrowser: ownsBrowser, showsBuiltInIndicator: showsBuiltIn)
                 case .offscreen:
-                    OffscreenRepresentable(browser: browser, ownsBrowser: ownsBrowser, showsBuiltInIndicator: showsBuiltIn)
+                    BrowserRepresentable<CefOffscreenBrowserView>(browser: browser, ownsBrowser: ownsBrowser, showsBuiltInIndicator: showsBuiltIn)
                 }
             }
             .overlay {
@@ -97,48 +97,38 @@ public struct CefWebView: View {
     }
 }
 
-private struct WindowedRepresentable: NSViewRepresentable {
-    let browser: CefBrowser
-    let ownsBrowser: Bool
-    let showsBuiltInIndicator: Bool
-
-    func makeNSView(context: Context) -> CefWindowedBrowserView {
-        let view = CefWindowedBrowserView()
-        view.closesBrowserOnTeardown = ownsBrowser
-        view.showsBuiltInGestureIndicator = showsBuiltInIndicator
-        view.browser = browser
-        return view
-    }
-
-    func updateNSView(_ view: CefWindowedBrowserView, context: Context) {
-        view.showsBuiltInGestureIndicator = showsBuiltInIndicator
-        view.browser = browser
-    }
-
-    static func dismantleNSView(_ view: CefWindowedBrowserView, coordinator: ()) {
-        view.tearDown()
-    }
+/// The AppKit views `CefWebView` hosts a browser in, one per rendering.
+@MainActor
+protocol CefBrowserHostView: NSView {
+    init()
+    var browser: CefBrowser? { get set }
+    var showsBuiltInGestureIndicator: Bool { get set }
+    var closesBrowserOnTeardown: Bool { get set }
+    func tearDown()
 }
 
-private struct OffscreenRepresentable: NSViewRepresentable {
+extension CefWindowedBrowserView: CefBrowserHostView {}
+extension CefOffscreenBrowserView: CefBrowserHostView {}
+
+private struct BrowserRepresentable<HostView: CefBrowserHostView>: NSViewRepresentable {
     let browser: CefBrowser
     let ownsBrowser: Bool
     let showsBuiltInIndicator: Bool
 
-    func makeNSView(context: Context) -> CefOffscreenBrowserView {
-        let view = CefOffscreenBrowserView()
+    func makeNSView(context: Context) -> HostView {
+        let view = HostView()
         view.closesBrowserOnTeardown = ownsBrowser
         view.showsBuiltInGestureIndicator = showsBuiltInIndicator
         view.browser = browser
         return view
     }
 
-    func updateNSView(_ view: CefOffscreenBrowserView, context: Context) {
+    func updateNSView(_ view: HostView, context: Context) {
         view.showsBuiltInGestureIndicator = showsBuiltInIndicator
         view.browser = browser
     }
 
-    static func dismantleNSView(_ view: CefOffscreenBrowserView, coordinator: ()) {
+    static func dismantleNSView(_ view: HostView, coordinator: ()) {
         view.tearDown()
     }
 }
