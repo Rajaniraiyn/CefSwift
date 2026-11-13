@@ -148,14 +148,8 @@ final class URLRequestLoader {
         let r = request.pointee
         CefStringUtil.withCefString(plan.url.absoluteString) { r.set_url(request, $0) }
         CefStringUtil.withCefString(plan.method) { r.set_method(request, $0) }
-        if !plan.headers.isEmpty, let map = cef_string_multimap_alloc() {
-            for header in plan.headers {
-                CefStringUtil.withCefString(header.name) { name in
-                    CefStringUtil.withCefString(header.value) { value in _ = cef_string_multimap_append(map, name, value) }
-                }
-            }
-            r.set_header_map(request, map)
-            cef_string_multimap_free(map)
+        if !plan.headers.isEmpty {
+            withCefStringMultimap(plan.headers.lazy.map { (name: $0.name, value: $0.value) }) { r.set_header_map(request, $0) }
         }
         if let referrer = plan.referrer {
             CefStringUtil.withCefString(referrer.absoluteString) { r.set_referrer(request, $0, REFERRER_POLICY_DEFAULT) }
@@ -362,22 +356,7 @@ final class URLRequestLoader {
         let status = Int(r.pointee.get_status(r))
         guard status > 0 else { return nil }
         let url = CefStringUtil.takingUserFree(r.pointee.get_url(r)).flatMap { URL(string: $0) } ?? fallbackURL
-        var headers: [String: String] = [:]
-        if let map = cef_string_multimap_alloc() {
-            r.pointee.get_header_map(r, map)
-            for index in 0..<cef_string_multimap_size(map) {
-                var key = cef_string_t()
-                var value = cef_string_t()
-                if cef_string_multimap_key(map, index, &key) != 0, cef_string_multimap_value(map, index, &value) != 0 {
-                    let name = CefStringUtil.string(from: key)
-                    let field = CefStringUtil.string(from: value)
-                    headers[name] = headers[name].map { "\($0), \(field)" } ?? field
-                }
-                cef_string_utf16_clear(&key)
-                cef_string_utf16_clear(&value)
-            }
-            cef_string_multimap_free(map)
-        }
+        let headers = cefHeaderFields { r.pointee.get_header_map(r, $0) }
         return HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: headers)
     }
 }
