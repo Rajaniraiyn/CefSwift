@@ -120,8 +120,6 @@ below; two short jobs run beside it without CEF:
   and checks that the result is x86_64 for macOS 14. CefKit loads the CEF
   framework at run time and the plugin builds the helper only when it
   bundles, so compiling needs no `macosx64` CEF archive.
-- `macos-14` builds and runs the unit tests on a `macos-14` runner, with
-  the newest Xcode on that image.
 
 The `ci` job:
 
@@ -153,9 +151,10 @@ The `ci` job:
 What CI verifies, and what it does not:
 
 - Compiling against the macOS 14 deployment target means the compiler
-  rejects any newer API used without an availability check. On macOS 14
-  only the unit tests run (CefKit's macOS 14 executor path among them);
-  Chromium, and with it SelfTest, runs on macOS 15 only.
+  rejects any newer API used without an availability check. Nothing runs
+  on macOS 14, since GitHub no longer offers a macOS 14 runner: CefKit's
+  macOS 14 executor path is compiled but not exercised, and the unit
+  tests and SelfTest run on macOS 15 only.
 - Everything compiles for Intel, and nothing runs there. Running on Intel
   needs an Intel runner (`macos-15-intel`), the `macosx64` CEF archive in
   the cache, `cef bundle --platform macosx64` there, and a SelfTest run;
@@ -173,7 +172,7 @@ are no assets to build.
 
 The release is made only for a commit CI passed: before it creates the
 release, the workflow reads the tagged commit's check runs and requires
-the latest `ci`, `intel` and `macos-14` runs to have succeeded, waiting up
+the latest `ci` and `intel` runs to have succeeded, waiting up
 to 75 minutes for runs still in progress. A commit pushed to `main` has
 those runs. For another commit, run CI on the tag first
 (`gh workflow run ci.yml --ref v0.1.0`), then re-run the release workflow.

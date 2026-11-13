@@ -4,7 +4,7 @@
 #
 #   git tag v0.1.0 && git push origin v0.1.0
 #
-# Only a commit CI passed is released: the `ci`, `intel` and `macos-14` jobs
+# Only a commit CI passed is released: the `ci` and `intel` jobs
 # of the CI workflow must have succeeded on the tagged commit. A commit
 # pushed to main has those runs; for any other, start CI on the tag first
 # (Actions → CI → Run workflow, or `gh workflow run ci.yml --ref <tag>`).
@@ -31,7 +31,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          REQUIRED: ci intel macos-14
+          REQUIRED: ci intel
         run: |
           deadline=$(( $(date +%s) + 75 * 60 ))
           while :; do

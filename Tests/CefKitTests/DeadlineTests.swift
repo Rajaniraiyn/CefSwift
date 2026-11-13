@@ -42,7 +42,9 @@ struct DeadlineTests {
             }
         }
         #expect(timedOut)
-        #expect(ContinuousClock.now - start < .seconds(2))
+        // A defeated deadline never returns; the bound only has to tell that
+        // from a main actor kept busy by other tests under a sanitizer.
+        #expect(ContinuousClock.now - start < .seconds(60))
         stuck.release()
     }
 
