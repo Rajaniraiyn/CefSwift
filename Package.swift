@@ -3,6 +3,9 @@ import PackageDescription
 
 let package = Package(
     name: "CefSwift",
+    // The built-in sheets' strings are English, in each target's
+    // Resources/en.lproj; another language is another .lproj beside it.
+    defaultLocalization: "en",
     platforms: [.macOS(.v14)],
     products: [
         .library(name: "CefKit", targets: ["CefKit"]),
@@ -53,13 +56,15 @@ let package = Package(
         .target(
             name: "CefKit",
             dependencies: ["CCef", "CefBase"],
+            resources: [.process("Resources")],
             linkerSettings: [.linkedFramework("AppKit")]
         ),
         // Optional: WebAuthn answered by the app, or refused, instead of
         // Chromium. A CefBrowserAttachment over the DevTools protocol.
         .target(
             name: "CefPasskeys",
-            dependencies: ["CefKit"]
+            dependencies: ["CefKit"],
+            resources: [.process("Resources")]
         ),
         // Optional: Chromium's own browser features, bound to Chromium's
         // private WebUI interfaces and AppKit classes of the pinned CEF:

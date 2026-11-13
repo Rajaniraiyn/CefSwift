@@ -38,6 +38,7 @@ The runtime, browser, window and profile APIs are `@MainActor`.
   - [User scripts and style sheets](#user-scripts-and-style-sheets)
   - [Bridge](#bridge)
 - [Decisions](#decisions)
+  - [Built-in sheets](#built-in-sheets)
   - [HTTP authentication](#http-authentication)
   - [Navigation and new windows](#navigation-and-new-windows)
   - [Downloads](#downloads)
@@ -1274,6 +1275,61 @@ the delegate), `browser(_:didFinishLoadWithStatus:)`,
 `CefDialogPresenter` provides the native sheets behind the defaults, so your
 delegate can keep them for some cases.
 
+### Built-in sheets
+
+Every sheet CefSwift shows by default answers a delegate method, so an app
+replaces any of them by implementing that method, and keeps the stock one
+for some cases by calling its presenter:
+
+| Sheet | Delegate method | Presenter |
+|---|---|---|
+| `alert`, `confirm`, `prompt` | `browser(_:runJavaScriptDialog:)` | `CefDialogPresenter.present(_:in:)` |
+| Leaving a page (`beforeunload`) | `browser(_:confirmLeavingPage:)` | `CefDialogPresenter.confirmLeaving(isReload:in:)` |
+| HTTP sign-in | `browser(_:credentialFor:)` | `CefDialogPresenter.requestCredential(for:in:)` |
+| Client certificate | `browser(_:selectClientCertificateFor:)` | `CefClientCertificatePresenter` |
+| Unresponsive page | `browserPageIsUnresponsive(_:)` | `CefUnresponsivePagePresenter` |
+| File chooser | `browser(_:runFileDialog:)` | `CefFileDialogPresenter` |
+| Download save panel | `browser(_:decideDestinationFor:)` | `CefDownloadPresenter` |
+| Passkeys | `CefPasskeyDelegate.browser(_:decidePasskeyFor:)` | `CefPasskeyPresenter` |
+
+The context menu's Inspect item is a configuration
+(`contextMenu.showsInspectElement`), and the offscreen view's accessibility
+label (“Web content”) gives way to one set with `setAccessibilityLabel(_:)`.
+
+Their text comes from three places:
+
+- **CefSwift's resource bundles**: the titles, messages and buttons of the
+  sheets above, CefKit's in `CefSwift_CefKit.bundle` and CefPasskeys' in
+  `CefSwift_CefPasskeys.bundle`, from `Sources/<Target>/Resources/<language>.lproj/Localizable.strings`.
+  CefSwift ships English. Foundation picks their language as for every
+  bundle an app loads: the app's own, the localization macOS chose for the
+  app, when the bundle has it, else English.
+- **AppKit**: the OK button of `alert` and of the no-passkey sheet, and
+  everything in the open and save panels (file choosers, downloads), in the
+  system's language.
+- **Chromium**: its own interface (Chrome-style windows, `chrome://` pages,
+  its dialogs, its context-menu items, Inspect included), in
+  `CefRuntime.shared.locale`, which `configuration.localization` chooses
+  (see [Languages](#languages)), with `configuration.stringOverrides` for
+  single strings.
+
+With the default `localization`, `.application`, both follow the app's
+language: an English-only app shows English sheets and an English
+Chromium to a French user, and an app localized in French shows French
+ones, once CefSwift has French strings. With `.system`, Chromium follows
+the user's languages while the sheets keep the app's.
+
+To add a language to the sheets, add
+`Sources/CefKit/Resources/<language>.lproj/Localizable.strings` (and
+`Sources/CefPasskeys/Resources/…` for passkeys), a copy of the English file
+with its values translated, to CefSwift (a contribution, or a local copy of
+the package with `swift package edit`). Keys are the English text; the
+comment above each says where it appears and what each `%@` stands for. A
+string the new file lacks shows in English. `cef bundle` copies the bundles
+into the app's `Contents/Resources`; their languages do not change the
+app's `CFBundleLocalizations` (see [Bundling](bundling.md#locale-packs)).
+For text of your own, in any language, replace the presenter.
+
 ### HTTP authentication
 
 When a site or proxy asks for a user name and password (Basic, Digest,
@@ -1600,8 +1656,9 @@ browserConfiguration.contextMenu.items = [
 - `items` are added below Chromium's. `isVisible` decides per click, from
   the `CefContextMenuTarget`: `linkURL`, `sourceURL`, `pageURL`,
   `selectedText`, `mediaType`, `isEditable`, `location`.
-- `showsInspectElement` adds Inspect Element, which opens DevTools on the
-  clicked element.
+- `showsInspectElement` adds Chromium's Inspect item, which opens DevTools
+  on the clicked element, titled in Chromium's locale as the rest of the
+  menu.
 - `isEnabled = false` removes the menu.
 
 For menus that depend on app state, implement
@@ -1609,7 +1666,7 @@ For menus that depend on app state, implement
 and edits the `CefMenuModel` directly, and handle your command IDs in
 `browser(_:handleContextMenuCommand:for:)`. Take IDs from
 `CefMenuModel.userCommandIDs`; `items` use IDs from its start and Inspect
-Element its last ID.
+its last ID.
 
 ## Chrome-style windows
 

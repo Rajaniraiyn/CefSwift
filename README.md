@@ -183,6 +183,8 @@ or Chromium limit. Everything else belongs to the app.
 | JavaScript evaluation with timeouts, user scripts and style sheets | `evaluateJavaScript(_:timeout:)`, `CefUserScript` | [JavaScript](docs/guide.md#javascript) |
 | Typed calls between JavaScript and Swift | `CefBridge` | [Bridge](docs/guide.md#bridge) |
 | Asynchronous decisions: permissions, dialogs, downloads, certificate errors | `CefBrowserDelegate` | [Decisions](docs/guide.md#decisions) |
+| Native default sheets, localizable and each replaceable | `CefDialogPresenter`, `CefDownloadPresenter`, … | [Built-in sheets](docs/guide.md#built-in-sheets) |
+| Downloads: a profile policy, a save panel, observable downloads for a download manager | `CefProfile.downloadPolicy`, `CefProfile.downloads`, `CefDownload` | [Downloads](docs/guide.md#downloads) |
 | Context menu | `CefBrowser.Configuration.ContextMenu` | [Context menu](docs/guide.md#context-menu) |
 | Chrome-style windows (CEF Views), SwiftUI toolbars, a view over the page, popups, native tabs | `CefWindow`, `pageOverlay` | [Chrome-style windows](docs/guide.md#chrome-style-windows) |
 | Chrome commands and Chrome UI trimming | `CefChromeCommand`, `CefRuntime.Configuration.ChromeToolbar` | [Chrome commands](docs/guide.md#chrome-commands) |

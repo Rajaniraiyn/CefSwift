@@ -51,12 +51,13 @@ public enum CefDialogPresenter {
         let alert = NSAlert()
         alert.messageText = dialog.origin
         alert.informativeText = dialog.message
-        alert.addButton(withTitle: "OK")
+        // An alert keeps NSAlert's own OK button, which AppKit localizes.
+        if dialog.kind != .alert {
+            alert.addButton(withTitle: String(localized: "OK", bundle: .cefKit, comment: "JavaScript confirm() and prompt(): the button that accepts."))
+            alert.addButton(withTitle: String(localized: "Cancel", bundle: .cefKit, comment: "A button that dismisses a sheet without answering it."))
+        }
 
         var promptField: NSTextField?
-        if dialog.kind != .alert {
-            alert.addButton(withTitle: "Cancel")
-        }
         if dialog.kind == .prompt {
             let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
             field.stringValue = dialog.defaultPromptText
@@ -72,10 +73,14 @@ public enum CefDialogPresenter {
     /// Presents the "leave / stay" confirmation for `beforeunload`.
     public static func confirmLeaving(isReload: Bool, in window: NSWindow?) async -> Bool {
         let alert = NSAlert()
-        alert.messageText = isReload ? "Reload this page?" : "Leave this page?"
-        alert.informativeText = "Changes you made may not be saved."
-        alert.addButton(withTitle: isReload ? "Reload" : "Leave")
-        alert.addButton(withTitle: "Stay")
+        alert.messageText = isReload
+            ? String(localized: "Reload this page?", bundle: .cefKit, comment: "Title of the sheet a page's beforeunload handler raises when the user reloads.")
+            : String(localized: "Leave this page?", bundle: .cefKit, comment: "Title of the sheet a page's beforeunload handler raises when the user navigates away.")
+        alert.informativeText = String(localized: "Changes you made may not be saved.", bundle: .cefKit, comment: "Message of the beforeunload sheet.")
+        alert.addButton(withTitle: isReload
+            ? String(localized: "Reload", bundle: .cefKit, comment: "beforeunload sheet: the button that reloads the page.")
+            : String(localized: "Leave", bundle: .cefKit, comment: "beforeunload sheet: the button that leaves the page."))
+        alert.addButton(withTitle: String(localized: "Stay", bundle: .cefKit, comment: "beforeunload sheet: the button that stays on the page."))
         return await run(alert, in: window) == .alertFirstButtonReturn
     }
 
@@ -83,17 +88,21 @@ public enum CefDialogPresenter {
     /// Returns `nil` if the user cancels.
     public static func requestCredential(for challenge: CefAuthenticationChallenge, in window: NSWindow?) async -> CefCredential? {
         let alert = NSAlert()
-        alert.messageText = "Sign in"
+        alert.messageText = String(localized: "Sign In to Website", bundle: .cefKit, comment: "Title of the HTTP authentication sheet.")
+        let host = challenge.host
+        let proxy = "\(challenge.host):\(challenge.port)"
         alert.informativeText = challenge.isProxy
-            ? "The proxy \(challenge.host):\(challenge.port) requires a username and password."
-            : "\(challenge.host) requires a username and password."
-        alert.addButton(withTitle: "Sign In")
-        alert.addButton(withTitle: "Cancel")
+            ? String(localized: "The proxy \(proxy) requires a username and password.", bundle: .cefKit,
+                     comment: "HTTP authentication sheet for a proxy: %@ is the proxy's host and port, such as proxy.example.com:8080.")
+            : String(localized: "\(host) requires a username and password.", bundle: .cefKit,
+                     comment: "HTTP authentication sheet: %@ is the website's host, such as example.com.")
+        alert.addButton(withTitle: String(localized: "Sign In", bundle: .cefKit, comment: "HTTP authentication sheet: the button that sends the user name and password."))
+        alert.addButton(withTitle: String(localized: "Cancel", bundle: .cefKit, comment: "A button that dismisses a sheet without answering it."))
 
         let username = NSTextField(frame: NSRect(x: 0, y: 30, width: 260, height: 24))
-        username.placeholderString = "Username"
+        username.placeholderString = String(localized: "Username", bundle: .cefKit, comment: "HTTP authentication sheet: placeholder of the user name field.")
         let password = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
-        password.placeholderString = "Password"
+        password.placeholderString = String(localized: "Password", bundle: .cefKit, comment: "HTTP authentication sheet: placeholder of the password field.")
         username.nextKeyView = password
         let fields = NSView(frame: NSRect(x: 0, y: 0, width: 260, height: 54))
         fields.addSubview(username)

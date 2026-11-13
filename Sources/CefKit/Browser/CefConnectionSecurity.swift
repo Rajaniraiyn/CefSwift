@@ -142,15 +142,21 @@ public enum CefClientCertificatePresenter {
     public static func present(_ request: CefClientCertificateRequest, in window: NSWindow?) async -> CefCertificate? {
         guard !request.certificates.isEmpty else { return nil }
         let alert = NSAlert()
-        alert.messageText = "Select a certificate"
-        alert.informativeText = "\(request.host) requests a certificate to identify you."
+        alert.messageText = String(localized: "Select a certificate", bundle: .cefKit,
+                                   comment: "Title of the sheet that asks which client certificate to identify the user with.")
+        let host = request.host
+        alert.informativeText = String(localized: "\(host) requests a certificate to identify you.", bundle: .cefKit,
+                                       comment: "Client certificate sheet: %@ is the website's host, such as example.com.")
         let menu = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 300, height: 26), pullsDown: false)
         for certificate in request.certificates {
-            menu.addItem(withTitle: "\(certificate.subject.displayName) (\(certificate.issuer.displayName))")
+            let subject = certificate.subject.displayName, issuer = certificate.issuer.displayName
+            menu.addItem(withTitle: String(localized: "\(subject) (\(issuer))", bundle: .cefKit,
+                                           comment: "Client certificate sheet: one certificate in the menu. The first %@ is whom it was issued to, the second who issued it."))
         }
         alert.accessoryView = menu
-        alert.addButton(withTitle: "Continue")
-        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: String(localized: "Continue", bundle: .cefKit,
+                                          comment: "Client certificate sheet: the button that identifies with the chosen certificate."))
+        alert.addButton(withTitle: String(localized: "Cancel", bundle: .cefKit, comment: "A button that dismisses a sheet without answering it."))
         // Dismissed, as Cancel, when the task is cancelled: before it is
         // shown, as a sheet or as a modal alert.
         let response = await CefDialogPresenter.run(alert, in: window)

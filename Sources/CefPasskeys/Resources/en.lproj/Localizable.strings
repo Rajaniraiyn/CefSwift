@@ -1,0 +1,40 @@
+/*
+  CefPasskeys' passkey sheet, in English, the development language.
+
+  To add a language, copy this file to <language>.lproj/Localizable.strings
+  in this directory (de.lproj, pt-BR.lproj, zh-Hans.lproj, …) and translate
+  the values; keep the keys. %@ stands for a value given in the comment.
+*/
+
+/* Title of the sheet that asks before creating a passkey: %@ is the website's host, such as example.com. */
+"Save a passkey for “%@”?" = "Save a passkey for “%@”?";
+
+/* Message of the sheet that asks before creating a passkey. */
+"A passkey lets you sign in to this website without a password. It is saved on this Mac." = "A passkey lets you sign in to this website without a password. It is saved on this Mac.";
+
+/* Title of the sheet shown when a website asks for a passkey and none is saved for it: %@ is the website's host. */
+"No passkeys for “%@”" = "No passkeys for “%@”";
+
+/* Message of the sheet shown when no passkey is saved for the website. */
+"You have no saved passkeys for this website." = "You have no saved passkeys for this website.";
+
+/* Title of the sheet that asks before signing in with a passkey: %@ is the website's host. */
+"Sign in to “%@” with your passkey?" = "Sign in to “%@” with your passkey?";
+
+/* Passkey sign-in sheet, when several accounts have a passkey: asks to pick one from the menu below. */
+"Choose an account." = "Choose an account.";
+
+/* Passkey sheets: the button that goes on to verify the user. */
+"Continue" = "Continue";
+
+/* Passkey sheets: the button that refuses the website's request. */
+"Cancel" = "Cancel";
+
+/* Reason in the Touch ID or password prompt before creating a passkey. It completes the sentence “<App> wants to …”: %@ is the website's host. */
+"save a passkey for %@" = "save a passkey for %@";
+
+/* Reason in the Touch ID or password prompt before signing in with a passkey. It completes the sentence “<App> wants to …”: %@ is the website's host. */
+"sign in to %@" = "sign in to %@";
+
+/* Why a passkey cannot be used, when macOS gives no reason of its own. */
+"User verification is not available." = "User verification is not available.";

@@ -181,6 +181,13 @@ pin.
 
 - Swift 6 language mode. Prefer `@MainActor` to locks. No force-unwraps in
   library code. Doc comments on public API.
+- Text a built-in sheet shows is `String(localized: "…", bundle: .cefKit,
+  comment: "…")` (`.cefPasskeys` in CefPasskeys), with the same key and
+  comment in the target's `Resources/en.lproj/Localizable.strings`; where
+  AppKit or Chromium already has the string (NSAlert's lone OK, the panels,
+  Chromium's menu items), use theirs. String Catalogs need Xcode's
+  `xcstringstool`, which the Command Line Tools lack, so the strings are
+  `.strings` files.
 - Keep pull requests focused, and run `swift test` before sending one.
 
 ## Naming

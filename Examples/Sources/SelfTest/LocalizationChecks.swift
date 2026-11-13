@@ -1,5 +1,6 @@
 import AppKit
 @_spi(Testing) import CefKit
+@_spi(Testing) import CefPasskeys
 import CefSwiftUI
 import CCef
 
@@ -14,8 +15,35 @@ extension SelfTest {
     static let localizationPolicyKey = "CEFSWIFT_SELFTEST_LOCALIZATION"
     static let localizationExpectationKey = "CEFSWIFT_SELFTEST_LOCALIZATION_EXPECT"
 
+    /// The built-in sheets' strings come from CefSwift's resource bundles,
+    /// which `cef bundle` puts in the app's Resources; the context menu's
+    /// Inspect item from Chromium, as the rest of that menu.
+    static func builtInSheetStringChecks() {
+        let resources = Bundle.main.resourceURL!.standardizedFileURL
+        let kit = CefRuntime.resourceBundle, passkeys = CefPasskeyPresenter.resourceBundle
+        check("localization: CefKit's strings load from the app's Resources",
+              kit.bundleURL.standardizedFileURL == resources.appendingPathComponent("CefSwift_CefKit.bundle"),
+              detail: kit.bundleURL.path)
+        check("localization: CefPasskeys' strings load from the app's Resources",
+              passkeys.bundleURL.standardizedFileURL == resources.appendingPathComponent("CefSwift_CefPasskeys.bundle"),
+              detail: passkeys.bundleURL.path)
+        // A key whose English value differs from it, and one whose value is
+        // the key: both come from the bundle, not the fallback.
+        let missing = "\u{1}missing"
+        check("localization: a sheet's string resolves from the bundle, not its key",
+              kit.localizedString(forKey: "Sign In to Website", value: missing, table: nil) == "Sign in"
+                  && passkeys.localizedString(forKey: "Choose an account.", value: missing, table: nil) == "Choose an account.")
+        check("localization: the bundles are English, the development language",
+              kit.developmentLocalization == "en" && kit.localizations.contains("en"),
+              detail: "\(String(describing: kit.developmentLocalization)) \(kit.localizations)")
+        let inspect = CefRuntime.shared.localizedString(CefRuntime.StringID(rawValue: IDS_CONTENT_CONTEXT_INSPECTELEMENT))
+        check("localization: the Inspect menu item has Chromium's string", inspect?.isEmpty == false,
+              detail: String(describing: inspect))
+    }
+
     static func localizationChecks() async {
         await acceptLanguageChecks()
+        builtInSheetStringChecks()
         let cases: [(label: String, policy: String, languages: String, expected: Expectation)] = [
             ("French user, .application", "application", "(fr)",
              Expectation(locale: "fr", newTab: "Nouvel onglet", navigatorLanguage: "fr")),

@@ -35,32 +35,39 @@ public enum CefPasskeyPresenter {
         alert.icon = NSImage(systemSymbolName: "person.badge.key.fill", accessibilityDescription: nil)
         var picker: NSPopUpButton?
 
+        let host = request.host
+        let proceed = String(localized: "Continue", bundle: .cefPasskeys, comment: "Passkey sheets: the button that goes on to verify the user.")
         switch request.kind {
         case .registration:
-            alert.messageText = "Save a passkey for “\(request.host)”?"
-            alert.informativeText = "A passkey lets you sign in to this website without a password. "
-                + "It is saved on this Mac."
-            alert.addButton(withTitle: "Continue")
+            alert.messageText = String(localized: "Save a passkey for “\(host)”?", bundle: .cefPasskeys,
+                                       comment: "Title of the sheet that asks before creating a passkey: %@ is the website's host, such as example.com.")
+            alert.informativeText = String(localized: "A passkey lets you sign in to this website without a password. It is saved on this Mac.",
+                                           bundle: .cefPasskeys, comment: "Message of the sheet that asks before creating a passkey.")
+            alert.addButton(withTitle: proceed)
         case .assertion where request.passkeys.isEmpty:
-            alert.messageText = "No passkeys for “\(request.host)”"
-            alert.informativeText = "You have no saved passkeys for this website."
-            alert.addButton(withTitle: "OK")
+            alert.messageText = String(localized: "No passkeys for “\(host)”", bundle: .cefPasskeys,
+                                       comment: "Title of the sheet shown when a website asks for a passkey and none is saved for it: %@ is the website's host.")
+            alert.informativeText = String(localized: "You have no saved passkeys for this website.", bundle: .cefPasskeys,
+                                           comment: "Message of the sheet shown when no passkey is saved for the website.")
+            // NSAlert's own OK button, which AppKit localizes.
             _ = await run(alert, in: window)
             return .deny
         case .assertion:
-            alert.messageText = "Sign in to “\(request.host)” with your passkey?"
+            alert.messageText = String(localized: "Sign in to “\(host)” with your passkey?", bundle: .cefPasskeys,
+                                       comment: "Title of the sheet that asks before signing in with a passkey: %@ is the website's host.")
             if request.passkeys.count == 1 {
                 alert.informativeText = request.passkeys[0].userName
             } else {
-                alert.informativeText = "Choose an account."
+                alert.informativeText = String(localized: "Choose an account.", bundle: .cefPasskeys,
+                                               comment: "Passkey sign-in sheet, when several accounts have a passkey: asks to pick one from the menu below.")
                 let popUp = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 260, height: 26))
                 popUp.addItems(withTitles: request.passkeys.map(\.userName))
                 alert.accessoryView = popUp
                 picker = popUp
             }
-            alert.addButton(withTitle: "Continue")
+            alert.addButton(withTitle: proceed)
         }
-        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: String(localized: "Cancel", bundle: .cefPasskeys, comment: "Passkey sheets: the button that refuses the website's request."))
 
         guard await run(alert, in: window) == .alertFirstButtonReturn, !Task.isCancelled else { return .deny }
         let verification = await verifier.verify(reason(for: request))
@@ -77,7 +84,9 @@ public enum CefPasskeyPresenter {
     static func verifyUser(reason: String, with context: sending any CefLocalAuthenticationContext) async -> CefUserVerification {
         var error: NSError?
         guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) else {
-            return .unavailable(error?.localizedDescription ?? "User verification is not available.")
+            return .unavailable(error?.localizedDescription
+                ?? String(localized: "User verification is not available.", bundle: .cefPasskeys,
+                          comment: "Why a passkey cannot be used, when macOS gives no reason of its own."))
         }
         // Cancelling the task invalidates the context, which ends the
         // system prompt with an error.
@@ -113,7 +122,12 @@ public enum CefPasskeyPresenter {
     }
 
     static func reason(for request: CefPasskeyRequest) -> String {
-        request.kind == .registration ? "save a passkey for \(request.host)" : "sign in to \(request.host)"
+        let host = request.host
+        return request.kind == .registration
+            ? String(localized: "save a passkey for \(host)", bundle: .cefPasskeys,
+                     comment: "Reason in the Touch ID or password prompt before creating a passkey. It completes the sentence “<App> wants to …”: %@ is the website's host.")
+            : String(localized: "sign in to \(host)", bundle: .cefPasskeys,
+                     comment: "Reason in the Touch ID or password prompt before signing in with a passkey. It completes the sentence “<App> wants to …”: %@ is the website's host.")
     }
 
     /// Shows `alert` until the user answers or the task is cancelled, which

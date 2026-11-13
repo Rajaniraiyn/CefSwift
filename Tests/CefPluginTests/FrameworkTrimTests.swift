@@ -124,4 +124,21 @@ import Testing
         #expect(FrameworkTrim.resourceLocalizations(
             in: [flat, root.appendingPathComponent("App_Kit.bundle")]) == ["de", "fr"])
     }
+
+    /// CefSwift's bundles go in the app, but their languages are not the
+    /// app's: an English app with CefKit's German strings stays English.
+    @Test func cefSwiftBundlesDoNotLocalizeTheApp() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("bundles-\(UUID().uuidString)")
+        defer { try? fm.removeItem(at: root) }
+        let app = root.appendingPathComponent("App_App.bundle")
+        let kit = root.appendingPathComponent("CefSwift_CefKit.bundle/Contents/Resources")
+        for directory in [app.appendingPathComponent("en.lproj"),
+                          kit.appendingPathComponent("en.lproj"), kit.appendingPathComponent("de.lproj")] {
+            try fm.createDirectory(at: directory, withIntermediateDirectories: true)
+        }
+        #expect(FrameworkTrim.resourceLocalizations(
+            in: [app, root.appendingPathComponent("CefSwift_CefKit.bundle")]) == ["en"])
+        #expect(FrameworkTrim.resourceLocalizations(in: [root.appendingPathComponent("CefSwift_CefKit.bundle")]).isEmpty)
+    }
 }

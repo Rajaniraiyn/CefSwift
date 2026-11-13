@@ -5,9 +5,9 @@ import Foundation
 /// is built from (what `Bundle.module` loads), and the dynamic libraries
 /// and frameworks it loads through `@rpath` from the build directory.
 ///
-/// `AppBundler` puts the resource bundles in `Contents/Resources`, where
-/// SwiftPM's generated `Bundle.module` accessor looks first
-/// (`Bundle.main.resourceURL`), and the libraries in `Contents/Frameworks`.
+/// `AppBundler` puts the resource bundles in `Contents/Resources`
+/// (`Bundle.main.resourceURL`), where CefSwift's targets find theirs, and
+/// the libraries in `Contents/Frameworks`.
 struct BuiltProduct: Equatable, Sendable {
     var executable: URL
     /// `<Package>_<Target>.bundle` directories.
