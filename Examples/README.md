@@ -67,16 +67,47 @@ A tabbed browser (`Sources/Browser`). Each tab is a Chrome-style
 leaving, an unreachable site, a Widevine-protected test stream that plays in
 Chromium, and a link to a FairPlay test player to open in WebKit.
 
-## Showcase
+## Gallery
 
-Embedding web content in SwiftUI with the `.embedded` configuration
-(`Sources/Showcase`). Its sidebar has three demos:
+A library of small examples (`Sources/Gallery`), each showing one
+capability in one file of SwiftUI and CefSwift code you can copy:
+`Demos/<Name>Demo.swift`. The sidebar groups them; the detail shows the
+running demo, what it shows, and its file.
 
-- **Web View**: a windowed browser with observable state.
-- **Native Overlay**: SwiftUI content over an offscreen page, with a
-  swipe-to-navigate indicator.
-- **JavaScript Bridge**: a typed bridge to a page served from a custom
-  scheme.
+- **Web Views**: observable state and awaited loads; offscreen rendering
+  under SwiftUI; swipe navigation with the app's own indicator;
+  `CefWindowedBrowserView` in an `NSViewRepresentable`, without CefSwiftUI.
+- **Page**: find in page (`CefFindSession`); the context menu; PDF and
+  printing; DevTools and the DevTools Protocol.
+- **JavaScript**: `evaluateJavaScript`; a typed `CefBridge` both ways;
+  user scripts and style sheets; frames.
+- **Content and Network**: a custom scheme serving the app's resources;
+  requests through Chromium's network stack; profiles and cookies;
+  permissions and site settings; downloads.
+- **Chrome-Style Windows**: a `CefWindow` with a SwiftUI toolbar; Chromium's
+  find bar, status bubble and QR code bubble replaced with SwiftUI.
+- **Runtime**: the task manager; discarding and restoring; the media
+  router's devices.
+- **Chromium Data** (`CefChromium`): bookmarks, history and address
+  suggestions.
+- **Passkeys** (`CefPasskeys`): passkeys answered from an in-memory store.
+
+Every demo works offline. Pages come from a `gallery://` scheme handler,
+and those that need real HTTP (cookies, permissions, passkeys, downloads,
+requests) from a small server on `localhost` (`Support/`). The one runtime
+configuration is the `.chrome` preset with offscreen rendering on, as
+Chrome-style windows, Chromium's data and the media router need, and a
+mock keychain, so no keychain prompt appears.
+
+To add a demo, write a type that conforms to `Demo` (title, summary,
+symbol, category, `makeView()`) in `Demos/`, and list it in `Demos.all`.
+
+`-smoke` (or `GALLERY_SMOKE=1`) opens every demo in turn, waits until it
+reports ready (its pages loaded, or its own work done), prints
+`PASS <demo>` or `FAIL <demo> — <reason>` and a `SUMMARY` line, and quits
+with the number of failures as its exit status. A demo also fails if it
+leaves a browser or window open. `GALLERY_SMOKE_ONLY=BridgeDemo,RequestsDemo`
+runs only those. It keeps Chromium's data in a temporary directory.
 
 ## Minimal
 
@@ -127,13 +158,16 @@ Accessibility permission. `SELFTEST_ISOLATED`, `SELFTEST_STRICT` and
 
 ## Launch arguments
 
-Browser and Showcase can start in a given state, for trying things out and
+Browser and Gallery can start in a given state, for trying things out and
 for automated screenshots. Arguments are read as user defaults
 (`-key value`).
 
 ```sh
-# Showcase: open a demo ("Web View", "Native Overlay" or "JavaScript Bridge").
-Examples/dist/Showcase.app/Contents/MacOS/Showcase -demo "JavaScript Bridge"
+# Gallery: open a demo, by the name of its type.
+Examples/dist/Gallery.app/Contents/MacOS/Gallery -demo BridgeDemo
+
+# Gallery: open every demo in turn; the exit status is the number of failures.
+Examples/dist/Gallery.app/Contents/MacOS/Gallery -smoke
 
 # Browser: open tabs, run JavaScript in the last one once it has loaded,
 # start editing the address, and force an appearance.

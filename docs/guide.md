@@ -1670,10 +1670,11 @@ sheet. Private keys stay in the keychain; Chromium signs with them itself.
 
 `setToolbar(leading:principal:trailing:)` gives the window a unified
 title-bar toolbar laid out as Safari's is: `leading` beside the window
-buttons, `principal` centered, `trailing` at the far edge. Each view is a
-native toolbar item, and the native tab bar appears beneath the toolbar when
-the window joins a tab group. `setToolbar(principal:)` sets only the
-centered view. Installing a toolbar keeps the window's frame.
+buttons, `principal` centered, `trailing` at the far edge. Each is a
+native toolbar item, whose views sit side by side, and the native tab bar
+appears beneath the toolbar when the window joins a tab group.
+`setToolbar(principal:)` sets only the centered view. Installing a toolbar
+keeps the window's frame.
 
 The builder closures run once, when you call the method, and the views they
 build stay live: SwiftUI updates them as the observable state they read

@@ -149,7 +149,10 @@ The `ci` job:
    go to the run summary. On failure, the log, the JSON results and the
    crash reports written during the run are uploaded as the
    `selftest-diagnostics` artifact.
-10. Check that the build left the working tree clean.
+10. Bundle the Gallery example and run `Gallery -smoke`, which opens each
+    demo in turn and fails when one does not come up or leaves a browser
+    open.
+11. Check that the build left the working tree clean.
 
 What CI verifies, and what it does not:
 

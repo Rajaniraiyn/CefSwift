@@ -27,11 +27,18 @@ let package = Package(
             name: "SystemEngine",
             dependencies: [.product(name: "CefKit", package: "CefSwift")]
         ),
-        // Embedding web content in a SwiftUI app.
+        // A library of small examples, one capability each, in one SwiftUI
+        // app; `Gallery -smoke` opens each in turn.
         .executableTarget(
-            name: "Showcase",
-            dependencies: [.product(name: "CefSwiftUI", package: "CefSwift")],
-            exclude: ["cefapp.json"]
+            name: "Gallery",
+            dependencies: [
+                .product(name: "CefKit", package: "CefSwift"),
+                .product(name: "CefSwiftUI", package: "CefSwift"),
+                .product(name: "CefChromium", package: "CefSwift"),
+                .product(name: "CefPasskeys", package: "CefSwift"),
+            ],
+            exclude: ["cefapp.json"],
+            resources: [.copy("Resources/Site")]
         ),
         // One CefWebView on the `.embedded` configuration; the footprint
         // benchmark's lean case (Scripts/measure-footprint.py).

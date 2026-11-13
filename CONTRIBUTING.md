@@ -67,7 +67,7 @@ swift package --package-path Examples \
 open Examples/dist/Browser.app
 ```
 
-The other products are `Showcase`, `Minimal`, `Compat` and `SelfTest`. The plugin keeps its cache
+The other products are `Gallery`, `Minimal`, `Compat` and `SelfTest`. The plugin keeps its cache
 in the invoking package, so the Examples package downloads CEF into
 `Examples/.cef/`. [Examples/README.md](Examples/README.md) lists the launch
 arguments.

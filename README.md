@@ -205,7 +205,8 @@ or Chromium limit. Everything else belongs to the app.
   toolbar, address-bar suggestions, bookmarks, history, private tabs,
   downloads, popups, a swipe indicator, and a Memory Saver that puts
   background tabs to sleep.
-- **Showcase**: three demos of embedding web content in SwiftUI.
+- **Gallery**: a library of small examples, one capability each, from a
+  web view bound to a browser's state to passkeys answered by the app.
 - **Minimal**: one `CefWebView` on the `.embedded` configuration, and the
   lean case of the footprint benchmark.
 - **Compat**: one page in one kind of host with chosen CefSwift features,

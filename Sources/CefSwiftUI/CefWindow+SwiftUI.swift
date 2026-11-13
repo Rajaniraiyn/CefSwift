@@ -8,7 +8,8 @@ extension CefWindow {
     /// buttons, `principal` centered (your address field), `trailing` at the
     /// far edge. Each view is a native toolbar item, so it picks up the
     /// system's toolbar appearance, and the native tab bar appears beneath
-    /// it when the window joins a tab group.
+    /// it when the window joins a tab group. Several views in one closure
+    /// sit side by side.
     ///
     /// Each closure runs once, when you call this method, to build its view.
     /// The views it builds stay live: SwiftUI re-renders them as the
@@ -33,10 +34,12 @@ extension CefWindow {
         @ViewBuilder principal: () -> some View,
         @ViewBuilder trailing: () -> some View
     ) {
+        // Several views in one closure sit side by side, as in a toolbar
+        // item group, rather than stacked.
         let provider = ToolbarItemProvider(
-            leading: NSHostingView(rootView: leading()),
-            principal: NSHostingView(rootView: principal()),
-            trailing: NSHostingView(rootView: trailing()))
+            leading: NSHostingView(rootView: HStack { leading() }),
+            principal: NSHostingView(rootView: HStack { principal() }),
+            trailing: NSHostingView(rootView: HStack { trailing() }))
         withWindow { provider.install(in: $0) }
     }
 
