@@ -11,7 +11,7 @@ import Testing
 /// break.
 @Suite struct SandboxConfigTests {
     @Test func defaultIsSandboxed() {
-        for configuration in [CefRuntime.Configuration(), .embedded, .browser] {
+        for configuration in [CefRuntime.Configuration(), .embedded, .chrome] {
             #expect(configuration.isSandboxEnabled)
         }
         let mapped = MappedCefSettings(configuration: CefRuntime.Configuration(), frameworkDirectory: nil)

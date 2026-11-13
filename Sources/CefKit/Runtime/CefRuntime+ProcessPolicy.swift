@@ -5,7 +5,7 @@ extension CefRuntime {
     /// processes it keeps running for the app.
     ///
     /// Set it with ``CefRuntime/Configuration/processPolicy``. ``CefRuntime/Configuration/embedded``
-    /// uses ``onDemand``; ``CefRuntime/Configuration/browser`` and the default
+    /// uses ``onDemand``; ``CefRuntime/Configuration/chrome`` and the default
     /// configuration use ``automatic``. The guide lists measured savings.
     public enum ProcessPolicy: Sendable, Equatable {
         /// Chromium's own behavior. Besides the renderer of each page, Chromium

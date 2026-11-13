@@ -12,7 +12,7 @@ import CefBase
         #expect(configuration.policyPreferences.isEmpty)
         #expect(configuration.policySwitches == ["disable-chrome-login-prompt"])
         #expect(configuration.runsComponentUpdater)
-        #expect(CefRuntime.Configuration.browser.policyPreferences.isEmpty)
+        #expect(CefRuntime.Configuration.chrome.policyPreferences.isEmpty)
     }
 
     @Test func eachOptionSetsItsPreferences() {
@@ -128,7 +128,7 @@ import CefBase
             "CalculateNativeWinOcclusion", "InterestFeedContentSuggestions", "disable-client-side-phishing-detection",
             "DisableLoadExtensionCommandLineSwitch", "disable-breakpad", "Translate",
         ]
-        for configuration in [CefRuntime.Configuration(), .embedded, .browser] {
+        for configuration in [CefRuntime.Configuration(), .embedded, .chrome] {
             #expect(absent.isDisjoint(with: configuration.extraCommandLineSwitches.keys))
             #expect(absent.isDisjoint(with: configuration.disabledFeatures))
             #expect(absent.isDisjoint(with: configuration.chromiumFeatures.disabled))

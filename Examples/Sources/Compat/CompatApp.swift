@@ -41,7 +41,7 @@ enum CompatApp {
         CefApplication.install()
         var configuration: CefRuntime.Configuration
         switch defaults.string(forKey: "preset") {
-        case "browser": configuration = .browser
+        case "chrome": configuration = .chrome
         case "embedded": configuration = .embedded
         default: configuration = CefRuntime.Configuration()
         }

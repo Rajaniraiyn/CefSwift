@@ -12,7 +12,7 @@ import SwiftUI
 @main
 struct BrowserApp: CefSwiftApp {
     static var runtimeConfiguration: CefRuntime.Configuration {
-        var configuration = CefRuntime.Configuration.browser
+        var configuration = CefRuntime.Configuration.chrome
         configuration.productName = "CefSwift Browser"
         // Chrome's own UI is replaced by the SwiftUI toolbar; keep its
         // internal pages free of buttons that would open Chrome windows.

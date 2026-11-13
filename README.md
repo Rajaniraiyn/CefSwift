@@ -76,7 +76,7 @@ import SwiftUI
 
 @main
 struct MyBrowser: CefSwiftApp {
-    static var runtimeConfiguration: CefRuntime.Configuration { .browser }
+    static var runtimeConfiguration: CefRuntime.Configuration { .chrome }
     @NSApplicationDelegateAdaptor private var appDelegate: AppDelegate
 
     var body: some Scene {
@@ -151,7 +151,7 @@ covers identifiers, signing, entitlements, notarization and the bundle layout;
 
 | | Showing web content | Building a browser |
 |---|---|---|
-| Configuration | `CefRuntime.Configuration.embedded` | `CefRuntime.Configuration.browser` |
+| Configuration | `CefRuntime.Configuration.embedded` | `CefRuntime.Configuration.chrome` |
 | Host | `CefWebView` in your own windows | `CefWindow`, or `CefRuntime.shared.openChromeWindow(url:)` for Chrome's complete UI |
 | Chrome runtime (`chrome://` pages, extensions, history) | No | Yes |
 | Background services | Off | On |

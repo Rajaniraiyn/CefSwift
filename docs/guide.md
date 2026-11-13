@@ -130,7 +130,7 @@ Start from a preset and change what you need:
 | Preset | Use |
 |---|---|
 | `CefRuntime.Configuration.embedded` | Showing your own or trusted web content. Turns off background networking, component updates, Widevine, sync, translation, preloading, hyperlink auditing, password saving and autofill, first-run and default-browser prompts, and starts renderer processes only when a page needs one. |
-| `CefRuntime.Configuration.browser` | A general-purpose browser. Keeps session cookies across launches and skips first-run and default-browser prompts; everything else is as Chromium has it and as users set it in `chrome://settings`, Widevine included. |
+| `CefRuntime.Configuration.chrome` | Arbitrary sites with Chrome's services. Keeps session cookies across launches and skips first-run and default-browser prompts; everything else is as Chromium has it and as users set it in `chrome://settings`, Widevine included. |
 | `CefRuntime.Configuration()` | Chromium's defaults. |
 
 Common options:
@@ -228,7 +228,7 @@ typed option that sets the same preference.
 | `credentials.autofill` | `.automatic`, `.disabled` | `autofill.profile_enabled`, `autofill.credit_card_enabled` | Every profile |
 
 ```swift
-var configuration = CefRuntime.Configuration.browser
+var configuration = CefRuntime.Configuration.chrome
 configuration.privacy.thirdPartyCookies = .block
 configuration.security.httpsFirst = .balanced
 configuration.network.secureDNS = .secure(templates: ["https://dns.example/dns-query{?dns}"])
@@ -2537,7 +2537,7 @@ directory, `<rootCacheDirectory>/WidevineCdm/`, on the user's Mac.
 
 | `services.protectedMedia` | Effect |
 |---|---|
-| `.automatic` | The component updater runs and fetches Widevine, whatever `services.componentUpdates` says. The default, and the `.browser` preset's. |
+| `.automatic` | The component updater runs and fetches Widevine, whatever `services.componentUpdates` says. The default, and the `.chrome` preset's. |
 | `.disabled` | CefSwift does not ask for the CDM. With `services.componentUpdates = .disabled`, as in the `.embedded` preset, Chromium registers no component, neither downloads the CDM nor loads one already on disk, and refuses `com.widevine.alpha`. With component updates on, Chromium registers Widevine with its other components, and its updater has no way to leave one out: it downloads the CDM at its first check, about a minute after start-up, and pages can use it from then on. |
 | `.preinstalled(widevineDirectory:)` | As `.automatic`, and copies a CDM your app carries into the profile before Chromium starts, so protected media works on first launch and offline. Only for apps licensed by Google to distribute the CDM. |
 
@@ -2720,12 +2720,12 @@ measurement).
 
 ### What the presets turn off
 
-| | `Configuration()` | `.embedded` | `.browser` |
+| | `Configuration()` | `.embedded` | `.chrome` |
 |---|---|---|---|
 | Background networking, sync, default apps, domain reliability | On | Off | On |
 | Component updates (`services.componentUpdates`), Widevine (`services.protectedMedia`) | On | Off | On |
 | Translation, preloading, hyperlink auditing, password saving, autofill | On | Off | On |
-| Media Router (Cast), optimization hints, Autofill server predictions, on-device model execution | On | Off | On |
+| Media Router (Cast), optimization hints, Autofill server predictions | On | Off | On |
 | First-run and default-browser prompts | On | Off | Off |
 | Spare renderer (`processPolicy`) | `.automatic` | `.onDemand` | `.automatic` |
 | Session cookies across launches | Off | Off | On |
