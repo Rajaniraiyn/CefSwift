@@ -483,7 +483,8 @@ public final class CefRuntime {
     }
 
     /// Low Power Mode and the thermal state as the energy policy should see
-    /// them, instead of the system's; `nil` reads the system's.
+    /// them, instead of the system's, until
+    /// ``stopSimulatingEnergyConditions()``.
     @_spi(Testing) public func simulateEnergyConditions(lowPowerMode: Bool, thermalState: ProcessInfo.ThermalState) {
         lifecycleCoordinator.simulatedConditions = CefEnergyConditions(
             isLowPowerModeEnabled: lowPowerMode, thermalState: thermalState)

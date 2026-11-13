@@ -1,6 +1,5 @@
 import AppKit
 import CefKit
-import CryptoKit
 import Foundation
 import Observation
 import WebKit
@@ -29,7 +28,7 @@ import WebKit
 /// and its observable state, JavaScript, user scripts, find, zoom and
 /// snapshots. Chromium's own features — DevTools protocol, bridges,
 /// `chrome://` pages, extensions, passkey modes, downloads, discarding —
-/// are not part of it. Show it with `CefSystemWebView` (CefSwiftUI) or by
+/// are not part of it. Show it with ``CefSystemWebView`` or by
 /// adding ``nativeView`` to a view hierarchy.
 @MainActor
 @Observable
