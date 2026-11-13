@@ -276,6 +276,7 @@ public final class CefRuntime {
             return
         }
         state = .stopping
+        requestsInFlightAtShutdown = URLRequestRegistry.shared.count
         for profile in CefProfile.all { profile.stopServiceHosts() }
         lifecycleCoordinator.stop()
         discardMonitor.policy = .disabled
@@ -359,6 +360,10 @@ public final class CefRuntime {
     /// released their CEF references, the last step before shutdown.
     @ObservationIgnored private var requestsDrained = false
     @ObservationIgnored private var requestDrain: Task<Void, Never>?
+
+    /// How many profile requests still held CEF references when shutdown
+    /// began; zero once the drain has done its work. For tests.
+    @ObservationIgnored @_spi(Testing) public private(set) var requestsInFlightAtShutdown: Int?
 
     /// Cancels the profile requests in flight on the IO thread, then quits
     /// again. Gives up waiting after a few seconds, so a stuck IO thread

@@ -407,6 +407,10 @@ final class URLRequestRegistry: Sendable {
         let loaders = close()
         guard !loaders.isEmpty else { return }
         await Self.halt(loaders)
+        // Callers awaiting on the IO actor resume there first; a second,
+        // empty job runs after them, so they have handed their errors on
+        // to their own callers before this returns.
+        await Self.afterQueuedJobs()
     }
 
     /// Chromium is about to shut down: no new requests start, and any
@@ -424,6 +428,8 @@ final class URLRequestRegistry: Sendable {
             return Array(state.loaders.values)
         }
     }
+
+    @CefIOActor private static func afterQueuedJobs() {}
 
     @CefIOActor private static func halt(_ loaders: [URLRequestLoader]) {
         for loader in loaders { loader.halt(.shutdown) }

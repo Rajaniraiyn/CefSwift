@@ -183,6 +183,10 @@ extension SelfTest {
                 check("\(name): the popup opens", false, detail: "\(popups.count) popups")
                 continue
             }
+            // The title can arrive before the first script has run.
+            _ = await waitUntilAsync(timeout: .seconds(10)) {
+                (try? await popup.evaluateJavaScript("window.__early !== undefined").boolValue) == true
+            }
             let early = (try? await popup.evaluateJavaScript("window.__early"))?.stringValue
             let elapsed = ContinuousClock.now - start
             let answeredByCefKit = early == "NotAllowedError" && elapsed < .seconds(9)

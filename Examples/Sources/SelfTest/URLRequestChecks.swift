@@ -445,13 +445,15 @@ extension SelfTest {
     /// Checks made once Chromium has shut down.
     static func quitChecksAfterShutdown() {
         if stalledRequestServer != nil {
+            // Each loader released its CEF references on the IO thread
+            // before shutdown began. A caller may hear of it after (its
+            // resumption can be queued behind the quit); one that heard
+            // before heard shutDown.
             let endings = stalledRequestEndings
-            let ended = ["before headers", "mid-stream"].allSatisfy { name in
-                guard let ending = endings[name] else { return false }
-                return ending.isShutDown && ending.state == .running
-            }
-            check("quit: stalled requests end with shutDown before Chromium stops", ended,
-                  detail: "\(endings)")
+            let inFlight = CefRuntime.shared.requestsInFlightAtShutdown
+            check("quit: stalled requests are cancelled on the IO thread before shutdown begins",
+                  inFlight == 0 && endings.values.allSatisfy { $0.isShutDown && $0.state == .running },
+                  detail: "\(String(describing: inFlight)) in flight, \(endings)")
             let census = CefDiagnostics.census().filter { $0.key.localizedCaseInsensitiveContains("urlrequest") }
             check("quit: no request objects are left after shutdown", census.isEmpty, detail: "\(census)")
             stalledRequestServer?.stop()
