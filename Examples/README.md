@@ -71,9 +71,10 @@ Embedding web content in SwiftUI with the `.embedded` configuration
 The smallest CefSwift app (`Sources/Minimal`): one window with one
 `CefWebView`, on the `.embedded` configuration. `-url <address>` shows
 another page, `-cacheDirectory <path>` keeps Chromium's data there,
-`-sandbox YES` runs its helpers in Chromium's sandbox, and
-`-processPolicy standard|reduced|minimal` chooses a `CefRuntime.ProcessPolicy`, and
-`-protectedMedia YES` lets Chromium fetch Widevine.
+`-sandbox NO` runs its helpers outside Chromium's sandbox,
+`-processPolicy automatic|onDemand|minimal` chooses a
+`CefRuntime.ProcessPolicy`, and `-protectedMedia YES` lets Chromium fetch
+Widevine.
 
 ## Compat
 
@@ -83,7 +84,7 @@ One page in one kind of host with chosen CefSwift features on
 and feature, next to stock Google Chrome. `-host window|windowed|offscreen`
 picks a `CefBrowserWindow` or a view, `-preset default|browser|embedded`
 the configuration, and `-features` a comma-separated list of `devtools`,
-`runtime`, `page`, `bridge`, `anyframe`, `userscript`, `evaluate`,
+`runtime`, `page`, `bridge`, `userscript`, `evaluate`,
 `passkeys` and `accessibility`. The script's documentation lists the rest.
 
 ```sh

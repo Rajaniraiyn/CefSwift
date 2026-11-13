@@ -124,7 +124,8 @@ when dispatched, on one `macos-15` runner:
    function it binds.
 5. `swift build --build-tests`, then check that the built code's
    deployment target is macOS 14.
-6. `swift test`, with `CEF_FRAMEWORK_PATH` set, so the loader tests run.
+6. `swift test`, with `CEF_FRAMEWORK_PATH` set, so the loader tests run;
+   then again with the Thread Sanitizer and with the Address Sanitizer.
 7. `Scripts/check-doc-samples.py`: every Swift sample in the README and
    the docs compiles.
 8. Build the Examples package, then bundle SelfTest and run `cef doctor`

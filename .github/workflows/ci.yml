@@ -146,8 +146,6 @@ jobs:
         env:
           SELFTEST_ISOLATED: "1"
           SELFTEST_STRICT: "1"
-          # Chromium's sandbox, the default; SELFTEST_SANDBOX=0 runs without.
-          SELFTEST_SANDBOX: "1"
           SELFTEST_JSON: ${{ runner.temp }}/selftest.json
         run: |
           set -o pipefail

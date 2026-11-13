@@ -2449,7 +2449,7 @@ profile and load a static local page. Memory is the physical footprint of
 the app and every helper process, read five seconds after the page
 finished loading; it is the figure Activity Monitor shows, not resident
 size; 1 MB here is 2^20 bytes. Launch time runs from starting the
-executable to the page's `didFinishLoad`.
+executable to the page's `browser(_:didFinishLoadWithStatus:)`.
 
 | App | Processes | Memory | Launch |
 |---|---|---|---|

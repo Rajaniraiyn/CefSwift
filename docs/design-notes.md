@@ -104,7 +104,7 @@ having been checked without any request from CefSwift.
 Measured on 2026-11-13 with CEF 156.0.28 on an M3 MacBook, macOS 27.2, ad
 hoc signed bundles, `Scripts/measure-footprint.py --kinds relaunch`
 (median of five runs, physical footprint of the app and every helper,
-launch to the first `didFinishLoad`). Another build ran on the same Mac at
+launch to the first `browser(_:didFinishLoadWithStatus:)`). Another build ran on the same Mac at
 the time, so run-to-run spread is wider than in the guide's table.
 
 | App | Sandbox | Launch | Memory (range) |
