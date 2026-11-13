@@ -73,8 +73,16 @@ extension CefBrowser {
         guard direction != .directSelection, state == .live, !isDiscarded else { return }
         let reverse = direction == .selectingPrevious
         Task {
-            // The key press must reach the page after the blur.
-            _ = try? await pageScripting.evaluate("document.activeElement?.blur(), 0", as: CefJSON.self)
+            // The key press must reach the page after the blur, and after
+            // the page has taken focus: Chromium tells the renderer about
+            // the focus on another channel than the one keys travel on, so
+            // a key sent at once can arrive first and move nothing. If the
+            // page has not said so in two seconds, the key is sent anyway.
+            _ = try? await evaluateJavaScript("""
+                document.activeElement?.blur();
+                new Promise(resolve => document.hasFocus() ? resolve(0)
+                    : addEventListener('focus', () => resolve(0), { once: true }))
+                """, timeout: .seconds(2))
             guard state == .live, let view = hostView, let window = view.window, isFirstResponderInside(view) else { return }
             if isOffscreen {
                 let modifiers: CefEventModifiers = reverse ? [.shift] : []
