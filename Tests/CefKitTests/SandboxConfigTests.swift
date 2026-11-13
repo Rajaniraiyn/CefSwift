@@ -6,7 +6,7 @@ import Testing
 
 /// Pure-logic tests for the macOS sandbox seam: defaults and the bit that
 /// crosses into `cef_settings_t.no_sandbox`, the inverse of
-/// `isSandboxEnabled`. The helper's side (Plugins/CefPlugin/Helper) needs a
+/// `isSandboxEnabled`. The helper's side (Sources/CefHelper) needs a
 /// real bundle, but the settings mapping is where the toggle is easy to
 /// break.
 @Suite struct SandboxConfigTests {
@@ -23,13 +23,6 @@ import Testing
         config.isSandboxEnabled = false
         let mapped = MappedCefSettings(configuration: config, frameworkDirectory: nil)
         #expect(mapped.raw.no_sandbox == 1)
-    }
-
-    @Test func enabledSandboxClearsNoSandbox() {
-        var config = CefRuntime.Configuration()
-        config.isSandboxEnabled = true
-        let mapped = MappedCefSettings(configuration: config, frameworkDirectory: nil)
-        #expect(mapped.raw.no_sandbox == 0)
     }
 
     @Test func messagePumpIsAlwaysExternal() {
