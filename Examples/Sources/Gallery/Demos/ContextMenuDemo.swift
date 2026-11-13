@@ -2,8 +2,9 @@ import CefSwiftUI
 import SwiftUI
 
 /// `CefBrowser.Configuration.contextMenu` shapes the menu without a
-/// delegate: it hides Chromium's commands, adds items of the app's own that
-/// appear depending on what was clicked, and can add Inspect Element.
+/// delegate: `customize` receives the menu Chromium built, as a value, and
+/// what was clicked; it removes commands by name and adds items of the
+/// app's own.
 struct ContextMenuDemo: Demo {
     let title = "Context Menu"
     let summary = "A context menu without View Source or Print, with items of the app's own for selected text and links."
@@ -37,19 +38,25 @@ private final class ContextMenuModel {
 
     private func makeBrowser() -> CefBrowser {
         var configuration = CefBrowser.Configuration()
-        configuration.contextMenu.hiddenCommands = [.viewSource, .print]
         configuration.contextMenu.showsInspectElement = true
-        configuration.contextMenu.items = [
-            CefContextMenuItem("Look Up in Gallery", isVisible: { !$0.selectedText.isEmpty }) { [weak self] _, target in
-                self?.lastAction = "Looked up “\(target.selectedText)”"
-            },
-            CefContextMenuItem("Copy Link as Markdown", isVisible: { $0.linkURL != nil }) { [weak self] browser, target in
-                let markdown = "[\(browser.title)](\(target.linkURL?.absoluteString ?? ""))"
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(markdown, forType: .string)
-                self?.lastAction = "Copied \(markdown)"
-            },
-        ]
+        configuration.contextMenu.customize { [weak self] menu, target in
+            menu.remove(.viewSource, .print)
+            var items: [CefContextMenu.Item] = []
+            if !target.selectedText.isEmpty {
+                items.append(CefContextMenu.Item("Look Up in Gallery") { _, target in
+                    self?.lastAction = "Looked up “\(target.selectedText)”"
+                })
+            }
+            if let link = target.linkURL {
+                items.append(CefContextMenu.Item("Copy Link as Markdown") { browser, _ in
+                    let markdown = "[\(browser.title)](\(link.absoluteString))"
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(markdown, forType: .string)
+                    self?.lastAction = "Copied \(markdown)"
+                })
+            }
+            menu.appendSection(items)
+        }
         return CefBrowser(url: Self.page.url, configuration: configuration)
     }
 
