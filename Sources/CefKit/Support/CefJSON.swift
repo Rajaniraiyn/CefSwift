@@ -196,13 +196,10 @@ extension CefJSON {
 
     /// Reads a borrowed `cef_dictionary_value_t` into a Swift dictionary.
     static func members(of dictionary: UnsafeMutablePointer<cef_dictionary_value_t>?) -> [String: CefJSON] {
-        guard let dictionary, let keys = cef_string_list_alloc() else { return [:] }
-        defer { cef_string_list_free(keys) }
-        _ = dictionary.pointee.get_keys(dictionary, keys)
+        guard let dictionary else { return [:] }
         var members: [String: CefJSON] = [:]
-        members.reserveCapacity(cef_string_list_size(keys))
         // Each key is looked up with CEF's own string, and decoded once.
-        cefForEachString(in: keys) { key in
+        cefForEachString(filledBy: { _ = dictionary.pointee.get_keys(dictionary, $0) }) { key in
             let element = dictionary.pointee.get_value(dictionary, key)
             defer { cefRelease(element) }
             members[CefStringUtil.string(from: key)] = CefJSON(cefValue: element)

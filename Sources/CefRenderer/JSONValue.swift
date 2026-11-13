@@ -84,17 +84,13 @@ enum JSONValue: Equatable {
                 return JSONValue(item)
             })
         case VTYPE_DICTIONARY:
-            guard let dictionary = value.pointee.get_dictionary(value), let keys = cef_string_list_alloc() else {
+            guard let dictionary = value.pointee.get_dictionary(value) else {
                 self = .object([])
                 return
             }
-            defer {
-                cefRelease(dictionary)
-                cef_string_list_free(keys)
-            }
-            _ = dictionary.pointee.get_keys(dictionary, keys)
+            defer { cefRelease(dictionary) }
             var members: [(String, JSONValue)] = []
-            cefForEachString(in: keys) { key in
+            cefForEachString(filledBy: { _ = dictionary.pointee.get_keys(dictionary, $0) }) { key in
                 let item = dictionary.pointee.get_value(dictionary, key)
                 defer { cefRelease(item) }
                 members.append((CefStringUtil.string(from: key), item.map(JSONValue.init) ?? .null))

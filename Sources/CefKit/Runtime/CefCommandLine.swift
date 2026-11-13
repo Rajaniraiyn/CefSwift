@@ -80,10 +80,7 @@ public final class CefCommandLine: CustomStringConvertible {
 
     /// Every argument, the program first, as Chromium parsed them.
     var argv: [String] {
-        guard let list = cef_string_list_alloc() else { return [] }
-        defer { cef_string_list_free(list) }
-        raw.pointee.get_argv(raw, list)
-        return cefStrings(from: list)
+        cefStrings { raw.pointee.get_argv(raw, $0) }
     }
 
     /// The whole command line as one string, for diagnostics.

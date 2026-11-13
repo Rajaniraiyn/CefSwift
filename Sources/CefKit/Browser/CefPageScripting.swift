@@ -180,10 +180,8 @@ final class CefPageScripting {
 extension CefBrowser {
     /// Runs `body` with every frame of the browser.
     fileprivate func forEachFrame(_ body: (UnsafeMutablePointer<cef_frame_t>) -> Void) {
-        guard let raw = raw?.pointer, let list = cef_string_list_alloc() else { return }
-        defer { cef_string_list_free(list) }
-        raw.pointee.get_frame_identifiers(raw, list)
-        for identifier in cefStrings(from: list) {
+        guard let raw = raw?.pointer else { return }
+        for identifier in cefStrings({ raw.pointee.get_frame_identifiers(raw, $0) }) {
             guard let frame = CefStringUtil.withCefString(identifier, { raw.pointee.get_frame_by_identifier(raw, $0) })
             else { continue }
             body(frame)
