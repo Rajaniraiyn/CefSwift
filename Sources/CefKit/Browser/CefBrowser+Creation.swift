@@ -247,7 +247,7 @@ extension CefBrowser {
         }
         isBootstrapping = false
         guard state == .live else { return }
-        if let initialURL { load(initialURL) }
+        if let initialURL { startLoad(initialURL) }
         readyWaiters.completeAll(.success(()))
     }
 }

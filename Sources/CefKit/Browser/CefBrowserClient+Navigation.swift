@@ -12,10 +12,11 @@ extension CefBrowserClient {
         h.pointee.on_loading_state_change = { s, browser, isLoading, canGoBack, canGoForward in
             CefBrowserClient.run(s, browser, default: ()) { _, b in
                 b.applyLoadingState(isLoading: isLoading != 0, canGoBack: canGoBack != 0, canGoForward: canGoForward != 0)
+                b.trackLoadingStateDidChange(isLoading: isLoading != 0)
                 b.refreshConnectionSecurity()
             }
         }
-        h.pointee.on_load_start = { s, browser, frame, _ in
+        h.pointee.on_load_start = { s, browser, frame, transition in
             let isMain = frame.map { $0.pointee.is_main($0) != 0 } ?? false
             let url = frame.flatMap { CefStringUtil.takingUserFree($0.pointee.get_url($0)) }
             let id = frame.flatMap { CefStringUtil.takingUserFree($0.pointee.get_identifier($0)) }
@@ -23,6 +24,7 @@ extension CefBrowserClient {
             CefBrowserClient.run(s, browser, default: ()) { _, b in
                 if let id { b.frameDidUpdate(id, url: url.flatMap(URL.init(string:))) }
                 if isMain { b.mainFrameDidStartLoading(url.flatMap(URL.init(string:))) }
+                if isMain { b.trackMainFrameDidCommit(url: url.flatMap(URL.init(string:)), transition: transition) }
             }
         }
         h.pointee.on_load_end = { s, browser, frame, httpStatus in
@@ -33,6 +35,7 @@ extension CefBrowserClient {
             CefBrowserClient.run(s, browser, default: ()) { _, b in
                 if let id { b.frameDidUpdate(id, url: url.flatMap(URL.init(string:))) }
                 if isMain { b.mainFrameDidFinishLoad(status: Int(httpStatus)) }
+                if isMain { b.trackMainFrameDidFinish(url: url.flatMap(URL.init(string:)), httpStatus: Int(httpStatus)) }
             }
         }
         h.pointee.on_load_error = { s, browser, frame, errorCode, errorText, failedURL in
@@ -46,6 +49,7 @@ extension CefBrowserClient {
             CefBrowserClient.run(s, browser, default: ()) { _, b in
                 guard isMain else { return }
                 b.mainFrameDidFailLoad(error)
+                b.trackMainFrameDidFail(error)
             }
         }
         return h
@@ -61,6 +65,7 @@ extension CefBrowserClient {
             let isMain = frame.map { $0.pointee.is_main($0) != 0 } ?? false
             cefRelease(frame)
             let url = request.flatMap { CefStringUtil.takingUserFree($0.pointee.get_url($0)) }
+            let transition = request.map { $0.pointee.get_transition_type($0) } ?? TT_EXPLICIT
             cefRelease(request)
             guard isMain else {
                 cefRelease(browser)
@@ -68,7 +73,11 @@ extension CefBrowserClient {
             }
             let action = CefNavigationAction(
                 url: url.flatMap(URL.init(string:)), isRedirect: isRedirect != 0, hasUserGesture: userGesture != 0)
-            return CefBrowserClient.run(s, browser, default: 0) { _, b in b.cancelsNavigation(action) ? 1 : 0 }
+            return CefBrowserClient.run(s, browser, default: 0) { _, b in
+                let cancels = b.cancelsNavigation(action)
+                b.trackNavigationWillStart(url: action.url, transition: transition, isRedirect: action.isRedirect, isCancelled: cancels)
+                return cancels ? 1 : 0
+            }
         }
         h.pointee.on_open_urlfrom_tab = { s, browser, frame, targetURL, disposition, userGesture in
             cefRelease(frame)
@@ -151,7 +160,10 @@ extension CefBrowserClient {
         }
         h.pointee.on_render_process_terminated = { s, browser, status, _, _ in
             let reason = CefTerminationReason(cefValue: status)
-            CefBrowserClient.run(s, browser, default: ()) { _, b in b.renderProcessDidTerminate(reason) }
+            CefBrowserClient.run(s, browser, default: ()) { _, b in
+                b.trackRenderProcessDidTerminate(reason)
+                b.renderProcessDidTerminate(reason)
+            }
         }
         Self.installResponsivenessCallbacks(on: h)
         Self.installClientCertificateCallback(on: h)

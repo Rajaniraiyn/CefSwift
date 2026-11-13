@@ -16,6 +16,7 @@ import os
 /// - `/passkeys…`: `PasskeyChecks.page`.
 /// - `….txt`: an attachment.
 /// - `/redirect`: 302 to `/echo?redirected`.
+/// - `/redirect-page`: 302 to `/page`.
 /// - `/private`: wants Basic `ada:lovelace` (realm `selftest`); titled
 ///   `authorized` or `denied`.
 /// - `/large?<bytes>`: that many bytes, sent as the client takes them.
@@ -180,6 +181,9 @@ final class LocalServer: Sendable {
         case "/redirect":
             status = "302 Found"
             headers = [("Location", "/echo?redirected")]
+        case "/redirect-page":
+            status = "302 Found"
+            headers = [("Location", "/page")]
         case "/private":
             if request.headers["authorization"] == basic("ada:lovelace") {
                 html(authorized)

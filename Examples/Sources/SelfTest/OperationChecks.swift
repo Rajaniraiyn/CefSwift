@@ -250,7 +250,7 @@ extension SelfTest {
     }
 }
 
-private func isBrowserClosed(_ error: Error?) -> Bool {
+func isBrowserClosed(_ error: Error?) -> Bool {
     if case .browserClosed? = error as? CefError { return true }
     return false
 }

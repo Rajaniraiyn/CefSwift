@@ -126,7 +126,8 @@ enum CompatApp {
             _ = try? await browser.devTools.send("Page.enable")
         }
         if features.contains("evaluate") {
-            _ = try? await browser.evaluateJavaScript("1 + 1")
+            // A page that keeps its renderer busy must not hold up the reading.
+            _ = try? await browser.evaluateJavaScript("1 + 1", timeout: .seconds(10))
         }
         // The window number, for a screenshot from outside the app.
         for _ in 0..<100 {

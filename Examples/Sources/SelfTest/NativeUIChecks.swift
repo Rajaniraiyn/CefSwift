@@ -223,6 +223,16 @@ extension SelfTest {
         session.previous()
         check("find session: previous wraps back to 3 of 3", await findState(3, of: 3),
               detail: "\(session.activeMatch) of \(session.matchCount)")
+        // Only the case changes: the search starts again with its count.
+        session.text = "Page"
+        check("find session: a search ignoring case matches 1 of 3", await findState(1, of: 3),
+              detail: "\(session.activeMatch) of \(session.matchCount)")
+        session.isCaseSensitive = true
+        check("find session: turning case sensitivity on with the same text searches again, 0 of 0",
+              await findState(0, of: 0), detail: "\(session.activeMatch) of \(session.matchCount)")
+        session.isCaseSensitive = false
+        check("find session: turning it off again finds 1 of 3", await findState(1, of: 3),
+              detail: "\(session.activeMatch) of \(session.matchCount)")
         session.text = "zzqqxx"
         check("find session: no matches is 0 of 0", await findState(0, of: 0),
               detail: "\(session.activeMatch) of \(session.matchCount)")

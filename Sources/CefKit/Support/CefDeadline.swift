@@ -8,14 +8,14 @@ import Foundation
 /// stays suspended in an await that ignores cancellation. Cancelling the
 /// calling task cancels `operation` and throws `CancellationError`.
 @MainActor
-func withDeadline<T: Sendable>(
+func withDeadline<T>(
     _ timeout: Duration,
     timeoutError: any Error,
     onTimeout: @escaping @MainActor () -> Void = {},
     _ operation: @escaping @MainActor () async throws -> T
 ) async throws -> T {
     let race = DeadlineRace<T>()
-    return try await withTaskCancellationHandler {
+    try await withTaskCancellationHandler {
         try await withCheckedThrowingContinuation { continuation in
             race.continuation = continuation
             race.work = Task {
@@ -39,11 +39,15 @@ func withDeadline<T: Sendable>(
             race.finish(.failure(CancellationError()))
         }
     }
+    // Kept on the main actor, so `T` need not be `Sendable`.
+    guard let value = race.value else { throw CancellationError() }
+    return value
 }
 
 @MainActor
-private final class DeadlineRace<T: Sendable> {
-    var continuation: CheckedContinuation<T, any Error>?
+private final class DeadlineRace<T> {
+    var continuation: CheckedContinuation<Void, any Error>?
+    var value: T?
     var work: Task<Void, Never>?
     var timer: Task<Void, Never>?
 
@@ -53,6 +57,12 @@ private final class DeadlineRace<T: Sendable> {
         guard let continuation else { return }
         self.continuation = nil
         timer?.cancel()
-        continuation.resume(with: result)
+        switch result {
+        case .success(let value):
+            self.value = value
+            continuation.resume()
+        case .failure(let error):
+            continuation.resume(throwing: error)
+        }
     }
 }

@@ -32,6 +32,14 @@ public enum CefError: Error {
     case frameDetached
     /// A Chromium operation reported failure. The associated value says which.
     case operationFailed(String)
+    /// A wait given a `timeout:` ran out first. Only the wait ends: a
+    /// script goes on running, a navigation goes on loading.
+    case timedOut
+    /// Another main-frame navigation started before the one awaited
+    /// finished, and replaced it. See ``CefNavigation``.
+    case navigationSuperseded
+    /// The page's render process ended while its document was loading.
+    case renderProcessTerminated(CefTerminationReason)
 }
 
 extension CefError: CustomStringConvertible {
@@ -75,6 +83,12 @@ extension CefError: CustomStringConvertible {
             return "The frame was detached before the operation completed."
         case .operationFailed(let detail):
             return detail
+        case .timedOut:
+            return "The wait timed out."
+        case .navigationSuperseded:
+            return "Another navigation replaced the one awaited."
+        case .renderProcessTerminated(let reason):
+            return "The page's render process ended (\(reason)) while it loaded."
         }
     }
 }

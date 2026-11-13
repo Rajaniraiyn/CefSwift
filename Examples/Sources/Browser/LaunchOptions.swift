@@ -52,7 +52,7 @@ struct LaunchOptions {
         let browsers = urls.map { controller.openTab(url: $0, isPrivate: opensPrivateTabs) }
         if let browser = browsers.last, script != nil || focusesAddressBar {
             Task {
-                await controller.waitUntilLoaded(browser)
+                _ = try? await browser.waitUntilLoaded(timeout: .seconds(10))
                 if let script { _ = try? await browser.evaluateJavaScript(script, userGesture: true) }
                 if focusesAddressBar {
                     // Focus goes to the key window, so wait for the app to be active.
