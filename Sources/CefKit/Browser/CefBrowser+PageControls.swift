@@ -210,19 +210,8 @@ extension CefBrowser {
 
     // MARK: Downloads
 
-    public func cancelDownload(_ id: CefDownload.ID) {
-        downloadControls[id].map { $0.pointer.pointee.cancel($0.pointer) }
-    }
-
-    public func pauseDownload(_ id: CefDownload.ID) {
-        downloadControls[id].map { $0.pointer.pointee.pause($0.pointer) }
-    }
-
-    public func resumeDownload(_ id: CefDownload.ID) {
-        downloadControls[id].map { $0.pointer.pointee.resume($0.pointer) }
-    }
-
-    /// Downloads `url` as if the user had clicked a download link.
+    /// Downloads `url` as if the user had clicked a download link. It
+    /// joins ``downloads`` when Chromium starts it.
     public func startDownload(_ url: URL) {
         guard !isDiscarded else {
             whenRestored { [weak self] in self?.startDownload(url) }

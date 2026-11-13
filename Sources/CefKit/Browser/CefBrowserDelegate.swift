@@ -101,13 +101,17 @@ public protocol CefBrowserDelegate: AnyObject {
     /// its own picker. The default asks with
     /// ``CefClientCertificatePresenter``.
     func browser(_ browser: CefBrowser, selectClientCertificateFor request: CefClientCertificateRequest) async -> CefCertificate?
-    /// Decide where a download goes. The default saves to `~/Downloads`.
-    func browser(_ browser: CefBrowser, decideDestinationFor download: CefDownload, suggestedName: String) async -> CefDownloadDecision
+    /// Decide whether and where to save a download. The default,
+    /// ``CefDownloadDecision/default(for:)``, follows the profile's
+    /// ``CefProfile/downloadPolicy``: the Downloads folder unless the app
+    /// set another.
+    func browser(_ browser: CefBrowser, decideDestinationFor download: CefDownload) async -> CefDownloadDecision
 
     // MARK: Downloads
 
-    /// A download's progress or state changed. ``CefBrowser/downloads``
-    /// carries the same information observably.
+    /// A download's progress or state changed. The ``CefDownload`` itself
+    /// is observable, and ``CefBrowser/downloads`` and
+    /// ``CefProfile/downloads`` list it.
     func browser(_ browser: CefBrowser, downloadDidUpdate download: CefDownload)
 }
 
@@ -162,8 +166,8 @@ extension CefBrowserDelegate {
     public func browser(_ browser: CefBrowser, selectClientCertificateFor request: CefClientCertificateRequest) async -> CefCertificate? {
         await CefClientCertificatePresenter.present(request, in: browser.hostWindow)
     }
-    public func browser(_ browser: CefBrowser, decideDestinationFor download: CefDownload, suggestedName: String) async -> CefDownloadDecision {
-        .saveToDownloadsFolder
+    public func browser(_ browser: CefBrowser, decideDestinationFor download: CefDownload) async -> CefDownloadDecision {
+        .default(for: download)
     }
 
     public func browser(_ browser: CefBrowser, downloadDidUpdate download: CefDownload) {}

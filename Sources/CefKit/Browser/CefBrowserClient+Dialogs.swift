@@ -11,25 +11,37 @@ extension CefBrowserClient {
         let h = cefAllocate(cef_download_handler_t.self, owner: self)
         // CEF treats a missing callback as "no": without this, every link or
         // navigation that turns into a download is cancelled before
-        // on_before_download, where the delegate decides.
+        // on_before_download, where the delegate or the profile's policy
+        // decides.
         h.pointee.can_download = { _, browser, _, _ in
             cefRelease(browser)
             return 1
         }
         h.pointee.on_before_download = { s, browser, item, suggestedName, callback in
-            let download = item.map { CefDownload(item: $0) }
+            var snapshot = item.map { CefDownload.Snapshot(item: $0) }
             cefRelease(item)
             let name = CefStringUtil.string(from: suggestedName)
+            if !name.isEmpty { snapshot?.suggestedFilename = name }
             let callback = CefRef(adopting: callback)
-            guard let download, let callback else {
+            guard let snapshot, let callback else {
                 cefRelease(browser)
                 return 0
             }
             return CefBrowserClient.run(s, browser, default: 0) { _, b in
-                b.decide(.browser) { await $0.browser(b, decideDestinationFor: download, suggestedName: name) } then: { decision in
+                // Chromium may have reported the download already, without
+                // the name it suggests here.
+                let download = b.effectiveProfile.trackDownload(snapshot, startedBy: b)
+                download.apply(snapshot)
+                b.decide(.browser) { delegate -> URL? in
+                    let decision = await delegate.browser(b, decideDestinationFor: download)
+                    switch CefDownloadDestination.resolve(decision, suggestedFilename: download.suggestedFilename) {
+                    case .file(let file): return file
+                    case .cancel: return nil
+                    case .ask: return await CefDownloadPresenter.present(download, in: b.hostWindow)
+                    }
+                } then: { destination in
                     // Dropping the callback without continuing cancels the download.
-                    guard let destination = CefDownloadDestination.resolve(decision: decision, suggestedName: name)
-                    else { return }
+                    guard let destination else { return }
                     CefStringUtil.withCefString(destination.path) {
                         callback.pointer.pointee.cont(callback.pointer, $0, 0)
                     }
@@ -38,12 +50,12 @@ extension CefBrowserClient {
             }
         }
         h.pointee.on_download_updated = { s, browser, item, callback in
-            let download = item.map { CefDownload(item: $0) }
+            let snapshot = item.map { CefDownload.Snapshot(item: $0) }
             cefRelease(item)
             let control = CefRef(adopting: callback)
             CefBrowserClient.run(s, browser, default: ()) { _, b in
-                guard let download else { return }
-                b.applyDownload(download, control: control)
+                guard let snapshot else { return }
+                b.applyDownload(snapshot, control: control)
             }
         }
         return h

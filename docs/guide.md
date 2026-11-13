@@ -1251,7 +1251,7 @@ final class Policy: CefBrowserDelegate {
 | `browser(_:shouldProceedDespite:) async` (certificate errors) | `false`: the load is cancelled |
 | `browser(_:selectClientCertificateFor:) async` | Native sheet; asked only with `CefBrowser.Configuration.clientCertificates = .delegate`, otherwise Chromium's picker. See [Client certificates](#client-certificates) |
 | `browserPageIsUnresponsive(_:) async` | Native sheet; Chrome-style browsers show Chromium's dialog instead. See [Unresponsive pages](#unresponsive-pages) |
-| `browser(_:decideDestinationFor:suggestedName:) async` | `.saveToDownloadsFolder`: `~/Downloads` |
+| `browser(_:decideDestinationFor:) async` | `CefDownloadDecision.default(for:)`: the profile's `downloadPolicy`, the Downloads folder unless set. See [Downloads](#downloads) |
 | `browser(_:decidePolicyFor:)` | `.allow` |
 | `browser(_:decideWindowOpenFor:)` | `CefWindowOpenDecision.default(for:)` |
 | `browser(_:handleKeyEvent:isBeforePage:)` | `false` |
@@ -1339,23 +1339,84 @@ func browser(_ browser: CefBrowser, decideWindowOpenFor request: CefWindowOpenRe
 
 ### Downloads
 
-`browser.downloads` lists the browser's downloads, oldest first, as
-`CefDownload` values with `receivedBytes`, `expectedBytes` (`nil` when the
-server gives no size), `destinationURL` and a `state`: `.inProgress`,
-`.paused`, `.completed`, `.cancelled`, or `.interrupted(reason)` when an
-error stopped it. Control them with `pauseDownload(_:)`,
-`resumeDownload(_:)` and `cancelDownload(_:)`, and start one with
-`startDownload(_:)`. A paused or interrupted download keeps its controls,
-so `canResume` downloads continue with `resumeDownload(_:)`.
-
-Each download asks the delegate where to save:
+A download goes where its profile's `downloadPolicy` says, unless the
+browser's delegate decides otherwise. The policy is a setting an app, or
+its settings window, sets without writing a delegate; it belongs to the
+profile because Chromium keeps downloads per profile:
 
 ```swift
-func browser(_ browser: CefBrowser, decideDestinationFor download: CefDownload, suggestedName: String) async -> CefDownloadDecision {
-    guard let folder = await chooseFolder() else { return .cancel }
-    return .save(to: folder.appending(path: suggestedName))
+profile.downloadPolicy = .ask   // .downloadsFolder (the default), .folder(url), .ask, .disabled
+```
+
+| Policy | Effect |
+|---|---|
+| `.downloadsFolder` | Saves in the user's Downloads folder under the suggested name, numbered (`report (1).pdf`) when the name is taken. The default. |
+| `.folder(url)` | The same, in `url`. |
+| `.ask` | Shows a save panel for each download, as a sheet on the browser's window, proposing the suggested name and type. Cancel cancels the download. |
+| `.disabled` | Cancels every download. |
+
+The default is the Downloads folder, as in Safari and Chrome: a download
+the user started should arrive without a question, and a panel that opens
+on its own would stall an app nobody is watching. `WKWebView` has no
+default and makes its delegate choose; CefSwift's delegate methods all
+have one, and this is it.
+
+To decide per download, implement
+`browser(_:decideDestinationFor:)`. Its answer wins over the policy;
+`CefDownloadDecision.default(for:)` is what the policy would do:
+
+```swift
+func browser(_ browser: CefBrowser, decideDestinationFor download: CefDownload) async -> CefDownloadDecision {
+    if download.mimeType == "application/pdf" { return .ask }
+    guard download.url?.host() != "ads.example" else { return .cancel }
+    return .default(for: download)
 }
 ```
+
+`.save(to: file)` saves as exactly that file, `.saveInFolder(folder)` under
+the suggested name, numbered when taken, `.ask` shows the save panel and
+`.cancel` cancels. To show a panel of your own, show it and return
+`.save(to:)` with the user's choice, or `.cancel`. `CefDownloadPresenter`
+is the stock panel, for a delegate that keeps it for some downloads.
+
+Each download is one observable `CefDownload` for its whole life, updated
+as it goes: `url`, `suggestedFilename`, `mimeType`, `fileURL` (the file
+being written, then the finished file), `receivedBytes`, `expectedBytes`
+(`nil` when the server gives no size), `fractionCompleted`,
+`bytesPerSecond`, `estimatedTimeRemaining`, the `browser` that started it,
+and a `state`: `.inProgress`, `.paused`, `.completed`, `.cancelled`, or
+`.interrupted(reason)` when an error stopped it. `pause()`, `resume()` and
+`cancel()` control it while the browser that started it is open; a paused
+or interrupted download keeps its controls, so one that `canResume`
+continues with `resume()`. `browser.startDownload(_:)` starts one.
+
+`browser.downloads` lists a browser's downloads, oldest first, and
+`profile.downloads` those of every browser of the profile, so a download
+manager reads one list instead of being every browser's delegate:
+
+```swift
+struct DownloadsList: View {
+    let profile: CefProfile
+
+    var body: some View {
+        List(profile.downloads.reversed()) { download in
+            HStack {
+                Text(download.fileURL?.lastPathComponent ?? download.suggestedFilename)
+                if download.state == .inProgress {
+                    ProgressView(value: download.fractionCompleted ?? 0)
+                    Button("Cancel", systemImage: "xmark.circle", action: download.cancel)
+                }
+            }
+        }
+    }
+}
+```
+
+The lists last as long as the app runs, an incognito profile's as long as
+the profile. CefSwift keeps no download history across launches; an app
+that wants one saves what it needs from `profile.downloads`. The delegate's
+`browser(_:downloadDidUpdate:)` reports each change too, for code that
+does not observe.
 
 ### File choosers
 

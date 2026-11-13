@@ -47,6 +47,9 @@ public final class CefProfile {
     /// configuration's.
     public var acceptLanguages: [String]?
 
+    /// The download policy and the downloads; see `CefProfile+Downloads.swift`.
+    let downloadStore = CefDownloadStore()
+
     /// Whether the profile is in memory only, made by ``incognito()``.
     public var isIncognito: Bool { kind == .incognito }
 

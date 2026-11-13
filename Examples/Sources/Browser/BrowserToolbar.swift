@@ -382,11 +382,7 @@ private struct DownloadsButton: View {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Downloads").font(.headline)
                     ForEach(browser.downloads.reversed()) { download in
-                        DownloadRow(download: download) {
-                            browser.cancelDownload(download.id)
-                        } resume: {
-                            browser.resumeDownload(download.id)
-                        }
+                        DownloadRow(download: download)
                     }
                 }
                 .padding()
@@ -397,8 +393,6 @@ private struct DownloadsButton: View {
 
 private struct DownloadRow: View {
     let download: CefDownload
-    let cancel: () -> Void
-    let resume: () -> Void
 
     var body: some View {
         HStack(spacing: 10) {
@@ -406,13 +400,13 @@ private struct DownloadRow: View {
                 .font(.title2)
                 .foregroundStyle(.secondary)
             VStack(alignment: .leading, spacing: 3) {
-                Text(download.destinationURL?.lastPathComponent ?? download.url?.lastPathComponent ?? "Download")
+                Text(download.fileURL?.lastPathComponent ?? download.suggestedFilename)
                     .lineLimit(1)
                     .truncationMode(.middle)
                 switch download.state {
                 case .completed:
                     Button("Show in Finder") {
-                        if let path = download.destinationURL { NSWorkspace.shared.activateFileViewerSelecting([path]) }
+                        if let path = download.fileURL { NSWorkspace.shared.activateFileViewerSelecting([path]) }
                     }
                     .buttonStyle(.link)
                     .font(.caption)
@@ -423,21 +417,21 @@ private struct DownloadRow: View {
                 case .paused:
                     Text("Paused").font(.caption).foregroundStyle(.secondary)
                 case .inProgress:
-                    if let expected = download.expectedBytes {
-                        ProgressView(value: Double(download.receivedBytes), total: Double(expected))
+                    if let fraction = download.fractionCompleted {
+                        ProgressView(value: fraction)
                     } else {
                         ProgressView().controlSize(.small)
                     }
                 }
             }
             if download.canResume {
-                Button("Resume", systemImage: "arrow.clockwise.circle.fill", action: resume)
+                Button("Resume", systemImage: "arrow.clockwise.circle.fill", action: download.resume)
                     .labelStyle(.iconOnly)
                     .buttonStyle(.borderless)
                     .foregroundStyle(.secondary)
             }
             if !download.state.isFinished {
-                Button("Cancel", systemImage: "xmark.circle.fill", action: cancel)
+                Button("Cancel", systemImage: "xmark.circle.fill", action: download.cancel)
                     .labelStyle(.iconOnly)
                     .buttonStyle(.borderless)
                     .foregroundStyle(.secondary)

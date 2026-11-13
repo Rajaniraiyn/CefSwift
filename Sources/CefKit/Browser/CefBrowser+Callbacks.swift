@@ -120,14 +120,11 @@ extension CefBrowser {
         findSession.didReceive(result)
     }
 
-    func applyDownload(_ download: CefDownload, control: CefRef<cef_download_item_callback_t>?) {
-        if let index = downloads.firstIndex(where: { $0.id == download.id }) {
-            downloads[index] = download
-        } else {
-            downloads.append(download)
-        }
+    func applyDownload(_ snapshot: CefDownload.Snapshot, control: CefRef<cef_download_item_callback_t>?) {
+        let download = effectiveProfile.trackDownload(snapshot, startedBy: self)
+        download.apply(snapshot)
         // Kept while the download can go on, paused or interrupted included.
-        downloadControls[download.id] = download.state.isFinished ? nil : control
+        download.control = download.state.isFinished ? nil : control
         delegate?.browser(self, downloadDidUpdate: download)
     }
 
@@ -302,7 +299,7 @@ extension CefBrowser {
         canGoForward = false
         isShowingDevTools = false
         frames = []
-        downloadControls = [:]
+        for download in downloads { download.control = nil }
         for attachment in configuration.attachments { attachment.browserDidClose(self) }
         accessibilityDidClose()
         cancelDecisions { _ in true }
