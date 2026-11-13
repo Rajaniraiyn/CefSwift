@@ -305,7 +305,7 @@ public final class CefBookmarks {
         guard let url = bookmarksFileURL else { return nil }
         let account = url.deletingLastPathComponent().appendingPathComponent("AccountBookmarks")
         guard !FileManager.default.fileExists(atPath: account.path),
-              (profile.preference("policy.managed_bookmarks")?.arrayValue ?? []).isEmpty
+              (profile.preferences.value(named: "policy.managed_bookmarks")?.arrayValue ?? []).isEmpty
         else { return nil }
         return CefBookmarkFile(contentsOf: url)
     }

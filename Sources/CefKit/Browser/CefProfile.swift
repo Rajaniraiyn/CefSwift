@@ -181,38 +181,6 @@ public final class CefProfile {
         return url.appendingPathComponent("Default", isDirectory: true)
     }
 
-    // MARK: Preferences
-
-    /// Reads a Chromium preference by its dotted name; `nil` when no such
-    /// preference exists. Apps use ``preferences``.
-    func preference(_ name: String) -> CefJSON? {
-        withPreferences { manager in
-            CefStringUtil.withCefString(name) { cefName -> CefJSON? in
-                guard manager.pointee.has_preference(manager, cefName) != 0 else { return nil }
-                let value = manager.pointee.get_preference(manager, cefName)
-                defer { cefRelease(value) }
-                return CefJSON(cefValue: value)
-            }
-        } ?? nil
-    }
-
-    /// Changes a Chromium preference, passing an unknown name on to
-    /// Chromium; `nil` restores its default. Applies the configured
-    /// preferences. Apps use ``preferences``.
-    func setPreference(_ name: String, to value: CefJSON?) throws(CefError) {
-        let failure: String? = withPreferences { manager in
-            CefStringUtil.withCefString(name) { cefName -> String? in
-                var error = cef_string_t()
-                defer { cef_string_utf16_clear(&error) }
-                guard manager.pointee.set_preference(manager, cefName, value?.makeCefValue(), &error) == 0 else { return nil }
-                return CefStringUtil.string(from: error)
-            }
-        } ?? "the profile is unavailable"
-        if let failure {
-            throw CefError.operationFailed("Cannot set preference '\(name)': \(failure)")
-        }
-    }
-
     // MARK: Appearance
 
     /// The color scheme Chrome's UI and `prefers-color-scheme` follow.
@@ -386,9 +354,10 @@ public final class CefProfile {
 
     private func applyConfigured(_ preferences: [String: CefJSON]) {
         // Application-wide ones are CefRuntime's to apply.
-        for (name, value) in preferences where preference(name) != nil {
+        let manager = self.preferences
+        for (name, value) in preferences where manager.value(named: name) != nil {
             do {
-                try setPreference(name, to: value)
+                try manager.setValue(value, named: name)
             } catch {
                 CefLog.error("\(error)")
             }

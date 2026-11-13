@@ -378,7 +378,7 @@ public struct CefSiteSettings {
     public func exceptions(for permission: CefSitePermission? = nil) -> [Exception] {
         let permissions = permission.map { [$0] } ?? CefSitePermission.allCases
         return permissions.flatMap { permission -> [Exception] in
-            guard let stored = profile.preference("profile.content_settings.exceptions.\(permission.storageName)")
+            guard let stored = profile.preferences.value(named: "profile.content_settings.exceptions.\(permission.storageName)")
             else { return [] }
             return Self.exceptions(of: permission, stored: stored)
         }
