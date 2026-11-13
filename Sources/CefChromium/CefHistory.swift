@@ -2,36 +2,40 @@ import AppKit
 import CefKit
 import Foundation
 
-/// A page in a profile's browsing history.
-///
-/// Like `chrome://history`, history is grouped by day: a page visited on
-/// several days appears once per day.
-public struct CefHistoryEntry: Sendable, Identifiable, Hashable {
-    public struct ID: Sendable, Hashable {
+extension CefHistory {
+    /// A page in a profile's browsing history.
+    ///
+    /// Like `chrome://history`, history is grouped by day: a page visited on
+    /// several days appears once per day.
+    public struct Entry: Sendable, Identifiable, Hashable {
+        public struct ID: Sendable, Hashable {
+            public var url: URL
+            public var lastVisitDate: Date
+        }
+
+        public var id: ID { ID(url: url, lastVisitDate: lastVisitDate) }
         public var url: URL
+        public var title: String
+        /// The latest visit this entry covers.
         public var lastVisitDate: Date
+        /// Every visit this entry covers, newest first.
+        public var visitDates: [Date]
+        /// Whether the page is bookmarked.
+        public var isBookmarked: Bool
+
+        /// Chromium's own visit times, needed to remove exactly these visits.
+        let visitTimes: [Double]
     }
-
-    public var id: ID { ID(url: url, lastVisitDate: lastVisitDate) }
-    public var url: URL
-    public var title: String
-    /// The latest visit this entry covers.
-    public var lastVisitDate: Date
-    /// Every visit this entry covers, newest first.
-    public var visitDates: [Date]
-    /// Whether the page is bookmarked.
-    public var isBookmarked: Bool
-
-    /// Chromium's own visit times, needed to remove exactly these visits.
-    let visitTimes: [Double]
 }
 
-/// A site from a profile's most-visited list — the tiles on Chrome's new
-/// tab page.
-public struct CefMostVisitedSite: Sendable, Identifiable, Hashable {
-    public var id: URL { url }
-    public var url: URL
-    public var title: String
+extension CefHistory {
+    /// A site from a profile's most-visited list — the tiles on Chrome's new
+    /// tab page.
+    public struct TopSite: Sendable, Identifiable, Hashable {
+        public var id: URL { url }
+        public var url: URL
+        public var title: String
+    }
 }
 
 /// The browsing history of a ``CefProfile`` — the same history Chrome's
@@ -42,7 +46,7 @@ public struct CefMostVisitedSite: Sendable, Identifiable, Hashable {
 /// for entry in try await history.search("swift", limit: 20) {
 ///     print(entry.lastVisitDate, entry.title, entry.url)
 /// }
-/// let tiles = try await history.mostVisited()
+/// let tiles = try await history.topSites()
 /// ```
 ///
 /// Chromium records visits made in Chrome-style browsers (``CefWindow``
@@ -64,17 +68,17 @@ public final class CefHistory {
         self.profile = profile
     }
 
-    private func call(_ module: CefServiceModule, _ function: String, _ arguments: CefJSON = [:]) async throws -> CefJSON {
+    private func call(_ module: CefServiceHost.Module, _ function: String, _ arguments: CefJSON = [:]) async throws -> CefJSON {
         // Incognito profiles keep no history.
         guard !profile.isIncognito else {
             throw CefError.operationFailed("an incognito profile keeps no history")
         }
-        return try await profile.services.call(module, function, arguments)
+        return try await profile.serviceHosts.call(module, function, arguments)
     }
 
     /// Visited pages whose title or address matches `text` (everything
     /// when empty), newest first.
-    public func search(_ text: String = "", limit: Int = 100) async throws -> [CefHistoryEntry] {
+    public func search(_ text: String = "", limit: Int = 100) async throws -> [CefHistory.Entry] {
         try await call(
             Self.historyModule,
             """
@@ -93,11 +97,11 @@ public final class CefHistory {
             })
             """,
             ["text": .string(text), "limit": .number(Double(max(1, limit)))]
-        ).decode([HistoryRecord].self).compactMap(CefHistoryEntry.init)
+        ).decode([HistoryRecord].self).compactMap(CefHistory.Entry.init)
     }
 
     /// Removes the visits `entries` cover from history.
-    public func remove(_ entries: [CefHistoryEntry]) async throws {
+    public func remove(_ entries: [CefHistory.Entry]) async throws {
         guard !entries.isEmpty else { return }
         let items = CefJSON.array(entries.map { entry in
             ["url": .string(entry.url.absoluteString), "timestamps": .array(entry.visitTimes.map(CefJSON.number))]
@@ -115,12 +119,12 @@ public final class CefHistory {
     /// The profile's most-visited sites, most visited first — what Chrome's
     /// new tab page shows as tiles, including visits made just before the
     /// call.
-    public func mostVisited() async throws -> [CefMostVisitedSite] {
+    public func topSites() async throws -> [CefHistory.TopSite] {
         try await call(
             Self.mostVisitedModule,
             "s => s.tiles().then(tiles => tiles.map(t => ({ url: t.url, title: t.title })))"
         ).decode([TileRecord].self).compactMap { tile in
-            URL(string: tile.url).map { CefMostVisitedSite(url: $0, title: tile.title) }
+            URL(string: tile.url).map { CefHistory.TopSite(url: $0, title: tile.title) }
         }
     }
 
@@ -171,7 +175,7 @@ public final class CefHistory {
 
     /// An own `history.mojom.PageHandler`. Calls are queued because result
     /// paging is stateful per handler.
-    static let historyModule = CefServiceModule(
+    static let historyModule = CefServiceHost.Module(
         name: "history", hosts: [.history],
         setup: """
             async () => {
@@ -194,7 +198,7 @@ public final class CefHistory {
     /// The new handler first reports the cached tiles, and reports again once
     /// the fresh list differs; without a second report within a moment, the
     /// cached tiles were current.
-    private static let mostVisitedModule = CefServiceModule(
+    private static let mostVisitedModule = CefServiceHost.Module(
         name: "most-visited", hosts: [.mostVisited],
         setup: """
             async () => {
@@ -226,7 +230,7 @@ public final class CefHistory {
 
     /// `chrome://favicon2` images, which the bookmarks and history hosts may
     /// load; whichever of them runs answers.
-    private static let faviconModule = CefServiceModule(
+    private static let faviconModule = CefServiceHost.Module(
         name: "favicons", hosts: [.bookmarks, .history], setup: "async () => ({})")
 }
 
@@ -243,7 +247,7 @@ private struct TileRecord: Decodable {
     var title: String
 }
 
-extension CefHistoryEntry {
+extension CefHistory.Entry {
     fileprivate init?(_ record: HistoryRecord) {
         guard let url = URL(string: record.url) else { return nil }
         self.url = url

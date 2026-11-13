@@ -67,7 +67,7 @@ extension SelfTest {
         await expect("service hosts: calls across services run concurrently") {
             async let search = profile.bookmarks.search("CefSwift")
             async let visits = profile.history.search(limit: 5)
-            async let tiles = profile.history.mostVisited()
+            async let tiles = profile.history.topSites()
             async let suggestions = profile.autocomplete.suggestions(for: "selftest")
             // An image is not `Sendable`, so its call stays on the main actor.
             let icon = Task { @MainActor in

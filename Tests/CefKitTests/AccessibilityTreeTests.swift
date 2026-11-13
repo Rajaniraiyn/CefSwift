@@ -231,8 +231,8 @@ struct AccessibilityTreeTests {
         #expect(changes.updatedNodes == [Self.id(6), Self.id(12)])
         #expect(changes.focusDidChange)
         #expect(tree.focusedNode?.id == Self.id(6))
-        #expect(changes.announcements == [CefAccessibilityAnnouncement(text: "Saved", isAssertive: false)])
-        #expect(changes.events == [CefAccessibilityEvent(type: "focus", node: Self.id(6))])
+        #expect(changes.announcements == [CefAccessibilityChanges.Announcement(text: "Saved", isAssertive: false)])
+        #expect(changes.events == [CefAccessibilityChanges.Event(type: "focus", node: Self.id(6))])
         #expect(tree.node(Self.id(6))?.textSelection == NSRange(location: 1, length: 3))
     }
 
@@ -286,7 +286,7 @@ struct AccessibilityTreeTests {
         let changes = tree.applyTreeChange(Self.change(nodes: [
             Self.node(4, "staticText", attributes: ["name": "disk full", "containerLiveStatus": "assertive", "containerLiveAtomic": true]),
         ]))
-        #expect(changes.announcements == [CefAccessibilityAnnouncement(text: "Error: disk full", isAssertive: true)])
+        #expect(changes.announcements == [CefAccessibilityChanges.Announcement(text: "Error: disk full", isAssertive: true)])
     }
 
     @Test func removeAllEmptiesTheTree() {

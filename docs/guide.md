@@ -1166,7 +1166,7 @@ struct Person: Codable { var name: String }
 
 let bridge = CefBridge(name: "app")
 bridge.handle("greet") { (person: Person) in "Hello, \(person.name)!" }
-bridge.handle("save") { (document: Document, call: CefBridgeCall) in
+bridge.handle("save") { (document: Document, call: CefBridge.Call) in
     guard call.origin == "https://app.example.com" else { throw AppError.forbidden }
     try documents.save(document)
 }
@@ -1186,7 +1186,7 @@ const stop = app.on("themeChanged", theme => apply(theme));
 - `bridge.emit("themeChanged", theme)` delivers an event to `app.on`
   listeners, in every browser the bridge is attached to or in one
   (`to: browser`).
-- `CefBridgeCall` describes the caller: `browser`, `method`, `origin` and
+- `CefBridge.Call` describes the caller: `browser`, `method`, `origin` and
   `isMainFrame`. The browser process establishes the origin from its own
   record of the frame's address, so neither a page nor a compromised
   renderer can claim another one. `about:blank` and `srcdoc` frames have
@@ -1778,7 +1778,7 @@ from the top right of the page. That is all CefKit does with them.
 The optional `CefChromium` library
 (`.product(name: "CefChromium", package: "CefSwift")`) lets the app take
 them over. They are surfaces, `CefChromiumSurface`, of a `Kind`, and
-`window.chromiumUI` decides, per kind, how each is presented:
+`window.chromiumSurfacePolicy` decides, per kind, how each is presented:
 
 | Presentation | Effect |
 |---|---|
@@ -1791,9 +1791,9 @@ Anchors put Chromium's surfaces under your controls:
 ```swift
 import CefChromium
 
-window.chromiumUI.anchor = .view(addressField, alignment: .trailing)  // every toolbar surface
-window.chromiumUI.anchors[.qrCode] = .view(qrButton, alignment: .trailing)
-window.chromiumUI[.statusBubble] = .hidden
+window.chromiumSurfacePolicy.anchor = .view(addressField, alignment: .trailing)  // every toolbar surface
+window.chromiumSurfacePolicy.anchors[.qrCode] = .view(qrButton, alignment: .trailing)
+window.chromiumSurfacePolicy[.statusBubble] = .hidden
 ```
 
 CefChromium recognizes surfaces by overriding methods of Chromium's
@@ -1801,10 +1801,10 @@ private AppKit classes (`CefNSWindow`, `NativeWidgetMacNSWindow`) and by
 the class names Chromium's views report through accessibility, so it is
 bound to the pinned CEF; SelfTest fails when an update renames them. It
 starts following surfaces, in every `CefWindow`, the first time the app
-uses any of its window API (`chromiumUI`, `configuration.chromiumUI`,
+uses any of its window API (`chromiumSurfacePolicy`, `configuration.chromiumSurfacePolicy`,
 `chromiumSurfaces`, `setCustomPresentation(for:_:)`, `setStatusBubble(_:)`,
 `chromiumSurfaceAnchor(_:alignment:)`, …); surfaces already on screen then
-are taken up as they are. Set `chromiumUI` before showing the window, so
+are taken up as they are. Set `chromiumSurfacePolicy` before showing the window, so
 nothing shows before it applies. Until then Chromium's interface shows as
 it does without the library.
 
@@ -1813,13 +1813,15 @@ switched off in Chromium when the browser is created
 (`cef_browser_settings_t`'s `chrome_status_bubble` and
 `chrome_zoom_bubble`), so Chromium never creates its window, and
 `browser.statusText` still follows the pointer. Hidden later, through
-`window.chromiumUI`, Chromium's window is created and kept invisible:
+`window.chromiumSurfacePolicy`, Chromium's window is created and kept invisible:
 
 ```swift
+import CefChromium
+
 var configuration = CefWindow.Configuration()
-var ui = CefWindow.ChromiumUI()
-ui[.statusBubble] = .hidden
-configuration.chromiumUI = ui              // window.chromiumUI starts as this
+var policy = CefChromiumSurface.Policy()
+policy[.statusBubble] = .hidden
+configuration.chromiumSurfacePolicy = policy              // window.chromiumSurfacePolicy starts as this
 let window = CefWindow(browser: browser, configuration: configuration)
 ```
 
@@ -1866,7 +1868,7 @@ A surface carries what a replacement needs: `kind`, `title`, `browser`,
 `url` (the address a QR code encodes, or the page's), `anchorRect`,
 `position(_:)` to place a window of yours as Chromium would, and
 `dismiss()`. A panel from the SwiftUI method closes on Esc, on a click
-elsewhere, and when the surface is dismissed. `presentationForSurface`
+elsewhere, and when the surface is dismissed. `presentationForChromiumSurface`
 decides per surface as it appears, `chromiumSurfaces` lists those on
 screen, and `onChromiumSurface` hears about each one, custom ones without
 a presenter included.
@@ -2207,7 +2209,7 @@ let recent = try await profile.bookmarks.recent(limit: 12)
 for await _ in profile.bookmarks.changes { /* refresh your UI */ }
 
 let visits = try await profile.history.search("swift", limit: 20)
-let topSites = try await profile.history.mostVisited()
+let topSites = try await profile.history.topSites()
 try await profile.history.remove(visits)
 
 let suggestions = try await profile.autocomplete.suggestions(for: "cef")
@@ -2219,7 +2221,7 @@ let suggestions = try await profile.autocomplete.suggestions(for: "cef")
   this API and in Chrome's UI; edits made while the consumer is busy are
   reported once, as one signal to read again.
 - `history` groups visits by day, as `chrome://history` does. It records
-  only visits made in Chrome-style browsers. `mostVisited()` includes visits
+  only visits made in Chrome-style browsers. `topSites()` includes visits
   made up to the call and takes up to a second.
 - `history.favicon(for:size:)` returns the icon Chromium keeps for a page
   that is not open, such as a history entry, bookmark or most-visited site,
@@ -2268,14 +2270,14 @@ latency the median of five calls.
 | `bookmarks` reads, `changes` while the host is closed | none (Chromium's file) | 0 | – | – |
 | `bookmarks` changes and searches | `chrome://bookmarks` | 21 MB | 137 ms | 1 ms |
 | `history.search`, `remove` | `chrome://history` | 27 MB | 175 ms | 2 ms |
-| `history.mostVisited()` | `chrome://new-tab-page-third-party` | 21 MB | 127 ms | 1 ms |
+| `history.topSites()` | `chrome://new-tab-page-third-party` | 21 MB | 127 ms | 1 ms |
 | `history.favicon(for:size:)` | `chrome://bookmarks` or `chrome://history`, whichever runs | 0 when one runs | 16 ms | 2 ms |
 | `autocomplete` | `chrome://omnibox` | 23 MB | 234 ms | 9 ms |
 | Discarding | `chrome://discards` | 22 MB | 122 ms | 1 ms |
 
 The Browser example uses them for address-field suggestions
 (`AddressSuggestions.swift`), a bookmark star, Bookmarks and History menus,
-and a start page whose tiles come from `mostVisited()` and
+and a start page whose tiles come from `topSites()` and
 `bookmarks.recent()` through a `CefBridge` (`BrowserLibrary.swift`). It
 reads history when the menu bar opens, so at launch it starts no host.
 
@@ -2798,7 +2800,7 @@ the switches measured and not used.
   experimental, and `CefBookmarks`, `CefHistory` and `CefAutocomplete`
   depend on Chromium-internal WebUI hosts, and `CefBookmarks` on the format
   of Chromium's `Bookmarks` file.
-- CefChromium's `chromiumUI` and swipe navigation in `CefWindow`
+- CefChromium's `chromiumSurfacePolicy` and swipe navigation in `CefWindow`
   depend on Chromium's AppKit classes and the view class names its
   accessibility reports
   ([architecture](architecture.md#chromiums-appkit-classes)). If a

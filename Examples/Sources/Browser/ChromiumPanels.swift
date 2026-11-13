@@ -14,7 +14,7 @@ enum ChromiumPanels {
 
     static func configure(_ window: CefWindow) {
         window.setFindBar { session in FindBar(session: session) }
-        window.chromiumUI[.statusBubble] = .hidden
+        window.chromiumSurfacePolicy[.statusBubble] = .hidden
         let browser = window.browser
         window.setPageOverlay {
             ZStack {

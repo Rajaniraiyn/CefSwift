@@ -10,7 +10,7 @@ import Observation
 /// sign-in, the find bar, the link status bubble, and others.
 ///
 /// Chromium draws these with its Views toolkit, each in a window of its
-/// own attached to the ``CefWindow``. ``CefWindow/chromiumUI``
+/// own attached to the ``CefWindow``. ``CefWindow/chromiumSurfacePolicy``
 /// decides how each kind is presented: as Chromium draws it, anchored under
 /// one of your controls, replaced by your own interface, or hidden. Every
 /// surface that appears is listed in ``CefWindow/chromiumSurfaces``
@@ -68,7 +68,7 @@ public final class CefChromiumSurface: Identifiable {
         case other(String)
 
         /// Whether Chromium would attach the surface to its toolbar, so that
-        /// ``CefWindow/ChromiumUI/anchor`` applies to it.
+        /// ``CefChromiumSurface/Policy/anchor`` applies to it.
         public var hangsFromToolbar: Bool {
             switch self {
             case .qrCode, .cast, .share, .downloads, .permissionPrompt, .translate, .savePassword, .bookmark,
@@ -87,7 +87,7 @@ public final class CefChromiumSurface: Identifiable {
     /// How a kind of surface is presented.
     public enum Presentation: Sendable {
         /// As Chromium draws it, under its anchor
-        /// (``CefWindow/ChromiumUI/anchors``, or ``CefWindow/ChromiumUI/anchor`` for
+        /// (``CefChromiumSurface/Policy/anchors``, or ``CefChromiumSurface/Policy/anchor`` for
         /// surfaces that hang from the toolbar), or where Chromium puts it
         /// when there is none.
         case native
@@ -114,7 +114,7 @@ public final class CefChromiumSurface: Identifiable {
     /// places a window there.
     public var anchorRect: CGRect? {
         guard let window = parentWindow?.window else { return nil }
-        return parentWindow?.chromiumUI.anchor(for: kind)?.screenRect(in: window)
+        return parentWindow?.chromiumSurfacePolicy.anchor(for: kind)?.screenRect(in: window)
     }
     /// How the surface is presented.
     public internal(set) var presentation: Presentation = .native
@@ -196,7 +196,7 @@ public final class CefChromiumSurface: Identifiable {
     public func position(_ panel: NSWindow) {
         guard let parent = parentWindow?.window else { return }
         let size = panel.frame.size
-        if let anchor = parentWindow?.chromiumUI.anchor(for: kind), let origin = anchor.origin(for: size, in: parent) {
+        if let anchor = parentWindow?.chromiumSurfacePolicy.anchor(for: kind), let origin = anchor.origin(for: size, in: parent) {
             panel.setFrameOrigin(origin)
             return
         }
@@ -354,25 +354,25 @@ public final class CefChromiumSurface: Identifiable {
         guard let widgetClass = NSClassFromString("NativeWidgetMacNSWindow"), window.isKind(of: widgetClass) else {
             return false
         }
-        if let browserWindowClass = NSClassFromString("CefNSWindow"), window.isKind(of: browserWindowClass) {
+        if let viewsWindowClass = NSClassFromString("CefNSWindow"), window.isKind(of: viewsWindowClass) {
             return false
         }
         return true
     }
 }
 
-extension CefWindow {
+extension CefChromiumSurface {
     /// How a ``CefWindow`` presents Chromium's own interface: for each
     /// kind of surface, whether Chromium draws it, you replace it, or it is
     /// hidden, and where it goes.
     ///
     /// ```swift
-    /// window.chromiumUI.anchor = .view(addressField, alignment: .trailing)
-    /// window.chromiumUI.anchors[.qrCode] = .view(qrButton, alignment: .trailing)
-    /// window.chromiumUI[.statusBubble] = .hidden
+    /// window.chromiumSurfacePolicy.anchor = .view(addressField, alignment: .trailing)
+    /// window.chromiumSurfacePolicy.anchors[.qrCode] = .view(qrButton, alignment: .trailing)
+    /// window.chromiumSurfacePolicy[.statusBubble] = .hidden
     /// ```
     @MainActor
-    public struct ChromiumUI {
+    public struct Policy {
         /// Where surfaces that hang from Chrome's toolbar go
         /// (``CefChromiumSurface/Kind/hangsFromToolbar``) when their kind has no
         /// anchor in ``anchors``. `nil` leaves them where Chromium puts them,
@@ -408,8 +408,8 @@ extension CefChromiumSurface {
     /// or centered on it.
     ///
     /// ```swift
-    /// window.chromiumUI.anchor = .view(addressField, alignment: .trailing)
-    /// window.chromiumUI.anchors[.findBar] = .rect(CGRect(x: 0, y: 700, width: 300, height: 0))
+    /// window.chromiumSurfacePolicy.anchor = .view(addressField, alignment: .trailing)
+    /// window.chromiumSurfacePolicy.anchors[.findBar] = .rect(CGRect(x: 0, y: 700, width: 300, height: 0))
     /// ```
     @MainActor
     public struct Anchor {

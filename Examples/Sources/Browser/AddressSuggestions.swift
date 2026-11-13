@@ -21,7 +21,7 @@ import SwiftUI
 @Observable
 final class AddressSuggestions {
     /// The suggestions for ``typedText``, best first.
-    private(set) var items: [CefAutocompleteSuggestion] = []
+    private(set) var items: [CefAutocomplete.Suggestion] = []
     /// The highlighted suggestion; `nil` means the typed text itself.
     private(set) var selection: Int?
     /// What the user typed, as opposed to a suggestion's text put into the
@@ -35,7 +35,7 @@ final class AddressSuggestions {
     /// when the selection moves.
     @ObservationIgnored var setFieldText: (String) -> Void = { _ in }
     /// Opens a suggestion.
-    @ObservationIgnored var choose: (CefAutocompleteSuggestion) -> Void = { _ in }
+    @ObservationIgnored var choose: (CefAutocomplete.Suggestion) -> Void = { _ in }
     /// The icon of an open tab showing a URL, for "Switch to Tab" rows.
     @ObservationIgnored var favicon: (URL) -> NSImage? = { _ in nil }
 
@@ -50,7 +50,7 @@ final class AddressSuggestions {
     @ObservationIgnored private var lastKeyDeleted = false
     @ObservationIgnored private lazy var panel = SuggestionsPanel(suggestions: self)
 
-    var selectedSuggestion: CefAutocompleteSuggestion? {
+    var selectedSuggestion: CefAutocomplete.Suggestion? {
         selection.flatMap { items.indices.contains($0) ? items[$0] : nil }
     }
 
@@ -165,7 +165,7 @@ final class AddressSuggestions {
 
     private static let limit = 8
 
-    private func show(_ results: [CefAutocompleteSuggestion]) {
+    private func show(_ results: [CefAutocomplete.Suggestion]) {
         items = results
         selection = nil
         if let anchor, !results.isEmpty { panel.show(below: anchor) } else { panel.hide() }
@@ -224,7 +224,7 @@ final class AddressSuggestions {
     }
 
     /// The text a suggestion puts in the field.
-    static func fieldText(for suggestion: CefAutocompleteSuggestion) -> String {
+    static func fieldText(for suggestion: CefAutocomplete.Suggestion) -> String {
         if suggestion.isSearch { return suggestion.text }
         return suggestion.url?.absoluteString ?? suggestion.replacementText
     }
@@ -300,7 +300,7 @@ private struct SuggestionsList: View {
 }
 
 private struct SuggestionRow: View {
-    let suggestion: CefAutocompleteSuggestion
+    let suggestion: CefAutocomplete.Suggestion
     let isSelected: Bool
     /// The page's own icon, when there is one to show.
     var icon: NSImage?

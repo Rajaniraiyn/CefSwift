@@ -113,7 +113,7 @@ public final class CefProfile {
     /// The hidden service hosts on Chromium's WebUI pages: native tab
     /// discarding's here, and those of modules built on CefKit, such as
     /// CefChromium's bookmarks, history and autocomplete.
-    package private(set) lazy var services = CefInternalServices(profile: self)
+    package private(set) lazy var serviceHosts = CefServiceHosts(profile: self)
 
     /// The profile's last browser has closed. Its service hosts close too —
     /// they hold the profile, so an incognito profile and its data could
@@ -121,27 +121,27 @@ public final class CefProfile {
     /// profile's close when idle.
     func lastBrowserDidClose() {
         guard self !== CefProfile.default else { return }
-        services.stopAll()
+        serviceHosts.stopAll()
     }
 
     // MARK: Service hosts, for tests
 
     /// The names of the service hosts open or opening.
-    @_spi(Testing) public var runningServiceHosts: [String] { services.runningHostNames }
+    @_spi(Testing) public var runningServiceHosts: [String] { serviceHosts.runningHostNames }
 
     /// Closes every service host, as idling does.
-    @_spi(Testing) public func stopServiceHosts() { services.stopAll() }
+    @_spi(Testing) public func stopServiceHosts() { serviceHosts.stopAll() }
 
     /// Kills the renderer of the running service host called `name`, as a
     /// crash would.
     @_spi(Testing) public func crashServiceHost(named name: String) async {
-        await services.crashRenderer(ofHostNamed: name)
+        await serviceHosts.crashRenderer(ofHostNamed: name)
     }
 
     /// How long a service host stays open after its last call.
     @_spi(Testing) public static var serviceIdleTimeout: Duration {
-        get { CefInternalServices.idleTimeout }
-        set { CefInternalServices.idleTimeout = newValue }
+        get { CefServiceHosts.idleTimeout }
+        set { CefServiceHosts.idleTimeout = newValue }
     }
 
     /// The directory Chromium keeps this profile's files in; `nil` for an

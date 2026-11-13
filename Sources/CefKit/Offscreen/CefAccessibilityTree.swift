@@ -26,10 +26,10 @@ public struct CefAccessibilityChanges: Sendable, Equatable {
     /// Whether nodes moved, resized, appeared or went away.
     public var layoutDidChange = false
     /// Text that live regions on the page ask to have announced.
-    public var announcements: [CefAccessibilityAnnouncement] = []
+    public var announcements: [CefAccessibilityChanges.Announcement] = []
     /// Chromium's own events, such as `"focus"`, `"loadComplete"` or
     /// `"valueChanged"`, in the order they arrived.
-    public var events: [CefAccessibilityEvent] = []
+    public var events: [CefAccessibilityChanges.Event] = []
 
     /// Creates an empty set of changes.
     public init() {}
@@ -38,27 +38,31 @@ public struct CefAccessibilityChanges: Sendable, Equatable {
     public var isEmpty: Bool { self == CefAccessibilityChanges() }
 }
 
-/// Text a live region asks assistive technology to announce.
-public struct CefAccessibilityAnnouncement: Sendable, Equatable {
-    /// The text to announce.
-    public var text: String
-    /// Whether the region is `assertive`, interrupting current speech,
-    /// rather than `polite`.
-    public var isAssertive: Bool
+extension CefAccessibilityChanges {
+    /// Text a live region asks assistive technology to announce.
+    public struct Announcement: Sendable, Equatable {
+        /// The text to announce.
+        public var text: String
+        /// Whether the region is `assertive`, interrupting current speech,
+        /// rather than `polite`.
+        public var isAssertive: Bool
 
-    /// Creates an announcement.
-    public init(text: String, isAssertive: Bool) {
-        self.text = text
-        self.isAssertive = isAssertive
+        /// Creates an announcement.
+        public init(text: String, isAssertive: Bool) {
+            self.text = text
+            self.isAssertive = isAssertive
+        }
     }
 }
 
-/// An event Chromium reported with an accessibility update.
-public struct CefAccessibilityEvent: Sendable, Equatable {
-    /// Chromium's event name, such as `"focus"` or `"loadComplete"`.
-    public var type: String
-    /// The node the event is about.
-    public var node: CefAccessibilityNode.ID?
+extension CefAccessibilityChanges {
+    /// An event Chromium reported with an accessibility update.
+    public struct Event: Sendable, Equatable {
+        /// Chromium's event name, such as `"focus"` or `"loadComplete"`.
+        public var type: String
+        /// The node the event is about.
+        public var node: CefAccessibilityNode.ID?
+    }
 }
 
 /// The accessibility tree of an offscreen browser's page, kept up to date
@@ -317,7 +321,7 @@ public final class CefAccessibilityTree {
         for event in value["events"].arrayValue ?? [] {
             guard let type = event["event_type"].stringValue else { continue }
             let node = event["id"].intValue.map { CefAccessibilityNode.ID(tree: treeID, node: Int32(truncatingIfNeeded: $0)) }
-            changes.events.append(CefAccessibilityEvent(type: type, node: node))
+            changes.events.append(CefAccessibilityChanges.Event(type: type, node: node))
             switch type {
             case "loadComplete" where treeID == mainTreeID:
                 changes.didFinishLoading = true
@@ -547,7 +551,7 @@ public final class CefAccessibilityTree {
         }
         for region in regions {
             let text = region.atomic ? textContent(of: region.root) : region.texts.joined(separator: " ")
-            changes.announcements.append(CefAccessibilityAnnouncement(text: text, isAssertive: region.assertive))
+            changes.announcements.append(CefAccessibilityChanges.Announcement(text: text, isAssertive: region.assertive))
         }
     }
 

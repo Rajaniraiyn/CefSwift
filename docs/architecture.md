@@ -12,7 +12,7 @@ CefSwiftUI   CefSwiftApp, CefWebView (over CefKit's host views), SwiftUI modifie
     │     │         stores and the passkey sheet
     │     │  CefChromium  optional, bound to the pinned CEF: CefBookmarks, CefHistory,
     │     │     │         CefAutocomplete (on CefKit's service hosts); CefChromiumSurface,
-    │     │     │         chromiumUI and their SwiftUI glue (on Chromium's AppKit classes)
+    │     │     │         chromiumSurfacePolicy and their SwiftUI glue (on Chromium's AppKit classes)
 CefKit       CefRuntime, CefBrowser, CefWindow, CefBrowserDelegate, CefBridge,
     │        CefDevTools, CefProfile, CefBrowserAttachment, configuration and policy types; the AppKit
     │        host views CefWindowedBrowserView and CefOffscreenBrowserView
@@ -67,8 +67,8 @@ CefPasskeys or CefChromium, plugs into it at these points:
   (package) set the browser's `chrome_status_bubble` and
   `chrome_zoom_bubble`. CefChromium's status bubble uses the public
   `pageOverlay`.
-- The internal service hosts (package): `CefInternalServices`
-  (`CefProfile.services`), `CefServiceHost` and `CefServiceModule`. A module
+- The internal service hosts (package): `CefServiceHosts`
+  (`CefProfile.serviceHosts`), `CefServiceHost` and `CefServiceHost.Module`. A module
   declares its own hosts and modules and calls them
   ([Internal-page services](#internal-page-services)).
 
@@ -85,7 +85,7 @@ for overrides of Chromium's AppKit classes.
 Chromium-private interfaces of the pinned CEF: its stores
 (`profile.bookmarks`, `history` and `autocomplete`, kept weakly in the
 profile's module state) and the surfaces of Chrome-style windows
-(`window.chromiumUI`, kept in the window's module state). It depends on
+(`window.chromiumSurfacePolicy`, kept in the window's module state). It depends on
 CefKit and on CCef and CefBase for Chromium's command and string
 identifiers. Its surface handling starts on the first use of its window
 API: that installs the AppKit overrides and the command interceptor once,
@@ -862,13 +862,13 @@ once, for the call waiting on it.
 
 CEF has no API for bookmarks, history, most-visited sites, omnibox
 suggestions or tab discarding, but Chromium's own WebUI pages reach those
-services. `CefInternalServices`, one per profile, calls them from hidden
+services. `CefServiceHosts`, one per profile, calls them from hidden
 Chrome-style browsers it calls service hosts. The engine is CefKit's,
 since native tab discarding uses it; the bookmark, history, most-visited
 and omnibox hosts and modules are CefChromium's, declared there and
 registered with the engine by being called.
 
-`CefHistory.mostVisited()` binds a new most-visited page handler for each
+`CefHistory.topSites()` binds a new most-visited page handler for each
 call. Chromium's `TopSites` reads the list from history once, shortly after
 it loads, and then hourly, and a handler's `updateMostVisitedInfo` returns
 that cached list; creating a handler is what makes `TopSites` read history
@@ -887,7 +887,7 @@ Chromium locks a WebUI renderer to its host, and neither
 |---|---|---|
 | `chrome://bookmarks` | `chrome.bookmarks`, `chrome.tabs`, `chrome://favicon2` | `CefBookmarks`, `CefHistory.favicon` |
 | `chrome://history` | `history.mojom.PageHandler`, `chrome://favicon2` | `CefHistory.search`, `remove` |
-| `chrome://new-tab-page-third-party` | `most_visited.mojom.MostVisitedPageHandlerFactory` | `CefHistory.mostVisited` |
+| `chrome://new-tab-page-third-party` | `most_visited.mojom.MostVisitedPageHandlerFactory` | `CefHistory.topSites` |
 | `chrome://omnibox` | `mojom.OmniboxPageHandler` | `CefAutocomplete` |
 | `chrome://discards` | `discards.mojom.DetailsProvider` | Discarding |
 
@@ -907,7 +907,7 @@ Chromium serves it there. Its renderer has the host's bindings and none of
 the app's scripts, styles or elements. A host starts in about a tenth of a
 second.
 
-**Services as modules.** A `CefServiceModule` names the hosts that can
+**Services as modules.** A `CefServiceHost.Module` names the hosts that can
 serve it and a JavaScript `setup` that builds a service object once per
 document — a bound Mojo remote, or an extension API with listeners. A
 call evaluates a function against that object in the host's renderer, as

@@ -49,28 +49,28 @@ import CefKit
 }
 
 @MainActor
-@Suite struct ChromiumUITests {
+@Suite struct SurfacePolicyTests {
     @Test func presentationsDefaultToNative() {
-        var ui = CefWindow.ChromiumUI()
-        #expect(ui[.qrCode] == .native)
-        ui[.qrCode] = .hidden
-        #expect(ui[.qrCode] == .hidden)
-        #expect(ui[.cast] == .native)
+        var policy = CefChromiumSurface.Policy()
+        #expect(policy[.qrCode] == .native)
+        policy[.qrCode] = .hidden
+        #expect(policy[.qrCode] == .hidden)
+        #expect(policy[.cast] == .native)
     }
 
     @Test func windowAnchorAppliesToToolbarKindsOnly() {
-        var ui = CefWindow.ChromiumUI()
+        var policy = CefChromiumSurface.Policy()
         let view = NSView()
-        ui.anchor = .view(view)
-        #expect(ui.anchor(for: .qrCode)?.isAnchored(to: view) == true)
-        #expect(ui.anchor(for: .findBar) == nil)
-        #expect(ui.anchor(for: .signIn) == nil)
-        #expect(ui.anchor(for: .other("Install this page as an app")) != nil)
-        #expect(ui.anchor(for: .other("view:AutofillPopupViewViews")) == nil)
+        policy.anchor = .view(view)
+        #expect(policy.anchor(for: .qrCode)?.isAnchored(to: view) == true)
+        #expect(policy.anchor(for: .findBar) == nil)
+        #expect(policy.anchor(for: .signIn) == nil)
+        #expect(policy.anchor(for: .other("Install this page as an app")) != nil)
+        #expect(policy.anchor(for: .other("view:AutofillPopupViewViews")) == nil)
         let own = NSView()
-        ui.anchors[.findBar] = .view(own)
-        ui.anchors[.qrCode] = .view(own)
-        #expect(ui.anchor(for: .findBar)?.isAnchored(to: own) == true)
-        #expect(ui.anchor(for: .qrCode)?.isAnchored(to: own) == true)
+        policy.anchors[.findBar] = .view(own)
+        policy.anchors[.qrCode] = .view(own)
+        #expect(policy.anchor(for: .findBar)?.isAnchored(to: own) == true)
+        #expect(policy.anchor(for: .qrCode)?.isAnchored(to: own) == true)
     }
 }

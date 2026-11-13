@@ -23,7 +23,7 @@ extension SelfTest {
     /// The `app` bridge's handlers, which the windowed and discard groups
     /// call. Installed at start-up so that each group also runs by itself.
     static func installBridgeHandlers() {
-        bridge.handle("greet") { (person: Person, call: CefBridgeCall) in
+        bridge.handle("greet") { (person: Person, call: CefBridge.Call) in
             "Hello, \(person.name) from \(call.isMainFrame ? "main" : "sub")!"
         }
         bridge.handle("fail") { (_: CefJSON) -> String in throw CefError.operationFailed("nope") }
@@ -304,7 +304,7 @@ extension SelfTest {
         _ = await waitUntil { visitor.isClosed }
 
         let history = profile.history
-        var entry: CefHistoryEntry?
+        var entry: CefHistory.Entry?
         check("history: visit found", await waitUntilAsync(timeout: .seconds(15)) {
             entry = try? await history.search("History Probe").first { $0.url == visitedURL }
             return entry != nil
@@ -315,7 +315,7 @@ extension SelfTest {
         }
         var tiles: [URL] = []
         check("history: most visited includes the visit", await waitUntilAsync(timeout: .seconds(20)) {
-            tiles = (try? await history.mostVisited().map(\.url)) ?? []
+            tiles = (try? await history.topSites().map(\.url)) ?? []
             return tiles.contains(visitedURL)
         }, detail: "\(tiles.count) tiles: \(tiles.map(\.absoluteString))")
 

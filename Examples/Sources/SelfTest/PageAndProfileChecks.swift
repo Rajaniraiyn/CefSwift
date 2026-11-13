@@ -96,7 +96,7 @@ extension SelfTest {
         // established for the caller.
         let probe = CefBridge(name: "probe")
         probe.access = .anyFrame
-        probe.handle("origin") { (_: CefJSON, call: CefBridgeCall) in call.origin }
+        probe.handle("origin") { (_: CefJSON, call: CefBridge.Call) in call.origin }
         var configuration = CefBrowser.Configuration()
         configuration.bridges = [bridge, probe]
         let browser = CefBrowser(url: URL(string: "selftest://app/second.html")!, configuration: configuration)
@@ -264,7 +264,7 @@ extension SelfTest {
         scoped.handle("ping") { (_: CefJSON) in "pong" }
         let probe = CefBridge(name: "probe")
         probe.access = .anyFrame
-        probe.handle("origin") { (_: CefJSON, call: CefBridgeCall) in call.origin }
+        probe.handle("origin") { (_: CefJSON, call: CefBridge.Call) in call.origin }
         var configuration = CefBrowser.Configuration()
         configuration.bridges = [scoped, probe]
         let browser = CefBrowser(url: file, configuration: configuration)

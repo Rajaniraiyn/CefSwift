@@ -4,8 +4,8 @@ import SwiftUI
 
 extension CefWindow {
     /// Replaces one of Chromium's surfaces with a SwiftUI view, shown in a
-    /// panel under the kind's anchor (``CefWindow/ChromiumUI/anchors``, or
-    /// ``CefWindow/ChromiumUI/anchor`` for surfaces that hang from the toolbar), or
+    /// panel under the kind's anchor (``CefChromiumSurface/Policy/anchors``, or
+    /// ``CefChromiumSurface/Policy/anchor`` for surfaces that hang from the toolbar), or
     /// at the top right of the page. The panel closes when the surface is
     /// dismissed (``CefChromiumSurface/dismiss()``), on Esc, and on a click
     /// elsewhere.
@@ -66,10 +66,10 @@ extension CefWindow {
     /// ```
     ///
     /// The bubble takes the whole page overlay. To show it with other views
-    /// over the page, hide Chromium's with `chromiumUI[.statusBubble] = .hidden`
+    /// over the page, hide Chromium's with `chromiumSurfacePolicy[.statusBubble] = .hidden`
     /// and draw ``CefBrowser/statusText`` in an overlay of your own.
     public func setStatusBubble(@ViewBuilder _ content: @escaping (String) -> some View) {
-        chromiumUI[.statusBubble] = .hidden
+        chromiumSurfacePolicy[.statusBubble] = .hidden
         let hosting = NSHostingView(rootView: StatusTextReader(browser: browser, content: { AnyView(content($0)) }))
         pageOverlay = PassthroughHostingContainer(hosting)
     }
@@ -114,9 +114,9 @@ extension View {
     /// Chrome's toolbar would be.
     ///
     /// Without `kinds`, the view becomes the window's
-    /// ``CefWindow/ChromiumUI/anchor``, which every surface that hangs from Chrome's
+    /// ``CefChromiumSurface/Policy/anchor``, which every surface that hangs from Chrome's
     /// toolbar follows; with them, it is the anchor of those kinds in
-    /// ``CefWindow/ChromiumUI/anchors``, Chromium's surfaces and your own interface
+    /// ``CefChromiumSurface/Policy/anchors``, Chromium's surfaces and your own interface
     /// for them alike. The anchor is removed when the view leaves the
     /// window.
     ///
@@ -160,7 +160,7 @@ private final class SurfaceAnchorView: NSView {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
     /// Called from `updateNSView`, where SwiftUI tracks what is read: the
-    /// window's `chromiumUI` is touched only when something changed, and
+    /// window's `chromiumSurfacePolicy` is touched only when something changed, and
     /// outside the update, so writing it does not start another update.
     func configure(kinds: Set<CefChromiumSurface.Kind>?, alignment: CefChromiumSurface.Anchor.Alignment, spacing: CGFloat) {
         guard kinds != self.kinds || alignment != self.alignment || spacing != self.spacing || !isConfigured else { return }
@@ -188,9 +188,9 @@ private final class SurfaceAnchorView: NSView {
         guard let window, let owner = CefWindow.owning(window) else { return }
         let anchor = CefChromiumSurface.Anchor.view(self, alignment: alignment, spacing: spacing)
         if let kinds {
-            for kind in kinds { owner.chromiumUI.anchors[kind] = anchor }
+            for kind in kinds { owner.chromiumSurfacePolicy.anchors[kind] = anchor }
         } else {
-            owner.chromiumUI.anchor = anchor
+            owner.chromiumSurfacePolicy.anchor = anchor
         }
         registeredWindow = owner
     }
@@ -199,11 +199,11 @@ private final class SurfaceAnchorView: NSView {
         guard let owner = registeredWindow else { return }
         registeredWindow = nil
         // Wherever this view anchors, whatever kinds it was set up with.
-        for (kind, anchor) in owner.chromiumUI.anchors where anchor.isAnchored(to: self) {
-            owner.chromiumUI.anchors[kind] = nil
+        for (kind, anchor) in owner.chromiumSurfacePolicy.anchors where anchor.isAnchored(to: self) {
+            owner.chromiumSurfacePolicy.anchors[kind] = nil
         }
-        if owner.chromiumUI.anchor?.isAnchored(to: self) == true {
-            owner.chromiumUI.anchor = nil
+        if owner.chromiumSurfacePolicy.anchor?.isAnchored(to: self) == true {
+            owner.chromiumSurfacePolicy.anchor = nil
         }
     }
 }

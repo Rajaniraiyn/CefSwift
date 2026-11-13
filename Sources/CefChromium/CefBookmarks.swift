@@ -78,7 +78,7 @@ public final class CefBookmarks {
         self.profile = profile
     }
 
-    private var services: CefInternalServices { profile.services }
+    private var services: CefServiceHosts { profile.serviceHosts }
 
     /// Where reads come from. `.automatic` reads Chromium's file while the
     /// service host is not running.
@@ -253,7 +253,7 @@ public final class CefBookmarks {
     // MARK: Plumbing
 
     /// `chrome.bookmarks`, with listeners that report every change.
-    static let module = CefServiceModule(
+    static let module = CefServiceHost.Module(
         name: "bookmarks", hosts: [.bookmarks],
         setup: """
             async emit => {

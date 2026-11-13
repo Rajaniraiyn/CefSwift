@@ -7,7 +7,7 @@ import Observation
 // How a CefWindow follows Chromium's surfaces: CefSurfaceTracker
 // reports each child window Chromium attaches; it is kept invisible until
 // it is recognized, then shown and placed, replaced, or dismissed according
-// to the window's chromiumUI. A window's ChromiumSurfaceController holds
+// to the window's chromiumSurfacePolicy. A window's ChromiumSurfaceController holds
 // all of it, made on first use (see ChromiumSurfaces.activate()).
 
 extension CefWindow {
@@ -18,8 +18,8 @@ extension CefWindow {
     /// interface, or hidden.
     ///
     /// ```swift
-    /// window.chromiumUI.anchor = .view(addressField, alignment: .trailing)
-    /// window.chromiumUI[.statusBubble] = .hidden
+    /// window.chromiumSurfacePolicy.anchor = .view(addressField, alignment: .trailing)
+    /// window.chromiumSurfacePolicy[.statusBubble] = .hidden
     /// window.setCustomPresentation(for: .qrCode) { surface in showMyQRCode(for: surface.url) }
     /// ```
     ///
@@ -29,21 +29,21 @@ extension CefWindow {
     ///
     /// CefChromium starts following Chromium's surfaces, in every browser
     /// window, the first time any of its window API is used, this property
-    /// and ``CefWindow/Configuration/chromiumUI`` included. Until
+    /// and ``CefWindow/Configuration/chromiumSurfacePolicy`` included. Until
     /// then Chromium shows its interface as it does without CefChromium;
     /// surfaces already on screen then are taken up as they are. Set it
     /// before showing the window, so no surface shows before it applies.
-    public var chromiumUI: ChromiumUI {
-        get { surfaces.ui }
-        set { surfaces.ui = newValue }
+    public var chromiumSurfacePolicy: CefChromiumSurface.Policy {
+        get { surfaces.policy }
+        set { surfaces.policy = newValue }
     }
 
     /// Decides a surface's presentation as it appears, taking precedence
-    /// over ``chromiumUI``. Return `nil` to use ``chromiumUI``. The surface
+    /// over ``chromiumSurfacePolicy``. Return `nil` to use ``chromiumSurfacePolicy``. The surface
     /// stays hidden while this runs.
-    public var presentationForSurface: ((CefChromiumSurface) -> CefChromiumSurface.Presentation?)? {
-        get { surfaces.presentationForSurface }
-        set { surfaces.presentationForSurface = newValue }
+    public var presentationForChromiumSurface: ((CefChromiumSurface) -> CefChromiumSurface.Presentation?)? {
+        get { surfaces.presentationForChromiumSurface }
+        set { surfaces.presentationForChromiumSurface = newValue }
     }
 
     /// Chromium's surfaces in this window, oldest first: those Chromium
@@ -69,7 +69,7 @@ extension CefWindow {
     ) {
         let surfaces = surfaces
         surfaces.customPresenters[kind] = present
-        surfaces.ui[kind] = present == nil ? .native : .custom
+        surfaces.policy[kind] = present == nil ? .native : .custom
     }
 
     /// The window's surface state, made on first use.
@@ -84,18 +84,18 @@ extension CefWindow {
 
 extension CefWindow.Configuration {
     /// How Chromium's interface is presented at first:
-    /// ``CefWindow/chromiumUI`` starts as this, or with every
+    /// ``CefWindow/chromiumSurfacePolicy`` starts as this, or with every
     /// surface ``CefChromiumSurface/Presentation/native`` when `nil`.
     /// A status bubble or zoom bubble hidden here is never created, as the
     /// browser starts with Chromium's own switched off
     /// (`cef_browser_settings_t`); hiding one later keeps Chromium's window
     /// invisible instead. Popups start with every surface native.
     @MainActor
-    public var chromiumUI: CefWindow.ChromiumUI? {
-        get { moduleValues[ObjectIdentifier(CefWindow.ChromiumUI.self)] as? CefWindow.ChromiumUI }
+    public var chromiumSurfacePolicy: CefChromiumSurface.Policy? {
+        get { moduleValues[ObjectIdentifier(CefChromiumSurface.Policy.self)] as? CefChromiumSurface.Policy }
         set {
             ChromiumSurfaces.activate()
-            moduleValues[ObjectIdentifier(CefWindow.ChromiumUI.self)] = newValue
+            moduleValues[ObjectIdentifier(CefChromiumSurface.Policy.self)] = newValue
             showsChromiumStatusBubble = newValue?[.statusBubble] != .hidden
             showsChromiumZoomBubble = newValue?[.zoom] != .hidden
         }
@@ -136,12 +136,12 @@ final class ChromiumSurfaceController: CefWindowParticipant {
     @ObservationIgnored private weak var window: CefWindow?
     private let browser: CefBrowser
 
-    var ui: CefWindow.ChromiumUI {
-        didSet { applyChromiumUI() }
+    var policy: CefChromiumSurface.Policy {
+        didSet { applyPolicy() }
     }
 
     var surfaces: [CefChromiumSurface] = []
-    @ObservationIgnored var presentationForSurface: ((CefChromiumSurface) -> CefChromiumSurface.Presentation?)?
+    @ObservationIgnored var presentationForChromiumSurface: ((CefChromiumSurface) -> CefChromiumSurface.Presentation?)?
     @ObservationIgnored var onSurface: ((CefChromiumSurface) -> Void)?
     @ObservationIgnored var customPresenters: [CefChromiumSurface.Kind: @MainActor (CefChromiumSurface) -> Void] = [:]
     @ObservationIgnored private var surfaceObservers: [ObjectIdentifier: [NSObjectProtocol]] = [:]
@@ -152,7 +152,7 @@ final class ChromiumSurfaceController: CefWindowParticipant {
     init(window: CefWindow) {
         self.window = window
         browser = window.browser
-        ui = window.configuration.chromiumUI ?? CefWindow.ChromiumUI()
+        policy = window.configuration.chromiumSurfacePolicy ?? CefChromiumSurface.Policy()
     }
 
     /// Follows the window's frame, and takes up the surfaces Chromium
@@ -208,7 +208,7 @@ final class ChromiumSurfaceController: CefWindowParticipant {
         let surface = CefChromiumSurface(
             kind: kind, title: recognized.title, browser: browser, url: url,
             window: child, parentWindow: window)
-        let presentation = presentationForSurface?(surface) ?? ui[kind]
+        let presentation = presentationForChromiumSurface?(surface) ?? policy[kind]
         surface.presentation = presentation
         switch presentation {
         case .native:
@@ -271,12 +271,12 @@ final class ChromiumSurfaceController: CefWindowParticipant {
         CefChromiumSurface.closeNatively(child, kind: surface.kind, browser: browser)
     }
 
-    /// Applies a changed `chromiumUI` to the surfaces on screen: places them
+    /// Applies a changed `chromiumSurfacePolicy` to the surfaces on screen: places them
     /// under their anchors, and hides those whose kind is now hidden.
-    private func applyChromiumUI() {
+    private func applyPolicy() {
         for surface in surfaces {
             guard let child = surface.window else { continue }
-            if case .hidden = ui[surface.kind] {
+            if case .hidden = policy[surface.kind] {
                 hide(surface, window: child)
                 forget(surface)
             } else {
@@ -292,7 +292,7 @@ final class ChromiumSurfaceController: CefWindowParticipant {
     /// Moves a native surface under its anchor.
     private func place(_ surface: CefChromiumSurface) {
         guard surface.isPresented, let child = surface.window, let parent = window?.window,
-              let anchor = ui.anchor(for: surface.kind),
+              let anchor = policy.anchor(for: surface.kind),
               let origin = anchor.origin(for: child.frame.size, in: parent)
         else { return }
         let current = child.frame.origin
@@ -357,7 +357,7 @@ final class ChromiumSurfaceController: CefWindowParticipant {
     /// without Chromium showing its own. Returns whether it was handled.
     func handleSurfaceCommand(_ command: CefChromeCommand) -> Bool {
         // ⌘G and ⇧⌘G move through a custom find bar's matches.
-        if case .custom = ui[.findBar], browser.findSession.isActive {
+        if case .custom = policy[.findBar], browser.findSession.isActive {
             switch command.rawValue {
             case Int(IDC_FIND_NEXT):
                 browser.findSession.next()
@@ -370,7 +370,7 @@ final class ChromiumSurfaceController: CefWindowParticipant {
             }
         }
         guard let kind = Self.surfaceKind(for: command) else { return false }
-        switch ui[kind] {
+        switch policy[kind] {
         case .hidden:
             return true
         case .custom:

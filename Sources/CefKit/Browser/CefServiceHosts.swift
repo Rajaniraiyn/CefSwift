@@ -31,37 +31,39 @@ package struct CefServiceHost: Hashable, Sendable {
         name: "discards", document: "chrome://discards/strings.m.js", isAvailableInIncognito: true)
 }
 
-/// A JavaScript object built once per host document and handed to every
-/// call of a service — a bound Mojo remote, or an extension API with its
-/// listeners — together with the hosts that can build it.
-///
-/// Adding a service is declaring one, in CefKit or in a module built on it
-/// (CefChromium declares its bookmark, history and omnibox services so):
-///
-/// ```swift
-/// static let downloads = CefServiceModule(name: "downloads", hosts: [.downloads], setup: """
-///     async emit => {
-///       const m = await import('chrome://downloads/downloads.mojom-webui.js');
-///       ...
-///       return { handler };
-///     }
-///     """)
-/// let items = try await profile.services.call(.downloads, "s => s.handler.getDownloads()")
-/// ```
-package struct CefServiceModule: Sendable {
-    package let name: String
-    /// Hosts that can build the module, the one to start first. A call goes
-    /// to the first of them that is already running.
-    package let hosts: [CefServiceHost]
-    /// A JavaScript expression evaluating to `async emit => service`.
-    /// `emit(name, payload)` delivers an event to
-    /// ``CefInternalServices/events(_:_:bufferingPolicy:)``.
-    package let setup: String
+extension CefServiceHost {
+    /// A JavaScript object built once per host document and handed to every
+    /// call of a service — a bound Mojo remote, or an extension API with its
+    /// listeners — together with the hosts that can build it.
+    ///
+    /// Adding a service is declaring one, in CefKit or in a module built on it
+    /// (CefChromium declares its bookmark, history and omnibox services so):
+    ///
+    /// ```swift
+    /// static let downloads = CefServiceHost.Module(name: "downloads", hosts: [.downloads], setup: """
+    ///     async emit => {
+    ///       const m = await import('chrome://downloads/downloads.mojom-webui.js');
+    ///       ...
+    ///       return { handler };
+    ///     }
+    ///     """)
+    /// let items = try await profile.serviceHosts.call(.downloads, "s => s.handler.getDownloads()")
+    /// ```
+    package struct Module: Sendable {
+        package let name: String
+        /// Hosts that can build the module, the one to start first. A call goes
+        /// to the first of them that is already running.
+        package let hosts: [CefServiceHost]
+        /// A JavaScript expression evaluating to `async emit => service`.
+        /// `emit(name, payload)` delivers an event to
+        /// ``CefServiceHosts/events(_:_:bufferingPolicy:)``.
+        package let setup: String
 
-    package init(name: String, hosts: [CefServiceHost], setup: String) {
-        self.name = name
-        self.hosts = hosts
-        self.setup = setup
+        package init(name: String, hosts: [CefServiceHost], setup: String) {
+            self.name = name
+            self.hosts = hosts
+            self.setup = setup
+        }
     }
 }
 
@@ -84,7 +86,7 @@ package struct CefServiceModule: Sendable {
 ///   every Chrome-style window in its session and reopens them after a
 ///   crash, and ``CefRuntime`` closes the ones it recognizes by it.
 @MainActor
-package final class CefInternalServices: CefShutdownParticipant {
+package final class CefServiceHosts: CefShutdownParticipant {
     /// The fragment that marks a service page's address.
     nonisolated static let addressMarker = "cefswift-service"
 
@@ -120,7 +122,7 @@ package final class CefInternalServices: CefShutdownParticipant {
     /// `async (service, args) => value` — on `module`'s service object with
     /// `arguments`, and returns its JSON result.
     package func call(
-        _ module: CefServiceModule, _ function: String, _ arguments: CefJSON = [:], timeout: Duration = .seconds(15)
+        _ module: CefServiceHost.Module, _ function: String, _ arguments: CefJSON = [:], timeout: Duration = .seconds(15)
     ) async throws -> CefJSON {
         let host = try runningHost(for: module)
         return try await host.call(module, function, arguments, timeout: timeout)
@@ -129,7 +131,7 @@ package final class CefInternalServices: CefShutdownParticipant {
     /// Evaluates `function` as ``call(_:_:_:timeout:)`` does and decodes its
     /// result.
     package func call<Result: Decodable>(
-        _ module: CefServiceModule, _ function: String, _ arguments: CefJSON = [:], as type: Result.Type,
+        _ module: CefServiceHost.Module, _ function: String, _ arguments: CefJSON = [:], as type: Result.Type,
         timeout: Duration = .seconds(15)
     ) async throws -> Result {
         try await call(module, function, arguments, timeout: timeout).decode(Result.self)
@@ -141,7 +143,7 @@ package final class CefInternalServices: CefShutdownParticipant {
     /// `.bufferingNewest(1)` for invalidations, where only the latest
     /// matters.
     package func events(
-        _ module: CefServiceModule, _ name: String,
+        _ module: CefServiceHost.Module, _ name: String,
         bufferingPolicy: AsyncStream<CefJSON>.Continuation.BufferingPolicy
     ) -> AsyncStream<CefJSON> {
         let key = "\(module.name)/\(name)"
@@ -160,7 +162,7 @@ package final class CefInternalServices: CefShutdownParticipant {
 
     /// The host to call `module` on: one already running, or the first the
     /// profile can open.
-    private func runningHost(for module: CefServiceModule) throws -> CefServiceHostBrowser {
+    private func runningHost(for module: CefServiceHost.Module) throws -> CefServiceHostBrowser {
         guard CefRuntime.shared.isRunning, !CefRuntime.shared.isTerminating else {
             throw CefError.notInitialized
         }
@@ -214,11 +216,11 @@ package final class CefInternalServices: CefShutdownParticipant {
 
     @MainActor
     private final class MemoryPressureWatch {
-        private struct Weak { weak var services: CefInternalServices? }
+        private struct Weak { weak var services: CefServiceHosts? }
         private var all: [Weak] = []
         private var source: DispatchSourceMemoryPressure?
 
-        func watch(_ services: CefInternalServices) {
+        func watch(_ services: CefServiceHosts) {
             all.removeAll { $0.services == nil }
             all.append(Weak(services: services))
             guard source == nil else { return }
@@ -236,7 +238,7 @@ package final class CefInternalServices: CefShutdownParticipant {
 @MainActor
 final class CefServiceHostBrowser {
     let host: CefServiceHost
-    private weak var services: CefInternalServices?
+    private weak var services: CefServiceHosts?
     private let profile: CefProfile
 
     private var window: CefWindow?
@@ -259,7 +261,7 @@ final class CefServiceHostBrowser {
         var payload: CefJSON?
     }
 
-    init(host: CefServiceHost, services: CefInternalServices) {
+    init(host: CefServiceHost, services: CefServiceHosts) {
         self.host = host
         self.services = services
         self.profile = services.profile
@@ -272,7 +274,7 @@ final class CefServiceHostBrowser {
     fileprivate var isIdle: Bool { callsInProgress == 0 }
 
     func call(
-        _ module: CefServiceModule, _ function: String, _ arguments: CefJSON, timeout: Duration
+        _ module: CefServiceHost.Module, _ function: String, _ arguments: CefJSON, timeout: Duration
     ) async throws -> CefJSON {
         callsInProgress += 1
         idleStop?.cancel()
@@ -301,7 +303,7 @@ final class CefServiceHostBrowser {
 
     /// Builds the module on first use in this document, then calls
     /// `function` with it.
-    private static func script(_ module: CefServiceModule, _ function: String, _ arguments: CefJSON) -> String {
+    private static func script(_ module: CefServiceHost.Module, _ function: String, _ arguments: CefJSON) -> String {
         let name = CefJSON.string(module.name).text
         return """
             (async () => {
@@ -320,7 +322,7 @@ final class CefServiceHostBrowser {
     private func scheduleIdleStop() {
         idleStop?.cancel()
         idleStop = Task { [weak self] in
-            try? await Task.sleep(for: CefInternalServices.idleTimeout)
+            try? await Task.sleep(for: CefServiceHosts.idleTimeout)
             guard !Task.isCancelled, let self, self.isIdle else { return }
             self.stop()
         }
@@ -366,7 +368,7 @@ final class CefServiceHostBrowser {
                 // data source fails a load whose address has a fragment or
                 // query, so the mark is added once the document is shown.
                 _ = try? await browser.evaluateJavaScript(
-                    "history.replaceState(null, '', '#\(CefInternalServices.addressMarker)')")
+                    "history.replaceState(null, '', '#\(CefServiceHosts.addressMarker)')")
                 return browser
             }
             try await Task.sleep(for: .milliseconds(10))

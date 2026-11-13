@@ -28,7 +28,7 @@ enum ServiceBenchmark {
 
         await step("bookmarks.tree") { _ = try await profile.bookmarks.tree() }
         await step("history.search") { _ = try await profile.history.search(limit: 20) }
-        await step("history.mostVisited") { _ = try await profile.history.mostVisited() }
+        await step("history.topSites") { _ = try await profile.history.topSites() }
         await step("history.favicon") {
             _ = try await profile.history.favicon(for: URL(string: "selftest://edge/favicon.html")!, size: 32)
         }
@@ -37,7 +37,7 @@ enum ServiceBenchmark {
         await step("all, concurrently") {
             async let a = profile.bookmarks.recent(limit: 5)
             async let b = profile.history.search(limit: 5)
-            async let c = profile.history.mostVisited()
+            async let c = profile.history.topSites()
             async let d = profile.autocomplete.suggestions(for: "selftest")
             async let e = tab.browser.discardBlockers()
             _ = try await (a, b, c, d, e)

@@ -37,10 +37,10 @@ extension SelfTest {
         let browser = CefBrowser(url: URL(string: "http://127.0.0.1:\(server.port)/page")!)
         var configuration = CefWindow.Configuration()
         configuration.frame = CGRect(x: 160, y: 160, width: 900, height: 640)
-        var ui = CefWindow.ChromiumUI()
-        ui[.statusBubble] = .hidden
-        ui[.zoom] = .hidden
-        configuration.chromiumUI = ui
+        var policy = CefChromiumSurface.Policy()
+        policy[.statusBubble] = .hidden
+        policy[.zoom] = .hidden
+        configuration.chromiumSurfacePolicy = policy
         let window = CefWindow(browser: browser, configuration: configuration)
         window.show()
         defer { window.close() }
@@ -48,7 +48,7 @@ extension SelfTest {
             check("surfaces: status bubble off at creation: page loads", false, detail: browser.title)
             return
         }
-        check("surfaces: chromiumUI starts as the configuration's", window.chromiumUI[.statusBubble] == .hidden)
+        check("surfaces: chromiumSurfacePolicy starts as the configuration's", window.chromiumSurfacePolicy[.statusBubble] == .hidden)
         nsWindow.orderFrontRegardless()
         var hovered = false
         for _ in 0..<5 where !hovered {
@@ -93,7 +93,7 @@ extension SelfTest {
         // In window coordinates: a control wider than the bubble, near the
         // top, with room on both sides.
         let anchorRect = CGRect(x: 240, y: 560, width: 400, height: 24)
-        window.chromiumUI.anchor = .rect(anchorRect, alignment: .leading)
+        window.chromiumSurfacePolicy.anchor = .rect(anchorRect, alignment: .leading)
         window.show()
         _ = await loaded(browser, title: "page")
         guard let nsWindow = window.window else { return }
@@ -102,8 +102,8 @@ extension SelfTest {
         // SwiftUI keeps updating: no update loop).
         window.setToolbar { Text("QR").chromiumSurfaceAnchor([.qrCode]) }
         check("surfaces: a SwiftUI toolbar view becomes an anchor",
-              await waitUntil(timeout: .seconds(5)) { window.chromiumUI.anchors[.qrCode] != nil })
-        window.chromiumUI.anchors[.qrCode] = nil
+              await waitUntil(timeout: .seconds(5)) { window.chromiumSurfacePolicy.anchors[.qrCode] != nil })
+        window.chromiumSurfacePolicy.anchors[.qrCode] = nil
 
         /// The visible surface windows Chromium has attached.
         func visibleSurfaceWindows() -> [NSWindow] {
@@ -134,17 +134,17 @@ extension SelfTest {
             nsWindow.setFrame(frame, display: true)
             check("surfaces: follow the window as it moves",
                   await waitUntil(timeout: .seconds(3)) { isUnderAnchor(anchorRect) })
-            window.chromiumUI.anchors[.qrCode] = .rect(anchorRect, alignment: .trailing)
+            window.chromiumSurfacePolicy.anchors[.qrCode] = .rect(anchorRect, alignment: .trailing)
             check("surfaces: a kind's own anchor takes precedence",
                   await waitUntil(timeout: .seconds(3)) { isUnderAnchor(anchorRect, trailing: true) })
-            window.chromiumUI.anchors[.qrCode] = nil
+            window.chromiumSurfacePolicy.anchors[.qrCode] = nil
             qr.dismiss()
             check("surfaces: dismiss closes Chromium's surface",
                   await waitUntil(timeout: .seconds(5)) { qr.window?.isVisible != true && window.chromiumSurfaces.isEmpty })
         }
 
         // Hidden.
-        window.chromiumUI[.qrCode] = .hidden
+        window.chromiumSurfacePolicy[.qrCode] = .hidden
         browser.execute(.createQRCode)
         try? await Task.sleep(for: .milliseconds(800))
         check("surfaces: a hidden kind never shows", visibleSurfaceWindows().isEmpty && window.chromiumSurfaces.isEmpty)
@@ -165,7 +165,7 @@ extension SelfTest {
         window.onChromiumSurface = { surface in
             if surface.presentation == .custom { presented.append(surface) }
         }
-        window.presentationForSurface = { $0.kind == .qrCode ? .custom : nil }
+        window.presentationForChromiumSurface = { $0.kind == .qrCode ? .custom : nil }
         presented = []
         browser.execute(.createQRCode)
         check("surfaces: Chromium's surface replaced as it appears",
@@ -173,7 +173,7 @@ extension SelfTest {
                   && presented.first?.url == pageURL && visibleSurfaceWindows().isEmpty,
               detail: "\(presented.count) \(visibleSurfaceWindows().map(\.title))")
         presented.first?.dismiss()
-        window.presentationForSurface = nil
+        window.presentationForChromiumSurface = nil
         window.onChromiumSurface = nil
 
         // Share: Chromium has none without its toolbar; custom here.
@@ -190,7 +190,7 @@ extension SelfTest {
               detail: "\(window.chromiumSurfaces.map { "\($0.kind) '\($0.title)'" })")
         if let findBar = window.chromiumSurfaces.first(where: { $0.kind == .findBar }) {
             let findAnchor = CGRect(x: 40, y: 500, width: 10, height: 10)
-            window.chromiumUI.anchors[.findBar] = .rect(findAnchor, alignment: .leading)
+            window.chromiumSurfacePolicy.anchors[.findBar] = .rect(findAnchor, alignment: .leading)
             let anchor = nsWindow.convertToScreen(findAnchor)
             check("surfaces: find bar follows its own anchor", await waitUntil(timeout: .seconds(3)) {
                 guard let frame = findBar.window?.frame else { return false }
@@ -282,7 +282,7 @@ extension SelfTest {
         // page overlay.
         window.setStatusBubble { Text($0) }
         check("surfaces: an app's status bubble is the page overlay",
-              window.pageOverlay != nil && window.chromiumUI[.statusBubble] == .hidden)
+              window.pageOverlay != nil && window.chromiumSurfacePolicy[.statusBubble] == .hidden)
         _ = try? await browser.devTools.send("Input.dispatchMouseEvent", ["type": "mouseMoved", "x": 1, "y": 1])
         try? await Task.sleep(for: .milliseconds(600))
         // Chromium fades its bubble in by raising its window's alpha, so
@@ -300,7 +300,7 @@ extension SelfTest {
         check("surfaces: an app's status bubble keeps Chromium's hidden throughout its fade",
               shown && leaks.isEmpty, detail: "\(browser.statusText) \(leaks.prefix(3))")
         window.pageOverlay = nil
-        window.chromiumUI.presentations[.statusBubble] = nil
+        window.chromiumSurfacePolicy.presentations[.statusBubble] = nil
 
         // CefSwiftUI's find bar: a title-bar accessory while the session runs.
         window.setFindBar { _ in Text("Find").padding() }

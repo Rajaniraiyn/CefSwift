@@ -3,34 +3,38 @@ import Foundation
 import Observation
 import CefBase
 
-/// A device content can be cast to: a Cast receiver or a DIAL device.
-public struct CefMediaSink: Identifiable, Hashable, Sendable {
-    /// What protocol the device speaks.
-    public enum Kind: Sendable, Hashable {
-        case cast
-        case dial
-        case unknown
-    }
+extension CefMediaRouter {
+    /// A device content can be cast to: a Cast receiver or a DIAL device.
+    public struct Sink: Identifiable, Hashable, Sendable {
+        /// What protocol the device speaks.
+        public enum Kind: Sendable, Hashable {
+            case cast
+            case dial
+            case unknown
+        }
 
-    public let id: String
-    /// The device's name, as its owner set it.
-    public let name: String
-    public let kind: Kind
+        public let id: String
+        /// The device's name, as its owner set it.
+        public let name: String
+        public let kind: Kind
+    }
 }
 
-/// A connection from a source to a ``CefMediaSink``.
-public struct CefMediaRoute: Identifiable, Hashable, Sendable {
-    /// Where the route is in its lifetime.
-    public enum State: Sendable, Hashable {
-        case connecting, connected, closed, terminated, unknown
-    }
+extension CefMediaRouter {
+    /// A connection from a source to a ``CefMediaRouter.Sink``.
+    public struct Route: Identifiable, Hashable, Sendable {
+        /// Where the route is in its lifetime.
+        public enum State: Sendable, Hashable {
+            case connecting, connected, closed, terminated, unknown
+        }
 
-    public let id: String
-    /// The sink's ``CefMediaSink/id``.
-    public let sinkID: String
-    /// The source's URN, as passed to ``CefMediaRouter/cast(_:to:)``.
-    public let source: String
-    public internal(set) var state: State
+        public let id: String
+        /// The sink's ``CefMediaRouter/Sink/id``.
+        public let sinkID: String
+        /// The source's URN, as passed to ``CefMediaRouter/cast(_:to:)``.
+        public let source: String
+        public internal(set) var state: State
+    }
 }
 
 /// A failure to start a route.
@@ -62,9 +66,9 @@ public final class CefMediaRouter: CefShutdownParticipant {
 
     /// The devices found, in the order Chromium reports them. Empty until
     /// ``startDiscovery()``.
-    public private(set) var sinks: [CefMediaSink] = []
+    public private(set) var sinks: [CefMediaRouter.Sink] = []
     /// The routes in use.
-    public private(set) var routes: [CefMediaRoute] = []
+    public private(set) var routes: [CefMediaRouter.Route] = []
     /// Whether discovery is running.
     public private(set) var isDiscovering = false
 
@@ -114,7 +118,7 @@ public final class CefMediaRouter: CefShutdownParticipant {
     }
 
     /// Whether `sink` can show `source`.
-    public func canCast(_ source: String, to sink: CefMediaSink) -> Bool {
+    public func canCast(_ source: String, to sink: CefMediaRouter.Sink) -> Bool {
         guard let router, let sinkObject = sinkObjects[sink.id],
               let sourceObject = mediaSource(source, router: router)
         else { return false }
@@ -123,7 +127,7 @@ public final class CefMediaRouter: CefShutdownParticipant {
     }
 
     /// Connects `source` to `sink`.
-    public func cast(_ source: String, to sink: CefMediaSink) async throws -> CefMediaRoute {
+    public func cast(_ source: String, to sink: CefMediaRouter.Sink) async throws -> CefMediaRouter.Route {
         guard let router, let sinkObject = sinkObjects[sink.id],
               let sourceObject = mediaSource(source, router: router)
         else { throw CefMediaRouteError(message: "No such device or source") }
@@ -140,7 +144,7 @@ public final class CefMediaRouter: CefShutdownParticipant {
     }
 
     /// Ends `route`.
-    public func stop(_ route: CefMediaRoute) {
+    public func stop(_ route: CefMediaRouter.Route) {
         guard let object = routeObjects[route.id] else { return }
         object.pointer.pointee.terminate(object.pointer)
     }
@@ -156,10 +160,10 @@ public final class CefMediaRouter: CefShutdownParticipant {
         sinks = objects.map { object in
             let pointer = object.pointer
             let id = CefStringUtil.takingUserFree(pointer.pointee.get_id(pointer)) ?? ""
-            let kind: CefMediaSink.Kind = pointer.pointee.is_cast_sink(pointer) != 0
+            let kind: CefMediaRouter.Sink.Kind = pointer.pointee.is_cast_sink(pointer) != 0
                 ? .cast : pointer.pointee.is_dial_sink(pointer) != 0 ? .dial : .unknown
             sinkObjects[id] = object
-            return CefMediaSink(id: id, name: CefStringUtil.takingUserFree(pointer.pointee.get_name(pointer)) ?? "", kind: kind)
+            return CefMediaRouter.Sink(id: id, name: CefStringUtil.takingUserFree(pointer.pointee.get_name(pointer)) ?? "", kind: kind)
         }
     }
 
@@ -172,18 +176,18 @@ public final class CefMediaRouter: CefShutdownParticipant {
         }
     }
 
-    fileprivate func update(route id: String, state: CefMediaRoute.State) {
+    fileprivate func update(route id: String, state: CefMediaRouter.Route.State) {
         guard let index = routes.firstIndex(where: { $0.id == id }) else { return }
         routes[index].state = state
     }
 
-    fileprivate static func describe(_ route: UnsafeMutablePointer<cef_media_route_t>, source: String?) -> CefMediaRoute {
+    fileprivate static func describe(_ route: UnsafeMutablePointer<cef_media_route_t>, source: String?) -> CefMediaRouter.Route {
         let id = CefStringUtil.takingUserFree(route.pointee.get_id(route)) ?? ""
         let sink = CefRef(adopting: route.pointee.get_sink(route))
         let sinkID = sink.flatMap { CefStringUtil.takingUserFree($0.pointer.pointee.get_id($0.pointer)) } ?? ""
         let sourceObject = CefRef(adopting: route.pointee.get_source(route))
         let urn = source ?? sourceObject.flatMap { CefStringUtil.takingUserFree($0.pointer.pointee.get_id($0.pointer)) } ?? ""
-        return CefMediaRoute(id: id, sinkID: sinkID, source: urn, state: .connecting)
+        return CefMediaRouter.Route(id: id, sinkID: sinkID, source: urn, state: .connecting)
     }
 }
 
@@ -212,7 +216,7 @@ private final class MediaObserver: Sendable {
         o.pointee.on_route_state_changed = { s, route, state in
             let id = route.flatMap { CefStringUtil.takingUserFree($0.pointee.get_id($0)) } ?? ""
             cefRelease(route)
-            let value: CefMediaRoute.State = switch state {
+            let value: CefMediaRouter.Route.State = switch state {
             case CEF_MRCS_CONNECTING: .connecting
             case CEF_MRCS_CONNECTED: .connected
             case CEF_MRCS_CLOSED: .closed

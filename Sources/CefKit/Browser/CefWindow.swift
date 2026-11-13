@@ -72,7 +72,7 @@ public final class CefWindow: Identifiable {
         public var tabbingIdentifier: String?
         /// Whether the browser starts with Chromium's status bubble and
         /// zoom bubble (`cef_browser_settings_t`'s `chrome_status_bubble`
-        /// and `chrome_zoom_bubble`). CefChromium's `chromiumUI` sets them.
+        /// and `chrome_zoom_bubble`). CefChromium's `chromiumSurfacePolicy` sets them.
         package var showsChromiumStatusBubble = true
         package var showsChromiumZoomBubble = true
 

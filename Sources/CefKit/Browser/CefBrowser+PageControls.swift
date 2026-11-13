@@ -196,7 +196,7 @@ extension CefBrowser {
     /// bookmark, and so on. Chrome-style browsers only.
     ///
     /// In a ``CefWindow``, a command whose surface the window
-    /// presents with your interface or hides (CefChromium's `chromiumUI`)
+    /// presents with your interface or hides (CefChromium's `chromiumSurfacePolicy`)
     /// goes there instead of to Chrome.
     public func execute(_ command: CefChromeCommand, disposition: CefWindowOpenDisposition = .currentTab) {
         if let window = CefWindow.hosting(self), window.intercept(command) { return }

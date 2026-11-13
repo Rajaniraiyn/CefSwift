@@ -63,7 +63,7 @@ final class CefTabDiscarder {
     }
 
     private func call(_ function: String, _ arguments: CefJSON) async throws -> CefJSON {
-        try await CefProfile.default.services.call(Self.module, function, arguments, timeout: .seconds(10))
+        try await CefProfile.default.serviceHosts.call(Self.module, function, arguments, timeout: .seconds(10))
     }
 
     /// The blockers a look-up's reply (``matcher``) reports.
@@ -133,7 +133,7 @@ final class CefTabDiscarder {
         """
 
     /// Binds a `DetailsProvider` of its own.
-    static let module = CefServiceModule(
+    static let module = CefServiceHost.Module(
         name: "discards", hosts: [.discards],
         setup: """
         async () => {
