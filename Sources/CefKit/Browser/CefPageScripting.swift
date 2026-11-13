@@ -84,7 +84,7 @@ final class CefPageScripting {
     }
 
     /// Where a reply's value starts: after the header.
-    static let valueOffset = CefWireHeader.size
+    private static let valueOffset = CefWireHeader.size
 
     /// Sends `script` to `frameID`'s renderer, or the main frame's, and
     /// waits for the reply.
@@ -179,7 +179,7 @@ final class CefPageScripting {
 
 extension CefBrowser {
     /// Runs `body` with every frame of the browser.
-    func forEachFrame(_ body: (UnsafeMutablePointer<cef_frame_t>) -> Void) {
+    fileprivate func forEachFrame(_ body: (UnsafeMutablePointer<cef_frame_t>) -> Void) {
         guard let raw = raw?.pointer, let list = cef_string_list_alloc() else { return }
         defer { cef_string_list_free(list) }
         raw.pointee.get_frame_identifiers(raw, list)

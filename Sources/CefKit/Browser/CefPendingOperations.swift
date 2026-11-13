@@ -36,9 +36,6 @@ final class CefPendingOperations<Value: Sendable> {
         }
     }
 
-    /// Whether `id` is still waiting.
-    func isWaiting(_ id: Int) -> Bool { waiting[id] != nil }
-
     /// Completes one caller. Returns `false` when it was completed already.
     @discardableResult
     func complete(_ id: Int, _ result: Result<Value, Error>) -> Bool {

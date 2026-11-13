@@ -94,7 +94,7 @@ extension CefBrowser {
         setNeedsDisplay()
     }
 
-    func createWindowed(in parentView: NSView) {
+    private func createWindowed(in parentView: NSView) {
         var blueprint = makeBlueprint()
         var windowInfo = cef_window_info_t()
         windowInfo.size = MemoryLayout<cef_window_info_t>.stride
@@ -114,7 +114,7 @@ extension CefBrowser {
         if created == nil { creationFailed() }
     }
 
-    func createOffscreen(host: CefOffscreenHost, size: CGSize) {
+    private func createOffscreen(host: CefOffscreenHost, size: CGSize) {
         precondition(
             CefRuntime.shared.configuration?.isOffscreenRenderingEnabled == true,
             "Offscreen browsers need CefRuntime.Configuration.isOffscreenRenderingEnabled = true at initialize().")

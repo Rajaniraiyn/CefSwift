@@ -38,7 +38,7 @@ extension CefBrowser {
     }
 
     /// Whether the window's first responder is `view` or inside it.
-    func isFirstResponderInside(_ view: NSView) -> Bool {
+    private func isFirstResponderInside(_ view: NSView) -> Bool {
         guard let responder = view.window?.firstResponder as? NSView else { return false }
         return responder === view || responder.isDescendant(of: view)
     }
@@ -93,7 +93,7 @@ extension CefBrowser {
 
     /// Posts a Tab (or Shift-Tab) press to `window`'s first responder, as
     /// the keyboard would.
-    static func sendTabKey(to window: NSWindow, reverse: Bool) {
+    private static func sendTabKey(to window: NSWindow, reverse: Bool) {
         for type in [NSEvent.EventType.keyDown, .keyUp] {
             guard let event = NSEvent.keyEvent(
                 with: type, location: .zero, modifierFlags: reverse ? [.shift] : [],

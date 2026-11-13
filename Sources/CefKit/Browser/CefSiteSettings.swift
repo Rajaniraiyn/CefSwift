@@ -191,7 +191,7 @@ public enum CefSitePermission: String, CaseIterable, Sendable, Codable {
 
     /// The name Chromium stores the permission's site exceptions under, in
     /// the `profile.content_settings.exceptions` preference.
-    var storageName: String {
+    fileprivate var storageName: String {
         switch self {
         case .camera: "media_stream_camera"
         case .microphone: "media_stream_mic"

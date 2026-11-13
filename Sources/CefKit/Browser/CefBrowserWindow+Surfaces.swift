@@ -146,7 +146,7 @@ extension CefBrowserWindow {
     /// Hands a surface to the app's presenter, or to `onChromiumSurface`.
     /// Returns the surface.
     @discardableResult
-    func presentCustom(kind: CefChromiumSurface.Kind, url: URL?, title: String = "") -> CefChromiumSurface {
+    private func presentCustom(kind: CefChromiumSurface.Kind, url: URL?, title: String = "") -> CefChromiumSurface {
         // One custom surface of a kind at a time.
         chromiumSurfaces.filter { $0.kind == kind && $0.window == nil }.forEach { $0.dismiss() }
         let surface = CefChromiumSurface(

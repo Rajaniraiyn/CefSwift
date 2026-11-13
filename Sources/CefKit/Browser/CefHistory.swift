@@ -193,7 +193,7 @@ public final class CefHistory {
     /// The new handler first reports the cached tiles, and reports again once
     /// the fresh list differs; without a second report within a moment, the
     /// cached tiles were current.
-    static let mostVisitedModule = CefServiceModule(
+    private static let mostVisitedModule = CefServiceModule(
         name: "most-visited", hosts: [.mostVisited],
         setup: """
             async () => {
@@ -225,7 +225,7 @@ public final class CefHistory {
 
     /// `chrome://favicon2` images, which the bookmarks and history hosts may
     /// load; whichever of them runs answers.
-    static let faviconModule = CefServiceModule(
+    private static let faviconModule = CefServiceModule(
         name: "favicons", hosts: [.bookmarks, .history], setup: "async () => ({})")
 }
 

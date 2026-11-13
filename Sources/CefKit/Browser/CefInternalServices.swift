@@ -202,7 +202,7 @@ final class CefInternalServices {
     }
 
     /// Closes the hosts without a call in progress.
-    func stopIdle() {
+    private func stopIdle() {
         hosts.values.filter(\.isIdle).forEach { $0.stop() }
     }
 
@@ -212,7 +212,7 @@ final class CefInternalServices {
     }
 
     /// A host's browser closed or is closing.
-    func hostDidStop(_ browser: CefServiceHostBrowser) {
+    fileprivate func hostDidStop(_ browser: CefServiceHostBrowser) {
         if hosts[browser.host] === browser { hosts[browser.host] = nil }
     }
 
@@ -276,7 +276,7 @@ final class CefServiceHostBrowser {
         }
     }
 
-    var isIdle: Bool { callsInProgress == 0 }
+    fileprivate var isIdle: Bool { callsInProgress == 0 }
 
     func call(
         _ module: CefServiceModule, _ function: String, _ arguments: CefJSON, timeout: Duration
@@ -419,7 +419,7 @@ final class CefServiceHostBrowser {
 /// Watches a service browser for a dead renderer, whose pending evaluations
 /// would otherwise never finish.
 private final class ServiceBrowserDelegate: CefBrowserDelegate {
-    var onTerminated: ((CefBrowser) -> Void)?
+    fileprivate var onTerminated: ((CefBrowser) -> Void)?
 
     func browser(_ browser: CefBrowser, renderProcessDidTerminate reason: CefTerminationReason) {
         onTerminated?(browser)

@@ -130,7 +130,7 @@ extension CefBrowser {
         return data
     }
 
-    static func pngData(_ image: CGImage) -> Data? {
+    private static func pngData(_ image: CGImage) -> Data? {
         let data = NSMutableData()
         guard let destination = CGImageDestinationCreateWithData(data, "public.png" as CFString, 1, nil) else { return nil }
         CGImageDestinationAddImage(destination, image, nil)
@@ -167,7 +167,7 @@ extension CefBrowser {
         CefBrowser.refreshDevToolsStates()
     }
     /// Reads whether DevTools is open back from Chromium.
-    func refreshDevToolsState() {
+    private func refreshDevToolsState() {
         let showing = withHost { $0.pointee.has_dev_tools($0) != 0 } ?? false
         if showing != isShowingDevTools { isShowingDevTools = showing }
     }

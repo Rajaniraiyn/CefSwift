@@ -89,7 +89,7 @@ enum DiscardPhase {
 }
 
 /// The document a discard checked: unloading goes ahead only on the same one.
-struct DiscardCheckpoint: Equatable {
+private struct DiscardCheckpoint: Equatable {
     var navigationGeneration: Int
     var url: URL?
 

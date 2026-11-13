@@ -139,7 +139,7 @@ final class CefDiscardMonitor {
 
     /// Discards, longest hidden first, every browser that has been hidden
     /// for at least `duration` and that nothing keeps loaded.
-    func discardHiddenBrowsers(hiddenFor duration: Duration?) async {
+    private func discardHiddenBrowsers(hiddenFor duration: Duration?) async {
         guard let duration, !isDiscarding, !CefRuntime.shared.isTerminating else { return }
         isDiscarding = true
         defer { isDiscarding = false }
