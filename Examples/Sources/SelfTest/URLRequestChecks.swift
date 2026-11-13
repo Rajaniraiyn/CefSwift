@@ -90,16 +90,14 @@ extension SelfTest {
         // A file body, read by Chromium.
         let file = FileManager.default.temporaryDirectory.appending(path: "selftest-upload-\(UUID().uuidString).bin")
         defer { try? FileManager.default.removeItem(at: file) }
-        do {
+        await expect("urlRequest: a file body is sent") {
             try payload.write(to: file)
             var fileConfiguration = CefProfile.RequestConfiguration()
             fileConfiguration.bodyFile = file
             var put = URLRequest(url: URL(string: "\(base)/echo?file")!)
             put.httpMethod = "PUT"
             let (data, _) = try await profile.data(for: put, configuration: fileConfiguration)
-            check("urlRequest: a file body is sent", data == payload, detail: "\(data.count) bytes back")
-        } catch {
-            check("urlRequest: a file body is sent", false, detail: "\(error)")
+            return (data == payload, "\(data.count) bytes back")
         }
 
         // An HTTP error status is a response.
@@ -125,13 +123,10 @@ extension SelfTest {
         // Into a file.
         let destination = FileManager.default.temporaryDirectory.appending(path: "selftest-download-\(UUID().uuidString).bin")
         defer { try? FileManager.default.removeItem(at: destination) }
-        do {
+        await expect("urlRequest: a download is written to its file") {
             let response = try await profile.download(for: URLRequest(url: URL(string: "\(base)/large?3000000")!), to: destination)
             let size = (try? destination.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-            check("urlRequest: a download is written to its file", response.statusCode == 200 && size == 3_000_000,
-                  detail: "\(size) bytes")
-        } catch {
-            check("urlRequest: a download is written to its file", false, detail: "\(error)")
+            return (response.statusCode == 200 && size == 3_000_000, "\(size) bytes")
         }
     }
 
@@ -195,12 +190,9 @@ extension SelfTest {
             check("urlRequest: stopsAtRedirects returns the redirect", false, detail: "\(error)")
         }
 
-        do {
+        await expect("urlRequest: without a credential the 401 is the response") {
             let (_, response) = try await profile.data(from: URL(string: "\(base)/private")!)
-            check("urlRequest: without a credential the 401 is the response", response.statusCode == 401,
-                  detail: "\(response.statusCode)")
-        } catch {
-            check("urlRequest: without a credential the 401 is the response", false, detail: "\(error)")
+            return (response.statusCode == 401, "\(response.statusCode)")
         }
         do {
             let challenges = ChallengeLog()
@@ -248,7 +240,7 @@ extension SelfTest {
         }
 
         // A consumer that falls behind past the limit ends the request.
-        do {
+        await expect("urlRequest: a reader past the stream's limit gets ERR_INSUFFICIENT_RESOURCES") {
             var configuration = CefProfile.RequestConfiguration()
             configuration.streamBufferLimit = 256 << 10
             let (body, _) = try await profile.bytes(for: URLRequest(url: URL(string: "\(base)/large?\(32 << 20)")!), configuration: configuration)
@@ -258,10 +250,7 @@ extension SelfTest {
             } catch let error as CefLoadError {
                 outcome = "\(error.code)"
             }
-            check("urlRequest: a reader past the stream's limit gets ERR_INSUFFICIENT_RESOURCES", outcome == "-12",
-                  detail: outcome)
-        } catch {
-            check("urlRequest: a reader past the stream's limit gets ERR_INSUFFICIENT_RESOURCES", false, detail: "\(error)")
+            return (outcome == "-12", outcome)
         }
 
         // Cancelling the task mid-body.

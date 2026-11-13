@@ -35,13 +35,11 @@ extension SelfTest {
         // A page's @page size sets its orientation; this one has none.
         browser.load(capabilityOrigin.appending(path: "plain.html"))
         _ = await waitUntil { browser.title == "plain" && !browser.isLoading }
-        do {
+        await expect("pdf: landscape turns the paper") {
             let pdf = try await document { $0.isLandscape = true }
             let page = pdf.page(at: 0)
-            check("pdf: landscape turns the paper", close(size(pdf), CGSize(width: a4.height, height: a4.width)),
-                  detail: "\(size(pdf)), rotation \(page?.rotation ?? -1), \(pdf.pageCount) pages")
-        } catch {
-            check("pdf: landscape turns the paper", false, detail: "\(error)")
+            return (close(size(pdf), CGSize(width: a4.height, height: a4.width)),
+                    "\(size(pdf)), rotation \(page?.rotation ?? -1), \(pdf.pageCount) pages")
         }
         browser.load(capabilityOrigin.appending(path: "print.html"))
         _ = await waitUntil { browser.title == "print" && !browser.isLoading }

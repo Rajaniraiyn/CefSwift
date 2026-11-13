@@ -209,8 +209,15 @@ enum SelfTest {
     }
 
     static func expect(_ name: String, _ body: () async throws -> Bool) async {
+        await expect(name) { (try await body(), "") }
+    }
+
+    /// Checks what `body` returns, with the detail to report if it fails; a
+    /// thrown error fails the check.
+    static func expect(_ name: String, _ body: () async throws -> (passed: Bool, detail: String)) async {
         do {
-            check(name, try await body())
+            let (passed, detail) = try await body()
+            check(name, passed, detail: detail)
         } catch {
             check(name, false, detail: "\(error)")
         }
