@@ -11,6 +11,7 @@ extension SelfTest {
         await windowDiscardChecks()
         await discardBlockerChecks()
         await viewDiscardBlockerChecks()
+        await beforeUnloadBlockerChecks()
         await viewDiscardChecks()
     }
 
@@ -318,6 +319,85 @@ extension SelfTest {
         for (browser, view) in [(silent, silentView), (element, elementView), (webAudio, webAudioView),
                                 (muted, mutedView), (typed, typedView)] {
             await closeHosted(browser, view)
+        }
+    }
+
+    // MARK: beforeunload
+
+    /// `beforeunload` listeners in any frame, added and removed after load,
+    /// and `onbeforeunload` assigned, for both runtime styles. Chromium
+    /// asks every frame, so a listener in a same-site or a cross-site
+    /// (out-of-process) `iframe` keeps the page too.
+    static func beforeUnloadBlockerChecks() async {
+        for style in ["view", "window"] {
+            func open(_ path: String) async -> (browser: CefBrowser, close: () async -> Void) {
+                let browser = CefBrowser(url: URL(string: "selftest://edge/\(path)")!)
+                if style == "view" {
+                    let view = hostWindowed(browser)
+                    _ = await loaded(browser)
+                    view.isHidden = true
+                    return (browser, { await closeHosted(browser, view) })
+                }
+                let window = CefWindow(browser: browser)
+                window.show()
+                _ = await loaded(browser)
+                window.hide()
+                return (browser, {
+                    browser.close(force: true)
+                    _ = await waitUntil { window.isClosed && browser.state == .closed }
+                })
+            }
+            /// Runs `script` (in the page's first subframe if `inFrame`),
+            /// then checks whether the page is kept for its listeners.
+            func expectKept(
+                _ name: String, _ browser: CefBrowser, _ script: String?, inFrame: Bool = false, kept: Bool
+            ) async {
+                if let script {
+                    if inFrame, let frame = browser.frames.first(where: { !$0.isMain }) {
+                        _ = try? await browser.evaluateJavaScript(script, in: frame)
+                    } else {
+                        _ = try? await browser.evaluateJavaScript(script)
+                    }
+                }
+                // Hidden windows take a moment to reach Chromium's tab state.
+                var blockers: Set<CefBrowser.DiscardBlocker> = []
+                let agreed = await waitUntilAsync(timeout: .seconds(5)) {
+                    blockers = await browser.discardBlockers()
+                    return blockers == (kept ? [.beforeUnloadHandler] : [])
+                }
+                check("discard blockers (\(style)): \(name)", agreed, detail: "\(blockers)")
+            }
+
+            let page = await open("tab.html?beforeunload")
+            await expectKept("a page without beforeunload listeners is not kept", page.browser, nil, kept: false)
+            await expectKept("a beforeunload listener added after load keeps the page", page.browser,
+                             "window.__leave = event => event.preventDefault(); addEventListener('beforeunload', __leave)",
+                             kept: true)
+            await expectKept("removing the listener again releases it", page.browser,
+                             "removeEventListener('beforeunload', __leave)", kept: false)
+            await expectKept("window.onbeforeunload keeps the page", page.browser,
+                             "onbeforeunload = () => 'stay'", kept: true)
+            await expectKept("window.onbeforeunload = null releases it", page.browser,
+                             "onbeforeunload = null", kept: false)
+            await page.close()
+
+            let sameSite = await open("leave-frame.html")
+            await expectKept("a listener in a same-site iframe keeps the page", sameSite.browser, nil, kept: true)
+            await sameSite.close()
+
+            let crossSite = await open("plain-xframe.html")
+            let separate = crossSite.browser.frames.count == 2
+                && Set(crossSite.browser.frames.map { $0.id.split(separator: "-").first }).count == 2
+            check("discard blockers (\(style)): the cross-site iframe is in a renderer of its own", separate,
+                  detail: "\(crossSite.browser.frames.map(\.id))")
+            await expectKept("a cross-site iframe without listeners does not keep the page", crossSite.browser,
+                             nil, kept: false)
+            await expectKept("a listener a cross-site iframe adds after load keeps the page", crossSite.browser,
+                             "window.__leave = () => {}; addEventListener('beforeunload', __leave)",
+                             inFrame: true, kept: true)
+            await expectKept("the cross-site iframe removing it releases the page", crossSite.browser,
+                             "removeEventListener('beforeunload', __leave)", inFrame: true, kept: false)
+            await crossSite.close()
         }
     }
 

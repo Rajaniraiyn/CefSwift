@@ -407,6 +407,10 @@ struct EdgePages: CefSchemeHandler {
                 <title>leave</title><p>leave</p>
                 <script>addEventListener('beforeunload', e => { e.preventDefault(); e.returnValue = ''; });</script>
                 """)
+        case "/leave-frame.html":
+            return Self.page("<title>leave-frame</title><iframe src=\"leave.html\"></iframe>")
+        case "/plain-xframe.html":
+            return Self.page("<title>plain-xframe</title><iframe src=\"selftest://edge-frame/tab.html\"></iframe>")
         default:
             let name = path.dropFirst().split(separator: ".").first.map(String.init) ?? "page"
             return Self.page("<title>\(name)</title><p>\(name)</p>")

@@ -141,9 +141,62 @@ first CEF update that changes it. The cost is the `chrome://discards`
 host's renderer, shared with tab discarding, while checks are made, the
 graph's change stream into it meanwhile, and about a millisecond per
 check (0.2 to 1.5 s for the first, which starts the host); the host closes after
-the usual idle timeout. The graph also has `has_nonempty_beforeunload`,
-which could replace the DevTools Protocol `beforeunload` check for Alloy
-browsers; that is neither done nor measured.
+the usual idle timeout.
+
+### `beforeunload` stays with the DevTools Protocol
+
+The page graph describes `has_nonempty_beforeunload`, on each frame
+node's `document` and on the page node, which looked like a way to drop
+the DevTools Protocol from `discardBlockers()`. A SelfTest probe against
+CEF 156.0.28 read it for both runtime styles (`CefWebView` and
+`CefWindow`) through every case that matters: a listener added after
+load and removed again, `window.onbeforeunload` set and cleared, two
+listeners with one removed, a listener in a same-site `iframe` and in a
+cross-site one (out of process), at load and added after it. The field
+was `false` every time, on every frame and on the page, while the
+DevTools Protocol saw each listener. Chromium's source fits:
+`FrameNodeImpl::SetHasNonEmptyBeforeUnload` is only the receiving end of
+`DocumentCoordinationUnit`, and Blink's `DocumentResourceCoordinator`
+has the sender, but `LocalDOMWindow`, `LocalFrame` and `Document` do not
+call it; `LocalDOMWindow` reports `beforeunload` listeners only as a
+sudden-termination disabler to its `RenderFrameHost`, which neither the
+graph nor CEF's API exposes.
+The CEF C API has nothing either (`try_close_browser` runs the handlers
+rather than reporting them), nor has AppKit.
+
+So the blocker stays with the DevTools Protocol, for both styles. The
+probe found the old check incomplete: it asked only the main frame's
+window, and Chromium runs `beforeunload` in every frame, so a listener
+in an `iframe` went unseen. `getEventListeners` reports only listeners of
+the context its object belongs to (`InspectorDOMDebuggerAgent`), so a
+subframe's window has to be obtained in that frame's main world: from
+`Page.getFrameTree`, `DOM.getFrameOwner`, `DOM.describeNode` (the owner's
+`contentDocument`), `DOM.resolveNode` and `Runtime.callFunctionOn`
+(`defaultView`). The DevTools frame id is the frame's DevTools token,
+not CEF's frame token, so CEF's frame list cannot be used for this. A
+cross-site frame is not in the main session's frame tree:
+`Target.getTargets` lists it as an `iframe` target with a `parentId`,
+and `Target.attachToTarget` with `flatten` gives a session in which the
+same steps work. CEF delivers that session's messages to
+`on_dev_tools_message` but not to its typed callbacks (a reply never
+arrived until `CefDevTools` parsed them there), so `CefDevTools` takes
+messages with a top-level `sessionId` there, and drops their events so
+that listeners never mistake them for the browser's own. A check took
+2 to 14 ms measured, subframes included; it enables no domain.
+
+The page node's `PageLiveStateDecorator` data was also read, for
+blockers Alloy browsers do not report. It has `IsConnectedToUSBDevice`,
+`…BluetoothDevice`, `…HidDevice`, `…SerialPort`, `IsCapturingVideo`,
+`…Audio`, `…Window`, `…Display`, `IsBeingMirrored`, `IsAutoDiscardable`,
+`IsPinnedTab` and `IsDevToolsOpen` (`true` in the probe, whose DevTools
+check had attached a session). None was added:
+capture is `.capturingMedia` already, from `on_media_access_change`, for
+both styles; mirroring is casting, which CEF does not have; pinning and
+auto-discardability are Chrome tab-strip state an Alloy browser does not
+have, and its exemptions are the app's policy; and the device flags
+could not be checked without a device and a chooser the user answers, so
+they are not known to be exact for Alloy browsers. Picture in picture is
+not in the graph's descriptions at all.
 
 ## Passkeys: a module on an attachment, not a CefKit option
 

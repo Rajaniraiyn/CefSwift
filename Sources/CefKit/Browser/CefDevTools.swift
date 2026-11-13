@@ -44,6 +44,12 @@ public struct CefDevToolsError: Error, Sendable, Equatable, CustomStringConverti
 /// your `Runtime.disable` leaves the domain on for a feature still using
 /// it, and the other way round. Each `X.enable` still reaches Chromium, so
 /// the newest parameters apply.
+///
+/// Only this session's events reach ``events(_:bufferingPolicy:)``: a
+/// session attached to another target in flat mode (`Target.attachToTarget`
+/// with `flatten`, as CefKit does for a moment to ask a cross-site frame
+/// about its `beforeunload` listeners) has messages of its own, which are
+/// not delivered as this session's.
 @MainActor
 public final class CefDevTools {
     private weak var browser: CefBrowser?
@@ -83,6 +89,17 @@ public final class CefDevTools {
     /// cancelled; Chromium still runs a call that was already sent.
     @discardableResult
     public func send(_ method: String, _ params: CefJSON = [:]) async throws -> CefJSON {
+        try await send(method, params, session: nil)
+    }
+
+    /// Calls a protocol method in a session ``send(_:_:)``'s session
+    /// attached to (`Target.attachToTarget` with `flatten`), such as an
+    /// out-of-process frame's. Domains enabled in it are not leased.
+    package func send(_ method: String, _ params: CefJSON = [:], inSession session: String) async throws -> CefJSON {
+        try await send(method, params, session: .some(session))
+    }
+
+    private func send(_ method: String, _ params: CefJSON, session childSession: String?) async throws -> CefJSON {
         guard let browser else { throw CefError.browserClosed }
         // Each suspension can outlive the session: start over in the new
         // one after a discard; fail once the browser has closed.
@@ -95,6 +112,7 @@ public final class CefDevTools {
             guard browser.state != .closed else { throw CefError.browserClosed }
         } while current != session || browser.raw == nil
         attachIfNeeded(to: browser)
+        if let childSession { return try await deliver(method, params, to: browser, session: childSession) }
         if let lease = Self.lease(for: method), lease.isDisable, (domainLeases[lease.enable] ?? 0) > 1 {
             // Another user of the domain still needs it.
             domainLeases[lease.enable, default: 1] -= 1
@@ -161,10 +179,14 @@ public final class CefDevTools {
     /// detach it.
     @_spi(Testing) public var isAttached: Bool { registration != nil }
 
-    private func deliver(_ method: String, _ params: CefJSON, to browser: CefBrowser) async throws -> CefJSON {
+    private func deliver(
+        _ method: String, _ params: CefJSON, to browser: CefBrowser, session: String? = nil
+    ) async throws -> CefJSON {
         sentMessageCount += 1
         let reply = try await pending.wait { id in
-            let message = CefJSON.object(["id": .number(Double(id)), "method": .string(method), "params": params]).data
+            var fields: [String: CefJSON] = ["id": .number(Double(id)), "method": .string(method), "params": params]
+            if let session { fields["sessionId"] = .string(session) }
+            let message = CefJSON.object(fields).data
             let sent = browser.withHost { host in
                 message.withUnsafeBytes { host.pointee.send_dev_tools_message(host, $0.baseAddress, $0.count) != 0 }
             }
@@ -277,6 +299,25 @@ public final class CefDevTools {
         pending.complete(Int(id), .success(Reply(succeeded: succeeded, result: result)))
     }
 
+    /// A message of a child session (one with a top-level `sessionId`),
+    /// which CEF's typed callbacks do not handle: a reply completes its
+    /// call; an event is dropped, so that listeners of this session never
+    /// take another session's event for one of its own. Returns whether it
+    /// was such a message.
+    static let sessionMarker = Data(#""sessionId""#.utf8)
+
+    func receivedChildSessionMessage(_ message: Data) -> Bool {
+        guard message.range(of: Self.sessionMarker) != nil, let json = try? CefJSON(data: message),
+              json["sessionId"].stringValue != nil
+        else { return false }
+        if let id = json["id"].intValue {
+            let error = json["error"]
+            let succeeded = error.isNull
+            pending.complete(id, .success(Reply(succeeded: succeeded, result: (succeeded ? json["result"] : error).data)))
+        }
+        return true
+    }
+
     func received(event method: String, params: Data) {
         params.withUnsafeBytes { received(event: method, params: $0) }
     }
@@ -309,9 +350,15 @@ private final class DevToolsObserver: Sendable {
 
     func makeObserver() -> UnsafeMutablePointer<cef_dev_tools_message_observer_t> {
         let observer = cefAllocate(cef_dev_tools_message_observer_t.self, owner: self)
-        observer.pointee.on_dev_tools_message = { _, browser, _, _ in
+        observer.pointee.on_dev_tools_message = { s, browser, message, size in
             cefRelease(browser)
-            return 0  // not consumed: CEF goes on to the typed callbacks below
+            guard let message, size > 0, let owner = cefOwner(DevToolsObserver.self, s) else { return 0 }
+            // Borrowed for the call: searched in place, copied only to parse.
+            let bytes = Data(bytesNoCopy: UnsafeMutableRawPointer(mutating: message), count: size, deallocator: .none)
+            return MainActor.assumeIsolated {
+                // Otherwise not consumed: CEF goes on to the typed callbacks below.
+                owner.devTools?.receivedChildSessionMessage(bytes) == true ? 1 : 0
+            }
         }
         observer.pointee.on_dev_tools_method_result = { s, browser, messageID, success, result, size in
             cefRelease(browser)
