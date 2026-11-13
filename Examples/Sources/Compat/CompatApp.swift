@@ -13,17 +13,13 @@ import CefSwiftUI
 /// - `-preset default|browser|embedded`: the `CefRuntime.Configuration` preset.
 /// - `-features <name>,<name>`: `devtools` (a DevTools session with no
 ///   domain enabled), `runtime` (`Runtime.enable`), `page` (`Page.enable`),
-///   `bridge`, `anyframe` (the bridge in every frame), `userscript`,
-///   `evaluate` (one `evaluateJavaScript` as the
+///   `bridge`, `userscript`, `evaluate` (one `evaluateJavaScript` as the
 ///   page loads), `passkeys` (app-answered passkeys), `accessibility`
 ///   (offscreen accessibility tree from the start).
 /// - `-wait <seconds>`: how long to show the page (default 12).
 /// - `-capture <path.png>`: where to save a screenshot of the window, taken
 ///   with `screencapture` from outside the page, when the time is up.
 /// - `-cacheDirectory <path>`: Chromium's data directory.
-/// - `-productToken <token>`: `CefRuntime.UserAgent.appendingProduct(token)`.
-/// - `-printValue <script>`: evaluates the script when the time is up and
-///   prints `compat value <JSON>`, for trying the harness out.
 ///
 /// It prints `compat window <number>` once the window is up and
 /// `compat done` before quitting.
@@ -54,9 +50,6 @@ enum CompatApp {
             configuration.rootCacheDirectory = URL(fileURLWithPath: path, isDirectory: true)
         }
         configuration.preferences["browser.confirm_to_quit"] = false
-        if let token = defaults.string(forKey: "productToken") {
-            configuration.userAgent = .appendingProduct(token)
-        }
         do {
             try CefRuntime.shared.initialize(configuration: configuration)
         } catch {
@@ -69,7 +62,6 @@ enum CompatApp {
         if features.contains("bridge") {
             bridge.handle("ping") { (_: CefJSON) in "pong" }
             browserConfiguration.bridges = [bridge]
-            if features.contains("anyframe") { bridge.access = .anyFrame }
         }
         if features.contains("userscript") {
             browserConfiguration.userScripts = [CefUserScript(source: "addEventListener('DOMContentLoaded', () => { document.documentElement.dataset.compat = '1'; });")]
@@ -91,21 +83,20 @@ enum CompatApp {
                 contentRect: frame, styleMask: [.titled, .resizable, .closable, .miniaturizable],
                 backing: .buffered, defer: false)
             window.title = "Compat"
-            let content = window.contentView!
+            let view: NSView
             if offscreen {
-                let view = CefOffscreenBrowserView()
-                view.frame = content.bounds
-                view.autoresizingMask = [.width, .height]
-                content.addSubview(view)
-                view.browser = browser
-                window.makeFirstResponder(view)
+                let offscreenView = CefOffscreenBrowserView()
+                offscreenView.browser = browser
+                view = offscreenView
             } else {
-                let view = CefWindowedBrowserView()
-                view.frame = content.bounds
-                view.autoresizingMask = [.width, .height]
-                content.addSubview(view)
-                view.browser = browser
+                let windowedView = CefWindowedBrowserView()
+                windowedView.browser = browser
+                view = windowedView
             }
+            view.frame = window.contentView!.bounds
+            view.autoresizingMask = [.width, .height]
+            window.contentView!.addSubview(view)
+            if offscreen { window.makeFirstResponder(view) }
             window.makeKeyAndOrderFront(nil)
             self.window = window
         default:
@@ -154,30 +145,6 @@ enum CompatApp {
             capture.arguments = ["-x", "-o", "-l", String(number), path]
             try? capture.run()
             capture.waitUntilExit()
-        }
-        // Scripts separated by a line of three dashes run one after another.
-        for script in (defaults.string(forKey: "printValue") ?? "").components(separatedBy: "\n---\n")
-        where !script.isEmpty {
-            let line: String = await withCheckedContinuation { continuation in
-                var resumed = false
-                let finish = { (line: String) in
-                    guard !resumed else { return }
-                    resumed = true
-                    continuation.resume(returning: line)
-                }
-                Task {
-                    do {
-                        finish("compat value \(try await browser.evaluateJavaScript(script).text)")
-                    } catch {
-                        finish("compat error \(error)")
-                    }
-                }
-                Task {
-                    try? await Task.sleep(for: .seconds(10))
-                    finish("compat error timed out")
-                }
-            }
-            print(line)
         }
         print("compat done")
         browser.close(force: true)
