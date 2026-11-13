@@ -135,19 +135,5 @@ extension SelfTest {
     }
 
     /// The renderer processes this app has running.
-    static func rendererCount() -> Int {
-        let ps = Process()
-        ps.executableURL = URL(fileURLWithPath: "/bin/ps")
-        ps.arguments = ["-A", "-o", "ppid=,args="]
-        let pipe = Pipe()
-        ps.standardOutput = pipe
-        guard (try? ps.run()) != nil else { return -1 }
-        let output = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-        ps.waitUntilExit()
-        let me = ProcessInfo.processInfo.processIdentifier
-        return output.split(separator: "\n").filter { line in
-            let fields = line.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
-            return fields.count == 2 && Int32(fields[0]) == me && fields[1].contains("--type=renderer")
-        }.count
-    }
+    static func rendererCount() -> Int { rendererProcesses().count }
 }
