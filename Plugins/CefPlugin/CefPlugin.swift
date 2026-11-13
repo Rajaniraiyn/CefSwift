@@ -160,11 +160,6 @@ struct CefPlugin: CommandPlugin {
         let packageFormat = extractor.extractOption(named: "package").last
         let notarize = extractor.extractFlag(named: "notarize") > 0
         let keychainProfileOption = extractor.extractOption(named: "keychain-profile").last
-        // Undocumented: bundle prebuilt executables, or skip straight to the
-        // `swift build` fallback.
-        let testExe = extractor.extractOption(named: "_test-exe").last
-        let testHelperExe = extractor.extractOption(named: "_test-helper-exe").last
-        let forceCLIBuild = extractor.extractFlag(named: "_force-cli-build") > 0
         try rejectLeftovers(extractor)
 
         guard let productName else {
@@ -246,18 +241,10 @@ struct CefPlugin: CommandPlugin {
 
         // 3. Build the product, linked to the framework (see
         // frameworkLinkerFlags).
-        let mainExecutable: URL
-        if let testExe {
-            mainExecutable = URL(fileURLWithPath: testExe)
-            print("[cef] Bundling prebuilt \(mainExecutable.path)")
-        } else {
-            mainExecutable = try buildProduct(
-                named: productName, kind: .executable, configuration: configuration, context: context,
-                // Room for the run path AppBundler adds.
-                linkerFlags: Self.frameworkLinkerFlags(framework) + ["-headerpad_max_install_names"],
-                forceCLIBuild: forceCLIBuild
-            )
-        }
+        let mainExecutable = try buildProduct(
+            named: productName, kind: .executable, configuration: configuration, context: context,
+            // Room for the run path AppBundler adds.
+            linkerFlags: Self.frameworkLinkerFlags(framework) + ["-headerpad_max_install_names"])
         let product = try BuiltProduct.collect(
             executable: mainExecutable, resourceBundleNames: located.resourceBundleNames)
         for item in product.resourceBundles + product.libraries {
@@ -266,21 +253,12 @@ struct CefPlugin: CommandPlugin {
         let minimumSystemVersion = appConfig?.minimumSystemVersion ?? product.deploymentTarget ?? "14.0"
 
         // 4. Build the helper against the framework.
-        let helper: HelperBuilder.Products
-        if let testHelperExe {
-            helper = .init(
-                executable: URL(fileURLWithPath: testHelperExe),
-                startupLibrary: URL(fileURLWithPath: testHelperExe).deletingLastPathComponent()
-                    .appendingPathComponent(HelperBuilder.startupLibraryName))
-        } else {
-            helper = try HelperBuilder(
-                framework: framework,
-                workDirectory: context.pluginWorkDirectoryURL.appendingPathComponent("helper")
-            ).build { product, kind, linkerFlags in
-                try buildProduct(
-                    named: product, kind: kind, configuration: configuration, context: context,
-                    linkerFlags: linkerFlags, forceCLIBuild: forceCLIBuild)
-            }
+        let helper = try HelperBuilder(
+            framework: framework,
+            workDirectory: context.pluginWorkDirectoryURL.appendingPathComponent("helper")
+        ).build { product, kind, linkerFlags in
+            try buildProduct(
+                named: product, kind: kind, configuration: configuration, context: context, linkerFlags: linkerFlags)
         }
 
         let outputDirectory = outputPath.map { packageRelative($0, context: context) }
@@ -501,31 +479,26 @@ struct CefPlugin: CommandPlugin {
         kind: PackageManager.BuildResult.BuiltArtifact.Kind,
         configuration: PackageManager.BuildConfiguration,
         context: PluginContext,
-        linkerFlags: [String],
-        forceCLIBuild: Bool
+        linkerFlags: [String]
     ) throws -> URL {
         print("[cef] Building product '\(productName)' (\(configuration))…")
         let fileName = kind == .dynamicLibrary ? "lib\(productName).dylib" : productName
 
         let proxyFailure: String
-        if forceCLIBuild {
-            proxyFailure = "skipped (--_force-cli-build)"
-        } else {
-            do {
-                var parameters = PackageManager.BuildParameters(
-                    configuration: configuration, logging: .concise, echoLogs: true)
-                parameters.otherLinkerFlags = linkerFlags
-                let result = try packageManager.build(.product(productName), parameters: parameters)
-                let artifacts = result.builtArtifacts.filter { $0.kind == kind }
-                if result.succeeded,
-                   let artifact = artifacts.first(where: { $0.url.lastPathComponent == fileName })
-                       ?? (kind == .executable ? artifacts.first : nil) {
-                    return artifact.url
-                }
-                proxyFailure = result.succeeded ? "the build produced no \(fileName)" : result.logText
-            } catch {
-                proxyFailure = "\(error)"
+        do {
+            var parameters = PackageManager.BuildParameters(
+                configuration: configuration, logging: .concise, echoLogs: true)
+            parameters.otherLinkerFlags = linkerFlags
+            let result = try packageManager.build(.product(productName), parameters: parameters)
+            let artifacts = result.builtArtifacts.filter { $0.kind == kind }
+            if result.succeeded,
+               let artifact = artifacts.first(where: { $0.url.lastPathComponent == fileName })
+                   ?? (kind == .executable ? artifacts.first : nil) {
+                return artifact.url
             }
+            proxyFailure = result.succeeded ? "the build produced no \(fileName)" : result.logText
+        } catch {
+            proxyFailure = "\(error)"
         }
 
         // The running `swift package` holds the lock on the invoking package's
