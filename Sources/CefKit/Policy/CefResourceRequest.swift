@@ -26,6 +26,11 @@ public struct CefResourceRequest: Sendable, Equatable {
         self.referrerString = referrerString
         self.isNavigation = isNavigation
     }
+
+    /// Creates a value of your own, for previews and tests.
+    public init(url: URL?, method: String = "GET", referrer: URL? = nil, isNavigation: Bool = false) {
+        self.init(url: url, method: method, referrerString: referrer?.absoluteString, isNavigation: isNavigation)
+    }
 }
 
 /// What a ``CefRequestFilter`` does with a request.

@@ -192,6 +192,13 @@ public struct CefLoadError: Error, Sendable, Equatable {
     /// The URL that failed.
     public var url: URL?
 
+    /// Creates a value of your own, for previews and tests.
+    public init(code: Int, message: String, url: URL? = nil) {
+        self.code = code
+        self.message = message
+        self.url = url
+    }
+
     /// Whether the load was aborted (`ERR_ABORTED`) — a navigation replaced
     /// or cancelled it. Usually not worth showing to the user.
     public var isCancellation: Bool { code == -3 }
@@ -203,6 +210,14 @@ public struct CefConsoleMessage: Sendable, Equatable {
     public var text: String
     public var source: String
     public var line: Int
+
+    /// Creates a value of your own, for previews and tests.
+    public init(level: CefLogSeverity, text: String, source: String = "", line: Int = 0) {
+        self.level = level
+        self.text = text
+        self.source = source
+        self.line = line
+    }
 }
 
 /// A main-frame navigation awaiting a policy decision.
@@ -212,7 +227,8 @@ public struct CefNavigationAction: Sendable, Equatable {
     /// Whether a user gesture (click, key) triggered the navigation.
     public var hasUserGesture: Bool
 
-    package init(url: URL?, isRedirect: Bool, hasUserGesture: Bool) {
+    /// Creates a value of your own, for previews and tests.
+    public init(url: URL?, isRedirect: Bool = false, hasUserGesture: Bool = false) {
         self.url = url
         self.isRedirect = isRedirect
         self.hasUserGesture = hasUserGesture
@@ -229,6 +245,14 @@ public struct CefCertificateError: Sendable, Equatable {
     public var status: CefCertificateStatus = []
     /// The certificate the server presented.
     public var certificate: CefCertificate?
+
+    /// Creates a value of your own, for previews and tests.
+    public init(code: Int, url: URL?, status: CefCertificateStatus = [], certificate: CefCertificate? = nil) {
+        self.code = code
+        self.url = url
+        self.status = status
+        self.certificate = certificate
+    }
 }
 
 /// Credentials answering a ``CefAuthenticationChallenge``.

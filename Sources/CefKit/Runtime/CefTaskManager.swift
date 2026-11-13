@@ -83,6 +83,29 @@ public final class CefTaskManager {
         /// The process CefKit estimates the task runs in, among the tasks
         /// of one snapshot; see ``CefTaskManager`` for how it is inferred.
         public var process: Process.ID
+
+        /// Creates a value of your own, for previews and tests.
+        public init(
+            id: Int64,
+            kind: Kind,
+            title: String,
+            cpuUsage: Double = 0,
+            memory: Int64? = nil,
+            gpuMemory: Int64? = nil,
+            isGPUMemoryAggregate: Bool = false,
+            canTerminate: Bool = false,
+            process: Process.ID
+        ) {
+            self.id = id
+            self.kind = kind
+            self.title = title
+            self.cpuUsage = cpuUsage
+            self.memory = memory
+            self.gpuMemory = gpuMemory
+            self.isGPUMemoryAggregate = isGPUMemoryAggregate
+            self.canTerminate = canTerminate
+            self.process = process
+        }
     }
 
     /// A process, as the tasks estimated to run in it: consecutive
@@ -95,6 +118,12 @@ public final class CefTaskManager {
         public var id: Int64
         /// The tasks in the process, the process's own first.
         public var tasks: [Task]
+
+        /// Creates a value of your own, for previews and tests.
+        public init(id: Int64, tasks: [Task]) {
+            self.id = id
+            self.tasks = tasks
+        }
 
         /// The process's memory footprint, counted once.
         public var memory: Int64? { tasks.first?.memory }

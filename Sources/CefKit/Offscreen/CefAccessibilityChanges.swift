@@ -61,5 +61,11 @@ extension CefAccessibilityChanges {
         public var type: String
         /// The node the event is about.
         public var node: CefAccessibilityNode.ID?
+
+        /// Creates a value of your own, for previews and tests.
+        public init(type: String, node: CefAccessibilityNode.ID? = nil) {
+            self.type = type
+            self.node = node
+        }
     }
 }

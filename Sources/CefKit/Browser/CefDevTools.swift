@@ -8,6 +8,13 @@ public struct CefDevToolsError: Error, Sendable, Equatable, CustomStringConverti
     public var code: Int
     public var message: String
 
+    /// Creates a value of your own, for previews and tests.
+    public init(method: String, code: Int, message: String) {
+        self.method = method
+        self.code = code
+        self.message = message
+    }
+
     public var description: String { "\(method) failed (\(code)): \(message)" }
 }
 

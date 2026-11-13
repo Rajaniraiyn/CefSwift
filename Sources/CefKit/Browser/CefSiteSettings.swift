@@ -322,6 +322,14 @@ public struct CefSiteSettings {
         /// The stored value.
         public var setting: CefSitePermission.Setting
 
+        /// Creates a value of your own, for previews and tests.
+        public init(permission: CefSitePermission, origin: URL?, pattern: String, setting: CefSitePermission.Setting) {
+            self.permission = permission
+            self.origin = origin
+            self.pattern = pattern
+            self.setting = setting
+        }
+
         /// Whether the exception's pattern covers `url`'s origin.
         public func applies(to url: URL) -> Bool {
             CefSiteSettings.pattern(pattern, matches: url)
@@ -423,6 +431,13 @@ public struct CefSiteSettings {
         public var origin: URL?
         /// The top-level site the change is scoped to, when there is one.
         public var topLevelOrigin: URL?
+
+        /// Creates a value of your own, for previews and tests.
+        public init(permission: CefSitePermission?, origin: URL?, topLevelOrigin: URL? = nil) {
+            self.permission = permission
+            self.origin = origin
+            self.topLevelOrigin = topLevelOrigin
+        }
     }
 
     /// Every change to the profile's site settings, as it happens: from

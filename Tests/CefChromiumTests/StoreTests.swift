@@ -42,4 +42,13 @@ struct StoreTests {
         // the forwarding task run mid-burst, which splits it into a few.
         #expect((1...3).contains(count))
     }
+
+    /// An entry an app makes removes the visits it lists: Chromium's visit
+    /// times are milliseconds since 1970.
+    @Test func anAppMadeHistoryEntryCarriesItsVisitTimes() {
+        let visits = [Date(timeIntervalSince1970: 2), Date(timeIntervalSince1970: 1.5)]
+        let entry = CefHistory.Entry(
+            url: URL(string: "https://example.com/")!, title: "", lastVisitDate: visits[0], visitDates: visits)
+        #expect(entry.visitTimes == [2_000, 1_500])
+    }
 }

@@ -53,6 +53,27 @@ public struct CefAppCapabilities: Sendable, Equatable {
     /// downloaded the CDM is ``CefRuntime/widevine``.
     public let canLoadWidevine: Bool
 
+    /// Creates a value of your own, for previews and tests.
+    public init(
+        signature: SignatureKind,
+        teamIdentifier: String? = nil,
+        isHardenedRuntime: Bool = false,
+        isAppSandboxed: Bool = false,
+        entitlements: Set<String> = [],
+        keychainAccessGroups: [String] = [],
+        usageDescriptions: Set<String> = [],
+        canLoadWidevine: Bool = false
+    ) {
+        self.signature = signature
+        self.teamIdentifier = teamIdentifier
+        self.isHardenedRuntime = isHardenedRuntime
+        self.isAppSandboxed = isAppSandboxed
+        self.entitlements = entitlements
+        self.keychainAccessGroups = keychainAccessGroups
+        self.usageDescriptions = usageDescriptions
+        self.canLoadWidevine = canLoadWidevine
+    }
+
     /// The running app's capabilities.
     public static let current = CefAppCapabilities(
         signingInformation: Self.signingInformationOfSelf(),

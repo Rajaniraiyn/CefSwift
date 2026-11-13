@@ -143,6 +143,14 @@ public struct CefPasskeyStoreError: Error, Sendable, CustomStringConvertible {
     /// The store's error, described.
     public var message: String
 
+    /// Creates a value of your own, for previews and tests.
+    public init(operation: Operation, origin: String, passkey: CefPasskey? = nil, message: String) {
+        self.operation = operation
+        self.origin = origin
+        self.passkey = passkey
+        self.message = message
+    }
+
     public var description: String {
         "passkey store \(operation) failed for \(origin): \(message)"
     }

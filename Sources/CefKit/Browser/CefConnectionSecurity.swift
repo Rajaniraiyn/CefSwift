@@ -46,6 +46,25 @@ public struct CefConnectionSecurity: Sendable, Equatable {
     /// The page ran scripts or loaded frames over HTTP.
     public var ranInsecureContent: Bool
 
+    /// Creates a value of your own, for previews and tests.
+    public init(
+        url: URL?,
+        isSecureConnection: Bool,
+        protocolVersion: ProtocolVersion? = nil,
+        certificateStatus: CefCertificateStatus = [],
+        certificate: CefCertificate? = nil,
+        displayedInsecureContent: Bool = false,
+        ranInsecureContent: Bool = false
+    ) {
+        self.url = url
+        self.isSecureConnection = isSecureConnection
+        self.protocolVersion = protocolVersion
+        self.certificateStatus = certificateStatus
+        self.certificate = certificate
+        self.displayedInsecureContent = displayedInsecureContent
+        self.ranInsecureContent = ranInsecureContent
+    }
+
     /// The overall state.
     public var level: Level {
         guard let scheme = url?.scheme?.lowercased(), ["https", "http", "wss", "ws"].contains(scheme) else { return .local }
@@ -129,6 +148,14 @@ public struct CefClientCertificateRequest: Sendable, Equatable {
     /// The certificates of the user's identities whose issuers the server
     /// accepts, from the keychain. Their private keys stay there.
     public var certificates: [CefCertificate]
+
+    /// Creates a value of your own, for previews and tests.
+    public init(host: String, port: Int = 443, isProxy: Bool = false, certificates: [CefCertificate]) {
+        self.host = host
+        self.port = port
+        self.isProxy = isProxy
+        self.certificates = certificates
+    }
 }
 
 /// The native sheet behind the default
