@@ -35,7 +35,22 @@ extension CefContextMenu {
             menu.appendSection(alloyTextServiceItems(for: target))
         }
         routeTextServices(in: &menu, pageView: pageView)
+        removeProfileItems(from: &menu)
         return menu
+    }
+
+    /// Removes Chrome's "Open Link as <profile>" item and submenu.
+    ///
+    /// Chromium offers them once a second profile exists on disk, naming
+    /// the app's persistent ``CefProfile``s as its own, and would open the
+    /// link in a Chromium window for that profile. Which profile a link
+    /// opens in is the app's decision, through the window-open decision.
+    static func removeProfileItems(from menu: inout CefContextMenu) {
+        let profiles = Int(IDC_OPEN_LINK_IN_PROFILE_FIRST)..<Int(IDC_CONTENT_CONTEXT_START_SMART_SELECTION_ACTION1)
+        menu.removeAll { item in
+            guard let command = item.command else { return false }
+            return command == .openLinkInProfile || profiles.contains(Int(command.rawValue))
+        }
     }
 
     // MARK: Text services
