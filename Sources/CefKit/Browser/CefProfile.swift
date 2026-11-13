@@ -354,14 +354,7 @@ public final class CefProfile {
 
     private func applyConfigured(_ preferences: [String: CefJSON]) {
         // Application-wide ones are CefRuntime's to apply.
-        let manager = self.preferences
-        for (name, value) in preferences where manager.value(named: name) != nil {
-            do {
-                try manager.setValue(value, named: name)
-            } catch {
-                CefLog.error("\(error)")
-            }
-        }
+        self.preferences.apply(preferences)
     }
 
     /// A +1 request context for browser creation, which consumes it.

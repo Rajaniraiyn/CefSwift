@@ -123,7 +123,8 @@ public final class CefRuntime {
         }
         state = .running
         lifecycleCoordinator.start()
-        applyApplicationWidePreferences(configuration.effectivePreferences)
+        // Profiles apply the rest as each is first used.
+        preferences.apply(configuration.effectivePreferences)
         logCapabilities()
     }
 
