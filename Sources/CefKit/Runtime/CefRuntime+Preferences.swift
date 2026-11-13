@@ -2,10 +2,9 @@ import CCef
 import CefBase
 
 extension CefRuntime {
-    /// Reads an application-wide Chromium preference — one Chromium keeps
-    /// for the whole app rather than per profile, such as
-    /// `"browser.confirm_to_quit"`. `nil` when no such preference exists.
-    public func preference(_ name: String) -> CefJSON? {
+    /// Reads an application-wide Chromium preference; `nil` when no such
+    /// preference exists. Apps use ``preferences``.
+    func preference(_ name: String) -> CefJSON? {
         withGlobalPreferences { manager in
             CefStringUtil.withCefString(name) { cefName -> CefJSON? in
                 guard manager.pointee.has_preference(manager, cefName) != 0 else { return nil }
@@ -16,11 +15,10 @@ extension CefRuntime {
         } ?? nil
     }
 
-    /// Changes an application-wide Chromium preference. Pass `nil` to restore
-    /// its default. Throws if the preference is unknown or `value` has the
-    /// wrong type. Per-profile settings are changed with
-    /// ``CefProfile/setPreference(_:to:)``.
-    public func setPreference(_ name: String, to value: CefJSON?) throws(CefError) {
+    /// Changes an application-wide Chromium preference; `nil` restores its
+    /// default. Applies the configured preferences. Apps use
+    /// ``preferences``.
+    func setPreference(_ name: String, to value: CefJSON?) throws(CefError) {
         let failure: String? = withGlobalPreferences { manager in
             CefStringUtil.withCefString(name) { cefName -> String? in
                 guard manager.pointee.has_preference(manager, cefName) != 0 else { return "no such preference" }
@@ -48,7 +46,7 @@ extension CefRuntime {
     }
 
     private func withGlobalPreferences<R>(_ body: (UnsafeMutablePointer<cef_preference_manager_t>) -> R) -> R? {
-        guard isInitialized, let manager = cef_preference_manager_get_global() else { return nil }
+        guard isRunning, let manager = cef_preference_manager_get_global() else { return nil }
         defer { cefRelease(manager) }
         return body(manager)
     }

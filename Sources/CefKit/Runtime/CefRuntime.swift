@@ -44,13 +44,13 @@ public final class CefRuntime {
     public private(set) var state = State.notStarted
 
     /// Whether Chromium is running (``state`` is ``State/running``).
-    public var isInitialized: Bool { state == .running }
+    public var isRunning: Bool { state == .running }
 
     /// The configuration CEF was initialized with.
-    public private(set) var configuration: CefConfiguration?
+    public private(set) var configuration: CefRuntime.Configuration?
 
     /// The locale of Chromium's own interface, such as `"fr"`, `"pt-BR"` or
-    /// `"en-US"`: ``CefConfiguration/localization`` resolved to a locale the
+    /// `"en-US"`: ``CefRuntime/Configuration/localization`` resolved to a locale the
     /// bundle has strings for. `nil` until Chromium runs.
     public private(set) var locale: String?
 
@@ -99,7 +99,7 @@ public final class CefRuntime {
     @ObservationIgnored private var isTerminationRequested = false
     @ObservationIgnored private var hasRequestedWidevine = false
     /// The Widevine fetch in progress; ``installWidevine()`` callers share it.
-    @ObservationIgnored var widevineInstallation: Task<CefWidevineState, Never>?
+    @ObservationIgnored var widevineInstallation: Task<CefRuntime.WidevineState, Never>?
 
     private init() {}
 
@@ -111,7 +111,7 @@ public final class CefRuntime {
     /// Throws ``CefError/alreadyInitialized`` when Chromium is running, and
     /// ``CefError/shutDown`` once it has shut down: Chromium starts once per
     /// process.
-    public func initialize(configuration: CefConfiguration = .default) throws(CefError) {
+    public func initialize(configuration: CefRuntime.Configuration = .init()) throws(CefError) {
         try state.checkCanStart()
         state = .starting
         do {
@@ -127,7 +127,7 @@ public final class CefRuntime {
         logCapabilities()
     }
 
-    private func start(configuration: CefConfiguration) throws(CefError) {
+    private func start(configuration: CefRuntime.Configuration) throws(CefError) {
         CefApplication.install()
 
         let frameworkBinary = try Self.resolveFrameworkBinary(override: configuration.frameworkDirectory)
@@ -139,7 +139,7 @@ public final class CefRuntime {
         let pump = CefMessagePump()
         // Browsers created through Chrome's own UI have no CefBrowser asking
         // for them; this client adopts them as they appear.
-        let defaultClient = CefBrowserClient(browser: nil, requestFilter: nil, chromeUI: configuration.chromeUI)
+        let defaultClient = CefBrowserClient(browser: nil, requestFilter: nil, chromeToolbar: configuration.chromeToolbar)
         let context = CefAppContext(
             configuration: configuration, pump: pump, defaultClient: defaultClient.makeClient())
         let frameworkDirectory = frameworkBinary.deletingLastPathComponent()
@@ -191,8 +191,8 @@ public final class CefRuntime {
 
     /// Opens a window drawn entirely by Chrome — tab strip, omnibox, menus,
     /// extension toolbar — showing `url`. The fastest route to a complete
-    /// browser; trim or rebrand it with ``CefConfiguration/chromeUI`` and
-    /// ``CefConfiguration/productName``.
+    /// browser; trim or rebrand it with ``CefRuntime/Configuration/chromeToolbar`` and
+    /// ``CefRuntime/Configuration/productName``.
     ///
     /// Tabs and windows the user opens from there are reported through
     /// ``onBrowserCreated`` and listed in ``browsers``. The returned
@@ -200,9 +200,9 @@ public final class CefRuntime {
     /// your own reference to it.
     @discardableResult
     public func openChromeWindow(
-        url: URL, frame: CGRect? = nil, options: CefBrowserOptions = .init(), delegate: CefBrowserDelegate? = nil
+        url: URL, frame: CGRect? = nil, configuration: CefBrowser.Configuration = .init(), delegate: CefBrowserDelegate? = nil
     ) -> CefBrowser {
-        let browser = CefBrowser(url: url, options: options, delegate: delegate)
+        let browser = CefBrowser(url: url, configuration: configuration, delegate: delegate)
         browser.createInChromeUIWindow(frame: frame)
         return browser
     }
@@ -212,7 +212,7 @@ public final class CefRuntime {
     /// Registers `handler` as the content source for `scheme` (optionally
     /// restricted to `domain` for standard schemes). Call after
     /// ``initialize(configuration:)``; for custom (non-built-in) schemes the
-    /// scheme must also be declared in ``CefConfiguration/customSchemes``.
+    /// scheme must also be declared in ``CefRuntime/Configuration/customSchemes``.
     /// Registering again for the same scheme/domain replaces the handler.
     ///
     /// The handler serves every profile: the default one, and the
@@ -220,7 +220,7 @@ public final class CefRuntime {
     /// profiles, whose request contexts Chromium keeps separately.
     public func registerSchemeHandler(scheme: String, domain: String? = nil, handler: some CefSchemeHandler) {
         precondition(
-            isInitialized,
+            isRunning,
             "CefRuntime.registerSchemeHandler requires initialize() to have succeeded first."
         )
         let factory = SchemeHandlerFactory(handler: handler)
@@ -276,7 +276,7 @@ public final class CefRuntime {
         state = .stopping
         for profile in CefProfile.all { profile.stopServiceHosts() }
         lifecycleCoordinator.stop()
-        memorySaverMonitor.policy = .off
+        discardMonitor.policy = .disabled
         widevineInstallation?.cancel()
         CefMediaRouter.shared.tearDown()
         CefProfile.releaseRequestContexts()
@@ -307,7 +307,7 @@ public final class CefRuntime {
         // Chromium's update service starts fetching once a browser exists;
         // ask for Widevine then rather than at its first scheduled run, a
         // minute after launch.
-        if !hasRequestedWidevine, let configuration, configuration.protectedMedia != .disabled {
+        if !hasRequestedWidevine, let configuration, configuration.services.protectedMedia != .disabled {
             hasRequestedWidevine = true
             if !widevine.isInstalled { Task { await installWidevine() } }
         }
@@ -328,8 +328,8 @@ public final class CefRuntime {
         browser.lifecycle = .hidden
         if browsers.contains(where: { $0 === browser }) {
             browsers.removeAll { $0 === browser }
-            let profile = browser.options.profile ?? .default
-            if !browsers.contains(where: { ($0.options.profile ?? .default) === profile }) {
+            let profile = browser.configuration.profile ?? .default
+            if !browsers.contains(where: { ($0.configuration.profile ?? .default) === profile }) {
                 profile.lastBrowserDidClose()
             }
         }
@@ -398,7 +398,7 @@ public final class CefRuntime {
     /// browser first (so pages can run `beforeunload` and state is flushed),
     /// then terminates once the last one is gone.
     func handleTerminationRequest() -> Bool {
-        guard isInitialized else { return true }
+        guard isRunning else { return true }
         isTerminationRequested = true
         // Browsers discarded by closing them have nothing left in Chromium.
         for browser in browsers where browser.isDiscarded && browser.raw == nil {
@@ -445,43 +445,43 @@ public final class CefRuntime {
     /// Whether the app is quitting, so no new service browsers should start.
     var isTerminating: Bool { isTerminationRequested }
 
-    // MARK: Memory Saver
+    // MARK: Discard policy
 
-    /// When CefKit discards browsers on its own to free memory. `.off`, the
+    /// When CefKit discards browsers on its own to free memory. `.disabled`, the
     /// default, leaves discarding to ``CefBrowser/discard()``.
     ///
     /// ```swift
     /// // Discard tabs hidden for 30 minutes, and hidden tabs whenever
     /// // macOS runs low on memory.
-    /// CefRuntime.shared.memorySaver = .after(.seconds(30 * 60))
+    /// CefRuntime.shared.discardPolicy = .after(.seconds(30 * 60))
     /// ```
     ///
     /// Only hidden browsers are discarded, and only those
     /// ``CefBrowser/discardBlockers()`` lets through: not one playing audio,
     /// holding unsaved form input, or with ``CefBrowser/allowsDiscarding``
     /// turned off.
-    public var memorySaver: CefMemorySaver {
-        get { memorySaverMonitor.policy }
-        set { memorySaverMonitor.policy = newValue }
+    public var discardPolicy: CefRuntime.DiscardPolicy {
+        get { discardMonitor.policy }
+        set { discardMonitor.policy = newValue }
     }
 
-    @ObservationIgnored private(set) lazy var memorySaverMonitor = CefMemorySaverMonitor()
+    @ObservationIgnored private(set) lazy var discardMonitor = CefDiscardMonitor()
 
-    // MARK: Energy Saver
+    // MARK: Energy policy
 
     /// When CefKit spends less energy on its own. `.automatic`, the
     /// default, lowers offscreen browsers' frame rate to 30 while Low Power
     /// Mode is on or the Mac is under serious thermal pressure.
     ///
     /// ```swift
-    /// CefRuntime.shared.energySaver = .off   // a game or video player
+    /// CefRuntime.shared.energyPolicy = .disabled   // a game or video player
     /// ```
-    public var energySaver: CefEnergySaver {
-        get { lifecycleCoordinator.energySaver }
-        set { lifecycleCoordinator.energySaver = newValue }
+    public var energyPolicy: CefRuntime.EnergyPolicy {
+        get { lifecycleCoordinator.energyPolicy }
+        set { lifecycleCoordinator.energyPolicy = newValue }
     }
 
-    /// Low Power Mode and the thermal state as the energy saver should see
+    /// Low Power Mode and the thermal state as the energy policy should see
     /// them, instead of the system's; `nil` reads the system's.
     @_spi(Testing) public func simulateEnergyConditions(lowPowerMode: Bool, thermalState: ProcessInfo.ThermalState) {
         lifecycleCoordinator.simulatedConditions = CefEnergyConditions(

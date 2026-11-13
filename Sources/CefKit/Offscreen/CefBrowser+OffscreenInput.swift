@@ -207,7 +207,7 @@ extension CefBrowser {
         withHost { host in
             host.pointee.was_hidden(host, 0)
             // Showing the browser can bring back the rate it was created
-            // with; keep the energy saver's.
+            // with; keep the energy policy's.
             if let rate = appliedOffscreenFrameRate { host.pointee.set_windowless_frame_rate(host, Int32(rate)) }
         }
         CefRuntime.shared.lifecycleCoordinator.setNeedsUpdate()
@@ -235,7 +235,7 @@ extension CefBrowser {
 
     /// Marks the whole view as needing to be repainted. The repaint arrives
     /// with the next frame, at the browser's frame rate
-    /// (``CefRendering/offscreen(frameRate:)``).
+    /// (``CefBrowser/Rendering/offscreen(frameRate:)``).
     public func setNeedsDisplay() {
         withHost { $0.pointee.invalidate($0, PET_VIEW) }
     }

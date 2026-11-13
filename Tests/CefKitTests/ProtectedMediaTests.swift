@@ -6,11 +6,11 @@ import Testing
 
 @Suite struct ProtectedMediaTests {
     @Test func presetsChooseWhetherChromiumFetchesWidevine() {
-        #expect(CefConfiguration.default.protectedMedia == .automatic)
-        #expect(CefConfiguration.browser.protectedMedia == .automatic)
-        #expect(CefConfiguration.embedded.protectedMedia == .disabled)
+        #expect(CefRuntime.Configuration().services.protectedMedia == .automatic)
+        #expect(CefRuntime.Configuration.browser.services.protectedMedia == .automatic)
+        #expect(CefRuntime.Configuration.embedded.services.protectedMedia == .disabled)
         // The switch follows the typed options rather than the preset's list.
-        #expect(CefConfiguration.embedded.extraCommandLineSwitches["disable-component-update"] == nil)
+        #expect(CefRuntime.Configuration.embedded.extraCommandLineSwitches["disable-component-update"] == nil)
     }
 
     @Test func componentStatesMapToWidevineStates() {
@@ -35,7 +35,7 @@ import Testing
         try Data("stand-in".utf8).write(to: source.appendingPathComponent("_platform_specific/mac_arm64/lib"))
 
         let root = scratch.appendingPathComponent("Root")
-        let policy = CefProtectedMedia.preinstalled(widevineDirectory: source)
+        let policy = CefRuntime.Configuration.Services.ProtectedMedia.preinstalled(widevineDirectory: source)
         policy.installPreinstalledCDM(rootCache: root)
         let installed = root.appendingPathComponent("WidevineCdm/1.2.3.4/_platform_specific/mac_arm64/lib")
         #expect(FileManager.default.fileExists(atPath: installed.path))
@@ -47,11 +47,11 @@ import Testing
     }
 
     @Test func directoryWithoutManifestVersionIsIgnored() {
-        #expect(CefProtectedMedia.cdmVersion(at: URL(fileURLWithPath: "/nonexistent")) == nil)
+        #expect(CefRuntime.Configuration.Services.ProtectedMedia.cdmVersion(at: URL(fileURLWithPath: "/nonexistent")) == nil)
     }
 
     @Test func protectedMediaIdentifierPermissionHasAKind() {
-        let kinds = CefPermissionKind.fromRequestTypes(UInt32(CEF_PERMISSION_TYPE_PROTECTED_MEDIA_IDENTIFIER.rawValue))
+        let kinds = CefPermissionRequest.Kinds.fromRequestTypes(UInt32(CEF_PERMISSION_TYPE_PROTECTED_MEDIA_IDENTIFIER.rawValue))
         #expect(kinds == .protectedMediaIdentifier)
     }
 }

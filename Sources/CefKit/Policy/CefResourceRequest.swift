@@ -53,7 +53,7 @@ public enum CefResourceRequestAction: Sendable, Equatable {
 /// ```swift
 /// @CefIOActor var blockedHosts: Set<String> = []
 ///
-/// options.requestFilter = { @CefIOActor request in
+/// configuration.requestFilter = { @CefIOActor request in
 ///     blockedHosts.contains(request.url?.host() ?? "") ? .block : .allow
 /// }
 ///

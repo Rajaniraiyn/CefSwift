@@ -24,7 +24,7 @@ extension CefBrowserClient {
             CefBrowserClient.run(s, browser, default: ()) { client, b in
                 client.contextMenuTarget = target
                 CefMenuModel.borrowing(borrowedModel) { menu in
-                    b.options.contextMenu.apply(to: menu, for: target)
+                    b.configuration.contextMenu.apply(to: menu, for: target)
                     b.delegate?.browser(b, configureContextMenu: menu, for: target)
                 }
             }
@@ -62,7 +62,7 @@ extension CefBrowserClient {
             cefRelease(params)
             return CefBrowserClient.run(s, browser, default: 0) { client, b in
                 let target = snapshot ?? client.contextMenuTarget
-                if b.options.contextMenu.perform(commandID: Int(commandID), in: b, for: target) { return 1 }
+                if b.configuration.contextMenu.perform(commandID: Int(commandID), in: b, for: target) { return 1 }
                 return (b.delegate?.browser(b, handleContextMenuCommand: Int(commandID), for: target) ?? false) ? 1 : 0
             }
         }
@@ -92,21 +92,21 @@ extension CefBrowserClient {
         }
         h.pointee.is_chrome_app_menu_item_visible = { s, browser, commandID in
             CefBrowserClient.run(s, browser, default: 1) { client, _ in
-                client.chromeUI.hiddenAppMenuCommands.contains(CefChromeCommand(rawValue: Int(commandID))) ? 0 : 1
+                client.chromeToolbar.hiddenAppMenuCommands.contains(CefChromeCommand(rawValue: Int(commandID))) ? 0 : 1
             }
         }
         h.pointee.is_chrome_app_menu_item_enabled = { s, browser, commandID in
             CefBrowserClient.run(s, browser, default: 1) { client, _ in
-                client.chromeUI.disabledAppMenuCommands.contains(CefChromeCommand(rawValue: Int(commandID))) ? 0 : 1
+                client.chromeToolbar.disabledAppMenuCommands.contains(CefChromeCommand(rawValue: Int(commandID))) ? 0 : 1
             }
         }
         h.pointee.is_chrome_page_action_icon_visible = { s, _ in
             guard let client = cefOwner(CefBrowserClient.self, s) else { return 1 }
-            return MainActor.assumeIsolated { client.chromeUI.showsPageActionIcons ? 1 : 0 }
+            return MainActor.assumeIsolated { client.chromeToolbar.showsPageActionIcons ? 1 : 0 }
         }
         h.pointee.is_chrome_toolbar_button_visible = { s, _ in
             guard let client = cefOwner(CefBrowserClient.self, s) else { return 1 }
-            return MainActor.assumeIsolated { client.chromeUI.showsToolbarButtons ? 1 : 0 }
+            return MainActor.assumeIsolated { client.chromeToolbar.showsToolbarButtons ? 1 : 0 }
         }
         return h
     }

@@ -28,34 +28,36 @@ extension CefBrowser {
     }
 }
 
-/// When CefKit spends less energy on its own; set it as
-/// ``CefRuntime/energySaver``.
-///
-/// ```swift
-/// CefRuntime.shared.energySaver = .automatic   // the default
-/// CefRuntime.shared.energySaver = .off         // full frame rate whatever the conditions
-/// ```
-///
-/// While Low Power Mode is on, or the Mac reports serious or critical
-/// thermal pressure, offscreen browsers draw at most
-/// ``reducedOffscreenFrameRate`` frames a second: on an animated page that
-/// halves the CPU time a browser takes at 60 frames a second. Hidden
-/// browsers draw nothing in any case, and windows Chromium draws itself
-/// keep the display's rate.
-public struct CefEnergySaver: Sendable, Equatable {
-    /// The highest frame rate offscreen browsers draw at while energy is
-    /// constrained; `nil` keeps each browser's own rate.
-    public var reducedOffscreenFrameRate: Int?
+extension CefRuntime {
+    /// When CefKit spends less energy on its own; set it as
+    /// ``CefRuntime/energyPolicy``.
+    ///
+    /// ```swift
+    /// CefRuntime.shared.energyPolicy = .automatic   // the default
+    /// CefRuntime.shared.energyPolicy = .disabled         // full frame rate whatever the conditions
+    /// ```
+    ///
+    /// While Low Power Mode is on, or the Mac reports serious or critical
+    /// thermal pressure, offscreen browsers draw at most
+    /// ``reducedOffscreenFrameRate`` frames a second: on an animated page that
+    /// halves the CPU time a browser takes at 60 frames a second. Hidden
+    /// browsers draw nothing in any case, and windows Chromium draws itself
+    /// keep the display's rate.
+    public struct EnergyPolicy: Sendable, Equatable {
+        /// The highest frame rate offscreen browsers draw at while energy is
+        /// constrained; `nil` keeps each browser's own rate.
+        public var reducedOffscreenFrameRate: Int?
 
-    public init(reducedOffscreenFrameRate: Int? = 30) {
-        self.reducedOffscreenFrameRate = reducedOffscreenFrameRate.map { max($0, 1) }
+        public init(reducedOffscreenFrameRate: Int? = 30) {
+            self.reducedOffscreenFrameRate = reducedOffscreenFrameRate.map { max($0, 1) }
+        }
+
+        /// Reduces offscreen frame rates to 30 while energy is constrained.
+        public static let automatic = CefRuntime.EnergyPolicy()
+
+        /// Leaves frame rates alone.
+        public static let disabled = CefRuntime.EnergyPolicy(reducedOffscreenFrameRate: nil)
     }
-
-    /// Reduces offscreen frame rates to 30 while energy is constrained.
-    public static let automatic = CefEnergySaver()
-
-    /// Leaves frame rates alone.
-    public static let off = CefEnergySaver(reducedOffscreenFrameRate: nil)
 }
 
 /// What the system reports about power and heat.
@@ -85,16 +87,16 @@ struct CefEnergyConditions: Equatable {
 ///   (`was_hidden` does nothing for windowed browsers). Offscreen views
 ///   report their own visibility through `was_hidden`; Chrome-style
 ///   windows are Chromium's.
-/// - Energy: offscreen frame rates under ``CefRuntime/energySaver``.
-/// - Memory: ``CefRuntime/memorySaver`` hears every visibility change.
+/// - Energy: offscreen frame rates under ``CefRuntime/energyPolicy``.
+/// - Memory: ``CefRuntime/discardPolicy`` hears every visibility change.
 ///
 /// Chromium watches memory pressure and system sleep itself, and turns
 /// App Nap off for the browser process (`NSAppSleepDisabled`), so none of
 /// those need forwarding.
 @MainActor
 final class CefLifecycleCoordinator {
-    var energySaver = CefEnergySaver.automatic {
-        didSet { if energySaver != oldValue { setNeedsUpdate() } }
+    var energyPolicy = CefRuntime.EnergyPolicy.automatic {
+        didSet { if energyPolicy != oldValue { setNeedsUpdate() } }
     }
 
     /// Replaces the system's power and thermal readings, for tests.
@@ -173,7 +175,7 @@ final class CefLifecycleCoordinator {
             applyFrameRate(browser, conditions: conditions)
         }
         responderObservations = responderObservations.filter { windows.contains($0.key) }
-        CefRuntime.shared.memorySaverMonitor.visibilityDidChange()
+        CefRuntime.shared.discardMonitor.visibilityDidChange()
     }
 
     /// Focus moves without a notification; `firstResponder` is observable.
@@ -242,10 +244,10 @@ final class CefLifecycleCoordinator {
     // MARK: Energy
 
     private func applyFrameRate(_ browser: CefBrowser, conditions: CefEnergyConditions) {
-        guard browser.isOffscreen, browser.state == .live, case .offscreen(let requested) = browser.options.rendering
+        guard browser.isOffscreen, browser.state == .live, case .offscreen(let requested) = browser.configuration.rendering
         else { return }
         var rate = requested
-        if conditions.isConstrained, let reduced = energySaver.reducedOffscreenFrameRate {
+        if conditions.isConstrained, let reduced = energyPolicy.reducedOffscreenFrameRate {
             rate = min(rate, reduced)
         }
         // A rate below the one the browser was created with does not hold:

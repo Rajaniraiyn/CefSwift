@@ -2,7 +2,7 @@ import AppKit
 @_spi(Testing) import CefKit
 import CefSwiftUI
 
-/// Passkeys answered by the app (`CefPasskeyMode.app`), in both browser
+/// Passkeys answered by the app (`CefBrowser.PasskeyPolicy.app`), in both browser
 /// styles, on a page served from `http://localhost`, which WebAuthn treats
 /// as a secure context. The store is in memory: nothing touches the
 /// keychain.
@@ -30,9 +30,9 @@ extension SelfTest {
     private static func passkeyRoundTrip(style: String, url: URL, watcher: ChromiumDialogWatcher) async {
         let store = CefInMemoryPasskeyStore()
         let policy = PasskeyPolicy()
-        var options = CefBrowserOptions()
-        options.passkeys = .app(store)
-        let browser = CefBrowser(url: url, options: options, delegate: policy)
+        var configuration = CefBrowser.Configuration()
+        configuration.passkeys = .app(store)
+        let browser = CefBrowser(url: url, configuration: configuration, delegate: policy)
         var window: CefBrowserWindow?
         var view: CefWindowedBrowserView?
         if style == "Alloy" {
@@ -148,9 +148,9 @@ extension SelfTest {
 
     private static func disabledPasskeyChecks(url: URL) async {
         let policy = PasskeyPolicy()
-        var options = CefBrowserOptions()
-        options.passkeys = .disabled
-        let browser = CefBrowser(url: url, options: options, delegate: policy)
+        var configuration = CefBrowser.Configuration()
+        configuration.passkeys = .disabled
+        let browser = CefBrowser(url: url, configuration: configuration, delegate: policy)
         let window = CefBrowserWindow(browser: browser)
         window.show()
         _ = await waitUntil(timeout: .seconds(20)) { browser.title == "passkeys" && !browser.isLoading }
@@ -167,10 +167,10 @@ extension SelfTest {
     /// A passkey decision is a tracked one: leaving the page or closing the
     /// browser ends it, and the default sheet goes with it.
     private static func passkeyDecisionCancellationChecks(url: URL) async {
-        var options = CefBrowserOptions()
-        options.passkeys = .app(CefInMemoryPasskeyStore())
+        var configuration = CefBrowser.Configuration()
+        configuration.passkeys = .app(CefInMemoryPasskeyStore())
         let delegate = StallingDelegate()
-        let browser = CefBrowser(url: url, options: options, delegate: delegate)
+        let browser = CefBrowser(url: url, configuration: configuration, delegate: delegate)
         let view = CefWindowedBrowserView()
         view.frame = window.contentView!.bounds
         window.contentView!.addSubview(view)
@@ -194,7 +194,7 @@ extension SelfTest {
 
         // The default delegate's sheet, for a click's sign-in with no
         // saved passkey, goes when the browser closes.
-        let sheetBrowser = CefBrowser(url: url, options: options)
+        let sheetBrowser = CefBrowser(url: url, configuration: configuration)
         view.browser = sheetBrowser
         guard await waitUntil(timeout: .seconds(20), { sheetBrowser.title == "passkeys" && !sheetBrowser.isLoading }) else {
             check("passkeys (sheet): page loads", false, detail: sheetBrowser.title)
@@ -231,9 +231,9 @@ extension SelfTest {
         let store = UnreliablePasskeyStore()
         let policy = PasskeyPolicy()
         policy.answer = { request in request.passkeys.first.map { .signIn(with: $0) } ?? .createPasskey }
-        var options = CefBrowserOptions()
-        options.passkeys = .app(store)
-        let browser = CefBrowser(url: url, options: options, delegate: policy)
+        var configuration = CefBrowser.Configuration()
+        configuration.passkeys = .app(store)
+        let browser = CefBrowser(url: url, configuration: configuration, delegate: policy)
         let window = CefBrowserWindow(browser: browser)
         window.show()
         defer { window.close() }
@@ -350,7 +350,7 @@ final class PasskeyPolicy: CefBrowserDelegate {
     private(set) var requests: [CefPasskeyRequest] = []
     private(set) var storeFailures: [CefPasskeyStoreError] = []
 
-    func browser(_ browser: CefBrowser, decidePasskeyRequest request: CefPasskeyRequest) async -> CefPasskeyDecision {
+    func browser(_ browser: CefBrowser, decidePasskeyFor request: CefPasskeyRequest) async -> CefPasskeyDecision {
         requests.append(request)
         return answer(request)
     }

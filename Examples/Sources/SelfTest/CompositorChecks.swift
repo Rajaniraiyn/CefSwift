@@ -16,8 +16,8 @@ import QuartzCore
 extension SelfTest {
     static func compositorChecks() async {
         CefRuntime.shared.registerSchemeHandler(scheme: "selftest", domain: "bench", handler: BenchmarkPages())
-        CefRuntime.shared.energySaver = .off
-        defer { CefRuntime.shared.energySaver = .automatic }
+        CefRuntime.shared.energyPolicy = .disabled
+        defer { CefRuntime.shared.energyPolicy = .automatic }
         guard let stage = await CompositorStage(points: CGSize(width: 640, height: 400)) else {
             check("compositor: the page loads", false)
             return
@@ -69,8 +69,8 @@ extension Benchmarks {
     /// the size).
     static func compositor() async {
         CefRuntime.shared.registerSchemeHandler(scheme: "selftest", domain: "bench", handler: BenchmarkPages())
-        CefRuntime.shared.energySaver = .off
-        defer { CefRuntime.shared.energySaver = .automatic }
+        CefRuntime.shared.energyPolicy = .disabled
+        defer { CefRuntime.shared.energyPolicy = .automatic }
         SelfTest.window.orderOut(nil)
         let sizes: [(String, CGSize)] = [
             ("1280x800 @1x", CGSize(width: 640, height: 400)),
@@ -177,9 +177,9 @@ final class CompositorStage {
             styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.level = .floating
-        var options = CefBrowserOptions()
-        options.rendering = .offscreen(frameRate: 120)
-        browser = CefBrowser(url: URL(string: "selftest://bench/\(page.rawValue).html")!, options: options)
+        var configuration = CefBrowser.Configuration()
+        configuration.rendering = .offscreen(frameRate: 120)
+        browser = CefBrowser(url: URL(string: "selftest://bench/\(page.rawValue).html")!, configuration: configuration)
         view.frame = window.contentView!.bounds
         view.autoresizingMask = [.width, .height]
         window.contentView!.addSubview(view)

@@ -7,7 +7,7 @@ import Darwin
 @_silgen_name("sandbox_check")
 private func sandbox_check(_ pid: pid_t, _ operation: UnsafePointer<CChar>?, _ type: Int32) -> Int32
 
-/// Chromium's sandbox (`CefConfiguration.isSandboxEnabled`): whether the
+/// Chromium's sandbox (`CefRuntime.Configuration.isSandboxEnabled`): whether the
 /// helper processes run sealed. `SELFTEST_SANDBOX=1` or `0` runs SelfTest
 /// with it on or off; otherwise the configuration's default applies.
 extension SelfTest {

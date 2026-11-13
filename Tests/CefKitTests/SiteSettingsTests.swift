@@ -79,7 +79,7 @@ struct SiteSettingsTests {
         let answer = CefStoredPermissionAnswer(kinds: [.camera, .microphone]) { _ in .block }
         #expect(answer.undecided.isEmpty)
         #expect(answer.granted(after: nil).isEmpty)
-        #expect(CefPermissionKind.camera.mediaMask(within: UInt32.max) != 0)
+        #expect(CefPermissionRequest.Kinds.camera.mediaMask(within: UInt32.max) != 0)
     }
 
     @Test func decisionsThatGrant() {
@@ -90,8 +90,8 @@ struct SiteSettingsTests {
     }
 
     @Test func permissionKindsMapToSitePermissions() {
-        #expect(CefPermissionKind([.camera, .notifications]).sitePermissions == [.camera, .notifications])
-        #expect(CefPermissionKind.other.sitePermissions.isEmpty)
+        #expect(CefPermissionRequest.Kinds([.camera, .notifications]).sitePermissions == [.camera, .notifications])
+        #expect(CefPermissionRequest.Kinds.other.sitePermissions.isEmpty)
     }
 
     @Test func preferenceKeysConvert() {

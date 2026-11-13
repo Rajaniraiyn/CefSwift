@@ -7,7 +7,7 @@ import CefBase
 ///
 /// Chromium opens these by itself: a link from `chrome://settings` to the
 /// password manager, a ⌘-click or ⇧-click that a Chrome-style browser's
-/// delegate left to Chromium (``CefWindowOpenAction/allowNativePopup``),
+/// delegate left to Chromium (``CefWindowOpenDecision/allowNativePopup``),
 /// Chrome commands such as ``CefChromeCommand/newTab``, and tabs restored
 /// from an earlier session. The browser exists and has started loading;
 /// its window is kept off screen until the handler answers.
@@ -73,7 +73,7 @@ extension CefRuntime {
     ///
     /// When `nil`, Chromium shows these browsers in its own windows. Leave
     /// it `nil` in apps that use
-    /// ``openChromeWindow(url:frame:options:delegate:)``, whose new tabs
+    /// ``openChromeWindow(url:frame:configuration:delegate:)``, whose new tabs
     /// Chromium opens the same way.
     public var onOpenBrowser: ((CefOpenBrowserRequest) -> CefOpenBrowserDecision)? {
         get { openBrowserHandler }

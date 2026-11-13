@@ -29,7 +29,7 @@ final class BrowserLibrary {
     init() {
         startPageBridge.access = .origins([BrowserPages.startOrigin])
         startPageBridge.handle("load") { [weak self] (_: CefJSON, call: CefBridgeCall) in
-            await self?.startPageContent(isPrivate: call.browser.options.profile.map { $0 !== CefProfile.default } ?? false)
+            await self?.startPageContent(isPrivate: call.browser.configuration.profile.map { $0 !== CefProfile.default } ?? false)
         }
         NotificationCenter.default.addObserver(
             forName: NSMenu.didBeginTrackingNotification, object: nil, queue: .main

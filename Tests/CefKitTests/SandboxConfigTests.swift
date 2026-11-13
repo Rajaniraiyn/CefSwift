@@ -11,29 +11,29 @@ import Testing
 /// break.
 @Suite struct SandboxConfigTests {
     @Test func defaultIsSandboxed() {
-        for configuration in [CefConfiguration(), .default, .embedded, .browser] {
+        for configuration in [CefRuntime.Configuration(), .embedded, .browser] {
             #expect(configuration.isSandboxEnabled)
         }
-        let mapped = MappedCefSettings(configuration: CefConfiguration(), frameworkDirectory: nil)
+        let mapped = MappedCefSettings(configuration: CefRuntime.Configuration(), frameworkDirectory: nil)
         #expect(mapped.raw.no_sandbox == 0)
     }
 
     @Test func disabledSandboxSetsNoSandbox() {
-        var config = CefConfiguration()
+        var config = CefRuntime.Configuration()
         config.isSandboxEnabled = false
         let mapped = MappedCefSettings(configuration: config, frameworkDirectory: nil)
         #expect(mapped.raw.no_sandbox == 1)
     }
 
     @Test func enabledSandboxClearsNoSandbox() {
-        var config = CefConfiguration()
+        var config = CefRuntime.Configuration()
         config.isSandboxEnabled = true
         let mapped = MappedCefSettings(configuration: config, frameworkDirectory: nil)
         #expect(mapped.raw.no_sandbox == 0)
     }
 
     @Test func messagePumpIsAlwaysExternal() {
-        let mapped = MappedCefSettings(configuration: CefConfiguration(), frameworkDirectory: nil)
+        let mapped = MappedCefSettings(configuration: CefRuntime.Configuration(), frameworkDirectory: nil)
         #expect(mapped.raw.external_message_pump == 1)
     }
 }

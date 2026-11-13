@@ -19,11 +19,11 @@ extension SelfTest {
             CefRuntime.shared.onOpenBrowser = nil
             CefRuntime.shared.onBrowserCreated = nil
         }
-        var options = CefBrowserOptions()
-        options.profile = .persistent(id: "selftest-tabs", displayName: "SelfTest Tabs")
+        var configuration = CefBrowser.Configuration()
+        configuration.profile = .persistent(id: "selftest-tabs", displayName: "SelfTest Tabs")
         let page = "data:text/html,<title>links</title><a href='selftest://app/second.html' "
             + "style='display:block;width:300px;height:100px'>second</a>"
-        let browser = CefBrowser(url: URL(string: page)!, options: options)
+        let browser = CefBrowser(url: URL(string: page)!, configuration: configuration)
         let window = CefBrowserWindow(browser: browser)
         window.show()
         defer { window.close() }
@@ -61,8 +61,8 @@ extension SelfTest {
         let request = requests.first
         check("Chromium's tabs: a ⌘-clicked link's tab arrives with its opener, disposition and profile",
               arrived && request?.url.absoluteString == "selftest://app/second.html" && request?.opener === browser
-                  && request?.disposition == .newBackgroundTab && request?.profile === options.profile,
-              detail: "\(String(describing: request.map { ($0.url, $0.opener?.identifier, $0.disposition, $0.profile === options.profile) }))")
+                  && request?.disposition == .newBackgroundTab && request?.profile === configuration.profile,
+              detail: "\(String(describing: request.map { ($0.url, $0.opener?.identifier, $0.disposition, $0.profile === configuration.profile) }))")
         check("Chromium's tabs: the request carries Chromium's live browser",
               request?.browser.opener == nil && wasLive.first == true)
         let closed = await waitUntil { request?.browser.state == .closed }
@@ -86,7 +86,7 @@ extension SelfTest {
         }
         check("Chromium's tabs: a new-tab command's tab has no opener",
               shown?.opener == nil && shown?.disposition == .unknown && shown?.url.scheme == "chrome"
-                  && shown?.profile === options.profile,
+                  && shown?.profile === configuration.profile,
               detail: "\(String(describing: shown.map { ($0.url, $0.opener?.identifier, $0.disposition) }))")
         check("Chromium's tabs: answering showInChromium shows Chromium's window and announces the browser",
               visible && announced.contains { $0 === shown?.browser })

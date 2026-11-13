@@ -5,9 +5,9 @@ import WebKit
 /// CefSystemBrowser: pages in the system's WebKit, with FairPlay.
 extension SelfTest {
     static func systemEngineChecks() async {
-        var options = CefSystemBrowser.Options()
-        options.userScripts = [CefUserScript(source: "window.__injected = 42;")]
-        let browser = CefSystemBrowser(options: options)
+        var configuration = CefSystemBrowser.Configuration()
+        configuration.userScripts = [CefUserScript(source: "window.__injected = 42;")]
+        let browser = CefSystemBrowser(configuration: configuration)
         browser.nativeView.frame = window.contentView!.bounds
         window.contentView!.addSubview(browser.nativeView)
         defer {
@@ -112,13 +112,13 @@ extension SelfTest {
         await browser.nativeView.configuration.websiteDataStore.removeData(
             ofTypes: [WKWebsiteDataTypeCookies], modifiedSince: .distantPast)
 
-        let privateBrowser = CefSystemBrowser(options: .init(profile: .incognito()))
-        let namedBrowser = CefSystemBrowser(options: .init(profile: .persistent(id: "selftest-system", displayName: "SelfTest System")))
+        let privateBrowser = CefSystemBrowser(configuration: .init(profile: .incognito()))
+        let namedBrowser = CefSystemBrowser(configuration: .init(profile: .persistent(id: "selftest-system", displayName: "SelfTest System")))
         check("system engine: profiles map to WebKit data stores",
               !privateBrowser.nativeView.configuration.websiteDataStore.isPersistent
                   && namedBrowser.nativeView.configuration.websiteDataStore.isPersistent
                   && namedBrowser.nativeView.configuration.websiteDataStore.identifier
-                      == CefSystemBrowser(options: .init(profile: .persistent(id: "selftest-system", displayName: "SelfTest System")))
+                      == CefSystemBrowser(configuration: .init(profile: .persistent(id: "selftest-system", displayName: "SelfTest System")))
                           .nativeView.configuration.websiteDataStore.identifier
                   && browser.nativeView.configuration.websiteDataStore === WKWebsiteDataStore.default())
 

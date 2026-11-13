@@ -1,24 +1,26 @@
 import CCef
 import Foundation
 
-/// When an offscreen browser builds its page's accessibility tree.
-///
-/// Chromium computes the tree in the renderer and sends every change to
-/// the browser process, which costs CPU time and memory on every page, so
-/// it is worth building only when something reads it. Windowed browsers
-/// are unaffected: Chromium manages their accessibility itself.
-public enum CefOffscreenAccessibility: Sendable, Equatable {
-    /// Builds the tree on first demand: when VoiceOver is running, when an
-    /// assistive app first asks the host view for its children, or when an
-    /// app sets `AXEnhancedUserInterface` or `AXManualAccessibility` on the
-    /// application, as Voice Control and automation tools do. Once on, it
-    /// stays on for the browser's lifetime.
-    case automatic
-    /// Builds the tree from the moment the browser is created.
-    case enabled
-    /// Never builds the tree; the page is a single element to assistive
-    /// technology.
-    case disabled
+extension CefBrowser {
+    /// When an offscreen browser builds its page's accessibility tree.
+    ///
+    /// Chromium computes the tree in the renderer and sends every change to
+    /// the browser process, which costs CPU time and memory on every page, so
+    /// it is worth building only when something reads it. Windowed browsers
+    /// are unaffected: Chromium manages their accessibility itself.
+    public enum AccessibilityPolicy: Sendable, Equatable {
+        /// Builds the tree on first demand: when VoiceOver is running, when an
+        /// assistive app first asks the host view for its children, or when an
+        /// app sets `AXEnhancedUserInterface` or `AXManualAccessibility` on the
+        /// application, as Voice Control and automation tools do. Once on, it
+        /// stays on for the browser's lifetime.
+        case automatic
+        /// Builds the tree from the moment the browser is created.
+        case enabled
+        /// Never builds the tree; the page is a single element to assistive
+        /// technology.
+        case disabled
+    }
 }
 
 /// An action an assistive app asks a page's node to perform.
@@ -44,7 +46,7 @@ extension CefBrowser {
     // MARK: State
 
     /// Turns the offscreen accessibility tree on or off, whatever
-    /// ``CefBrowserOptions/offscreenAccessibility`` says. Before the browser
+    /// ``CefBrowser/Configuration/offscreenAccessibility`` says. Before the browser
     /// is created, the choice applies at creation. Turning it off empties
     /// ``accessibilityTree``.
     public func setAccessibilityEnabled(_ enabled: Bool) {
@@ -60,18 +62,18 @@ extension CefBrowser {
     }
 
     /// Turns the offscreen accessibility tree on because an assistive app
-    /// asked for it, unless ``CefBrowserOptions/offscreenAccessibility`` is
+    /// asked for it, unless ``CefBrowser/Configuration/offscreenAccessibility`` is
     /// `.disabled`. Hosts call this; `CefOffscreenBrowserView` does.
     public func requestAccessibilityTree() {
-        guard options.offscreenAccessibility != .disabled, !isAccessibilityEnabled else { return }
+        guard configuration.offscreenAccessibility != .disabled, !isAccessibilityEnabled else { return }
         setAccessibilityEnabled(true)
     }
 
-    /// At creation: applies ``CefBrowserOptions/offscreenAccessibility``
+    /// At creation: applies ``CefBrowser/Configuration/offscreenAccessibility``
     /// or an earlier request.
     func applyInitialAccessibilityState() {
         guard client?.offscreenHost != nil else { return }
-        if options.offscreenAccessibility == .enabled || wantsAccessibility {
+        if configuration.offscreenAccessibility == .enabled || wantsAccessibility {
             setAccessibilityEnabled(true)
         }
     }

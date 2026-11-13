@@ -420,7 +420,7 @@ enum Doctor {
                 features.append(.init(
                     status: .ok, title: "protectedMedia",
                     detail: "Widevine can load in \(helper.name) once Chromium has downloaded it " +
-                        "(CefConfiguration.protectedMedia = .automatic; CefRuntime.widevine reports it)."))
+                        "(CefRuntime.Configuration.services.protectedMedia = .automatic; CefRuntime.widevine reports it)."))
             }
             features.append(.init(
                 status: .info, title: "protectedMedia: Verified Media Path",
@@ -454,7 +454,7 @@ enum Doctor {
             ? .init(status: .ok, title: "passkeys: Touch ID", detail: "available (keychain group \(group)).")
             : .init(status: .info, title: "passkeys: Touch ID",
                     detail: "unavailable: CEF 156 looks for the keychain group \"\(group)\", which has no team " +
-                        "prefix, so no provisioning profile can authorize it. Use CefPasskeyMode.app with " +
+                        "prefix, so no provisioning profile can authorize it. Use CefBrowser.PasskeyPolicy.app with " +
                         "CefKeychainPasskeyStore for passkeys verified with Touch ID."))
         features.append(iCloud
             ? .init(status: .ok, title: "passkeys: iCloud Keychain", detail: "available.")
@@ -467,11 +467,11 @@ enum Doctor {
         features.append(libraryNames.contains("libcef_sandbox.dylib") && libraryNames.contains("libcefswift_helper_startup.dylib")
             ? .init(status: .ok, title: "Chromium sandbox",
                     detail: "the helpers can seal themselves (libcef_sandbox.dylib, libcefswift_helper_startup.dylib); " +
-                        "CefConfiguration.isSandboxEnabled decides at run time.")
+                        "CefRuntime.Configuration.isSandboxEnabled decides at run time.")
             : .init(status: .warning, title: "Chromium sandbox",
                     detail: "the bundle lacks libcef_sandbox.dylib or libcefswift_helper_startup.dylib, so sandboxed " +
                         "helpers cannot start.",
-                    fix: "bundle with cef bundle, or set CefConfiguration.isSandboxEnabled = false."))
+                    fix: "bundle with cef bundle, or set CefRuntime.Configuration.isSandboxEnabled = false."))
 
         return DoctorReport(
             app: app.name, bundleIdentifier: bundleID,

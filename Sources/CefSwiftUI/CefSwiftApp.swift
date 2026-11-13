@@ -5,12 +5,12 @@ import SwiftUI
 ///
 /// Conform your `@main` type to `CefSwiftApp` instead of `App`. Before
 /// SwiftUI starts, CefSwift installs the `NSApplication` subclass Chromium
-/// requires and initializes the runtime with ``cefConfiguration``.
+/// requires and initializes the runtime with ``runtimeConfiguration``.
 ///
 /// ```swift
 /// @main
 /// struct MyApp: CefSwiftApp {
-///     static var cefConfiguration: CefConfiguration { .embedded }
+///     static var runtimeConfiguration: CefRuntime.Configuration { .embedded }
 ///
 ///     var body: some Scene {
 ///         WindowGroup { CefWebView(url: URL(string: "https://example.com")!) }
@@ -20,13 +20,13 @@ import SwiftUI
 public protocol CefSwiftApp: SwiftUI.App {
     /// The configuration used to initialize the CEF runtime at launch.
     ///
-    /// Defaults to ``CefConfiguration/default``.
-    @MainActor static var cefConfiguration: CefConfiguration { get }
+    /// Defaults to `CefRuntime.Configuration()`.
+    @MainActor static var runtimeConfiguration: CefRuntime.Configuration { get }
 }
 
 extension CefSwiftApp {
-    /// Default configuration: ``CefConfiguration/default``.
-    @MainActor public static var cefConfiguration: CefConfiguration { .default }
+    /// The default configuration, `CefRuntime.Configuration()`.
+    @MainActor public static var runtimeConfiguration: CefRuntime.Configuration { .init() }
 }
 
 extension SwiftUI.App {
@@ -46,7 +46,7 @@ extension CefSwiftApp {
         // Must precede every other NSApp access, including SwiftUI's.
         CefApplication.install()
         do {
-            try CefRuntime.shared.initialize(configuration: Self.cefConfiguration)
+            try CefRuntime.shared.initialize(configuration: Self.runtimeConfiguration)
         } catch .anotherInstanceRunning {
             exit(0)  // the running instance has been told about this launch
         } catch {
@@ -59,7 +59,7 @@ extension CefSwiftApp {
     @MainActor private static func reportBootstrapFailure(_ error: CefError) -> Never {
         var message = "CefSwift: could not start Chromium. \(error)\n"
         if case .initializationFailed = error {
-            message += "Chromium's log (CefConfiguration.logFile) has the details.\n"
+            message += "Chromium's log (CefRuntime.Configuration.logFile) has the details.\n"
         }
         FileHandle.standardError.write(Data(message.utf8))
         exit(1)

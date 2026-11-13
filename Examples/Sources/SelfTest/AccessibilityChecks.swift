@@ -19,9 +19,9 @@ extension SelfTest {
     // MARK: The tree
 
     static func accessibilityTreeChecks() async {
-        var options = CefBrowserOptions()
-        options.rendering = .offscreen
-        let browser = CefBrowser(url: URL(string: "selftest://ax/page.html")!, options: options)
+        var configuration = CefBrowser.Configuration()
+        configuration.rendering = .offscreen
+        let browser = CefBrowser(url: URL(string: "selftest://ax/page.html")!, configuration: configuration)
         let view = CefOffscreenBrowserView()
         view.frame = window.contentView!.bounds
         window.contentView!.addSubview(view)
@@ -184,9 +184,9 @@ extension SelfTest {
     /// that client's request turned the tree on.
     static func accessibilityExternalClientSession() async {
         CefRuntime.shared.registerSchemeHandler(scheme: "selftest", domain: "ax", handler: AccessibilityPages())
-        var options = CefBrowserOptions()
-        options.rendering = .offscreen
-        let browser = CefBrowser(url: URL(string: "selftest://ax/page.html")!, options: options)
+        var configuration = CefBrowser.Configuration()
+        configuration.rendering = .offscreen
+        let browser = CefBrowser(url: URL(string: "selftest://ax/page.html")!, configuration: configuration)
         let view = CefOffscreenBrowserView()
         view.frame = window.contentView!.bounds
         window.contentView!.addSubview(view)
@@ -208,10 +208,10 @@ extension SelfTest {
     // MARK: Discarding
 
     static func accessibilityDiscardChecks() async {
-        var options = CefBrowserOptions()
-        options.rendering = .offscreen
-        options.offscreenAccessibility = .enabled
-        let browser = CefBrowser(url: URL(string: "selftest://ax/plain.html")!, options: options)
+        var configuration = CefBrowser.Configuration()
+        configuration.rendering = .offscreen
+        configuration.offscreenAccessibility = .enabled
+        let browser = CefBrowser(url: URL(string: "selftest://ax/plain.html")!, configuration: configuration)
         let view = CefOffscreenBrowserView()
         view.frame = window.contentView!.bounds
         window.contentView!.addSubview(view)
@@ -238,10 +238,10 @@ extension SelfTest {
     // MARK: Opting out
 
     static func accessibilityDisabledChecks() async {
-        var options = CefBrowserOptions()
-        options.rendering = .offscreen
-        options.offscreenAccessibility = .disabled
-        let browser = CefBrowser(url: URL(string: "selftest://ax/page.html")!, options: options)
+        var configuration = CefBrowser.Configuration()
+        configuration.rendering = .offscreen
+        configuration.offscreenAccessibility = .disabled
+        let browser = CefBrowser(url: URL(string: "selftest://ax/page.html")!, configuration: configuration)
         let view = CefOffscreenBrowserView()
         view.frame = window.contentView!.bounds
         window.contentView!.addSubview(view)
@@ -262,11 +262,11 @@ extension SelfTest {
     /// Reports how long a large page takes to load with and without the
     /// tree. Informational: printed, not checked.
     static func accessibilityCostChecks() async {
-        for mode in [CefOffscreenAccessibility.disabled, .enabled, .disabled, .enabled] {
-            var options = CefBrowserOptions()
-            options.rendering = .offscreen
-            options.offscreenAccessibility = mode
-            let browser = CefBrowser(url: URL(string: "selftest://ax/large.html")!, options: options)
+        for mode in [CefBrowser.AccessibilityPolicy.disabled, .enabled, .disabled, .enabled] {
+            var configuration = CefBrowser.Configuration()
+            configuration.rendering = .offscreen
+            configuration.offscreenAccessibility = mode
+            let browser = CefBrowser(url: URL(string: "selftest://ax/large.html")!, configuration: configuration)
             let view = CefOffscreenBrowserView()
             view.frame = window.contentView!.bounds
             window.contentView!.addSubview(view)

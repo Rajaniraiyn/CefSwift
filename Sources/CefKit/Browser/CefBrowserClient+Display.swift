@@ -93,7 +93,7 @@ extension CefBrowserClient {
     func makeFindHandler() -> UnsafeMutablePointer<cef_find_handler_t> {
         let h = cefAllocate(cef_find_handler_t.self, owner: self)
         h.pointee.on_find_result = { s, browser, _, count, _, activeMatch, finalUpdate in
-            let result = CefFindResult(
+            let result = CefBrowser.FindResult(
                 matchCount: Int(count), activeMatchIndex: Int(activeMatch), isFinal: finalUpdate != 0)
             CefBrowserClient.run(s, browser, default: ()) { _, b in b.applyFindResult(result) }
         }

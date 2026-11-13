@@ -30,7 +30,7 @@ public struct CefAppCapabilities: Sendable, Equatable {
     }
 
     /// A WebAuthn authenticator Chromium can offer when
-    /// ``CefPasskeyMode/chromium`` answers a page.
+    /// ``CefBrowser/PasskeyPolicy/chromium`` answers a page.
     public enum PasskeyAuthenticator: String, Sendable, Hashable, CaseIterable {
         /// USB and NFC security keys. Always available.
         case securityKey
@@ -63,7 +63,7 @@ public struct CefAppCapabilities: Sendable, Equatable {
     public let keychainAccessGroups: [String]
     /// The `NS…UsageDescription` keys in the app's Info.plist.
     public let usageDescriptions: Set<String>
-    /// The authenticators Chromium can offer with ``CefPasskeyMode/chromium``.
+    /// The authenticators Chromium can offer with ``CefBrowser/PasskeyPolicy/chromium``.
     public let passkeyAuthenticators: Set<PasskeyAuthenticator>
     /// Whether the helper that runs Chromium's content decryption module
     /// (`<App> Helper.app`) can load Google's Widevine CDM. Under the
@@ -137,12 +137,12 @@ public struct CefAppCapabilities: Sendable, Equatable {
         canLoadWidevine = !(validatesLibraries && helperHasTeam)
     }
 
-    /// Whether ``CefSafeStoragePolicy/automatic`` uses the keychain: only
+    /// Whether ``CefRuntime/SafeStoragePolicy/automatic`` uses the keychain: only
     /// with a team signature, whose "Always Allow" grant survives rebuilds.
     public var usesKeychainAutomatically: Bool { teamIdentifier != nil }
 
     /// The safe-storage policy Chromium gets for `policy`.
-    public func resolvedSafeStorage(_ policy: CefSafeStoragePolicy) -> CefSafeStoragePolicy {
+    public func resolvedSafeStorage(_ policy: CefRuntime.SafeStoragePolicy) -> CefRuntime.SafeStoragePolicy {
         switch policy {
         case .keychain, .mockKeychain: return policy
         case .automatic: return usesKeychainAutomatically ? .keychain : .mockKeychain

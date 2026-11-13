@@ -23,7 +23,7 @@ import CefBase
 /// ```
 ///
 /// For a window drawn entirely by Chrome, tab strip included, use
-/// ``CefRuntime/openChromeWindow(url:frame:options:delegate:)`` instead.
+/// ``CefRuntime/openChromeWindow(url:frame:configuration:delegate:)`` instead.
 ///
 /// Each window holds one browser. To present several as tabs, give the
 /// windows the same ``Configuration/tabbingIdentifier`` and macOS groups
@@ -63,7 +63,7 @@ public final class CefBrowserWindow: Identifiable {
         /// or zoom bubble hidden here is never created, as the browser
         /// starts with Chromium's own switched off (`cef_browser_settings_t`);
         /// hiding one later keeps Chromium's window invisible instead.
-        public var chromiumUI: CefChromiumUI?
+        public var chromiumUI: CefBrowserWindow.ChromiumUI?
 
         public init() {}
     }
@@ -108,7 +108,7 @@ public final class CefBrowserWindow: Identifiable {
         Self.liveCount += 1
         Self.installRuntimeHooks()
 
-        let initialUI = configuration.chromiumUI ?? CefChromiumUI()
+        let initialUI = configuration.chromiumUI ?? CefBrowserWindow.ChromiumUI()
         chromiumUI = initialUI
         let viewDelegate = BrowserViewDelegate(toolbar: configuration.toolbar, window: self)
         browserView = CefRef(adopting: browser.createBrowserView(
@@ -351,7 +351,7 @@ public final class CefBrowserWindow: Identifiable {
     /// Chromium lays them out again. CefSwiftUI's
     /// `chromiumSurfaceAnchor(_:alignment:)` modifier sets anchors from
     /// SwiftUI views in your toolbar.
-    public var chromiumUI = CefChromiumUI() {
+    public var chromiumUI = CefBrowserWindow.ChromiumUI() {
         didSet { applyChromiumUI() }
     }
 
@@ -391,7 +391,7 @@ public final class CefBrowserWindow: Identifiable {
     // MARK: Over the page
 
     /// A view of your own, laid over the page in place of the built-in
-    /// swipe indicator (``CefBrowserOptions/navigationGestureIndicator``).
+    /// swipe indicator (``CefBrowser/Configuration/navigationGestureIndicator``).
     /// It is sized to the page, never receives events, and stays installed;
     /// read ``CefBrowser/navigationGestureProgress`` to draw it.
     /// CefSwiftUI's `setNavigationGestureIndicator(_:)` sets it from a
@@ -430,9 +430,9 @@ public final class CefBrowserWindow: Identifiable {
     /// CefSwift's unless Chromium draws its own or none is wanted) and the
     /// app's status bubble.
     private func updatePageOverlay() {
-        let options = browser.options
-        let wantsBuiltIn = options.allowsBackForwardNavigationGestures
-            && options.navigationGestureIndicator == .automatic
+        let configuration = browser.configuration
+        let wantsBuiltIn = configuration.allowsBackForwardNavigationGestures
+            && configuration.navigationGestureIndicator == .automatic
         let indicator: NSView?
         if let custom = navigationGestureIndicatorView {
             builtInIndicator?.removeFromSuperview()

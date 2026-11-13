@@ -28,14 +28,14 @@ extension SelfTest {
     }
 
     static func windowedBrowserChecks() async {
-        var options = CefBrowserOptions()
-        options.bridges = [bridge]
-        options.userScripts = [CefUserScript(source: "window.__injected = 42;")]
-        options.requestFilter = { request in
+        var configuration = CefBrowser.Configuration()
+        configuration.bridges = [bridge]
+        configuration.userScripts = [CefUserScript(source: "window.__injected = 42;")]
+        configuration.requestFilter = { request in
             request.url?.path == "/blocked" ? .block : .allow
         }
         // The page calls the bridge from an inline script: it must already exist.
-        let browser = CefBrowser(url: URL(string: "selftest://app/index.html")!, options: options)
+        let browser = CefBrowser(url: URL(string: "selftest://app/index.html")!, configuration: configuration)
         let view = CefWindowedBrowserView()
         view.frame = window.contentView!.bounds
         view.autoresizingMask = [.width, .height]
@@ -118,9 +118,9 @@ extension SelfTest {
     }
 
     static func offscreenBrowserChecks() async {
-        var options = CefBrowserOptions()
-        options.rendering = .offscreen
-        let browser = CefBrowser(url: URL(string: "selftest://app/second.html")!, options: options)
+        var configuration = CefBrowser.Configuration()
+        configuration.rendering = .offscreen
+        let browser = CefBrowser(url: URL(string: "selftest://app/second.html")!, configuration: configuration)
         let view = CefOffscreenBrowserView()
         view.frame = window.contentView!.bounds
         window.contentView!.addSubview(view)
@@ -153,16 +153,16 @@ extension SelfTest {
 
     static func profileChecks() async {
         let profile = CefProfile.default
-        check("profile: preferences readable", (profile.allPreferences().objectValue?.count ?? 0) > 10)
+        check("profile: preferences readable", (profile.preferences.allValues().objectValue?.count ?? 0) > 10)
         check("profile: configured preference applied",
-              profile.preference("webkit.webprefs.default_font_size")?.intValue == 21)
+              profile.preferences.value(named: "webkit.webprefs.default_font_size")?.intValue == 21)
         do {
-            try profile.setPreference("webkit.webprefs.default_font_size", to: 19)
-            check("profile: preference round-trips", profile.preference("webkit.webprefs.default_font_size")?.intValue == 19)
+            try profile.preferences.setValue(19, named: "webkit.webprefs.default_font_size")
+            check("profile: preference round-trips", profile.preferences.value(named: "webkit.webprefs.default_font_size")?.intValue == 19)
         } catch {
             check("profile: preference round-trips", false, detail: "\(error)")
         }
-        check("profile: unknown preference is nil", profile.preference("cefswift.no.such.pref") == nil)
+        check("profile: unknown preference is nil", profile.preferences.value(named: "cefswift.no.such.pref") == nil)
 
         let cookie = HTTPCookie(properties: [
             .name: "selftest", .value: "yes", .domain: "example.com", .path: "/", .secure: "TRUE",
@@ -180,14 +180,14 @@ extension SelfTest {
         let isolated = CefProfile.incognito()
         check("profile: incognito is isolated", await isolated.cookies().isEmpty)
         check("profile: configured preference reaches new profiles", await waitUntil {
-            isolated.preference("webkit.webprefs.default_font_size")?.intValue == 21
+            isolated.preferences.value(named: "webkit.webprefs.default_font_size")?.intValue == 21
         })
 
         // Scheme handlers registered with CefRuntime serve every profile.
-        var options = CefBrowserOptions()
-        options.profile = isolated
+        var configuration = CefBrowser.Configuration()
+        configuration.profile = isolated
         let privateWindow = CefBrowserWindow(
-            browser: CefBrowser(url: URL(string: "selftest://app/second.html")!, options: options))
+            browser: CefBrowser(url: URL(string: "selftest://app/second.html")!, configuration: configuration))
         check("profile: custom scheme serves an incognito profile",
               await waitUntil { privateWindow.browser.title == "second" }, detail: privateWindow.browser.title)
         privateWindow.close()
@@ -195,13 +195,13 @@ extension SelfTest {
     }
 
     static func browserWindowChecks() async {
-        var options = CefBrowserOptions()
-        options.userScripts = [
+        var configuration = CefBrowser.Configuration()
+        configuration.userScripts = [
             CefUserScript(source: "window.__scoped = 1", matching: "chrome://version/*"),
             CefUserScript(source: "window.__elsewhere = 1", matching: "https://*"),
             .styleSheet("body { --cefswift-probe: 7 }", matching: "chrome://*"),
         ]
-        let browser = CefBrowser(url: URL(string: "chrome://version")!, options: options)
+        let browser = CefBrowser(url: URL(string: "chrome://version")!, configuration: configuration)
         let browserWindow = CefBrowserWindow(browser: browser)
         var popups: [CefBrowserWindow] = []
         browserWindow.onPopup = { popups.append($0) }

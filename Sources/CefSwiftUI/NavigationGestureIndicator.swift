@@ -10,8 +10,8 @@ extension NSView {
     func updatedGestureIndicator(
         _ indicator: CefNavigationGestureIndicatorView?, browser: CefBrowser?, isAllowed: Bool
     ) -> CefNavigationGestureIndicatorView? {
-        guard isAllowed, let browser, browser.options.allowsBackForwardNavigationGestures,
-              browser.options.navigationGestureIndicator != .hidden
+        guard isAllowed, let browser, browser.configuration.allowsBackForwardNavigationGestures,
+              browser.configuration.navigationGestureIndicator != .hidden
         else {
             indicator?.removeFromSuperview()
             return nil

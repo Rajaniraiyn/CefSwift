@@ -176,5 +176,5 @@ pin.
 
 Open a GitHub issue with your macOS version, Mac architecture, the pinned CEF
 version (`swift package cef info`), and steps to reproduce. For runtime bugs,
-attach Chromium's log: set `CefConfiguration.logSeverity = .verbose` and
+attach Chromium's log: set `CefRuntime.Configuration.logSeverity = .verbose` and
 `logFile`.

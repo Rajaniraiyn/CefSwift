@@ -104,7 +104,7 @@ import Testing
 
 @Suite struct CefConfigurationTests {
     @Test func productNameSetsBothBrandStrings() {
-        var configuration = CefConfiguration()
+        var configuration = CefRuntime.Configuration()
         configuration.productName = "Orbit"
         #expect(configuration.stringOverrides[.productName] == "Orbit")
         #expect(configuration.stringOverrides[.shortProductName] == "Orbit")
@@ -113,7 +113,7 @@ import Testing
     }
 
     @Test func embeddedPresetTurnsOffBackgroundServices() {
-        let configuration = CefConfiguration.embedded
+        let configuration = CefRuntime.Configuration.embedded
         #expect(configuration.extraCommandLineSwitches.keys.contains("disable-background-networking"))
         #expect(configuration.disabledFeatures.contains("OptimizationHints"))
     }
@@ -121,20 +121,20 @@ import Testing
     /// Chromium sets `navigator.webdriver` for these; no preset may.
     @Test func noPresetMarksTheBrowserAsAutomated() {
         let automation: Set<String> = ["enable-automation", "headless", "remote-debugging-pipe", "remote-debugging-port"]
-        for configuration in [CefConfiguration.default, .embedded, .browser] {
+        for configuration in [CefRuntime.Configuration(), .embedded, .browser] {
             #expect(automation.isDisjoint(with: configuration.extraCommandLineSwitches.keys))
             #expect(configuration.remoteDebuggingPort == nil)
         }
     }
 
     @Test func userAgentChoicesMapToCEFSettings() {
-        #expect(CefUserAgent.chromium.product == nil && CefUserAgent.chromium.fullString == nil)
-        #expect(CefUserAgent.replacingProduct("Orbit/1").product == "Orbit/1")
-        #expect(CefUserAgent.custom("UA").fullString == "UA" && CefUserAgent.custom("UA").product == nil)
-        #expect(CefConfiguration.default.userAgent == .chromium)
+        #expect(CefRuntime.UserAgent.chromium.product == nil && CefRuntime.UserAgent.chromium.fullString == nil)
+        #expect(CefRuntime.UserAgent.replacingProduct("Orbit/1").product == "Orbit/1")
+        #expect(CefRuntime.UserAgent.custom("UA").fullString == "UA" && CefRuntime.UserAgent.custom("UA").product == nil)
+        #expect(CefRuntime.Configuration().userAgent == .chromium)
     }
 
     @Test func browserPresetKeepsSessions() {
-        #expect(CefConfiguration.browser.persistsSessionCookies)
+        #expect(CefRuntime.Configuration.browser.persistsSessionCookies)
     }
 }

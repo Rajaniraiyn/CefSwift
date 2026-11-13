@@ -52,15 +52,15 @@ extension SelfTest {
         CefRuntime.shared.registerSchemeHandler(scheme: "selftest", domain: "threads", handler: ThreadPages())
         CefRuntime.shared.registerSchemeHandler(scheme: "selftest", domain: "main-actor", handler: MainActorPages(title: "from the main actor"))
 
-        var options = CefBrowserOptions()
-        options.requestFilter = { request in
+        var configuration = CefBrowser.Configuration()
+        configuration.requestFilter = { request in
             // On macOS 15 and later this asks the executor's checkIsolated(),
             // since the filter runs inside a CEF callback, not an actor job.
             CefIOActor.preconditionIsolated()
             ioFilteredRequests += 1
             return request.url?.path == "/blocked" ? .block : .allow
         }
-        let browser = CefBrowser(url: URL(string: "selftest://threads/page.html")!, options: options)
+        let browser = CefBrowser(url: URL(string: "selftest://threads/page.html")!, configuration: configuration)
         let view = CefWindowedBrowserView()
         view.frame = window.contentView!.bounds
         window.contentView!.addSubview(view)

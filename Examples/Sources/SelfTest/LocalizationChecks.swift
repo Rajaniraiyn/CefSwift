@@ -3,7 +3,7 @@ import AppKit
 import CefSwiftUI
 import CCef
 
-/// The language of Chromium's interface (`CefConfiguration.localization`)
+/// The language of Chromium's interface (`CefRuntime.Configuration.localization`)
 /// and the languages pages are offered (`acceptLanguages`).
 ///
 /// Each language case runs in a probe started with `-AppleLanguages`, as
@@ -68,9 +68,9 @@ extension SelfTest {
             profile.acceptLanguages = ["de-CH", "it"]
             return profile
         }())] {
-            var options = CefBrowserOptions()
-            options.profile = profile
-            let browser = CefBrowser(url: url, options: options)
+            var configuration = CefBrowser.Configuration()
+            configuration.profile = profile
+            let browser = CefBrowser(url: url, configuration: configuration)
             let view = CefWindowedBrowserView()
             view.frame = window.contentView!.bounds
             window.contentView!.addSubview(view)
@@ -95,7 +95,7 @@ extension SelfTest {
 
     // MARK: The probe
 
-    static func configureLocalizationProbe(_ configuration: inout CefConfiguration) {
+    static func configureLocalizationProbe(_ configuration: inout CefRuntime.Configuration) {
         let policy = ProcessInfo.processInfo.environment[localizationPolicyKey] ?? "application"
         switch policy {
         case "system": configuration.localization = .system
@@ -110,7 +110,7 @@ extension SelfTest {
 
     static func localizationProbeChecks() async {
         if ProcessInfo.processInfo.environment[localizationPolicyKey]?.hasPrefix("switch:") == true {
-            let newTab = CefRuntime.shared.localizedString(CefStringID(rawValue: IDS_NEW_TAB_TITLE))
+            let newTab = CefRuntime.shared.localizedString(CefRuntime.StringID(rawValue: IDS_NEW_TAB_TITLE))
             print("NOTE with --lang naming a missing pack, Chromium starts and shows '\(newTab ?? "nil")'")
             return
         }
@@ -122,7 +122,7 @@ extension SelfTest {
         }
         check("Chromium's locale is \(expected.locale)", CefRuntime.shared.locale == expected.locale,
               detail: CefRuntime.shared.locale ?? "nil")
-        let newTab = CefRuntime.shared.localizedString(CefStringID(rawValue: IDS_NEW_TAB_TITLE))
+        let newTab = CefRuntime.shared.localizedString(CefRuntime.StringID(rawValue: IDS_NEW_TAB_TITLE))
         check("Chromium's own strings are in that language", newTab == expected.newTab,
               detail: "'\(newTab ?? "nil")'")
 

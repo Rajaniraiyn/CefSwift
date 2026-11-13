@@ -7,7 +7,7 @@ import Observation
 /// use, as Chrome's Task Manager shows them.
 ///
 /// ```swift
-/// Table(CefRuntime.shared.tasks.tasks) {
+/// Table(CefRuntime.shared.taskManager.tasks) {
 ///     TableColumn("Task", value: \.title)
 ///     TableColumn("Memory") { Text($0.memory.map { "\($0 / 1_000_000) MB" } ?? "–") }
 /// }
@@ -198,7 +198,7 @@ public final class CefTaskManager {
         guard refreshing == nil else { return }
         // Not refreshed here: a read can come from a view being drawn.
         refreshing = _Concurrency.Task { [weak self] in
-            while let self, !_Concurrency.Task.isCancelled, CefRuntime.shared.isInitialized {
+            while let self, !_Concurrency.Task.isCancelled, CefRuntime.shared.isRunning {
                 self.snapshot()
                 try? await _Concurrency.Task.sleep(for: self.refreshInterval)
                 guard ContinuousClock.now < self.readUntil else { break }
@@ -272,7 +272,7 @@ public final class CefTaskManager {
     /// The task manager, kept for two refresh intervals after each use;
     /// `nil` before start-up.
     private func manager() -> UnsafeMutablePointer<cef_task_manager_t>? {
-        guard CefRuntime.shared.isInitialized else { return nil }
+        guard CefRuntime.shared.isRunning else { return nil }
         if held == nil { held = CefRef(adopting: cef_task_manager_get()) }
         return held?.pointer
     }
@@ -307,7 +307,7 @@ extension CefTaskManager.Task.Kind {
 
 extension CefRuntime {
     /// Chromium's processes and their resource use.
-    public var tasks: CefTaskManager { CefTaskManager.shared }
+    public var taskManager: CefTaskManager { CefTaskManager.shared }
 }
 
 extension CefTaskManager {
@@ -318,5 +318,5 @@ extension CefBrowser {
     /// The task of the renderer showing this browser's page: its CPU and
     /// memory, shared with any browser in the same process
     /// (``CefTaskManager/browsers(in:)``).
-    public var process: CefTaskManager.Task? { CefRuntime.shared.tasks.task(for: self) }
+    public var rendererTask: CefTaskManager.Task? { CefRuntime.shared.taskManager.task(for: self) }
 }

@@ -41,9 +41,9 @@ public enum CefTerminationReason: Sendable, Equatable {
 /// An HTTP authentication challenge delivered to
 /// ``CefBrowserDelegate/browser(_:credentialFor:)``.
 public struct CefAuthenticationChallenge: Sendable, Equatable {
-    /// The address of the request that is challenged, such as
-    /// `"http://intranet.example/reports"`.
-    public var origin: String
+    /// The full address of the request that is challenged, such as
+    /// `http://intranet.example/reports`.
+    public var url: URL?
     /// Whether the challenge comes from a proxy rather than the server.
     public var isProxy: Bool
     /// The host name of the server or proxy.
@@ -55,8 +55,8 @@ public struct CefAuthenticationChallenge: Sendable, Equatable {
     /// The authentication scheme, such as `"basic"`, or an empty string.
     public var scheme: String
 
-    public init(origin: String, isProxy: Bool, host: String, port: Int, realm: String, scheme: String) {
-        self.origin = origin
+    public init(url: URL?, isProxy: Bool, host: String, port: Int, realm: String, scheme: String) {
+        self.url = url
         self.isProxy = isProxy
         self.host = host
         self.port = port

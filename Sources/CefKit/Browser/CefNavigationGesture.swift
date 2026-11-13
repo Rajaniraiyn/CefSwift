@@ -3,22 +3,24 @@ import Foundation
 import ObjectiveC
 import QuartzCore
 
-/// How a browser shows a back or forward swipe in progress. Set it with
-/// ``CefBrowserOptions/navigationGestureIndicator``.
-public enum CefNavigationGestureIndicator: Sendable, Equatable {
-    /// CefSwift's indicator: a chevron in a circle that slides in from the
-    /// edge the page is leaving, rubber-bands, and fills with the accent
-    /// color once releasing would navigate.
-    case automatic
-    /// Chromium's own indicator in Chrome-style browsers
-    /// (``CefBrowserWindow``); ``automatic`` elsewhere.
-    case chromium
-    /// No indicator. Draw your own from
-    /// ``CefBrowser/navigationGestureProgress``.
-    case hidden
+extension CefBrowser {
+    /// How a browser shows a back or forward swipe in progress. Set it with
+    /// ``CefBrowser/Configuration/navigationGestureIndicator``.
+    public enum NavigationGestureIndicator: Sendable, Equatable {
+        /// CefSwift's indicator: a chevron in a circle that slides in from the
+        /// edge the page is leaving, rubber-bands, and fills with the accent
+        /// color once releasing would navigate.
+        case automatic
+        /// Chromium's own indicator in Chrome-style browsers
+        /// (``CefBrowserWindow``); ``automatic`` elsewhere.
+        case chromium
+        /// No indicator. Draw your own from
+        /// ``CefBrowser/navigationGestureProgress``.
+        case hidden
+    }
 }
 
-/// The indicator drawn for ``CefNavigationGestureIndicator/automatic``.
+/// The indicator drawn for ``CefBrowser/NavigationGestureIndicator/automatic``.
 ///
 /// It follows a browser's ``CefBrowser/navigationGestureProgress``: hidden at
 /// 0, sliding in from the leading edge as the progress moves toward -1
@@ -165,12 +167,12 @@ package final class CefNavigationGestureIndicatorView: NSView {
 /// `ChromeRenderWidgetHostViewMacDelegate` hands scroll events to a
 /// `HistorySwiper`, which navigates and draws its progress with a
 /// `HistoryOverlayController`. These overrides gate that on
-/// ``CefBrowserOptions/allowsBackForwardNavigationGestures``, report its
+/// ``CefBrowser/Configuration/allowsBackForwardNavigationGestures``, report its
 /// progress to ``CefBrowser/navigationGestureProgress``, and hide Chrome's
-/// overlay unless the browser asks for ``CefNavigationGestureIndicator/chromium``.
+/// overlay unless the browser asks for ``CefBrowser/NavigationGestureIndicator/chromium``.
 ///
 /// Only windows of a ``CefBrowserWindow`` are affected; windows from
-/// ``CefRuntime/openChromeWindow(url:frame:options:delegate:)`` keep
+/// ``CefRuntime/openChromeWindow(url:frame:configuration:delegate:)`` keep
 /// Chrome's behavior.
 @MainActor
 enum CefHistorySwipeHooks {
@@ -208,7 +210,7 @@ enum CefHistorySwipeHooks {
             else { return allowed }
             return MainActor.assumeIsolated {
                 guard let browser = browser(showing: view) else { return allowed }
-                return browser.options.allowsBackForwardNavigationGestures
+                return browser.configuration.allowsBackForwardNavigationGestures
             }
         }
         let delegate = "ChromeRenderWidgetHostViewMacDelegate"
@@ -243,7 +245,7 @@ enum CefHistorySwipeHooks {
                 return
             }
             objc_setAssociatedObject(overlay, &browserKey, WeakBrowser(browser), .OBJC_ASSOCIATION_RETAIN)
-            let showsChromium = MainActor.assumeIsolated { browser.options.navigationGestureIndicator == .chromium }
+            let showsChromium = MainActor.assumeIsolated { browser.configuration.navigationGestureIndicator == .chromium }
             if showsChromium { showOriginal?(overlay, showSelector, view) }
         }
 
@@ -335,7 +337,7 @@ extension CefBrowser {
     /// For views that host the browser; Chrome-style browsers swipe
     /// natively.
     package func beginHistorySwipeIfNeeded(with event: NSEvent) -> Bool {
-        guard options.allowsBackForwardNavigationGestures,
+        guard configuration.allowsBackForwardNavigationGestures,
               NSEvent.isSwipeTrackingFromScrollEventsEnabled,
               event.phase == .began,
               abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY)
@@ -358,7 +360,7 @@ extension CefBrowser {
     /// System Settings). Returns whether it navigated.
     @discardableResult
     package func handleNavigationSwipe(_ event: NSEvent) -> Bool {
-        guard options.allowsBackForwardNavigationGestures else { return false }
+        guard configuration.allowsBackForwardNavigationGestures else { return false }
         if event.deltaX > 0, canGoBack {
             goBack()
             return true

@@ -1,15 +1,17 @@
 import Foundation
 
-/// A Chromium facility the app leaves to Chromium or turns off.
-public enum CefSetting: Sendable, Equatable {
-    /// Chromium's own default, which users can change in
-    /// `chrome://settings` where Chromium offers the setting.
-    case automatic
-    /// Off, set again at every launch.
-    case disabled
+extension CefRuntime {
+    /// A Chromium facility the app leaves to Chromium or turns off.
+    public enum Setting: Sendable, Equatable {
+        /// Chromium's own default, which users can change in
+        /// `chrome://settings` where Chromium offers the setting.
+        case automatic
+        /// Off, set again at every launch.
+        case disabled
+    }
 }
 
-extension CefConfiguration {
+extension CefRuntime.Configuration {
     /// Chromium's background services. Each applies to the whole app and
     /// is read at start-up.
     public struct Services: Sendable, Equatable {
@@ -18,19 +20,25 @@ extension CefConfiguration {
         /// logs, Safe Browsing file-type and SSL error lists, origin trials,
         /// subresource filter rules and the like, and the Widevine CDM.
         ///
-        /// ``CefSetting/disabled`` turns it off (`--disable-component-update`):
+        /// ``CefRuntime/Setting/disabled`` turns it off (`--disable-component-update`):
         /// none of these is registered, fetched or loaded. Chromium 156
         /// still fetches one component of its own outside the switch, the
         /// on-device model manifest. Protected media that
-        /// needs the CDM (``CefProtectedMedia/automatic`` and
-        /// ``CefProtectedMedia/preinstalled(widevineDirectory:)``) keeps the
+        /// needs the CDM (``CefRuntime/Configuration/Services/ProtectedMedia/automatic`` and
+        /// ``CefRuntime/Configuration/Services/ProtectedMedia/preinstalled(widevineDirectory:)``) keeps the
         /// updater on regardless, since the CDM arrives through it.
-        public var componentUpdates: CefSetting = .automatic
+        public var componentUpdates: CefRuntime.Setting = .automatic
 
         /// Chromium's offer to translate pages through Google Translate,
         /// the `translate.enabled` preference of every profile. Chrome-style
         /// browsers show the offer.
-        public var translation: CefSetting = .automatic
+        public var translation: CefRuntime.Setting = .automatic
+
+        /// Whether Chromium fetches Google's Widevine CDM, so pages can play
+        /// protected (DRM) media. ``ProtectedMedia/automatic`` by default;
+        /// ``CefRuntime/Configuration/embedded`` turns it off. See
+        /// ``ProtectedMedia``.
+        public var protectedMedia: ProtectedMedia = .automatic
 
         public init() {}
     }
@@ -104,9 +112,9 @@ extension CefConfiguration {
         public var thirdPartyCookies: ThirdPartyCookies = .automatic
 
         /// The pings `<a ping>` links send when followed (hyperlink
-        /// auditing). ``CefSetting/disabled`` passes `--no-pings` for the
+        /// auditing). ``CefRuntime/Setting/disabled`` passes `--no-pings` for the
         /// whole app. Pages can still send requests of their own.
-        public var hyperlinkAuditing: CefSetting = .automatic
+        public var hyperlinkAuditing: CefRuntime.Setting = .automatic
 
         public init() {}
     }
@@ -140,15 +148,15 @@ extension CefConfiguration {
         /// Offering to save passwords, and signing in automatically with
         /// saved ones: the `credentials_enable_service` and
         /// `credentials_enable_autosignin` preferences of every profile.
-        /// ``CefSetting/disabled`` stops new passwords from being saved; it
+        /// ``CefRuntime/Setting/disabled`` stops new passwords from being saved; it
         /// does not stop Chromium from filling passwords the profile has
         /// already saved.
-        public var passwordSaving: CefSetting = .automatic
+        public var passwordSaving: CefRuntime.Setting = .automatic
 
         /// Saving and filling addresses and payment cards: the
         /// `autofill.profile_enabled` and `autofill.credit_card_enabled`
         /// preferences of every profile.
-        public var autofill: CefSetting = .automatic
+        public var autofill: CefRuntime.Setting = .automatic
 
         public init() {}
     }
@@ -156,7 +164,7 @@ extension CefConfiguration {
     /// Whether Chromium's component updater runs: when component updates
     /// are on, or protected media needs the Widevine CDM.
     var runsComponentUpdater: Bool {
-        services.componentUpdates == .automatic || protectedMedia != .disabled
+        services.componentUpdates == .automatic || services.protectedMedia != .disabled
     }
 
     /// The preferences the typed options set, by name; ``preferences``
@@ -210,7 +218,7 @@ extension CefConfiguration {
         var switches: [String] = []
         if !runsComponentUpdater { switches.append("disable-component-update") }
         if privacy.hyperlinkAuditing == .disabled { switches.append("no-pings") }
-        if authenticationPrompt == .delegate { switches.append(CefAuthenticationPrompt.delegateSwitch) }
+        if authenticationPrompt == .delegate { switches.append(CefRuntime.AuthenticationPromptPolicy.delegateSwitch) }
         return switches
     }
 }

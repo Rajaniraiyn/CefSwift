@@ -200,7 +200,7 @@ variants beside each. With `"localizations": "application"`, the default,
 - the development language, `CFBundleDevelopmentRegion` (`en`);
 - English, Chromium's last fallback.
 
-Localizations map onto packs as `CefLocalization` resolves them at run
+Localizations map onto packs as `CefRuntime.Localization` resolves them at run
 time, so the runtime only asks for packs the bundle has: `fr-CA` keeps
 `fr`, `pt` keeps `pt_BR`, `zh-Hant` keeps `zh_TW`, `en-AU` keeps `en_GB`.
 `bundle` warns about a localization Chromium has no pack for (`ga`, `eu`,
@@ -550,7 +550,7 @@ Each capability adds what its feature needs. Usage descriptions come from
 | `passkeys` | `NSWebBrowserPublicKeyCredentialUsageDescription` (optional); includes `bluetooth` | `com.apple.developer.web-browser.public-key-credential` (restricted) | Apple, on request, to web browsers; in a provisioning profile | iCloud Keychain passkeys through AuthenticationServices. Request it from Apple with the [passkey entitlement request form](https://developer.apple.com/contact/request/macos-browsers-passkeys/); Apple then enables it for the App ID as a managed capability. |
 | `defaultBrowser` | `CFBundleURLTypes` (`http`, `https`), `CFBundleDocumentTypes` (`public.html`, `public.xhtml`) | None | Any signature | The app can be chosen as the default browser, and can ask with `NSWorkspace.setDefaultApplication(at:toOpenURLsWithScheme:)`. `com.apple.developer.web-browser` is an iOS entitlement; macOS needs none. |
 | `handoff` | `NSUserActivityTypes` (`NSUserActivityTypeBrowsingWeb`) | None | Any signature | Handoff of web pages. |
-| `protectedMedia` | None | `com.apple.security.cs.disable-library-validation` (base helper) | Any signature | Lets a team-signed, hardened helper load Google's Widevine CDM, which Chromium downloads when `CefConfiguration.protectedMedia` is `.automatic`. Ad hoc builds without the hardened runtime load it without the capability. It does not give the app Verified Media Path: see [Playing streaming services](guide.md#playing-streaming-services). |
+| `protectedMedia` | None | `com.apple.security.cs.disable-library-validation` (base helper) | Any signature | Lets a team-signed, hardened helper load Google's Widevine CDM, which Chromium downloads when `CefRuntime.Configuration.services.protectedMedia` is `.automatic`. Ad hoc builds without the hardened runtime load it without the capability. It does not give the app Verified Media Path: see [Playing streaming services](guide.md#playing-streaming-services). |
 
 Under the hardened runtime, a missing resource entitlement makes the access
 fail silently; without it, the entitlements are not enforced. The usage
@@ -562,7 +562,7 @@ Other features:
 | Feature | Needs |
 |---|---|
 | Safe storage in the keychain (`keychainItem`, by default "<bundle identifier> Safe Storage") | A team signature: `.automatic` picks the keychain then. Ad hoc builds use `--use-mock-keychain`. See [Keychain access](guide.md#keychain-access). |
-| Chromium's profile passkeys with Touch ID | Not available with CEF 156: Chromium checks for the keychain access group `.org.chromium.Chromium.webauthn`, compiled in from Chromium's branding with an empty team identifier, and a provisioning profile authorizes only groups that start with a team identifier. `CefPasskeyMode.app` with `CefKeychainPasskeyStore` verifies the user with Touch ID instead. |
+| Chromium's profile passkeys with Touch ID | Not available with CEF 156: Chromium checks for the keychain access group `.org.chromium.Chromium.webauthn`, compiled in from Chromium's branding with an empty team identifier, and a provisioning profile authorizes only groups that start with a team identifier. `CefBrowser.PasskeyPolicy.app` with `CefKeychainPasskeyStore` verifies the user with Touch ID instead. |
 | `CefKeychainPasskeyStore` | A team signature with a provisioning profile, which gives the app the `com.apple.application-identifier` entitlement the data protection keychain needs. Ad hoc builds get `errSecMissingEntitlement` (-34018). |
 | Screen sharing (`getDisplayMedia`) | Nothing in the bundle; macOS asks the user for Screen Recording permission. |
 | Notifications | Nothing in the bundle; macOS asks the user. The Alerts helper gets `NSUserNotificationAlertStyle`. |

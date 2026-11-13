@@ -10,7 +10,7 @@ import CefSwiftUI
 /// - `-url <address>`: the page.
 /// - `-host window|windowed|offscreen`: a Chrome-style `CefBrowserWindow`,
 ///   or a `CefWebView`-style view (Alloy), windowed or offscreen.
-/// - `-preset default|browser|embedded`: the `CefConfiguration` preset.
+/// - `-preset default|browser|embedded`: the `CefRuntime.Configuration` preset.
 /// - `-features <name>,<name>`: `devtools` (a DevTools session with no
 ///   domain enabled), `runtime` (`Runtime.enable`), `page` (`Page.enable`),
 ///   `bridge`, `anyframe` (the bridge in every frame), `userscript`,
@@ -21,7 +21,7 @@ import CefSwiftUI
 /// - `-capture <path.png>`: where to save a screenshot of the window, taken
 ///   with `screencapture` from outside the page, when the time is up.
 /// - `-cacheDirectory <path>`: Chromium's data directory.
-/// - `-productToken <token>`: `CefUserAgent.appendingProduct(token)`.
+/// - `-productToken <token>`: `CefRuntime.UserAgent.appendingProduct(token)`.
 /// - `-printValue <script>`: evaluates the script when the time is up and
 ///   prints `compat value <JSON>`, for trying the harness out.
 ///
@@ -43,11 +43,11 @@ enum CompatApp {
     static func main() {
         setvbuf(stdout, nil, _IONBF, 0)
         CefApplication.install()
-        var configuration: CefConfiguration
+        var configuration: CefRuntime.Configuration
         switch defaults.string(forKey: "preset") {
         case "browser": configuration = .browser
         case "embedded": configuration = .embedded
-        default: configuration = .default
+        default: configuration = CefRuntime.Configuration()
         }
         configuration.isOffscreenRenderingEnabled = defaults.string(forKey: "host") == "offscreen"
         if let path = defaults.string(forKey: "cacheDirectory") {
@@ -65,28 +65,28 @@ enum CompatApp {
         }
 
         let url = URL(string: defaults.string(forKey: "url") ?? "about:blank")!
-        var options = CefBrowserOptions()
+        var browserConfiguration = CefBrowser.Configuration()
         if features.contains("bridge") {
             bridge.handle("ping") { (_: CefJSON) in "pong" }
-            options.bridges = [bridge]
+            browserConfiguration.bridges = [bridge]
             if features.contains("anyframe") { bridge.access = .anyFrame }
         }
         if features.contains("userscript") {
-            options.userScripts = [CefUserScript(source: "addEventListener('DOMContentLoaded', () => { document.documentElement.dataset.compat = '1'; });")]
+            browserConfiguration.userScripts = [CefUserScript(source: "addEventListener('DOMContentLoaded', () => { document.documentElement.dataset.compat = '1'; });")]
         }
         if features.contains("passkeys") {
-            options.passkeys = .app(CefInMemoryPasskeyStore())
+            browserConfiguration.passkeys = .app(CefInMemoryPasskeyStore())
         }
         if features.contains("accessibility") {
-            options.offscreenAccessibility = .enabled
+            browserConfiguration.offscreenAccessibility = .enabled
         }
 
         let frame = NSRect(x: 60, y: 60, width: 1280, height: 900)
         switch defaults.string(forKey: "host") ?? "window" {
         case "windowed", "offscreen":
             let offscreen = defaults.string(forKey: "host") == "offscreen"
-            if offscreen { options.rendering = .offscreen }
-            browser = CefBrowser(url: url, options: options, delegate: CompatDelegate.shared)
+            if offscreen { browserConfiguration.rendering = .offscreen }
+            browser = CefBrowser(url: url, configuration: browserConfiguration, delegate: CompatDelegate.shared)
             let window = NSWindow(
                 contentRect: frame, styleMask: [.titled, .resizable, .closable, .miniaturizable],
                 backing: .buffered, defer: false)
@@ -109,7 +109,7 @@ enum CompatApp {
             window.makeKeyAndOrderFront(nil)
             self.window = window
         default:
-            browser = CefBrowser(url: url, options: options, delegate: CompatDelegate.shared)
+            browser = CefBrowser(url: url, configuration: browserConfiguration, delegate: CompatDelegate.shared)
             var windowConfiguration = CefBrowserWindow.Configuration()
             windowConfiguration.frame = frame
             let browserWindow = CefBrowserWindow(browser: browser, configuration: windowConfiguration)

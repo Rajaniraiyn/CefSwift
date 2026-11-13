@@ -24,18 +24,18 @@ extension SelfTest {
         }
     }
 
-    static func discardOptions() -> CefBrowserOptions {
-        var options = CefBrowserOptions()
-        options.bridges = [bridge]
-        options.userScripts = [CefUserScript(source: "window.__injected = 42;")]
-        return options
+    static func discardConfiguration() -> CefBrowser.Configuration {
+        var configuration = CefBrowser.Configuration()
+        configuration.bridges = [bridge]
+        configuration.userScripts = [CefUserScript(source: "window.__injected = 42;")]
+        return configuration
     }
 
     // MARK: Chrome-style windows
 
     static func windowDiscardChecks() async {
         let recorder = DiscardRecorder()
-        let browser = CefBrowser(url: URL(string: "selftest://edge/heavy.html?1")!, options: discardOptions(), delegate: recorder)
+        let browser = CefBrowser(url: URL(string: "selftest://edge/heavy.html?1")!, configuration: discardConfiguration(), delegate: recorder)
         let browserWindow = CefBrowserWindow(browser: browser)
         browserWindow.show()
         _ = await waitUntil { browser.title == "heavy" && !browser.isLoading }
@@ -153,7 +153,7 @@ extension SelfTest {
             do {
                 try await leaving.browser.discard()
                 return false
-            } catch let error as CefDiscardError {
+            } catch let error as CefBrowser.DiscardError {
                 guard case .blocked(let blockers) = error else { return false }
                 return blockers.contains(.beforeUnloadHandler) && !leaving.browser.isDiscarded
             }
@@ -187,7 +187,7 @@ extension SelfTest {
         for twin in twins {
             await waitUntilDiscardable(twin.browser) { if case .unknown = $0 { true } else { false } }
         }
-        var twinError: CefDiscardError?
+        var twinError: CefBrowser.DiscardError?
         do { try await twins[0].browser.discard() } catch { twinError = error }
         let ambiguous: Bool
         if case .blocked(let blockers) = twinError {
@@ -216,7 +216,7 @@ extension SelfTest {
         window.hide()
         await waitUntilDiscardable(browser)
         hook.body = { _ in window.show() }
-        var shownError: CefDiscardError?
+        var shownError: CefBrowser.DiscardError?
         do { try await browser.discard() } catch { shownError = error }
         check("discard identity: a tab shown while it is being discarded stays loaded",
               shownError == .blocked([.visible]) && !browser.isDiscarded, detail: "\(String(describing: shownError))")
@@ -225,7 +225,7 @@ extension SelfTest {
         window.hide()
         await waitUntilDiscardable(browser)
         hook.body = { browser in browser.load(URL(string: "selftest://edge/tab.html?moved")!) }
-        var movedError: CefDiscardError?
+        var movedError: CefBrowser.DiscardError?
         do { try await browser.discard() } catch { movedError = error }
         hook.body = { _ in }
         check("discard identity: a tab that navigates while it is being discarded stays loaded",
@@ -241,13 +241,13 @@ extension SelfTest {
         let window = CefBrowserWindow(browser: browser)
         window.show()
         _ = await waitUntil { browser.title == "tab" && !browser.isLoading }
-        CefRuntime.shared.memorySaver = .after(.seconds(2), orUnderMemoryPressure: false)
+        CefRuntime.shared.discardPolicy = .after(.seconds(2), orUnderMemoryPressure: false)
         try? await Task.sleep(for: .seconds(3))
         check("memory saver: a visible tab stays loaded", !browser.isDiscarded)
         window.hide()
         check("memory saver: a hidden tab is discarded after the interval",
               await waitUntil(timeout: .seconds(15)) { browser.isDiscarded })
-        CefRuntime.shared.memorySaver = .off
+        CefRuntime.shared.discardPolicy = .disabled
         window.show()
         check("memory saver: the tab comes back when shown", await waitUntil { !browser.isDiscarded && !browser.isLoading })
         window.close()
@@ -258,7 +258,7 @@ extension SelfTest {
 
     static func viewDiscardChecks() async {
         let recorder = DiscardRecorder()
-        let browser = CefBrowser(url: URL(string: "selftest://edge/heavy.html?view")!, options: discardOptions(), delegate: recorder)
+        let browser = CefBrowser(url: URL(string: "selftest://edge/heavy.html?view")!, configuration: discardConfiguration(), delegate: recorder)
         let view = CefWindowedBrowserView()
         view.frame = window.contentView!.bounds
         view.autoresizingMask = [.width, .height]
@@ -347,7 +347,7 @@ extension SelfTest {
     /// accepts: a hidden window takes a moment to reach Chromium's tab
     /// state, and a page that just loaded to settle.
     static func waitUntilDiscardable(
-        _ browser: CefBrowser, allowing allowed: (CefDiscardBlocker) -> Bool = { _ in false }
+        _ browser: CefBrowser, allowing allowed: (CefBrowser.DiscardBlocker) -> Bool = { _ in false }
     ) async {
         _ = await waitUntilAsync(timeout: .seconds(5)) { await browser.discardBlockers().allSatisfy(allowed) }
     }

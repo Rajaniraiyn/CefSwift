@@ -41,7 +41,7 @@ extension CefError: CustomStringConvertible {
             return """
             Chromium Embedded Framework not found. \(detail)
             Fix: bundle the framework via `swift package cef bundle`, set \
-            CefConfiguration.frameworkDirectory, or export CEF_FRAMEWORK_PATH \
+            CefRuntime.Configuration.frameworkDirectory, or export CEF_FRAMEWORK_PATH \
             to the framework binary for unbundled dev/CI runs.
             """
         case .loadFailed(let message):

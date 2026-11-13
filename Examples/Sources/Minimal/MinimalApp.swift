@@ -10,28 +10,28 @@ import SwiftUI
 /// - `-url <address>` shows that page instead of the built-in one.
 /// - `-cacheDirectory <path>` keeps Chromium's data there.
 /// - `-sandbox NO` runs the helper processes outside Chromium's sandbox.
-/// - `-memoryPolicy standard|reduced|minimal` overrides the preset's
-///   ``CefMemoryPolicy``.
+/// - `-processPolicy automatic|onDemand|minimal` overrides the preset's
+///   ``CefRuntime/ProcessPolicy``.
 /// - `-protectedMedia YES` lets Chromium fetch Widevine
-///   (``CefProtectedMedia/automatic``).
+///   (``CefRuntime/Configuration/Services/ProtectedMedia/automatic``).
 /// - `-benchmark YES` prints `cefswift-benchmark loaded <seconds since 1970>
 ///   <address>` each time a page finishes loading, and quits when standard
 ///   input closes. `Scripts/measure-footprint.py` drives it.
 @main
 struct MinimalApp: CefSwiftApp {
-    static var cefConfiguration: CefConfiguration {
-        var configuration = CefConfiguration.embedded
+    static var runtimeConfiguration: CefRuntime.Configuration {
+        var configuration = CefRuntime.Configuration.embedded
         if let path = UserDefaults.standard.string(forKey: "cacheDirectory") {
             configuration.rootCacheDirectory = URL(fileURLWithPath: path, isDirectory: true)
         }
         if UserDefaults.standard.object(forKey: "sandbox") != nil {
             configuration.isSandboxEnabled = UserDefaults.standard.bool(forKey: "sandbox")
         }
-        if UserDefaults.standard.bool(forKey: "protectedMedia") { configuration.protectedMedia = .automatic }
-        switch UserDefaults.standard.string(forKey: "memoryPolicy") {
-        case "standard": configuration.memoryPolicy = .standard
-        case "reduced": configuration.memoryPolicy = .reduced
-        case "minimal": configuration.memoryPolicy = .minimal
+        if UserDefaults.standard.bool(forKey: "protectedMedia") { configuration.services.protectedMedia = .automatic }
+        switch UserDefaults.standard.string(forKey: "processPolicy") {
+        case "automatic": configuration.processPolicy = .automatic
+        case "onDemand": configuration.processPolicy = .onDemand
+        case "minimal": configuration.processPolicy = .minimal
         default: break
         }
         return configuration

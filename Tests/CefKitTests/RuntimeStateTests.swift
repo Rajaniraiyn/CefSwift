@@ -29,6 +29,6 @@ struct RuntimeStateTests {
 
     @MainActor @Test func theRuntimeHasNotStartedInUnitTests() {
         #expect(CefRuntime.shared.state == .notStarted)
-        #expect(!CefRuntime.shared.isInitialized)
+        #expect(!CefRuntime.shared.isRunning)
     }
 }

@@ -74,7 +74,7 @@ extension CefBrowser {
     }
 
     func mainFrameDidFailLoad(_ error: CefLoadError) {
-        // ERR_INVALID_AUTH_CREDENTIALS: with `CefAuthenticationPrompt.chromium`,
+        // ERR_INVALID_AUTH_CREDENTIALS: with `CefRuntime.AuthenticationPromptPolicy.chromium`,
         // Chromium asks for credentials itself, in a window of its own.
         if error.code == -338, !isChromeStyle, CefRuntime.shared.configuration?.authenticationPrompt == .chromium {
             signInPromptURL = error.url
@@ -84,7 +84,7 @@ extension CefBrowser {
 
     func applyFullscreen(_ isFullscreen: Bool) { self.isFullscreen = isFullscreen }
     func applyStatusText(_ text: String) { statusText = text }
-    func applyFindResult(_ result: CefFindResult) {
+    func applyFindResult(_ result: CefBrowser.FindResult) {
         findResult = result
         findSession.didReceive(result)
     }

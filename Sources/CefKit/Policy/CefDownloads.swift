@@ -99,20 +99,23 @@ public struct CefDownload: Sendable, Equatable, Identifiable {
 /// Whether and where to save a download.
 public enum CefDownloadDecision: Sendable {
     /// Save the download to `destination`, a file URL including the file
-    /// name, or to `~/Downloads` under the suggested name when `nil`.
-    case allow(destination: URL?)
+    /// name.
+    case save(to: URL)
+    /// Save the download to `~/Downloads` under the suggested name.
+    case saveToDownloadsFolder
     /// Cancel the download.
-    case deny
+    case cancel
 }
 
 enum CefDownloadDestination {
     /// The file a decision saves to, or `nil` when it cancels the download.
     static func resolve(decision: CefDownloadDecision, suggestedName: String) -> URL? {
         switch decision {
-        case .deny:
+        case .cancel:
             return nil
-        case .allow(let destination):
-            if let destination { return destination }
+        case .save(let destination):
+            return destination
+        case .saveToDownloadsFolder:
             let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
                 ?? FileManager.default.temporaryDirectory
             // A suggested name must not lead outside the directory.

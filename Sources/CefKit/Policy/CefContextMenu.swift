@@ -254,70 +254,72 @@ public struct CefContextMenuItem {
     }
 }
 
-/// Shapes a browser's context menu without a delegate: hide Chromium's
-/// items, add your own, and optionally add Inspect Element.
-///
-/// ```swift
-/// options.contextMenu.hiddenCommands = [.viewSource, .print]
-/// options.contextMenu.showsInspectElement = true
-/// options.contextMenu.items = [
-///     CefContextMenuItem("Copy Link as Markdown", isVisible: { $0.linkURL != nil }) { browser, target in
-///         copyMarkdownLink(target.linkURL!, title: browser.title)
-///     },
-/// ]
-/// ```
-///
-/// For menus that depend on more than the click target, implement
-/// ``CefBrowserDelegate/browser(_:configureContextMenu:for:)``, which
-/// runs after this configuration is applied.
-@MainActor
-public struct CefContextMenuConfiguration {
-    /// `false` suppresses the context menu entirely.
-    public var isEnabled = true
-    /// Chromium items to remove.
-    public var hiddenCommands: Set<CefContextMenuCommand> = []
-    /// Adds "Inspect Element", opening DevTools on the clicked node.
-    public var showsInspectElement = false
-    /// Your items, added below Chromium's.
-    public var items: [CefContextMenuItem] = []
+extension CefBrowser.Configuration {
+    /// Shapes a browser's context menu without a delegate: hide Chromium's
+    /// items, add your own, and optionally add Inspect Element.
+    ///
+    /// ```swift
+    /// configuration.contextMenu.hiddenCommands = [.viewSource, .print]
+    /// configuration.contextMenu.showsInspectElement = true
+    /// configuration.contextMenu.items = [
+    ///     CefContextMenuItem("Copy Link as Markdown", isVisible: { $0.linkURL != nil }) { browser, target in
+    ///         copyMarkdownLink(target.linkURL!, title: browser.title)
+    ///     },
+    /// ]
+    /// ```
+    ///
+    /// For menus that depend on more than the click target, implement
+    /// ``CefBrowserDelegate/browser(_:configureContextMenu:for:)``, which
+    /// runs after this configuration is applied.
+    @MainActor
+    public struct ContextMenu {
+        /// `false` suppresses the context menu entirely.
+        public var isEnabled = true
+        /// Chromium items to remove.
+        public var hiddenCommands: Set<CefContextMenuCommand> = []
+        /// Adds "Inspect Element", opening DevTools on the clicked node.
+        public var showsInspectElement = false
+        /// Your items, added below Chromium's.
+        public var items: [CefContextMenuItem] = []
 
-    public init() {}
+        public init() {}
 
-    /// Inspect Element takes the last user ID; ``items`` count up from the first.
-    static let inspectCommandID = CefMenuModel.userCommandIDs.upperBound
+        /// Inspect Element takes the last user ID; ``items`` count up from the first.
+        static let inspectCommandID = CefMenuModel.userCommandIDs.upperBound
 
-    /// Applies the configuration to a menu about to be shown.
-    func apply(to menu: CefMenuModel, for target: CefContextMenuTarget) {
-        guard isEnabled else {
-            menu.clear()
-            return
+        /// Applies the configuration to a menu about to be shown.
+        func apply(to menu: CefMenuModel, for target: CefContextMenuTarget) {
+            guard isEnabled else {
+                menu.clear()
+                return
+            }
+            for command in hiddenCommands {
+                menu.removeItem(commandID: command.rawValue)
+            }
+            let visible = items.enumerated().filter { $0.element.isVisible?(target) ?? true }
+            if !visible.isEmpty || showsInspectElement {
+                menu.trimSeparators()
+                if menu.count > 0 { menu.addSeparator() }
+            }
+            for (index, item) in visible {
+                menu.addItem(commandID: CefMenuModel.userCommandIDs.lowerBound + index, title: item.title)
+            }
+            if showsInspectElement {
+                if !visible.isEmpty { menu.addSeparator() }
+                menu.addItem(commandID: Self.inspectCommandID, title: "Inspect Element")
+            }
         }
-        for command in hiddenCommands {
-            menu.removeItem(commandID: command.rawValue)
-        }
-        let visible = items.enumerated().filter { $0.element.isVisible?(target) ?? true }
-        if !visible.isEmpty || showsInspectElement {
-            menu.trimSeparators()
-            if menu.count > 0 { menu.addSeparator() }
-        }
-        for (index, item) in visible {
-            menu.addItem(commandID: CefMenuModel.userCommandIDs.lowerBound + index, title: item.title)
-        }
-        if showsInspectElement {
-            if !visible.isEmpty { menu.addSeparator() }
-            menu.addItem(commandID: Self.inspectCommandID, title: "Inspect Element")
-        }
-    }
 
-    /// Runs the item for `commandID`. Returns whether the ID was one of ours.
-    func perform(commandID: Int, in browser: CefBrowser, for target: CefContextMenuTarget) -> Bool {
-        if showsInspectElement, commandID == Self.inspectCommandID {
-            browser.showDevTools(inspecting: target.location)
+        /// Runs the item for `commandID`. Returns whether the ID was one of ours.
+        func perform(commandID: Int, in browser: CefBrowser, for target: CefContextMenuTarget) -> Bool {
+            if showsInspectElement, commandID == Self.inspectCommandID {
+                browser.showDevTools(inspecting: target.location)
+                return true
+            }
+            let index = commandID - CefMenuModel.userCommandIDs.lowerBound
+            guard items.indices.contains(index) else { return false }
+            items[index].action(browser, target)
             return true
         }
-        let index = commandID - CefMenuModel.userCommandIDs.lowerBound
-        guard items.indices.contains(index) else { return false }
-        items[index].action(browser, target)
-        return true
     }
 }

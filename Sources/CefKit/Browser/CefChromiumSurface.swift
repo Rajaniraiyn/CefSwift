@@ -38,7 +38,7 @@ public final class CefChromiumSurface: Identifiable {
         /// the command opens macOS's share menu unless you present your own.
         case share
         /// The sign-in dialog for HTTP authentication, with
-        /// ``CefAuthenticationPrompt/chromium``.
+        /// ``CefRuntime/AuthenticationPromptPolicy/chromium``.
         case signIn
         /// The status bubble showing a hovered link's address.
         case statusBubble
@@ -67,7 +67,7 @@ public final class CefChromiumSurface: Identifiable {
         case other(String)
 
         /// Whether Chromium would attach the surface to its toolbar, so that
-        /// ``CefChromiumUI/anchor`` applies to it.
+        /// ``CefBrowserWindow/ChromiumUI/anchor`` applies to it.
         public var hangsFromToolbar: Bool {
             switch self {
             case .qrCode, .cast, .share, .downloads, .permissionPrompt, .translate, .savePassword, .bookmark,
@@ -86,7 +86,7 @@ public final class CefChromiumSurface: Identifiable {
     /// How a kind of surface is presented.
     public enum Presentation: Sendable {
         /// As Chromium draws it, under its anchor
-        /// (``CefChromiumUI/anchors``, or ``CefChromiumUI/anchor`` for
+        /// (``CefBrowserWindow/ChromiumUI/anchors``, or ``CefBrowserWindow/ChromiumUI/anchor`` for
         /// surfaces that hang from the toolbar), or where Chromium puts it
         /// when there is none.
         case native
@@ -364,131 +364,135 @@ public final class CefChromiumSurface: Identifiable {
     }
 }
 
-/// How a ``CefBrowserWindow`` presents Chromium's own interface: for each
-/// kind of surface, whether Chromium draws it, you replace it, or it is
-/// hidden, and where it goes.
-///
-/// ```swift
-/// window.chromiumUI.anchor = .view(addressField, alignment: .trailing)
-/// window.chromiumUI.anchors[.qrCode] = .view(qrButton, alignment: .trailing)
-/// window.chromiumUI[.statusBubble] = .hidden
-/// ```
-@MainActor
-public struct CefChromiumUI {
-    /// Where surfaces that hang from Chrome's toolbar go
-    /// (``CefChromiumSurface/Kind/hangsFromToolbar``) when their kind has no
-    /// anchor in ``anchors``. `nil` leaves them where Chromium puts them,
-    /// which without Chrome's toolbar is the top right of the page.
-    public var anchor: CefSurfaceAnchor?
+extension CefBrowserWindow {
+    /// How a ``CefBrowserWindow`` presents Chromium's own interface: for each
+    /// kind of surface, whether Chromium draws it, you replace it, or it is
+    /// hidden, and where it goes.
+    ///
+    /// ```swift
+    /// window.chromiumUI.anchor = .view(addressField, alignment: .trailing)
+    /// window.chromiumUI.anchors[.qrCode] = .view(qrButton, alignment: .trailing)
+    /// window.chromiumUI[.statusBubble] = .hidden
+    /// ```
+    @MainActor
+    public struct ChromiumUI {
+        /// Where surfaces that hang from Chrome's toolbar go
+        /// (``CefChromiumSurface/Kind/hangsFromToolbar``) when their kind has no
+        /// anchor in ``anchors``. `nil` leaves them where Chromium puts them,
+        /// which without Chrome's toolbar is the top right of the page.
+        public var anchor: CefChromiumSurface.Anchor?
 
-    /// Anchors by kind, for Chromium's surfaces and for your own interface
-    /// in their place. The only way to move surfaces that belong to the
-    /// page, such as the find bar and the sign-in dialog.
-    public var anchors: [CefChromiumSurface.Kind: CefSurfaceAnchor] = [:]
+        /// Anchors by kind, for Chromium's surfaces and for your own interface
+        /// in their place. The only way to move surfaces that belong to the
+        /// page, such as the find bar and the sign-in dialog.
+        public var anchors: [CefChromiumSurface.Kind: CefChromiumSurface.Anchor] = [:]
 
-    /// Presentations by kind. A kind not listed is
-    /// ``CefChromiumSurface/Presentation/native``.
-    public var presentations: [CefChromiumSurface.Kind: CefChromiumSurface.Presentation] = [:]
+        /// Presentations by kind. A kind not listed is
+        /// ``CefChromiumSurface/Presentation/native``.
+        public var presentations: [CefChromiumSurface.Kind: CefChromiumSurface.Presentation] = [:]
 
-    public init() {}
+        public init() {}
 
-    /// The presentation of `kind`.
-    public subscript(kind: CefChromiumSurface.Kind) -> CefChromiumSurface.Presentation {
-        get { presentations[kind] ?? .native }
-        set { presentations[kind] = newValue }
-    }
+        /// The presentation of `kind`.
+        public subscript(kind: CefChromiumSurface.Kind) -> CefChromiumSurface.Presentation {
+            get { presentations[kind] ?? .native }
+            set { presentations[kind] = newValue }
+        }
 
-    /// The anchor that applies to a surface of `kind`.
-    func anchor(for kind: CefChromiumSurface.Kind) -> CefSurfaceAnchor? {
-        anchors[kind] ?? (kind.hangsFromToolbar ? anchor : nil)
+        /// The anchor that applies to a surface of `kind`.
+        func anchor(for kind: CefChromiumSurface.Kind) -> CefChromiumSurface.Anchor? {
+            anchors[kind] ?? (kind.hangsFromToolbar ? anchor : nil)
+        }
     }
 }
-/// Where a surface of Chromium's goes in a ``CefBrowserWindow``: beneath a
-/// view or a rectangle of yours, aligned with its leading or trailing edge
-/// or centered on it.
-///
-/// ```swift
-/// window.chromiumUI.anchor = .view(addressField, alignment: .trailing)
-/// window.chromiumUI.anchors[.findBar] = .rect(CGRect(x: 0, y: 700, width: 300, height: 0))
-/// ```
-@MainActor
-public struct CefSurfaceAnchor {
-    /// How the surface lines up with its anchor.
-    public enum Alignment: Sendable {
-        /// The surface's left edge at the anchor's left edge.
-        case leading
-        /// Centered under the anchor.
-        case center
-        /// The surface's right edge at the anchor's right edge.
-        case trailing
-    }
-
-    private enum Target {
-        case view(WeakView)
-        case rect(CGRect)
-    }
-
-    private final class WeakView {
-        weak var view: NSView?
-        init(_ view: NSView) { self.view = view }
-    }
-
-    private let target: Target
-    public var alignment: Alignment
-    /// The gap between the anchor's bottom edge and the surface.
-    public var spacing: CGFloat
-
-    /// Beneath `view`, which must be in the browser window, its title bar
-    /// and toolbar included. The view is held weakly; once it is gone or
-    /// out of the window, surfaces stay where Chromium puts them.
-    public static func view(_ view: NSView, alignment: Alignment = .center, spacing: CGFloat = 4) -> CefSurfaceAnchor {
-        CefSurfaceAnchor(target: .view(WeakView(view)), alignment: alignment, spacing: spacing)
-    }
-
-    /// Beneath `rect`, in the window's coordinate space (points from its
-    /// bottom-left corner, as `NSView.convert(_:to: nil)` gives).
-    public static func rect(_ rect: CGRect, alignment: Alignment = .center, spacing: CGFloat = 4) -> CefSurfaceAnchor {
-        CefSurfaceAnchor(target: .rect(rect), alignment: alignment, spacing: spacing)
-    }
-
-    /// Whether this anchor is beneath `view`.
-    package func isAnchored(to view: NSView) -> Bool {
-        if case .view(let box) = target { return box.view === view }
-        return false
-    }
-
-    /// The anchor in screen coordinates, or `nil` when its view is gone or
-    /// not in `window`.
-    func screenRect(in window: NSWindow) -> CGRect? {
-        switch target {
-        case .rect(let rect):
-            return window.convertToScreen(rect)
-        case .view(let box):
-            guard let view = box.view, view.window === window, !view.isHiddenOrHasHiddenAncestor else { return nil }
-            return window.convertToScreen(view.convert(view.bounds, to: nil))
+extension CefChromiumSurface {
+    /// Where a surface of Chromium's goes in a ``CefBrowserWindow``: beneath a
+    /// view or a rectangle of yours, aligned with its leading or trailing edge
+    /// or centered on it.
+    ///
+    /// ```swift
+    /// window.chromiumUI.anchor = .view(addressField, alignment: .trailing)
+    /// window.chromiumUI.anchors[.findBar] = .rect(CGRect(x: 0, y: 700, width: 300, height: 0))
+    /// ```
+    @MainActor
+    public struct Anchor {
+        /// How the surface lines up with its anchor.
+        public enum Alignment: Sendable {
+            /// The surface's left edge at the anchor's left edge.
+            case leading
+            /// Centered under the anchor.
+            case center
+            /// The surface's right edge at the anchor's right edge.
+            case trailing
         }
-    }
 
-    /// Where a surface of `size` goes for this anchor in `window`, kept
-    /// inside the window horizontally and on screen.
-    func origin(for size: CGSize, in window: NSWindow) -> CGPoint? {
-        guard let anchor = screenRect(in: window) else { return nil }
-        var x: CGFloat = switch alignment {
-        case .leading: anchor.minX
-        case .center: anchor.midX - size.width / 2
-        case .trailing: anchor.maxX - size.width
+        private enum Target {
+            case view(WeakView)
+            case rect(CGRect)
         }
-        var y = anchor.minY - spacing - size.height
-        let margin: CGFloat = 4
-        let bounds = window.frame.insetBy(dx: margin, dy: 0)
-        if size.width <= bounds.width {
-            x = min(max(x, bounds.minX), bounds.maxX - size.width)
+
+        private final class WeakView {
+            weak var view: NSView?
+            init(_ view: NSView) { self.view = view }
         }
-        if let screen = window.screen?.visibleFrame {
-            x = min(max(x, screen.minX), screen.maxX - size.width)
-            y = max(y, screen.minY)
+
+        private let target: Target
+        public var alignment: Alignment
+        /// The gap between the anchor's bottom edge and the surface.
+        public var spacing: CGFloat
+
+        /// Beneath `view`, which must be in the browser window, its title bar
+        /// and toolbar included. The view is held weakly; once it is gone or
+        /// out of the window, surfaces stay where Chromium puts them.
+        public static func view(_ view: NSView, alignment: Alignment = .center, spacing: CGFloat = 4) -> CefChromiumSurface.Anchor {
+            CefChromiumSurface.Anchor(target: .view(WeakView(view)), alignment: alignment, spacing: spacing)
         }
-        return CGPoint(x: x.rounded(), y: y.rounded())
+
+        /// Beneath `rect`, in the window's coordinate space (points from its
+        /// bottom-left corner, as `NSView.convert(_:to: nil)` gives).
+        public static func rect(_ rect: CGRect, alignment: Alignment = .center, spacing: CGFloat = 4) -> CefChromiumSurface.Anchor {
+            CefChromiumSurface.Anchor(target: .rect(rect), alignment: alignment, spacing: spacing)
+        }
+
+        /// Whether this anchor is beneath `view`.
+        package func isAnchored(to view: NSView) -> Bool {
+            if case .view(let box) = target { return box.view === view }
+            return false
+        }
+
+        /// The anchor in screen coordinates, or `nil` when its view is gone or
+        /// not in `window`.
+        func screenRect(in window: NSWindow) -> CGRect? {
+            switch target {
+            case .rect(let rect):
+                return window.convertToScreen(rect)
+            case .view(let box):
+                guard let view = box.view, view.window === window, !view.isHiddenOrHasHiddenAncestor else { return nil }
+                return window.convertToScreen(view.convert(view.bounds, to: nil))
+            }
+        }
+
+        /// Where a surface of `size` goes for this anchor in `window`, kept
+        /// inside the window horizontally and on screen.
+        func origin(for size: CGSize, in window: NSWindow) -> CGPoint? {
+            guard let anchor = screenRect(in: window) else { return nil }
+            var x: CGFloat = switch alignment {
+            case .leading: anchor.minX
+            case .center: anchor.midX - size.width / 2
+            case .trailing: anchor.maxX - size.width
+            }
+            var y = anchor.minY - spacing - size.height
+            let margin: CGFloat = 4
+            let bounds = window.frame.insetBy(dx: margin, dy: 0)
+            if size.width <= bounds.width {
+                x = min(max(x, bounds.minX), bounds.maxX - size.width)
+            }
+            if let screen = window.screen?.visibleFrame {
+                x = min(max(x, screen.minX), screen.maxX - size.width)
+                y = max(y, screen.minY)
+            }
+            return CGPoint(x: x.rounded(), y: y.rounded())
+        }
     }
 }
 

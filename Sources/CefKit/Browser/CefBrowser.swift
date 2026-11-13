@@ -4,13 +4,15 @@ import Foundation
 import Observation
 import CefBase
 
-/// Progress of a find-in-page session.
-public struct CefFindResult: Sendable, Equatable {
-    public var matchCount: Int
-    /// 1-based index of the highlighted match; 0 when there is none.
-    public var activeMatchIndex: Int
-    /// Whether the search has finished counting.
-    public var isFinal: Bool
+extension CefBrowser {
+    /// Progress of a find-in-page session.
+    public struct FindResult: Sendable, Equatable {
+        public var matchCount: Int
+        /// 1-based index of the highlighted match; 0 when there is none.
+        public var activeMatchIndex: Int
+        /// Whether the search has finished counting.
+        public var isFinal: Bool
+    }
 }
 
 // MARK: - CefBrowser
@@ -77,14 +79,14 @@ public final class CefBrowser: Identifiable {
     /// Downloads started by this browser, oldest first.
     public internal(set) var downloads: [CefDownload] = []
     /// Progress of a back or forward swipe
-    /// (``CefBrowserOptions/allowsBackForwardNavigationGestures``): 0 at
+    /// (``CefBrowser/Configuration/allowsBackForwardNavigationGestures``): 0 at
     /// rest, moving toward -1 while swiping back and toward 1 while swiping
     /// forward. At -1 or 1 and beyond, releasing navigates. Use it to draw
     /// your own indicator with
-    /// ``CefBrowserOptions/navigationGestureIndicator`` set to `.hidden`.
+    /// ``CefBrowser/Configuration/navigationGestureIndicator`` set to `.hidden`.
     public package(set) var navigationGestureProgress = 0.0
     /// The latest result of ``find(_:backwards:caseSensitive:)``.
-    public internal(set) var findResult: CefFindResult?
+    public internal(set) var findResult: CefBrowser.FindResult?
     /// Whether the page responds to input. Chromium reports a page whose
     /// renderer has not handled input for 15 seconds as unresponsive; see
     /// ``CefBrowserDelegate/browserPageIsUnresponsive(_:)``.
@@ -104,7 +106,7 @@ public final class CefBrowser: Identifiable {
     public var mainFrame: CefFrame? { frames.first(where: \.isMain) }
 
     /// Whether the page has been unloaded to free its memory, by
-    /// ``discard()`` or ``CefRuntime/memorySaver``.
+    /// ``discard()`` or ``CefRuntime/discardPolicy``.
     ///
     /// A discarded browser keeps its ``url``, ``title`` and ``favicon`` and
     /// stays in your UI; dim its tab, for instance. It loads its page again
@@ -117,7 +119,7 @@ public final class CefBrowser: Identifiable {
     /// place while it loads again. `nil` when the browser is not discarded
     /// or the capture failed; released once the page has loaded again.
     public internal(set) var discardSnapshot: NSImage?
-    /// Whether ``CefRuntime/memorySaver`` and ``discard()`` may discard this
+    /// Whether ``CefRuntime/discardPolicy`` and ``discard()`` may discard this
     /// browser. Turn it off for tabs the user pinned, or pages that must
     /// keep running.
     public var allowsDiscarding = true
@@ -138,7 +140,8 @@ public final class CefBrowser: Identifiable {
     /// decision gets the default implementation from
     /// ``CefBrowserDelegate``.
     @ObservationIgnored public weak var delegate: CefBrowserDelegate?
-    @ObservationIgnored public let options: CefBrowserOptions
+    /// The creation-time settings the browser was made with.
+    @ObservationIgnored public let configuration: Configuration
     /// Chromium's identifier for this browser; `-1` until created.
     @ObservationIgnored public internal(set) var identifier: Int32 = -1
     /// The browser that opened this one, for popups.
@@ -209,7 +212,7 @@ public final class CefBrowser: Identifiable {
     @ObservationIgnored var appliedOffscreenFrameRate: Int?
 
     /// Whether Chromium is building the page's accessibility tree for an
-    /// offscreen browser. See ``CefBrowserOptions/offscreenAccessibility``.
+    /// offscreen browser. See ``CefBrowser/Configuration/offscreenAccessibility``.
     public internal(set) var isAccessibilityEnabled = false
     /// The page's accessibility tree, for offscreen browsers while
     /// ``isAccessibilityEnabled`` is on; empty otherwise.
@@ -222,26 +225,26 @@ public final class CefBrowser: Identifiable {
     ///
     /// - Parameters:
     ///   - url: The page the browser opens with.
-    ///   - options: Creation-time settings.
+    ///   - configuration: Creation-time settings.
     ///   - delegate: The browser's ``delegate``, held weakly. Keep your own
     ///     strong reference to it; a delegate created inline, such as
     ///     `CefBrowser(url: url, delegate: Policy())`, is released at once.
-    public init(url: URL? = nil, options: CefBrowserOptions = .init(), delegate: CefBrowserDelegate? = nil) {
+    public init(url: URL? = nil, configuration: Configuration = .init(), delegate: CefBrowserDelegate? = nil) {
         self.url = url
         self.initialURL = url
-        self.options = options
+        self.configuration = configuration
         self.delegate = delegate
     }
 
     /// Wraps a browser Chromium created on its own (popup, Chrome UI tab).
     init(adopting raw: CefRef<cef_browser_t>, client: CefBrowserClient, opener: CefBrowser?, profile: CefProfile?) {
-        var options = opener?.options ?? CefBrowserOptions()
-        options.profile = profile
-        self.options = options
+        var configuration = opener?.configuration ?? CefBrowser.Configuration()
+        configuration.profile = profile
+        self.configuration = configuration
         self.client = client
         self.opener = opener
         self.isChromeStyle = opener?.isChromeStyle ?? true
-        options.bridges.forEach { $0.attach(to: self) }
+        configuration.bridges.forEach { $0.attach(to: self) }
         adopt(raw)
     }
 
@@ -354,7 +357,7 @@ public final class CefBrowser: Identifiable {
 
     /// Injects `script` into every document loaded from now on, before the
     /// page's own scripts. For scripts known up front prefer
-    /// ``CefBrowserOptions/userScripts``, which also cover the first page.
+    /// ``CefBrowser/Configuration/userScripts``, which also cover the first page.
     ///
     /// The script reaches every renderer process that shows the browser's
     /// frames now. A renderer process that the browser moves to later (a
@@ -366,7 +369,7 @@ public final class CefBrowser: Identifiable {
     }
 
     /// The user scripts of the options and those added at runtime.
-    var userScripts: [CefUserScript] { options.userScripts + addedUserScripts }
+    var userScripts: [CefUserScript] { configuration.userScripts + addedUserScripts }
 
     // MARK: Lifetime
 
@@ -384,7 +387,7 @@ public final class CefBrowser: Identifiable {
             return
         }
         if let signInPromptURL, signInPromptURL == url {
-            // With `CefAuthenticationPrompt.chromium`, Chromium's sign-in
+            // With `CefRuntime.AuthenticationPromptPolicy.chromium`, Chromium's sign-in
             // window for an Alloy-style browser crashes the process when its
             // browser closes under it. A navigation dismisses the window, so
             // leave the page first and close once the window has gone.

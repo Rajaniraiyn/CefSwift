@@ -4,22 +4,22 @@ import Testing
 
 @testable import CefKit
 
-@Suite struct MemorySaverTests {
+@Suite struct DiscardPolicyTests {
     @Test func presets() {
-        #expect(CefMemorySaver.off == CefMemorySaver(hiddenDuration: nil, discardsUnderMemoryPressure: false))
-        #expect(CefMemorySaver.underMemoryPressure.hiddenDuration == nil)
-        #expect(CefMemorySaver.underMemoryPressure.discardsUnderMemoryPressure)
-        let after = CefMemorySaver.after(.seconds(1800))
+        #expect(CefRuntime.DiscardPolicy.disabled == CefRuntime.DiscardPolicy(hiddenDuration: nil, discardsUnderMemoryPressure: false))
+        #expect(CefRuntime.DiscardPolicy.underMemoryPressure.hiddenDuration == nil)
+        #expect(CefRuntime.DiscardPolicy.underMemoryPressure.discardsUnderMemoryPressure)
+        let after = CefRuntime.DiscardPolicy.after(.seconds(1800))
         #expect(after.hiddenDuration == .seconds(1800) && after.discardsUnderMemoryPressure)
-        #expect(!CefMemorySaver.after(.seconds(60), orUnderMemoryPressure: false).discardsUnderMemoryPressure)
+        #expect(!CefRuntime.DiscardPolicy.after(.seconds(60), orUnderMemoryPressure: false).discardsUnderMemoryPressure)
     }
 
     @Test func checkIntervalFollowsTheDuration() {
-        #expect(CefMemorySaver.off.checkInterval == nil)
-        #expect(CefMemorySaver.underMemoryPressure.checkInterval == nil)
-        #expect(CefMemorySaver.after(.seconds(2)).checkInterval == .milliseconds(500))
-        #expect(CefMemorySaver.after(.milliseconds(100)).checkInterval == .milliseconds(250))
-        #expect(CefMemorySaver.after(.seconds(3600)).checkInterval == .seconds(30))
+        #expect(CefRuntime.DiscardPolicy.disabled.checkInterval == nil)
+        #expect(CefRuntime.DiscardPolicy.underMemoryPressure.checkInterval == nil)
+        #expect(CefRuntime.DiscardPolicy.after(.seconds(2)).checkInterval == .milliseconds(500))
+        #expect(CefRuntime.DiscardPolicy.after(.milliseconds(100)).checkInterval == .milliseconds(250))
+        #expect(CefRuntime.DiscardPolicy.after(.seconds(3600)).checkInterval == .seconds(30))
     }
 }
 
@@ -68,11 +68,11 @@ import Testing
     }
 
     @Test func errorDescription() {
-        #expect(CefDiscardError.blocked([.visible, .playingAudio]).description == "not discardable: playingAudio, visible")
-        #expect(CefDiscardError.blocked([.unknown("why")]).description == "not discardable: unknown(why)")
+        #expect(CefBrowser.DiscardError.blocked([.visible, .playingAudio]).description == "not discardable: playingAudio, visible")
+        #expect(CefBrowser.DiscardError.blocked([.unknown("why")]).description == "not discardable: unknown(why)")
     }
 
-    private func isUnknown(_ blocker: CefDiscardBlocker) -> Bool {
+    private func isUnknown(_ blocker: CefBrowser.DiscardBlocker) -> Bool {
         if case .unknown = blocker { return true }
         return false
     }

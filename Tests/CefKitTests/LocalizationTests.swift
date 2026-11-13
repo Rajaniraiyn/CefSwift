@@ -75,22 +75,22 @@ import CefBase
     }
 
     @Test func policiesChooseTheirIdentifiers() {
-        #expect(CefLocalization.system.identifiers(bundle: .main, preferredLanguages: ["fr-CA", "en"]) == ["fr-CA", "en"])
-        #expect(CefLocalization.fixed("de").identifiers(bundle: .main, preferredLanguages: ["fr"]) == ["de"])
-        #expect(CefLocalization.fixed("xx").resolve(packs: Self.packs, preferredLanguages: [])?.locale == "en-US")
-        #expect(CefLocalization.system.resolve(packs: Self.packs, preferredLanguages: ["pt-BR"])?.locale == "pt-BR")
-        #expect(CefLocalization.system.resolve(packs: ["en", "fr"], preferredLanguages: ["ja"])?.locale == "en-US")
-        #expect(CefLocalization.system.resolve(packs: [], preferredLanguages: ["ja"]) == nil)
+        #expect(CefRuntime.Localization.system.identifiers(bundle: .main, preferredLanguages: ["fr-CA", "en"]) == ["fr-CA", "en"])
+        #expect(CefRuntime.Localization.fixed("de").identifiers(bundle: .main, preferredLanguages: ["fr"]) == ["de"])
+        #expect(CefRuntime.Localization.fixed("xx").resolve(packs: Self.packs, preferredLanguages: [])?.locale == "en-US")
+        #expect(CefRuntime.Localization.system.resolve(packs: Self.packs, preferredLanguages: ["pt-BR"])?.locale == "pt-BR")
+        #expect(CefRuntime.Localization.system.resolve(packs: ["en", "fr"], preferredLanguages: ["ja"])?.locale == "en-US")
+        #expect(CefRuntime.Localization.system.resolve(packs: [], preferredLanguages: ["ja"]) == nil)
     }
 
     @Test func defaultAcceptLanguagesAreThePreferredOnes() {
-        #expect(CefLocalization.defaultAcceptLanguages(preferredLanguages: ["fr-CA", "en-US", "fr-CA"], locale: "fr")
+        #expect(CefRuntime.Localization.defaultAcceptLanguages(preferredLanguages: ["fr-CA", "en-US", "fr-CA"], locale: "fr")
                 == ["fr-CA", "en-US"])
-        #expect(CefLocalization.defaultAcceptLanguages(preferredLanguages: [], locale: "de") == ["de"])
+        #expect(CefRuntime.Localization.defaultAcceptLanguages(preferredLanguages: [], locale: "de") == ["de"])
     }
 
     @Test func settingsCarryTheResolvedLocale() {
-        var configuration = CefConfiguration()
+        var configuration = CefRuntime.Configuration()
         configuration.acceptLanguages = ["de-CH"]
         let mapped = MappedCefSettings(configuration: configuration, frameworkDirectory: nil, locale: "fr")
         #expect(CefStringUtil.string(from: &mapped.raw.locale) == "fr")

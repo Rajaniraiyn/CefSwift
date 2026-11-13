@@ -6,7 +6,7 @@ import CefBase
 /// `cef_initialize`. Immutable after `makeApp()`, so safe to call from any
 /// CEF thread.
 final class CefAppContext: @unchecked Sendable {
-    let configuration: CefConfiguration
+    let configuration: CefRuntime.Configuration
     let customSchemes: [CefCustomScheme]
     let pump: CefMessagePump
     /// The client for browsers created through Chrome's own UI (+1, held
@@ -16,14 +16,14 @@ final class CefAppContext: @unchecked Sendable {
 
     /// The Chromium feature that discards a tab in place
     /// (``CefBrowser/discard()``). On by default; listing it in
-    /// ``CefConfiguration/disabledFeatures`` turns it off.
+    /// ``CefRuntime/Configuration/disabledFeatures`` turns it off.
     static let webContentsDiscardFeature = "WebContentsDiscard"
 
     private var browserProcessHandler: UnsafeMutablePointer<cef_browser_process_handler_t>?
     private var resourceBundleHandler: UnsafeMutablePointer<cef_resource_bundle_handler_t>?
 
     init(
-        configuration: CefConfiguration,
+        configuration: CefRuntime.Configuration,
         pump: CefMessagePump,
         defaultClient: UnsafeMutablePointer<cef_client_t>
     ) {

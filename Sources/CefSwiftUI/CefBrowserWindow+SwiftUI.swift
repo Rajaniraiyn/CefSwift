@@ -66,9 +66,9 @@ extension View {
     /// Chrome's toolbar would be.
     ///
     /// Without `kinds`, the view becomes the window's
-    /// ``CefChromiumUI/anchor``, which every surface that hangs from Chrome's
+    /// ``CefBrowserWindow/ChromiumUI/anchor``, which every surface that hangs from Chrome's
     /// toolbar follows; with them, it is the anchor of those kinds in
-    /// ``CefChromiumUI/anchors``, Chromium's surfaces and your own interface
+    /// ``CefBrowserWindow/ChromiumUI/anchors``, Chromium's surfaces and your own interface
     /// for them alike. The anchor is removed when the view leaves the
     /// window.
     ///
@@ -80,7 +80,7 @@ extension View {
     /// ```
     public func chromiumSurfaceAnchor(
         _ kinds: Set<CefChromiumSurface.Kind>? = nil,
-        alignment: CefSurfaceAnchor.Alignment = .center,
+        alignment: CefChromiumSurface.Anchor.Alignment = .center,
         spacing: CGFloat = 4
     ) -> some View {
         background(SurfaceAnchorRepresentable(kinds: kinds, alignment: alignment, spacing: spacing))
@@ -89,7 +89,7 @@ extension View {
 
 private struct SurfaceAnchorRepresentable: NSViewRepresentable {
     let kinds: Set<CefChromiumSurface.Kind>?
-    let alignment: CefSurfaceAnchor.Alignment
+    let alignment: CefChromiumSurface.Anchor.Alignment
     let spacing: CGFloat
 
     func makeNSView(context: Context) -> SurfaceAnchorView {
@@ -105,7 +105,7 @@ private struct SurfaceAnchorRepresentable: NSViewRepresentable {
 /// browser window it is in.
 private final class SurfaceAnchorView: NSView {
     private var kinds: Set<CefChromiumSurface.Kind>?
-    private var alignment = CefSurfaceAnchor.Alignment.center
+    private var alignment = CefChromiumSurface.Anchor.Alignment.center
     private var spacing: CGFloat = 4
     private weak var registeredWindow: CefBrowserWindow?
 
@@ -114,7 +114,7 @@ private final class SurfaceAnchorView: NSView {
     /// Called from `updateNSView`, where SwiftUI tracks what is read: the
     /// window's `chromiumUI` is touched only when something changed, and
     /// outside the update, so writing it does not start another update.
-    func configure(kinds: Set<CefChromiumSurface.Kind>?, alignment: CefSurfaceAnchor.Alignment, spacing: CGFloat) {
+    func configure(kinds: Set<CefChromiumSurface.Kind>?, alignment: CefChromiumSurface.Anchor.Alignment, spacing: CGFloat) {
         guard kinds != self.kinds || alignment != self.alignment || spacing != self.spacing || !isConfigured else { return }
         isConfigured = true
         self.kinds = kinds
@@ -138,7 +138,7 @@ private final class SurfaceAnchorView: NSView {
 
     private func register() {
         guard let window, let owner = CefBrowserWindow.owning(window) else { return }
-        let anchor = CefSurfaceAnchor.view(self, alignment: alignment, spacing: spacing)
+        let anchor = CefChromiumSurface.Anchor.view(self, alignment: alignment, spacing: spacing)
         if let kinds {
             for kind in kinds { owner.chromiumUI.anchors[kind] = anchor }
         } else {

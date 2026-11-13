@@ -24,9 +24,9 @@ extension SelfTest {
 
         for offscreen in [false, true] {
             let label = offscreen ? "offscreen" : "windowed"
-            var options = CefBrowserOptions()
-            if offscreen { options.rendering = .offscreen }
-            let browser = CefBrowser(url: URL(string: "selftest://edge/tab.html")!, options: options)
+            var configuration = CefBrowser.Configuration()
+            if offscreen { configuration.rendering = .offscreen }
+            let browser = CefBrowser(url: URL(string: "selftest://edge/tab.html")!, configuration: configuration)
             let view: NSView
             if offscreen {
                 let hosting = CefOffscreenBrowserView()

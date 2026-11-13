@@ -13,7 +13,7 @@ import os
 /// ```swift
 /// @CefIOActor var blockedCount = 0
 ///
-/// options.requestFilter = { @CefIOActor request in
+/// configuration.requestFilter = { @CefIOActor request in
 ///     guard request.url?.host() == "ads.example" else { return .allow }
 ///     blockedCount += 1
 ///     return .block

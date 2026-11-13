@@ -75,20 +75,20 @@ import CefBase
 }
 
 @Suite struct CefDownloadDecisionTests {
-    @Test func denyResolvesToNil() {
-        #expect(CefDownloadDestination.resolve(decision: .deny, suggestedName: "file.zip") == nil)
+    @Test func cancelResolvesToNil() {
+        #expect(CefDownloadDestination.resolve(decision: .cancel, suggestedName: "file.zip") == nil)
     }
 
     @Test func explicitDestinationWins() {
         let destination = URL(fileURLWithPath: "/tmp/custom/save-here.zip")
         #expect(
-            CefDownloadDestination.resolve(decision: .allow(destination: destination), suggestedName: "x.zip")
+            CefDownloadDestination.resolve(decision: .save(to: destination), suggestedName: "x.zip")
                 == destination)
     }
 
     @Test func defaultDestinationIsDownloadsPlusSuggestedName() throws {
         let resolved = try #require(
-            CefDownloadDestination.resolve(decision: .allow(destination: nil), suggestedName: "report.pdf"))
+            CefDownloadDestination.resolve(decision: .saveToDownloadsFolder, suggestedName: "report.pdf"))
         #expect(resolved.lastPathComponent == "report.pdf")
         let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
         #expect(resolved.deletingLastPathComponent().path == downloads?.path)
@@ -96,7 +96,7 @@ import CefBase
 
     @Test func hostileSuggestedNameIsSanitized() throws {
         let resolved = try #require(
-            CefDownloadDestination.resolve(decision: .allow(destination: nil), suggestedName: "../../etc/passwd"))
+            CefDownloadDestination.resolve(decision: .saveToDownloadsFolder, suggestedName: "../../etc/passwd"))
         #expect(resolved.lastPathComponent == "passwd")
         let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
         #expect(resolved.deletingLastPathComponent().path == downloads?.path)

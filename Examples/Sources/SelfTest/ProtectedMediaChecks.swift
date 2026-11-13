@@ -6,7 +6,7 @@ import CefSwiftUI
 /// with Chromium's component updater on and off.
 extension SelfTest {
     /// Set in a second SelfTest process that runs with
-    /// `CefProtectedMedia.automatic` on a fresh cache directory.
+    /// `CefRuntime.Configuration.Services.ProtectedMedia.automatic` on a fresh cache directory.
     static let widevineProbeEnvironmentKey = "CEFSWIFT_SELFTEST_WIDEVINE_ROOT"
 
     /// How long the Widevine probe waits for Chromium to download the CDM
@@ -42,7 +42,7 @@ extension SelfTest {
         await expect("protected media: Clear Key plays without a download") {
             try await requestKeySystem("org.w3.clearkey", in: browser) == "OK"
         }
-        // SelfTest runs on CefConfiguration.embedded, whose protectedMedia
+        // SelfTest runs on CefRuntime.Configuration.embedded, whose protectedMedia
         // is .disabled.
         let installResult = await CefRuntime.shared.installWidevine()
         check("protected media: .disabled reports Widevine unavailable",
@@ -115,7 +115,7 @@ extension SelfTest {
         }
 
         let started = ContinuousClock.now
-        var result: CefWidevineState?
+        var result: CefRuntime.WidevineState?
         // Chromium's update service fetches nothing until the first browser
         // exists, so ask only now.
         Task { result = await CefRuntime.shared.installWidevine() }

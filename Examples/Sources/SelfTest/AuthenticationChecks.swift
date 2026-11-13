@@ -4,7 +4,7 @@ import CefSwiftUI
 
 /// HTTP authentication: the delegate's `credentialFor` in both runtime
 /// styles and for a proxy, the default sheet, and, in a probe,
-/// `CefAuthenticationPrompt.chromium`.
+/// `CefRuntime.AuthenticationPromptPolicy.chromium`.
 extension SelfTest {
     static func authenticationChecks() async {
         guard let server = try? await LocalServer.start() else {
@@ -25,7 +25,7 @@ extension SelfTest {
         check("authentication: the delegate answers the challenge (Chrome style)",
               await waitUntil { browser.title == "authorized" }, detail: "title '\(browser.title)', \(recorder.challenges)")
         let expected = CefAuthenticationChallenge(
-            origin: url.absoluteString, isProxy: false, host: "127.0.0.1", port: Int(server.port),
+            url: url, isProxy: false, host: "127.0.0.1", port: Int(server.port),
             realm: "selftest", scheme: "basic")
         check("authentication: the challenge names the server, realm and scheme",
               recorder.challenges.first == expected, detail: "\(recorder.challenges)")
@@ -63,9 +63,9 @@ extension SelfTest {
         embeddedRecorder.credential = right
         // A profile of its own: Chromium keeps the credentials it was given
         // for the server, and would not ask again.
-        var embeddedOptions = CefBrowserOptions()
+        var embeddedOptions = CefBrowser.Configuration()
         embeddedOptions.profile = .incognito()
-        let embedded = CefBrowser(url: url, options: embeddedOptions, delegate: embeddedRecorder)
+        let embedded = CefBrowser(url: url, configuration: embeddedOptions, delegate: embeddedRecorder)
         let view = CefWindowedBrowserView()
         view.frame = SelfTest.window.contentView!.bounds
         SelfTest.window.contentView!.addSubview(view)
@@ -95,11 +95,11 @@ extension SelfTest {
     /// A proxy that wants credentials: the challenge says so.
     static func proxyAuthenticationChecks(server: LocalServer) async {
         let profile = CefProfile.incognito()
-        var options = CefBrowserOptions()
-        options.profile = profile
+        var configuration = CefBrowser.Configuration()
+        configuration.profile = profile
         let recorder = Recorder()
         recorder.credential = CefCredential(username: "grace", password: "hopper")
-        let browser = CefBrowser(url: URL(string: "about:blank")!, options: options, delegate: recorder)
+        let browser = CefBrowser(url: URL(string: "about:blank")!, configuration: configuration, delegate: recorder)
         let view = CefWindowedBrowserView()
         view.frame = SelfTest.window.contentView!.bounds
         SelfTest.window.contentView!.addSubview(view)
@@ -113,7 +113,7 @@ extension SelfTest {
             return
         }
         do {
-            try profile.setPreference("proxy", to: ["mode": "fixed_servers", "server": .string("127.0.0.1:\(server.port)")])
+            try profile.preferences.setValue(["mode": "fixed_servers", "server": .string("127.0.0.1:\(server.port)")], named: "proxy")
         } catch {
             check("authentication (proxy): the profile takes the proxy", false, detail: "\(error)")
             return
@@ -128,7 +128,7 @@ extension SelfTest {
               detail: "\(recorder.challenges)")
     }
 
-    /// The probe: `CefAuthenticationPrompt.chromium`. Chromium's dialog
+    /// The probe: `CefRuntime.AuthenticationPromptPolicy.chromium`. Chromium's dialog
     /// asks instead of the delegate.
     static func chromiumSignInProbeChecks() async {
         guard let server = try? await LocalServer.start() else {

@@ -48,7 +48,7 @@ three) on a build without the passkey and Chromium-panel code:
 
 These were measured on the Minimal example and are not used: they saved
 nothing on an idle page, cost more than they saved, or save the same as
-`memoryPolicy = .reduced`.
+`processPolicy = .onDemand`.
 
 - `--js-flags=--lite-mode` and `--js-flags=--optimize-for-size`: no
   difference while idle; both slow JavaScript down.
@@ -57,7 +57,7 @@ nothing on an idle page, cost more than they saved, or save the same as
   certificate-transparency updates and preloading: no difference.
 - `--disable-gpu-compositing`: 10 MB more.
 - `--renderer-process-limit=1` and `--disable-site-isolation-trials`: save
-  the spare renderer, as `.reduced` does; the second also gives up site
+  the spare renderer, as `.onDemand` does; the second also gives up site
   isolation.
 - `--enable-low-end-device-mode`: saves the spare renderer and 3 MB more in
   the GPU process, and lowers rendering quality.

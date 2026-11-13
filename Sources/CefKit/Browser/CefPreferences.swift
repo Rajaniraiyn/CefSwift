@@ -13,9 +13,8 @@ import Foundation
 /// ```
 ///
 /// Keys name preferences with their Swift type; ``Key`` lists the common
-/// ones, and `Key("dotted.name")` makes others. The string-keyed
-/// ``CefProfile/preference(_:)`` and ``CefProfile/setPreference(_:to:)``
-/// stay available for raw JSON values.
+/// ones, and `Key("dotted.name")` makes others. ``value(named:)`` and
+/// ``setValue(_:named:)`` read and write raw JSON values by name.
 @MainActor
 public struct CefPreferences {
     enum Source {
@@ -92,6 +91,16 @@ public struct CefPreferences {
     /// Restores a preference's default value.
     public func reset<Value>(_ key: Key<Value>) throws(CefError) {
         try setValue(nil, named: key.name)
+    }
+
+    /// Every preference, as one JSON object: only those something set, or
+    /// with `includingDefaults`, all of them.
+    public func allValues(includingDefaults: Bool = true) -> CefJSON {
+        withManager { manager in
+            let dictionary = manager.pointee.get_all_preferences(manager, includingDefaults ? 1 : 0)
+            defer { cefRelease(dictionary) }
+            return CefJSON.object(CefJSON.members(of: dictionary))
+        } ?? .object([:])
     }
 
     /// Whether the preference exists.
@@ -186,7 +195,7 @@ public struct CefPreferences {
         case .profile(let profile):
             return profile.withPreferences(body)
         case .application:
-            guard CefRuntime.shared.isInitialized, let manager = cef_preference_manager_get_global() else { return nil }
+            guard CefRuntime.shared.isRunning, let manager = cef_preference_manager_get_global() else { return nil }
             defer { cefRelease(manager) }
             return body(manager)
         }
@@ -303,12 +312,12 @@ extension CefPreferences.Key where Value == Bool {
     /// Offering to translate pages (`translate.enabled`).
     public static var offersTranslation: Self { Self("translate.enabled") }
     /// Safe Browsing protection (`safebrowsing.enabled`).
-    public static var safeBrowsing: Self { Self("safebrowsing.enabled") }
+    public static var usesSafeBrowsing: Self { Self("safebrowsing.enabled") }
     /// Search suggestions in the address bar (`search.suggest_enabled`).
-    public static var searchSuggestions: Self { Self("search.suggest_enabled") }
+    public static var showsSearchSuggestions: Self { Self("search.suggest_enabled") }
     /// Loading sites over HTTPS only, with a warning before HTTP
     /// (`https_only_mode_enabled`).
-    public static var httpsOnly: Self { Self("https_only_mode_enabled") }
+    public static var usesHTTPSOnlyMode: Self { Self("https_only_mode_enabled") }
     /// Sending a Do Not Track request (`enable_do_not_track`).
     public static var sendsDoNotTrack: Self { Self("enable_do_not_track") }
     /// Asking before quitting with ⌘Q (`browser.confirm_to_quit`). Application-wide.

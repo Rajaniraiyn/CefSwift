@@ -210,7 +210,7 @@ struct AddressBar: View {
         .onChange(of: text) {
             guard isFocused else { return }
             suggestions.fieldTextChanged(
-                to: text, profile: browser.options.profile ?? .default, currentURL: browser.url)
+                to: text, profile: browser.configuration.profile ?? .default, currentURL: browser.url)
         }
         .onChange(of: isFocused) { _, focused in
             guard focused else {
@@ -218,7 +218,7 @@ struct AddressBar: View {
                 text = Self.editableText(for: browser.url)
                 return
             }
-            suggestions.beginEditing(profile: browser.options.profile ?? .default)
+            suggestions.beginEditing(profile: browser.configuration.profile ?? .default)
             // Select the whole address so typing replaces it, as Safari does.
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                 NSApp.sendAction(#selector(NSText.selectAll(_:)), to: nil, from: nil)

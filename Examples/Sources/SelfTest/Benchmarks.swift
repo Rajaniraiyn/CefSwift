@@ -51,12 +51,12 @@ enum Benchmarks {
         let kinds = ["data", "stream", "file"]
         for run in 1...(3 * kinds.count) {
             let kind = kinds[(run - 1) % kinds.count]
-            var options = CefBrowserOptions()
-            options.requestFilter = { request in
+            var configuration = CefBrowser.Configuration()
+            configuration.requestFilter = { request in
                 if request.url?.path == "/blocked" { return .block }
                 return .setHeaders(["X-Bench": "1"])
             }
-            let browser = CefBrowser(url: URL(string: "selftest://bench/page.html?big=/big-\(kind)")!, options: options)
+            let browser = CefBrowser(url: URL(string: "selftest://bench/page.html?big=/big-\(kind)")!, configuration: configuration)
             let view = CefWindowedBrowserView()
             view.frame = SelfTest.window.contentView!.bounds
             SelfTest.window.contentView!.addSubview(view)

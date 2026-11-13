@@ -34,9 +34,9 @@ extension Benchmarks {
 
     static func bridge() async {
         let bridge = TransportBench.makeBridge()
-        var options = CefBrowserOptions()
-        options.bridges = [bridge]
-        let browser = CefBrowser(url: URL(string: "selftest://bench/bridge.html")!, options: options)
+        var configuration = CefBrowser.Configuration()
+        configuration.bridges = [bridge]
+        let browser = CefBrowser(url: URL(string: "selftest://bench/bridge.html")!, configuration: configuration)
         let view = CefWindowedBrowserView()
         view.frame = SelfTest.window.contentView!.bounds
         SelfTest.window.contentView!.addSubview(view)
@@ -158,10 +158,10 @@ extension Benchmarks {
     static func accessibilityIngest() async {
         for run in 1...4 {
             CefDiagnostics.accessibilityIngestion = run % 2 == 1 ? .json : .valueCopy
-            var options = CefBrowserOptions()
-            options.rendering = .offscreen
-            options.offscreenAccessibility = .enabled
-            let browser = CefBrowser(url: URL(string: "selftest://bench/axlarge.html")!, options: options)
+            var configuration = CefBrowser.Configuration()
+            configuration.rendering = .offscreen
+            configuration.offscreenAccessibility = .enabled
+            let browser = CefBrowser(url: URL(string: "selftest://bench/axlarge.html")!, configuration: configuration)
             let view = CefOffscreenBrowserView()
             view.frame = SelfTest.window.contentView!.bounds
             SelfTest.window.contentView!.addSubview(view)

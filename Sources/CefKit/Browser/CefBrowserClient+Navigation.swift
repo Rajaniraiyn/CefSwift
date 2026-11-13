@@ -121,7 +121,7 @@ extension CefBrowserClient {
         // through the callback, which CEF accepts from any thread.
         h.pointee.get_auth_credentials = { s, browser, originURL, isProxy, host, port, realm, scheme, callback in
             let challenge = CefAuthenticationChallenge(
-                origin: CefStringUtil.string(from: originURL),
+                url: URL(string: CefStringUtil.string(from: originURL)),
                 isProxy: isProxy != 0,
                 host: CefStringUtil.string(from: host),
                 port: Int(port),

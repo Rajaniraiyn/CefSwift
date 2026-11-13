@@ -244,9 +244,9 @@ extension SelfTest {
         await closeHosted(browser, view)
 
         // Offscreen: the view CefKit draws into enters the loop the same way.
-        var options = CefBrowserOptions()
-        options.rendering = .offscreen
-        let offscreen = CefBrowser(url: URL(string: "selftest://frames/focus.html")!, options: options)
+        var configuration = CefBrowser.Configuration()
+        configuration.rendering = .offscreen
+        let offscreen = CefBrowser(url: URL(string: "selftest://frames/focus.html")!, configuration: configuration)
         let offscreenView = CefOffscreenBrowserView()
         offscreenView.frame = window.contentView!.bounds.insetBy(dx: 0, dy: 40)
         window.contentView!.addSubview(offscreenView)

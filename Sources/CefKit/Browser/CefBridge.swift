@@ -15,9 +15,9 @@ import Foundation
 ///     "Hello, \(person.name)!"
 /// }
 ///
-/// var options = CefBrowserOptions()
-/// options.bridges = [bridge]
-/// let browser = CefBrowser(url: appURL, options: options)
+/// var configuration = CefBrowser.Configuration()
+/// configuration.bridges = [bridge]
+/// let browser = CefBrowser(url: appURL, configuration: configuration)
 /// ```
 ///
 /// ```js

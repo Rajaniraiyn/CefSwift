@@ -2,14 +2,16 @@ import AppKit
 import CCef
 import CefBase
 
-/// Who answers when a page stops responding.
-public enum CefUnresponsivePagePolicy: Sendable, Equatable {
-    /// Chrome-style browsers show Chromium's own “Page Unresponsive”
-    /// dialog; other browsers ask
-    /// ``CefBrowserDelegate/browserPageIsUnresponsive(_:)``.
-    case automatic
-    /// Every browser asks the delegate, and Chromium shows no dialog.
-    case delegate
+extension CefBrowser {
+    /// Who answers when a page stops responding.
+    public enum UnresponsivePagePolicy: Sendable, Equatable {
+        /// Chrome-style browsers show Chromium's own “Page Unresponsive”
+        /// dialog; other browsers ask
+        /// ``CefBrowserDelegate/browserPageIsUnresponsive(_:)``.
+        case automatic
+        /// Every browser asks the delegate, and Chromium shows no dialog.
+        case delegate
+    }
 }
 
 /// What to do about a page that stopped responding.
@@ -68,7 +70,7 @@ extension CefBrowser {
     /// it; `false` lets Chromium show its dialog (Chrome style) or wait.
     func renderProcessBecameUnresponsive(_ callback: CefRef<cef_unresponsive_process_callback_t>) -> Bool {
         isResponsive = false
-        if isChromeStyle, options.unresponsivePages == .automatic { return false }
+        if isChromeStyle, configuration.unresponsivePages == .automatic { return false }
         decide(.unresponsive) { await $0.browserPageIsUnresponsive(self) } then: { [weak self] decision in
             switch decision {
             case .wait:

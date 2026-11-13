@@ -10,12 +10,12 @@ import SwiftUI
 /// so macOS presents them as native tabs.
 @main
 struct BrowserApp: CefSwiftApp {
-    static var cefConfiguration: CefConfiguration {
-        var configuration = CefConfiguration.browser
+    static var runtimeConfiguration: CefRuntime.Configuration {
+        var configuration = CefRuntime.Configuration.browser
         configuration.productName = "CefSwift Browser"
         // Chrome's own UI is replaced by the SwiftUI toolbar; keep its
         // internal pages free of buttons that would open Chrome windows.
-        configuration.chromeUI.hiddenAppMenuCommands = [.newWindow, .newIncognitoWindow]
+        configuration.chromeToolbar.hiddenAppMenuCommands = [.newWindow, .newIncognitoWindow]
         configuration.customSchemes = [CefCustomScheme(name: BrowserPages.scheme)]
         // Quit immediately on ⌘Q instead of Chromium's "Hold ⌘Q to Quit".
         configuration.preferences["browser.confirm_to_quit"] = false
@@ -213,8 +213,8 @@ enum MemorySaver: String, CaseIterable {
     }
 
     @MainActor func apply() {
-        CefRuntime.shared.memorySaver = switch self {
-        case .off: .off
+        CefRuntime.shared.discardPolicy = switch self {
+        case .off: .disabled
         case .underPressure: .underMemoryPressure
         case .after15Minutes: .after(.seconds(15 * 60))
         case .after1Hour: .after(.seconds(60 * 60))
@@ -352,7 +352,7 @@ struct SettingsView: View {
     @AppStorage("newTabPage") private var newTabPage = BrowserController.defaultNewTabPage
     @AppStorage("appearance") private var appearance = Appearance.system.rawValue
     @AppStorage(ChromiumPanels.customPanelsKey) private var customPanels = false
-    @AppStorage("memorySaver") private var memorySaver = MemorySaver.current.rawValue
+    @AppStorage("memorySaver") private var discardPolicy = MemorySaver.current.rawValue
     @AppStorage(SystemEngineTab.automaticKey) private var streamingInSystemEngine = true
 
     var body: some View {
@@ -366,13 +366,13 @@ struct SettingsView: View {
             .onChange(of: appearance) { Appearance.current.apply() }
             Toggle("Use the browser's QR code and Cast panels", isOn: $customPanels)
                 .help("Applies to tabs opened from now on. Off: Chromium's own bubbles.")
-            Picker(selection: $memorySaver) {
+            Picker(selection: $discardPolicy) {
                 ForEach(MemorySaver.allCases, id: \.self) { Text($0.title).tag($0.rawValue) }
             } label: {
                 Text("Put tabs to sleep")
                 Text("Sleeping tabs free their memory and reload when you return to them.")
             }
-            .onChange(of: memorySaver) { MemorySaver.current.apply() }
+            .onChange(of: discardPolicy) { MemorySaver.current.apply() }
             Toggle(isOn: $streamingInSystemEngine) {
                 Text("Play streaming services with WebKit")
                 Text("Netflix, Disney+ and other services that need FairPlay open in a tab shown by the system's WebKit.")

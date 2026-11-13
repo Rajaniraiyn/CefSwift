@@ -8,8 +8,8 @@ import CefSwiftUI
 extension SelfTest {
     static func frameChecks() async {
         CefRuntime.shared.registerSchemeHandler(scheme: "selftest", domain: "bench", handler: BenchmarkPages())
-        CefRuntime.shared.energySaver = .off
-        defer { CefRuntime.shared.energySaver = .automatic }
+        CefRuntime.shared.energyPolicy = .disabled
+        defer { CefRuntime.shared.energyPolicy = .automatic }
         let frameWindow = NSWindow(
             contentRect: CGRect(x: 200, y: 200, width: 640, height: 480), styleMask: [.titled],
             backing: .buffered, defer: false)
@@ -19,9 +19,9 @@ extension SelfTest {
         frameWindow.contentView!.addSubview(probe)
         frameWindow.orderFrontRegardless()
 
-        var options = CefBrowserOptions()
-        options.rendering = .offscreen(frameRate: 60)
-        let browser = CefBrowser(url: URL(string: "selftest://bench/animated.html")!, options: options)
+        var configuration = CefBrowser.Configuration()
+        configuration.rendering = .offscreen(frameRate: 60)
+        let browser = CefBrowser(url: URL(string: "selftest://bench/animated.html")!, configuration: configuration)
         browser.host(offscreenIn: probe, size: probe.bounds.size)
         browser.hostViewDidUnhide()
         _ = await waitUntil { browser.title == "animated" }

@@ -72,7 +72,7 @@ The smallest CefSwift app (`Sources/Minimal`): one window with one
 `CefWebView`, on the `.embedded` configuration. `-url <address>` shows
 another page, `-cacheDirectory <path>` keeps Chromium's data there,
 `-sandbox YES` runs its helpers in Chromium's sandbox, and
-`-memoryPolicy standard|reduced|minimal` chooses a `CefMemoryPolicy`, and
+`-processPolicy standard|reduced|minimal` chooses a `CefRuntime.ProcessPolicy`, and
 `-protectedMedia YES` lets Chromium fetch Widevine.
 
 ## Compat

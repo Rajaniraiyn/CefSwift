@@ -10,9 +10,9 @@ extension SelfTest {
     static func securityChecks() async {
         CefRuntime.shared.registerSchemeHandler(scheme: "https", domain: "cefswift.test", handler: CapabilityPages())
         let recorder = SecurityRecorder()
-        var options = CefBrowserOptions()
-        options.clientCertificates = .delegate
-        let browser = CefBrowser(url: URL(string: "selftest://app/second.html")!, options: options)
+        var configuration = CefBrowser.Configuration()
+        configuration.clientCertificates = .delegate
+        let browser = CefBrowser(url: URL(string: "selftest://app/second.html")!, configuration: configuration)
         browser.delegate = recorder
         let view = CefWindowedBrowserView()
         view.frame = window.contentView!.bounds

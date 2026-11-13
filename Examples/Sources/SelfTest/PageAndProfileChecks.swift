@@ -91,9 +91,9 @@ extension SelfTest {
         let bridge = CefBridge(name: "scoped")
         bridge.access = .origins(["selftest://app"])
         bridge.handle("ping") { (_: CefJSON) in "pong" }
-        var options = CefBrowserOptions()
-        options.bridges = [bridge]
-        let browser = CefBrowser(url: URL(string: "selftest://app/second.html")!, options: options)
+        var configuration = CefBrowser.Configuration()
+        configuration.bridges = [bridge]
+        let browser = CefBrowser(url: URL(string: "selftest://app/second.html")!, configuration: configuration)
         let window = CefBrowserWindow(browser: browser)
         window.show()
         _ = await waitUntil { browser.title == "second" }
@@ -126,9 +126,9 @@ extension SelfTest {
         do {
             let profile = CefProfile.incognito()
             released = profile
-            var options = CefBrowserOptions()
-            options.profile = profile
-            let window = CefBrowserWindow(browser: CefBrowser(url: URL(string: "selftest://app/second.html")!, options: options))
+            var configuration = CefBrowser.Configuration()
+            configuration.profile = profile
+            let window = CefBrowserWindow(browser: CefBrowser(url: URL(string: "selftest://app/second.html")!, configuration: configuration))
             check("service lifetime: incognito tab loads", await waitUntil { window.browser.title == "second" })
             // Starts the profile's suggestions host.
             await expect("service lifetime: incognito suggestions answer") {

@@ -6,8 +6,8 @@ import SwiftUI
 /// page served from a custom scheme.
 @main
 struct ShowcaseApp: CefSwiftApp {
-    static var cefConfiguration: CefConfiguration {
-        var configuration = CefConfiguration.embedded
+    static var runtimeConfiguration: CefRuntime.Configuration {
+        var configuration = CefRuntime.Configuration.embedded
         configuration.isOffscreenRenderingEnabled = true
         configuration.customSchemes = [CefCustomScheme(name: "showcase")]
         return configuration
@@ -89,10 +89,10 @@ struct WebViewDemo: View {
 
 struct OverlayDemo: View {
     @State private var browser: CefBrowser = {
-        var options = CefBrowserOptions()
-        options.rendering = .offscreen
-        options.allowsBackForwardNavigationGestures = true
-        return CefBrowser(url: URL(string: "https://developer.apple.com/swiftui/")!, options: options)
+        var configuration = CefBrowser.Configuration()
+        configuration.rendering = .offscreen
+        configuration.allowsBackForwardNavigationGestures = true
+        return CefBrowser(url: URL(string: "https://developer.apple.com/swiftui/")!, configuration: configuration)
     }()
 
     var body: some View {
@@ -134,9 +134,9 @@ final class Counter {
     let browser: CefBrowser
 
     init() {
-        var options = CefBrowserOptions()
-        options.bridges = [bridge]
-        browser = CefBrowser(url: URL(string: "showcase://app/bridge.html")!, options: options)
+        var configuration = CefBrowser.Configuration()
+        configuration.bridges = [bridge]
+        browser = CefBrowser(url: URL(string: "showcase://app/bridge.html")!, configuration: configuration)
         bridge.handle("increment") { [unowned self] (amount: Int) -> Int in
             value += amount
             return value

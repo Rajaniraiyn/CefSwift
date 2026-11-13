@@ -4,7 +4,7 @@ import Foundation
 /// site and one account, with its private key.
 ///
 /// Passkeys of this kind belong to a ``CefPasskeyStore`` and are used when
-/// a browser's ``CefBrowserOptions/passkeys`` is ``CefPasskeyMode/app(_:)``.
+/// a browser's ``CefBrowser/Configuration/passkeys`` is ``CefBrowser/PasskeyPolicy/app(_:)``.
 /// They are software keys (ECDSA P-256): the app holds the private key, and
 /// Chromium holds a copy only while it answers one request.
 public struct CefPasskey: Sendable, Hashable, Identifiable, Codable {
@@ -58,7 +58,7 @@ public struct CefPasskey: Sendable, Hashable, Identifiable, Codable {
 
 /// A WebAuthn request a page made with `navigator.credentials.create()` or
 /// `navigator.credentials.get()`, delivered to
-/// ``CefBrowserDelegate/browser(_:decidePasskeyRequest:)``.
+/// ``CefBrowserDelegate/browser(_:decidePasskeyFor:)``.
 public struct CefPasskeyRequest: Sendable, Equatable {
     /// What the page asks for.
     public enum Kind: Sendable, Equatable {
@@ -148,26 +148,28 @@ public struct CefPasskeyStoreError: Error, Sendable, CustomStringConvertible {
     }
 }
 
-/// Who answers a browser's WebAuthn requests.
-public enum CefPasskeyMode {
-    /// Chromium, with its own dialog and authenticators: security keys, and
-    /// iCloud Keychain when the app has the entitlement for it. The default.
-    case chromium
-    /// The app, from this store, through
-    /// ``CefBrowserDelegate/browser(_:decidePasskeyRequest:)``. Chromium's
-    /// dialog and its other authenticators are not used.
-    case app(any CefPasskeyStore)
-    /// Every request is refused.
-    case disabled
+extension CefBrowser {
+    /// Who answers a browser's WebAuthn requests.
+    public enum PasskeyPolicy {
+        /// Chromium, with its own dialog and authenticators: security keys, and
+        /// iCloud Keychain when the app has the entitlement for it. The default.
+        case chromium
+        /// The app, from this store, through
+        /// ``CefBrowserDelegate/browser(_:decidePasskeyFor:)``. Chromium's
+        /// dialog and its other authenticators are not used.
+        case app(any CefPasskeyStore)
+        /// Every request is refused.
+        case disabled
 
-    var store: (any CefPasskeyStore)? {
-        if case .app(let store) = self { return store }
-        return nil
-    }
+        var store: (any CefPasskeyStore)? {
+            if case .app(let store) = self { return store }
+            return nil
+        }
 
-    var isChromium: Bool {
-        if case .chromium = self { return true }
-        return false
+        var isChromium: Bool {
+            if case .chromium = self { return true }
+            return false
+        }
     }
 }
 

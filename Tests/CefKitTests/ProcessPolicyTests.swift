@@ -2,15 +2,15 @@ import Testing
 
 @testable import CefKit
 
-@Suite struct MemoryPolicyTests {
+@Suite struct ProcessPolicyTests {
     @Test func presetsChooseTheirPolicy() {
-        #expect(CefConfiguration.default.memoryPolicy == .standard)
-        #expect(CefConfiguration.browser.memoryPolicy == .standard)
-        #expect(CefConfiguration.embedded.memoryPolicy == .reduced)
+        #expect(CefRuntime.Configuration().processPolicy == .automatic)
+        #expect(CefRuntime.Configuration.browser.processPolicy == .automatic)
+        #expect(CefRuntime.Configuration.embedded.processPolicy == .onDemand)
     }
 
     @Test func standardAddsNothing() {
-        var configuration = CefConfiguration()
+        var configuration = CefRuntime.Configuration()
         configuration.enabledFeatures = ["A"]
         configuration.disabledFeatures = ["B"]
         #expect(configuration.chromiumFeatures.enabled == ["A"])
@@ -18,18 +18,18 @@ import Testing
     }
 
     @Test func policiesAddTheirFeatures() {
-        var configuration = CefConfiguration()
-        configuration.memoryPolicy = .reduced
+        var configuration = CefRuntime.Configuration()
+        configuration.processPolicy = .onDemand
         #expect(configuration.chromiumFeatures.enabled.isEmpty)
         #expect(configuration.chromiumFeatures.disabled == ["SpareRendererForSitePerProcess"])
-        configuration.memoryPolicy = .minimal
+        configuration.processPolicy = .minimal
         #expect(configuration.chromiumFeatures.enabled == ["NetworkServiceInProcess2"])
         #expect(configuration.chromiumFeatures.disabled == ["SpareRendererForSitePerProcess"])
     }
 
     @Test func appFeaturesWinOverThePolicy() {
-        var configuration = CefConfiguration()
-        configuration.memoryPolicy = .minimal
+        var configuration = CefRuntime.Configuration()
+        configuration.processPolicy = .minimal
         configuration.enabledFeatures = ["SpareRendererForSitePerProcess"]
         configuration.disabledFeatures = ["NetworkServiceInProcess2"]
         #expect(configuration.chromiumFeatures.enabled == ["SpareRendererForSitePerProcess"])

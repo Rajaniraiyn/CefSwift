@@ -10,8 +10,8 @@ import WebKit
 /// extensions and theme. Browsers sharing a profile share all of it.
 ///
 /// ```swift
-/// var options = CefBrowserOptions()
-/// options.profile = .persistent(id: "work", displayName: "Work")
+/// var configuration = CefBrowser.Configuration()
+/// configuration.profile = .persistent(id: "work", displayName: "Work")
 /// ```
 ///
 /// A profile's ``id`` is its identity: it names the profile's storage and
@@ -40,7 +40,7 @@ public final class CefProfile {
 
     /// The languages this profile's pages are offered (`Accept-Language`,
     /// `navigator.languages`), most preferred first, instead of
-    /// ``CefConfiguration/acceptLanguages``. `nil`, the default, uses the
+    /// ``CefRuntime/Configuration/acceptLanguages``. `nil`, the default, uses the
     /// configuration's.
     ///
     /// Chromium reads it when it creates the profile, before its first
@@ -56,7 +56,7 @@ public final class CefProfile {
         self.displayName = displayName
     }
 
-    /// The default profile, stored at ``CefConfiguration/cacheDirectory``.
+    /// The default profile, stored at ``CefRuntime/Configuration/cacheDirectory``.
     public static let `default` = CefProfile(kind: .global, id: "default", displayName: "Default")
 
     /// A fresh in-memory profile; nothing is written to disk and everything
@@ -173,7 +173,7 @@ public final class CefProfile {
         // when it equals the root cache path; its profile is "Default". The
         // paths are compared, not the files: a new profile has no
         // Preferences until Chromium first saves them, seconds after start.
-        let root = (CefRuntime.shared.configuration ?? CefConfiguration()).resolvedRootCacheDirectory
+        let root = (CefRuntime.shared.configuration ?? CefRuntime.Configuration()).resolvedRootCacheDirectory
         guard url.resolvingSymlinksInPath().standardizedFileURL.path
                 == root.resolvingSymlinksInPath().standardizedFileURL.path
         else { return url }
@@ -182,10 +182,9 @@ public final class CefProfile {
 
     // MARK: Preferences
 
-    /// Reads a Chromium preference — the settings behind `chrome://settings`
-    /// — by its dotted name, e.g. `"browser.show_home_button"`. `nil` when no
-    /// such preference exists.
-    public func preference(_ name: String) -> CefJSON? {
+    /// Reads a Chromium preference by its dotted name; `nil` when no such
+    /// preference exists. Apps use ``preferences``.
+    func preference(_ name: String) -> CefJSON? {
         withPreferences { manager in
             CefStringUtil.withCefString(name) { cefName -> CefJSON? in
                 guard manager.pointee.has_preference(manager, cefName) != 0 else { return nil }
@@ -196,16 +195,10 @@ public final class CefProfile {
         } ?? nil
     }
 
-    /// Changes a Chromium preference. Pass `nil` to restore its default.
-    ///
-    /// ```swift
-    /// try profile.setPreference("credentials_enable_service", to: false)   // no password manager
-    /// try profile.setPreference("download.default_directory", to: .string(folder.path))
-    /// ```
-    ///
-    /// Throws if the preference is unknown, managed by policy, or `value`
-    /// has the wrong type.
-    public func setPreference(_ name: String, to value: CefJSON?) throws(CefError) {
+    /// Changes a Chromium preference, passing an unknown name on to
+    /// Chromium; `nil` restores its default. Applies the configured
+    /// preferences. Apps use ``preferences``.
+    func setPreference(_ name: String, to value: CefJSON?) throws(CefError) {
         let failure: String? = withPreferences { manager in
             CefStringUtil.withCefString(name) { cefName -> String? in
                 var error = cef_string_t()
@@ -217,15 +210,6 @@ public final class CefProfile {
         if let failure {
             throw CefError.operationFailed("Cannot set preference '\(name)': \(failure)")
         }
-    }
-
-    /// Every preference in the profile, as one JSON object.
-    public func allPreferences(includingDefaults: Bool = true) -> CefJSON {
-        withPreferences { manager in
-            let dictionary = manager.pointee.get_all_preferences(manager, includingDefaults ? 1 : 0)
-            defer { cefRelease(dictionary) }
-            return CefJSON.object(CefJSON.members(of: dictionary))
-        } ?? .object([:])
     }
 
     // MARK: Appearance
@@ -315,7 +299,7 @@ public final class CefProfile {
     /// The profile's `cef_request_context_t`, created on first use.
     func requestContext() -> CefRef<cef_request_context_t>? {
         if let context { return context }
-        guard CefRuntime.shared.isInitialized else { return nil }
+        guard CefRuntime.shared.isRunning else { return nil }
         let preferences = CefRuntime.shared.configuration?.effectivePreferences ?? [:]
         switch kind {
         case .global:
@@ -448,7 +432,7 @@ public final class CefProfile {
     }
 
     /// The one storage layout for a profile kind under `rootCacheDirectory`
-    /// (``CefConfiguration/resolvedRootCacheDirectory``).
+    /// (``CefRuntime/Configuration/resolvedRootCacheDirectory``).
     static func storage(for kind: Kind, rootCacheDirectory: URL) -> Storage {
         switch kind {
         case .global:
@@ -498,7 +482,7 @@ public final class CefProfile {
 
     /// This profile's storage under the running configuration's root.
     var storage: Storage {
-        let root = (CefRuntime.shared.configuration ?? CefConfiguration()).resolvedRootCacheDirectory
+        let root = (CefRuntime.shared.configuration ?? CefRuntime.Configuration()).resolvedRootCacheDirectory
         return Self.storage(for: kind, rootCacheDirectory: root)
     }
 }

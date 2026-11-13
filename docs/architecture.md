@@ -88,7 +88,7 @@ names at run time:
 | `cef_scheme_handler_factory_t.create` | IO | Creates the resource handler. |
 | `cef_resource_handler_t.get_response_headers`, `cancel` | IO | Read and change the handler's locked state. |
 | `cef_resource_handler_t.open`, `skip`, `read` | Chromium's thread pool (`ThreadPoolForegroundWorker`), in sequence | `open` starts the `CefSchemeHandler` in a task; `read` reads a file, copies buffered bytes or waits for them. |
-| `cef_request_handler_t.get_auth_credentials` | IO | Hops to the main actor for the delegate. CEF calls it only with `--disable-chrome-login-prompt` (`CefAuthenticationPrompt.delegate`, the default); without the switch Chromium shows its own dialog. |
+| `cef_request_handler_t.get_auth_credentials` | IO | Hops to the main actor for the delegate. CEF calls it only with `--disable-chrome-login-prompt` (`CefRuntime.AuthenticationPromptPolicy.delegate`, the default); without the switch Chromium shows its own dialog. |
 | `cef_cookie_visitor_t.visit`, `cef_download_handler_t` | UI | No hop needed. |
 | `cef_render_handler_t`, `cef_accessibility_handler_t`, everything else | UI | `MainActor.assumeIsolated`. |
 | `on_schedule_message_pump_work` | Any | Posts to the main queue. |
@@ -403,7 +403,7 @@ hands it to CEF's accessibility handler, which the render handler returns
 from `get_accessibility_handler`:
 
 - `set_accessibility_state(STATE_ENABLED)` starts the tree. With
-  `CefOffscreenAccessibility.automatic`, `CefOffscreenBrowserView` calls it
+  `CefBrowser.AccessibilityPolicy.automatic`, `CefOffscreenBrowserView` calls it
   on the first sign of an assistive app: VoiceOver running, the first
   children, hit-test or focus query on the view, or `CefApplication`
   receiving `AXEnhancedUserInterface` or `AXManualAccessibility`, which
@@ -528,7 +528,7 @@ protection"). These use it:
 | `browser.devTools` | Whatever the app sends. |
 | `evaluateJavaScript(_:userGesture: true)` | `Runtime.evaluate` with `userGesture`, the only way to grant a user activation. |
 | `snapshot()` | `Page.captureScreenshot`, for windowed browsers; an offscreen browser's snapshot is the frame its view shows. |
-| `CefPasskeyMode.app` and `.disabled` | `WebAuthn`, `Debugger`, `Page` and `Runtime` enabled for the browser's lifetime; see [Passkeys](#passkeys). |
+| `CefBrowser.PasskeyPolicy.app` and `.disabled` | `WebAuthn`, `Debugger`, `Page` and `Runtime` enabled for the browser's lifetime; see [Passkeys](#passkeys). |
 | `discard()` | `Runtime.evaluate` and `DOMDebugger.getEventListeners` on the page's window, to find a `beforeunload` listener, which JavaScript cannot list. |
 | Offscreen accessibility actions | `Accessibility.enable` for the length of one lookup, then `DOM.focus`, `DOM.scrollIntoViewIfNeeded`; `Input.insertText` only for a field that takes no input-method text. |
 
@@ -727,7 +727,7 @@ with its incognito profile.
 
 ## Passkeys
 
-With `CefBrowserOptions.passkeys` set to `.app` or `.disabled`,
+With `CefBrowser.Configuration.passkeys` set to `.app` or `.disabled`,
 `CefPasskeyAuthenticator` takes a browser's WebAuthn calls over through
 its DevTools connection, before the browser loads its first page:
 
@@ -856,7 +856,7 @@ page. Closing a browser
 never ends a renderer process another browser shares; Chromium keeps the
 process until its last frame goes.
 
-`CefRuntime.memorySaver` is applied by a monitor that polls which browsers
+`CefRuntime.discardPolicy` is applied by a monitor that polls which browsers
 are off screen, at a quarter of the policy's interval and at most every 30
 seconds, and listens for memory pressure through
 `DispatchSource.makeMemoryPressureSource`. The lifecycle coordinator tells
@@ -914,7 +914,7 @@ it, but a timer added later kept running, and a hidden page with busy
 timers took more CPU frozen than not; CefKit offers no freezing.
 
 **Energy.** While Low Power Mode is on or the thermal state is serious or
-critical, `CefRuntime.energySaver` caps offscreen browsers' frame rate
+critical, `CefRuntime.energyPolicy` caps offscreen browsers' frame rate
 (`set_windowless_frame_rate`) at 30. An animated offscreen page takes
 about 30% of a core at 30 frames a second and 50% at 60. A rate below the
 one a browser was created with does not hold by itself: every few
@@ -929,7 +929,7 @@ Chrome-style browsers draw at the display's rate, which CEF cannot change.
 every browser, so pages can run `beforeunload`, and declines the request. As
 the last browser and the last Chromium window are destroyed, it calls
 `terminate(_:)` again from the run loop, then shuts Chromium down in a
-fixed order: service hosts, lifecycle observers and the memory saver's
+fixed order: service hosts, lifecycle observers and the discard policy's
 timer, the media router's registrations, the preference and site-setting
 observer registrations (`CefObserverRegistration`, whose streams finish)
 and the task manager object, every profile's request context,

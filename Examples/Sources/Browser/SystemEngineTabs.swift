@@ -23,7 +23,7 @@ final class SystemEngineTab {
     }
 
     init(url: URL, profile: CefProfile, controller: BrowserController) {
-        browser = CefSystemBrowser(options: .init(profile: profile))
+        browser = CefSystemBrowser(configuration: .init(profile: profile))
         isPrivate = profile !== CefProfile.default
         window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1100, height: 760),

@@ -59,7 +59,7 @@ public final class CefApplication: NSApplication, CefAppProtocol {
     /// accessibility tree by setting `AXEnhancedUserInterface` or
     /// `AXManualAccessibility`, as Voice Control, Switch Control and UI
     /// automation tools do. Offscreen browsers with
-    /// ``CefOffscreenAccessibility/automatic`` start building their tree.
+    /// ``CefBrowser/AccessibilityPolicy/automatic`` start building their tree.
     public nonisolated static let accessibilityRequestedNotification = Notification.Name("CefApplicationAccessibilityRequested")
 
     /// Whether an assistive app has asked for the full accessibility tree

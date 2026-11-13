@@ -8,15 +8,15 @@ import CefBase
 /// presets choose them.
 @Suite struct ConfigurationPolicyTests {
     @Test func defaultsWriteNothing() {
-        let configuration = CefConfiguration()
+        let configuration = CefRuntime.Configuration()
         #expect(configuration.policyPreferences.isEmpty)
         #expect(configuration.policySwitches == ["disable-chrome-login-prompt"])
         #expect(configuration.runsComponentUpdater)
-        #expect(CefConfiguration.browser.policyPreferences.isEmpty)
+        #expect(CefRuntime.Configuration.browser.policyPreferences.isEmpty)
     }
 
     @Test func eachOptionSetsItsPreferences() {
-        var configuration = CefConfiguration()
+        var configuration = CefRuntime.Configuration()
         configuration.services.translation = .disabled
         configuration.network.preloading = .disabled
         configuration.network.secureDNS = .secure(templates: ["https://a.example/dns-query{?dns}", "https://b.example/q"])
@@ -46,7 +46,7 @@ import CefBase
     }
 
     @Test func explicitPreferencesWinOverTypedOptions() {
-        var configuration = CefConfiguration()
+        var configuration = CefRuntime.Configuration()
         configuration.credentials.passwordSaving = .disabled
         configuration.preferences["credentials_enable_service"] = true
         #expect(configuration.effectivePreferences["credentials_enable_service"] == true)
@@ -54,29 +54,29 @@ import CefBase
     }
 
     @Test func componentUpdatesAreSeparateFromProtectedMedia() {
-        var configuration = CefConfiguration()
-        configuration.protectedMedia = .disabled
+        var configuration = CefRuntime.Configuration()
+        configuration.services.protectedMedia = .disabled
         #expect(configuration.runsComponentUpdater)
         #expect(!configuration.policySwitches.contains("disable-component-update"))
         configuration.services.componentUpdates = .disabled
         #expect(configuration.policySwitches.contains("disable-component-update"))
         // Protected media needs the updater, so it keeps it on.
-        configuration.protectedMedia = .automatic
+        configuration.services.protectedMedia = .automatic
         #expect(configuration.runsComponentUpdater)
         #expect(!configuration.policySwitches.contains("disable-component-update"))
     }
 
     @Test func switchesFollowTheirOptions() {
-        var configuration = CefConfiguration()
+        var configuration = CefRuntime.Configuration()
         configuration.privacy.hyperlinkAuditing = .disabled
         configuration.authenticationPrompt = .chromium
         #expect(configuration.policySwitches == ["no-pings"])
     }
 
     @Test func embeddedPresetChoosesLeanServices() {
-        let configuration = CefConfiguration.embedded
+        let configuration = CefRuntime.Configuration.embedded
         #expect(configuration.services.componentUpdates == .disabled)
-        #expect(configuration.protectedMedia == .disabled)
+        #expect(configuration.services.protectedMedia == .disabled)
         #expect(!configuration.runsComponentUpdater)
         #expect(Set(configuration.policySwitches) == ["disable-component-update", "no-pings", "disable-chrome-login-prompt"])
         #expect(configuration.policyPreferences["translate.enabled"] == false)
@@ -91,15 +91,15 @@ import CefBase
     }
 
     @Test func keychainItemNames() {
-        #expect(CefKeychainItem.application.names(bundleIdentifier: "com.example.app")! == ("com.example.app Safe Storage", "com.example.app"))
-        #expect(CefKeychainItem.application.names(bundleIdentifier: nil) == nil)
-        #expect(CefKeychainItem.chromium.names(bundleIdentifier: "com.example.app") == nil)
-        #expect(CefKeychainItem.named(service: "S", account: "A").names(bundleIdentifier: nil)! == ("S", "A"))
-        #expect(CefConfiguration().keychainItem == .application)
+        #expect(CefRuntime.KeychainItem.application.names(bundleIdentifier: "com.example.app")! == ("com.example.app Safe Storage", "com.example.app"))
+        #expect(CefRuntime.KeychainItem.application.names(bundleIdentifier: nil) == nil)
+        #expect(CefRuntime.KeychainItem.chromium.names(bundleIdentifier: "com.example.app") == nil)
+        #expect(CefRuntime.KeychainItem.named(service: "S", account: "A").names(bundleIdentifier: nil)! == ("S", "A"))
+        #expect(CefRuntime.Configuration().keychainItem == .application)
     }
 
     @Test func keychainNamesReachChromiumOnlyWithTheKeychain() {
-        var configuration = CefConfiguration()
+        var configuration = CefRuntime.Configuration()
         configuration.keychainItem = .named(service: "Example Safe Storage", account: "Example")
         configuration.safeStorage = .keychain
         let keychain = MappedCefSettings(configuration: configuration, frameworkDirectory: nil)
@@ -111,10 +111,10 @@ import CefBase
     }
 
     @Test func enterprisePolicyDomain() {
-        #expect(CefEnterprisePolicy.disabled.domain(bundleIdentifier: "com.example.app") == nil)
-        #expect(CefEnterprisePolicy.applicationBundleIdentifier.domain(bundleIdentifier: "com.example.app") == "com.example.app")
-        #expect(CefEnterprisePolicy.domain("com.google.Chrome").domain(bundleIdentifier: "x") == "com.google.Chrome")
-        var configuration = CefConfiguration()
+        #expect(CefRuntime.EnterprisePolicy.disabled.domain(bundleIdentifier: "com.example.app") == nil)
+        #expect(CefRuntime.EnterprisePolicy.applicationBundleIdentifier.domain(bundleIdentifier: "com.example.app") == "com.example.app")
+        #expect(CefRuntime.EnterprisePolicy.domain("com.google.Chrome").domain(bundleIdentifier: "x") == "com.google.Chrome")
+        var configuration = CefRuntime.Configuration()
         #expect(configuration.enterprisePolicy == .disabled)
         configuration.enterprisePolicy = .domain("com.example.policy")
         let mapped = MappedCefSettings(configuration: configuration, frameworkDirectory: nil)
@@ -128,7 +128,7 @@ import CefBase
             "CalculateNativeWinOcclusion", "InterestFeedContentSuggestions", "disable-client-side-phishing-detection",
             "DisableLoadExtensionCommandLineSwitch", "disable-breakpad", "Translate",
         ]
-        for configuration in [CefConfiguration.default, .embedded, .browser] {
+        for configuration in [CefRuntime.Configuration(), .embedded, .browser] {
             #expect(absent.isDisjoint(with: configuration.extraCommandLineSwitches.keys))
             #expect(absent.isDisjoint(with: configuration.disabledFeatures))
             #expect(absent.isDisjoint(with: configuration.chromiumFeatures.disabled))

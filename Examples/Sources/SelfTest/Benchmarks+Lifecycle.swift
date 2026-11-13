@@ -16,13 +16,13 @@ final class HostedBenchmarkBrowser {
     private var browserWindow: CefBrowserWindow?
 
     init?(_ host: BenchmarkHost, url: URL, frame: CGRect = CGRect(x: 200, y: 200, width: 640, height: 480)) async {
-        var options = CefBrowserOptions()
+        var configuration = CefBrowser.Configuration()
         switch host {
         case .windowed, .chromeStyle:
-            browser = CefBrowser(url: url, options: options)
+            browser = CefBrowser(url: url, configuration: configuration)
         case .offscreen:
-            options.rendering = .offscreen
-            browser = CefBrowser(url: url, options: options)
+            configuration.rendering = .offscreen
+            browser = CefBrowser(url: url, configuration: configuration)
         }
         switch host {
         case .chromeStyle:
@@ -152,8 +152,8 @@ extension Benchmarks {
         // An offscreen page at the energy saver's frame rate and at full rate.
         if let hosted = await HostedBenchmarkBrowser(.offscreen, url: URL(string: "selftest://bench/animated.html")!) {
             _ = await SelfTest.waitUntil { hosted.browser.title == "animated" }
-            for (label, saver) in [("energy saver off", CefEnergySaver.off), ("Low Power Mode, energy saver on", .automatic)] {
-                CefRuntime.shared.energySaver = saver
+            for (label, saver) in [("energy saver off", CefRuntime.EnergyPolicy.disabled), ("Low Power Mode, energy saver on", .automatic)] {
+                CefRuntime.shared.energyPolicy = saver
                 CefRuntime.shared.simulateEnergyConditions(lowPowerMode: true, thermalState: .nominal)
                 try? await Task.sleep(for: .seconds(1.5))
                 _ = try? await hosted.browser.evaluateJavaScript("window.__raf = 0")
@@ -164,7 +164,7 @@ extension Benchmarks {
                 print(String(format: "bench lifecycle offscreen visible, %@: CPU %.1f%% (app %.1f%%), rAF %.0f/s",
                              label, used.total / interval * 100, used.app / interval * 100, raf / interval))
             }
-            CefRuntime.shared.energySaver = .automatic
+            CefRuntime.shared.energyPolicy = .automatic
             CefRuntime.shared.stopSimulatingEnergyConditions()
             await hosted.close()
         }
@@ -186,8 +186,8 @@ extension Benchmarks {
         let fps = window.screen?.maximumFramesPerSecond ?? 60
         print("bench frames display \(fps) Hz")
 
-        CefRuntime.shared.energySaver = .off
-        defer { CefRuntime.shared.energySaver = .automatic }
+        CefRuntime.shared.energyPolicy = .disabled
+        defer { CefRuntime.shared.energyPolicy = .automatic }
         // (label, external begin frames, frame rate, a second request 4 ms after each refresh)
         let timings: [(String, Bool, Int, Bool)] = [
             ("chromium timer, rate 60", false, 60, false),
@@ -200,9 +200,9 @@ extension Benchmarks {
         let only = UserDefaults.standard.string(forKey: "frameTiming")
         for (label, external, rate, retry) in timings where only == nil || label.hasPrefix(only!) {
         CefBrowser.usesExternalBeginFrames = external
-        var options = CefBrowserOptions()
-        options.rendering = .offscreen(frameRate: rate)
-        let browser = CefBrowser(url: URL(string: "selftest://bench/frames.html")!, options: options)
+        var configuration = CefBrowser.Configuration()
+        configuration.rendering = .offscreen(frameRate: rate)
+        let browser = CefBrowser(url: URL(string: "selftest://bench/frames.html")!, configuration: configuration)
         probe.drive(external ? browser : nil, retry: retry)
         browser.host(offscreenIn: probe, size: probe.bounds.size)
         browser.hostViewDidUnhide()

@@ -68,7 +68,7 @@ import SwiftUI
 
 @main
 struct MyBrowser: CefSwiftApp {
-    static var cefConfiguration: CefConfiguration { .browser }
+    static var runtimeConfiguration: CefRuntime.Configuration { .browser }
     @NSApplicationDelegateAdaptor private var appDelegate: AppDelegate
 
     var body: some Scene {
@@ -143,7 +143,7 @@ covers identifiers, signing, entitlements, notarization and the bundle layout;
 
 | | Showing web content | Building a browser |
 |---|---|---|
-| Configuration | `CefConfiguration.embedded` | `CefConfiguration.browser` |
+| Configuration | `CefRuntime.Configuration.embedded` | `CefRuntime.Configuration.browser` |
 | Host | `CefWebView` in your own windows | `CefBrowserWindow`, or `CefRuntime.shared.openChromeWindow(url:)` for Chrome's complete UI |
 | Chrome runtime (`chrome://` pages, extensions, history) | No | Yes |
 | Background services | Off | On |
@@ -157,15 +157,15 @@ covers identifiers, signing, entitlements, notarization and the bundle layout;
 | JavaScript evaluation, user scripts and style sheets | `evaluateJavaScript(_:)`, `CefUserScript` | [JavaScript](docs/guide.md#javascript) |
 | Typed calls between JavaScript and Swift | `CefBridge` | [Bridge](docs/guide.md#bridge) |
 | Asynchronous decisions: permissions, dialogs, downloads, certificate errors | `CefBrowserDelegate` | [Decisions](docs/guide.md#decisions) |
-| Context menu | `CefContextMenuConfiguration` | [Context menu](docs/guide.md#context-menu) |
+| Context menu | `CefBrowser.Configuration.ContextMenu` | [Context menu](docs/guide.md#context-menu) |
 | Chrome-style windows, SwiftUI toolbars, popups, native tabs | `CefBrowserWindow` | [Building a browser](docs/guide.md#building-a-browser) |
-| Chrome commands and Chrome UI trimming | `CefChromeCommand`, `CefChromeUIConfiguration` | [Chrome commands](docs/guide.md#chrome-commands) |
+| Chrome commands and Chrome UI trimming | `CefChromeCommand`, `CefRuntime.Configuration.ChromeToolbar` | [Chrome commands](docs/guide.md#chrome-commands) |
 | Rebranded and restyled `chrome://` pages | `productName`, `stringOverrides`, `CefUserScript.styleSheet(_:matching:includingShadowRoots:)` | [Chromium's own pages](docs/guide.md#customizing-chromiums-own-pages) |
 | Profiles, cookies, Chromium preferences | `CefProfile` | [Profiles](docs/guide.md#profiles) |
 | Bookmarks, history, address-bar suggestions | `CefBookmarks`, `CefHistory`, `CefAutocomplete` | [Bookmarks, history and suggestions](docs/guide.md#bookmarks-history-and-suggestions) |
 | Chrome DevTools Protocol, in-process | `CefDevTools` | [DevTools](docs/guide.md#devtools) |
 | Content served from your own URL scheme | `CefSchemeHandler` | [Serving your own content](docs/guide.md#serving-your-own-content) |
-| Protected media: Widevine in Chromium, FairPlay through the system's WebKit for streaming services | `CefConfiguration.protectedMedia`, `CefSystemBrowser`, `CefSystemWebView` | [Playing streaming services](docs/guide.md#playing-streaming-services) |
+| Protected media: Widevine in Chromium, FairPlay through the system's WebKit for streaming services | `CefRuntime.Configuration.protectedMedia`, `CefSystemBrowser`, `CefSystemWebView` | [Playing streaming services](docs/guide.md#playing-streaming-services) |
 
 ## Examples
 

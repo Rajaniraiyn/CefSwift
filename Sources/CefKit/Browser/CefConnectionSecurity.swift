@@ -108,12 +108,14 @@ extension CefBrowser {
 
 // MARK: - Client certificates
 
-/// Who picks the certificate a site asks the user to identify with.
-public enum CefClientCertificatePolicy: Sendable, Equatable {
-    /// Chromium's own certificate picker.
-    case automatic
-    /// ``CefBrowserDelegate/browser(_:selectClientCertificateFor:)``.
-    case delegate
+extension CefBrowser {
+    /// Who picks the certificate a site asks the user to identify with.
+    public enum ClientCertificatePolicy: Sendable, Equatable {
+        /// Chromium's own certificate picker.
+        case automatic
+        /// ``CefBrowserDelegate/browser(_:selectClientCertificateFor:)``.
+        case delegate
+    }
 }
 
 /// A site asking for a certificate to identify the user, delivered to
@@ -180,7 +182,7 @@ extension CefBrowserClient {
             }
             let references = offered.map(\.1)
             return CefBrowserClient.run(s, browser, default: 0) { _, b in
-                guard b.options.clientCertificates == .delegate else { return 0 }
+                guard b.configuration.clientCertificates == .delegate else { return 0 }
                 b.decide(.page) { await $0.browser(b, selectClientCertificateFor: request) } then: { chosen in
                     let index = chosen.flatMap { chosen in request.certificates.firstIndex(of: chosen) }
                     // Select consumes the certificate reference it is given.

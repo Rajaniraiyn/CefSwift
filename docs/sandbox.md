@@ -6,8 +6,8 @@ Chrome does. Turn it off only to debug a helper, or for a bundle that
 `cef bundle` did not make:
 
 ```swift
-static var cefConfiguration: CefConfiguration {
-    var configuration = CefConfiguration.browser
+static var runtimeConfiguration: CefRuntime.Configuration {
+    var configuration = CefRuntime.Configuration.browser
     configuration.isSandboxEnabled = false   // development only
     return configuration
 }

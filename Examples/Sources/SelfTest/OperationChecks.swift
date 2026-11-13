@@ -90,11 +90,11 @@ extension SelfTest {
 
     /// `ready()` waits for a browser's set-up, not just its creation.
     static func readinessChecks() async {
-        var options = CefBrowserOptions()
+        var configuration = CefBrowser.Configuration()
         // Taking WebAuthn over sets the browser up before its first page.
-        options.passkeys = .disabled
+        configuration.passkeys = .disabled
         let window = CefBrowserWindow(
-            browser: CefBrowser(url: URL(string: "selftest://edge/ready.html")!, options: options))
+            browser: CefBrowser(url: URL(string: "selftest://edge/ready.html")!, configuration: configuration))
         window.show()
         await expect("operations: ready() returns once the browser's set-up has finished") {
             try await window.browser.ready()
@@ -283,7 +283,7 @@ final class StallingDelegate: CefBrowserDelegate {
         return .allow
     }
 
-    func browser(_ browser: CefBrowser, decidePasskeyRequest request: CefPasskeyRequest) async -> CefPasskeyDecision {
+    func browser(_ browser: CefBrowser, decidePasskeyFor request: CefPasskeyRequest) async -> CefPasskeyDecision {
         await stall()
         return .createPasskey
     }

@@ -48,8 +48,8 @@ import SwiftUI
 
 @MainActor var browser = CefBrowser()
 @MainActor var tab = CefBrowser()
-@MainActor var options = CefBrowserOptions()
-@MainActor var configuration = CefConfiguration.embedded
+@MainActor var browserConfiguration = CefBrowser.Configuration()
+@MainActor var configuration = CefRuntime.Configuration.embedded
 @MainActor var window = CefBrowserWindow(browser: CefBrowser())
 @MainActor var profile = CefProfile.default
 @MainActor var bridge = CefBridge(name: "app")
@@ -86,8 +86,8 @@ struct MediaLibrary: Sendable { func file(for url: URL?) -> URL? { nil } }
 @MainActor func openTab(_ url: URL?, inBackground: Bool) {}
 @MainActor func showInNewTab(_ browser: CefSystemBrowser) {}
 @MainActor func search(_ text: String) {}
-@MainActor func askUser(about kinds: CefPermissionKind, from origin: String?) async -> Bool { true }
-@MainActor func askUserRemembering(about kinds: CefPermissionKind, from origin: String?) async -> (Bool, Bool) { (true, false) }
+@MainActor func askUser(about kinds: CefPermissionRequest.Kinds, from origin: String?) async -> Bool { true }
+@MainActor func askUserRemembering(about kinds: CefPermissionRequest.Kinds, from origin: String?) async -> (Bool, Bool) { (true, false) }
 @MainActor func chooseFolder() async -> URL? { nil }
 @MainActor func showLock() {}
 @MainActor func showWarning() {}

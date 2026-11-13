@@ -3,7 +3,7 @@ import Security
 
 /// Where an app keeps the passkeys it answers WebAuthn requests with.
 ///
-/// Pass a store to ``CefPasskeyMode/app(_:)``. CefKit reads it when a page
+/// Pass a store to ``CefBrowser/PasskeyPolicy/app(_:)``. CefKit reads it when a page
 /// asks to sign in, saves a passkey after a registration, and saves it
 /// again after each sign-in with its new ``CefPasskey/signCount``. List and
 /// remove passkeys through the store itself, for example in a settings

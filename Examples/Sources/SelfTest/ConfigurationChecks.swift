@@ -8,7 +8,7 @@ extension SelfTest {
     static let policyDomainKey = "CEFSWIFT_SELFTEST_POLICY_DOMAIN"
 
     static func configurationChecks() async {
-        // CefConfiguration.embedded.
+        // CefRuntime.Configuration.embedded.
         // Chromium registers the on-device model manifest outside its
         // component updater's switch; it registers nothing else.
         let components = CefRuntime.shared.registeredComponents
@@ -22,12 +22,12 @@ extension SelfTest {
             ("credentials_enable_service", false), ("credentials_enable_autosignin", false),
             ("autofill.profile_enabled", false), ("autofill.credit_card_enabled", false),
         ] {
-            check("configuration: .embedded sets \(name)", profile.preference(name) == expected,
-                  detail: "\(String(describing: profile.preference(name)))")
+            check("configuration: .embedded sets \(name)", profile.preferences.value(named: name) == expected,
+                  detail: "\(String(describing: profile.preferences.value(named: name)))")
         }
         check("configuration: no enterprise policy by default",
-              profile.preference("browser.show_home_button") == false,
-              detail: "\(String(describing: profile.preference("browser.show_home_button")))")
+              profile.preferences.value(named: "browser.show_home_button") == false,
+              detail: "\(String(describing: profile.preferences.value(named: "browser.show_home_button")))")
         await hyperlinkAuditingCheck(expectsPing: false, label: "configuration: .embedded sends no hyperlink auditing ping")
 
         // The others, with a recommended policy in a preferences domain of
@@ -76,7 +76,7 @@ extension SelfTest {
 
     // MARK: The probe
 
-    static func configurePoliciesProbe(_ configuration: inout CefConfiguration) {
+    static func configurePoliciesProbe(_ configuration: inout CefRuntime.Configuration) {
         configuration.services.componentUpdates = .automatic
         configuration.privacy.hyperlinkAuditing = .automatic
         configuration.privacy.thirdPartyCookies = .block
@@ -95,18 +95,18 @@ extension SelfTest {
         check("protected media .disabled: CefSwift does not ask for Widevine",
               await CefRuntime.shared.installWidevine() == .unavailable)
         let profile = CefProfile.default
-        check("third-party cookies .block", profile.preference("profile.cookie_controls_mode") == 1,
-              detail: "\(String(describing: profile.preference("profile.cookie_controls_mode")))")
-        check("HTTPS-First .strict", profile.preference("https_only_mode_enabled") == true,
-              detail: "\(String(describing: profile.preference("https_only_mode_enabled")))")
+        check("third-party cookies .block", profile.preferences.value(named: "profile.cookie_controls_mode") == 1,
+              detail: "\(String(describing: profile.preferences.value(named: "profile.cookie_controls_mode")))")
+        check("HTTPS-First .strict", profile.preferences.value(named: "https_only_mode_enabled") == true,
+              detail: "\(String(describing: profile.preferences.value(named: "https_only_mode_enabled")))")
         check("secure DNS .secure, application-wide",
-              CefRuntime.shared.preference("dns_over_https.mode") == "secure"
-                && CefRuntime.shared.preference("dns_over_https.templates") == "https://dns.example/dns-query{?dns}",
-              detail: "\(String(describing: CefRuntime.shared.preference("dns_over_https.mode"))), " +
-                  "\(String(describing: CefRuntime.shared.preference("dns_over_https.templates")))")
+              CefRuntime.shared.preferences.value(named: "dns_over_https.mode") == "secure"
+                && CefRuntime.shared.preferences.value(named: "dns_over_https.templates") == "https://dns.example/dns-query{?dns}",
+              detail: "\(String(describing: CefRuntime.shared.preferences.value(named: "dns_over_https.mode"))), " +
+                  "\(String(describing: CefRuntime.shared.preferences.value(named: "dns_over_https.templates")))")
         check("enterprise policy: a recommended policy in the domain sets the preference",
-              profile.preference("browser.show_home_button") == true,
-              detail: "\(String(describing: profile.preference("browser.show_home_button")))")
+              profile.preferences.value(named: "browser.show_home_button") == true,
+              detail: "\(String(describing: profile.preferences.value(named: "browser.show_home_button")))")
         await hyperlinkAuditingCheck(expectsPing: true, label: "hyperlink auditing .automatic sends the ping")
     }
 }

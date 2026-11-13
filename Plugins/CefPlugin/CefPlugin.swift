@@ -212,7 +212,7 @@ struct CefPlugin: CommandPlugin {
             workDirectory: workDirectory)
         if identity.isAdHoc {
             print("[cef] note: an ad-hoc signed app loses its keychain \"Always Allow\" grant on every " +
-                  "rebuild — see CefSafeStoragePolicy.")
+                  "rebuild — see CefRuntime.SafeStoragePolicy.")
         }
         let distribution = try distributionSettings(
             config: appConfig, context: context, bundleIdentifier: bundleID, identity: identity,

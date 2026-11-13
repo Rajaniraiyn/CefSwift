@@ -4,7 +4,7 @@ import Foundation
 /// One of Chrome's own commands (`IDC_*`). Run it with
 /// ``CefBrowser/execute(_:disposition:)``, intercept it in
 /// ``CefBrowserDelegate/browser(_:handleChromeCommand:disposition:)``, or hide
-/// it from Chrome's app menu with ``CefChromeUIConfiguration``.
+/// it from Chrome's app menu with ``CefRuntime/Configuration/ChromeToolbar``.
 ///
 /// The named constants cover the common commands; any other `IDC_*` value
 /// from Chromium's `chrome/app/chrome_command_ids.h` works through
@@ -66,39 +66,43 @@ public struct CefChromeCommand: RawRepresentable, Hashable, Sendable {
     var isZoomCommand: Bool { self == .zoomIn || self == .zoomOut || self == .resetZoom }
 }
 
-/// Trims Chrome's own UI in Chrome-style windows. Set on
-/// ``CefConfiguration/chromeUI`` before initializing.
-public struct CefChromeUIConfiguration: Sendable, Equatable {
-    /// Commands removed from Chrome's app ("⋮") menu.
-    public var hiddenAppMenuCommands: Set<CefChromeCommand> = []
-    /// Commands shown but greyed out in Chrome's app menu.
-    public var disabledAppMenuCommands: Set<CefChromeCommand> = []
-    /// Whether Chrome's toolbar shows its optional buttons (extensions,
-    /// downloads, side panel, cast, …).
-    public var showsToolbarButtons = true
-    /// Whether the omnibox shows page-action icons (bookmark star, zoom,
-    /// translate, reader mode, …).
-    public var showsPageActionIcons = true
+extension CefRuntime.Configuration {
+    /// Trims the toolbar and app menu of Chrome-style windows. Set on
+    /// ``CefRuntime/Configuration/chromeToolbar`` before initializing.
+    public struct ChromeToolbar: Sendable, Equatable {
+        /// Commands removed from Chrome's app ("⋮") menu.
+        public var hiddenAppMenuCommands: Set<CefChromeCommand> = []
+        /// Commands shown but greyed out in Chrome's app menu.
+        public var disabledAppMenuCommands: Set<CefChromeCommand> = []
+        /// Whether Chrome's toolbar shows its optional buttons (extensions,
+        /// downloads, side panel, cast, …).
+        public var showsToolbarButtons = true
+        /// Whether the omnibox shows page-action icons (bookmark star, zoom,
+        /// translate, reader mode, …).
+        public var showsPageActionIcons = true
 
-    public init() {}
+        public init() {}
+    }
 }
 
-/// Identifies one of Chromium's built-in UI strings (`IDS_*`), for
-/// ``CefConfiguration/stringOverrides``.
-///
-/// Identifiers are stable for a given CEF build but can change between CEF
-/// versions; the named constants here are re-resolved against the vendored
-/// headers on every build. Other identifiers are listed in the vendored
-/// `cef_pack_strings.h`.
-public struct CefStringID: RawRepresentable, Hashable, Sendable {
-    public let rawValue: Int32
-    public init(rawValue: Int32) { self.rawValue = rawValue }
+extension CefRuntime {
+    /// Identifies one of Chromium's built-in UI strings (`IDS_*`), for
+    /// ``CefRuntime/Configuration/stringOverrides``.
+    ///
+    /// Identifiers are stable for a given CEF build but can change between CEF
+    /// versions; the named constants here are re-resolved against the vendored
+    /// headers on every build. Other identifiers are listed in the vendored
+    /// `cef_pack_strings.h`.
+    public struct StringID: RawRepresentable, Hashable, Sendable {
+        public let rawValue: Int32
+        public init(rawValue: Int32) { self.rawValue = rawValue }
 
-    /// The product name ("Chromium") as shown throughout settings, About,
-    /// dialogs and internal pages.
-    public static let productName = Self(rawValue: IDS_PRODUCT_NAME)
-    /// The short product name, used where space is tight.
-    public static let shortProductName = Self(rawValue: IDS_SHORT_PRODUCT_NAME)
-    /// The company line on `chrome://version`.
-    public static let companyName = Self(rawValue: IDS_ABOUT_VERSION_COMPANY_NAME)
+        /// The product name ("Chromium") as shown throughout settings, About,
+        /// dialogs and internal pages.
+        public static let productName = Self(rawValue: IDS_PRODUCT_NAME)
+        /// The short product name, used where space is tight.
+        public static let shortProductName = Self(rawValue: IDS_SHORT_PRODUCT_NAME)
+        /// The company line on `chrome://version`.
+        public static let companyName = Self(rawValue: IDS_ABOUT_VERSION_COMPANY_NAME)
+    }
 }

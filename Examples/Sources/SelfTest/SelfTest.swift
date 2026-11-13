@@ -23,7 +23,7 @@ enum SelfTest {
         if isIsolatedParent {
             exit(runIsolated())
         }
-        var configuration = CefConfiguration.embedded
+        var configuration = CefRuntime.Configuration.embedded
         configuration.isOffscreenRenderingEnabled = true
         configuration.productName = "SelfTestBrowser"
         configuration.preferences["webkit.webprefs.default_font_size"] = 21
@@ -42,7 +42,7 @@ enum SelfTest {
         let widevineProbeDirectory = ProcessInfo.processInfo.environment[widevineProbeEnvironmentKey]
         if let widevineProbeDirectory {
             configuration.rootCacheDirectory = URL(fileURLWithPath: widevineProbeDirectory)
-            configuration.protectedMedia = .automatic
+            configuration.services.protectedMedia = .automatic
         }
         if let probe {
             configuration.rootCacheDirectory = ProcessInfo.processInfo.environment[probeRootEnvironmentKey]

@@ -108,7 +108,7 @@ extension CefBrowserClient {
         let h = cefAllocate(cef_permission_handler_t.self, owner: self)
         h.pointee.on_request_media_access_permission = { s, browser, frame, origin, requested, callback in
             cefRelease(frame)
-            let kinds = CefPermissionKind.fromMediaTypes(requested)
+            let kinds = CefPermissionRequest.Kinds.fromMediaTypes(requested)
             let request = CefPermissionRequest(kinds: kinds, origin: CefStringUtil.string(from: origin))
             guard let callback = CefRef(adopting: callback) else {
                 cefRelease(browser)
@@ -118,7 +118,7 @@ extension CefBrowserClient {
                 // Chromium asks before it reads the site settings for media,
                 // so stored values answer here, and only the rest is asked.
                 let stored = b.storedAnswer(to: request)
-                let answer = { (granted: CefPermissionKind) in
+                let answer = { (granted: CefPermissionRequest.Kinds) in
                     let mask = granted.mediaMask(within: requested)
                     if mask != 0 {
                         callback.pointer.pointee.cont(callback.pointer, mask)
@@ -140,7 +140,7 @@ extension CefBrowserClient {
         }
         h.pointee.on_show_permission_prompt = { s, browser, promptID, origin, requested, callback in
             let request = CefPermissionRequest(
-                kinds: CefPermissionKind.fromRequestTypes(requested),
+                kinds: CefPermissionRequest.Kinds.fromRequestTypes(requested),
                 origin: CefStringUtil.string(from: origin)
             )
             guard let callback = CefRef(adopting: callback) else {

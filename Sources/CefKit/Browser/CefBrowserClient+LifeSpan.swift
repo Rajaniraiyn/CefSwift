@@ -64,7 +64,7 @@ extension CefBrowserClient {
                 // the CefBrowser that wraps it.
                 if !isHandled, let extraInfo, extraInfo.pointee == nil {
                     extraInfo.pointee = CefPageScripting.makeExtraInfo(CefPageScripting.configuration(
-                        bridges: b.options.bridges, scripts: b.options.userScripts, generation: 0))
+                        bridges: b.configuration.bridges, scripts: b.configuration.userScripts, generation: 0))
                 }
                 return isHandled ? 1 : 0
             }

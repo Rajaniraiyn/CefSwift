@@ -2,7 +2,7 @@ import AppKit
 import LocalAuthentication
 
 /// The native passkey sheet behind the default
-/// ``CefBrowserDelegate/browser(_:decidePasskeyRequest:)``.
+/// ``CefBrowserDelegate/browser(_:decidePasskeyFor:)``.
 ///
 /// It names the site, asks the user to confirm, and verifies the user with
 /// a ``CefUserVerifier`` before answering: by default Touch ID or the

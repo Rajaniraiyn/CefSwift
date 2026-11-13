@@ -183,7 +183,7 @@ struct AppBundler {
         var info = Plist.merge(base, plan.appInfoPlist)
         // Localized resource bundles make the app localized: say so, so that
         // macOS picks the app's language, and Chromium's with it, from
-        // these (CefLocalization.application).
+        // these (CefRuntime.Localization.application).
         let localizations = FrameworkTrim.resourceLocalizations(in: product.resourceBundles)
         if info["CFBundleLocalizations"] == nil, !localizations.isEmpty {
             info["CFBundleLocalizations"] = .array(localizations.map { .string($0) })

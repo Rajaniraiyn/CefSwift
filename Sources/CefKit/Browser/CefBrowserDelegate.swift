@@ -27,7 +27,7 @@ public protocol CefBrowserDelegate: AnyObject {
     // MARK: Discarding
 
     /// The browser is about to be discarded (``CefBrowser/discard()`` or
-    /// ``CefRuntime/memorySaver``): its page is still there, and this is the
+    /// ``CefRuntime/discardPolicy``): its page is still there, and this is the
     /// last moment to read from it.
     func browserWillDiscard(_ browser: CefBrowser)
     /// The browser's page was unloaded to free its memory. The browser
@@ -48,8 +48,8 @@ public protocol CefBrowserDelegate: AnyObject {
     func browser(_ browser: CefBrowser, renderProcessDidTerminate reason: CefTerminationReason)
     /// The page has not responded to input for 15 seconds: wait for it, or
     /// end its renderer. Not asked for Chrome-style browsers, which show
-    /// Chromium's dialog, unless ``CefBrowserOptions/unresponsivePages`` is
-    /// ``CefUnresponsivePagePolicy/delegate``. The question is withdrawn,
+    /// Chromium's dialog, unless ``CefBrowser/Configuration/unresponsivePages`` is
+    /// ``CefBrowser/UnresponsivePagePolicy/delegate``. The question is withdrawn,
     /// and the task cancelled, when the page responds again. The default
     /// asks with ``CefUnresponsivePagePresenter``.
     func browserPageIsUnresponsive(_ browser: CefBrowser) async -> CefUnresponsivePageDecision
@@ -59,8 +59,8 @@ public protocol CefBrowserDelegate: AnyObject {
     /// Allow or cancel a main-frame navigation.
     func browser(_ browser: CefBrowser, decidePolicyFor navigation: CefNavigationAction) -> CefNavigationDecision
     /// Route a `target=_blank` / `window.open` / ⌘-click request. The default
-    /// is ``CefWindowOpenAction/default(for:)``.
-    func browser(_ browser: CefBrowser, decideWindowOpenFor request: CefWindowOpenRequest) -> CefWindowOpenAction
+    /// is ``CefWindowOpenDecision/default(for:)``.
+    func browser(_ browser: CefBrowser, decideWindowOpenFor request: CefWindowOpenRequest) -> CefWindowOpenDecision
     /// A key event, before (`isBeforePage`) or after the page saw it. Return
     /// `true` to consume it.
     func browser(_ browser: CefBrowser, handleKeyEvent event: CefKeyEvent, isBeforePage: Bool) -> Bool
@@ -88,8 +88,8 @@ public protocol CefBrowserDelegate: AnyObject {
     func browser(_ browser: CefBrowser, decidePermissionFor request: CefPermissionRequest) async -> CefPermissionDecision
     /// Supply credentials for HTTP/proxy authentication, or `nil` to cancel.
     /// Asked again, with the same challenge, when the server refuses the
-    /// credentials. Not asked when ``CefConfiguration/authenticationPrompt``
-    /// is ``CefAuthenticationPrompt/chromium``.
+    /// credentials. Not asked when ``CefRuntime/Configuration/authenticationPrompt``
+    /// is ``CefRuntime/AuthenticationPromptPolicy/chromium``.
     /// The default shows a native sign-in sheet.
     func browser(_ browser: CefBrowser, credentialFor challenge: CefAuthenticationChallenge) async -> CefCredential?
     /// Return `true` to proceed despite a certificate error. The default
@@ -97,22 +97,22 @@ public protocol CefBrowserDelegate: AnyObject {
     func browser(_ browser: CefBrowser, shouldProceedDespite error: CefCertificateError) async -> Bool
     /// Pick the certificate to identify the user with when a site asks for
     /// one, or `nil` to continue without. Asked only when
-    /// ``CefBrowserOptions/clientCertificates`` is
-    /// ``CefClientCertificatePolicy/delegate``; otherwise Chromium shows
+    /// ``CefBrowser/Configuration/clientCertificates`` is
+    /// ``CefBrowser/ClientCertificatePolicy/delegate``; otherwise Chromium shows
     /// its own picker. The default asks with
     /// ``CefClientCertificatePresenter``.
     func browser(_ browser: CefBrowser, selectClientCertificateFor request: CefClientCertificateRequest) async -> CefCertificate?
     /// Decide where a download goes. The default saves to `~/Downloads`.
     func browser(_ browser: CefBrowser, decideDestinationFor download: CefDownload, suggestedName: String) async -> CefDownloadDecision
     /// Answer a page's request to register or use a passkey, for browsers
-    /// whose ``CefBrowserOptions/passkeys`` is ``CefPasskeyMode/app(_:)``.
+    /// whose ``CefBrowser/Configuration/passkeys`` is ``CefBrowser/PasskeyPolicy/app(_:)``.
     /// The default asks the user with ``CefPasskeyPresenter``.
     ///
     /// The page stays stopped at its `navigator.credentials` call until you
     /// answer, as it does for `alert()`; JavaScript you evaluate in it
     /// meanwhile waits too. When the page navigates away or the browser
     /// closes first, the call's task is cancelled and its answer ignored.
-    func browser(_ browser: CefBrowser, decidePasskeyRequest request: CefPasskeyRequest) async -> CefPasskeyDecision
+    func browser(_ browser: CefBrowser, decidePasskeyFor request: CefPasskeyRequest) async -> CefPasskeyDecision
     /// The passkey store failed while a WebAuthn request was answered. A
     /// failed availability check or read refuses the page's call; a failed
     /// save happens after the page has its answer and carries the passkey
@@ -146,7 +146,7 @@ extension CefBrowserDelegate {
     public func browser(_ browser: CefBrowser, decidePolicyFor navigation: CefNavigationAction) -> CefNavigationDecision {
         .allow
     }
-    public func browser(_ browser: CefBrowser, decideWindowOpenFor request: CefWindowOpenRequest) -> CefWindowOpenAction {
+    public func browser(_ browser: CefBrowser, decideWindowOpenFor request: CefWindowOpenRequest) -> CefWindowOpenDecision {
         .default(for: request)
     }
     public func browser(_ browser: CefBrowser, handleKeyEvent event: CefKeyEvent, isBeforePage: Bool) -> Bool { false }
@@ -178,10 +178,10 @@ extension CefBrowserDelegate {
         await CefClientCertificatePresenter.present(request, in: browser.hostWindow)
     }
     public func browser(_ browser: CefBrowser, decideDestinationFor download: CefDownload, suggestedName: String) async -> CefDownloadDecision {
-        .allow(destination: nil)
+        .saveToDownloadsFolder
     }
 
-    public func browser(_ browser: CefBrowser, decidePasskeyRequest request: CefPasskeyRequest) async -> CefPasskeyDecision {
+    public func browser(_ browser: CefBrowser, decidePasskeyFor request: CefPasskeyRequest) async -> CefPasskeyDecision {
         await CefPasskeyPresenter.present(request, in: browser.hostWindow)
     }
     public func browser(_ browser: CefBrowser, passkeyStoreDidFail error: CefPasskeyStoreError) {

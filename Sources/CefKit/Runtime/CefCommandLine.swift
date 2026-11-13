@@ -3,7 +3,7 @@ import Foundation
 import CefBase
 
 /// The command line Chromium is about to process, passed to
-/// ``CefConfiguration/onBeforeCommandLineProcessing``.
+/// ``CefRuntime/Configuration/onBeforeCommandLineProcessing``.
 ///
 /// Valid only during that call: CefKit invalidates it when the call
 /// returns, and using it afterwards stops the program.

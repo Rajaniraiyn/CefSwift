@@ -16,9 +16,9 @@ final class MappedCefSettings {
     ///   - configuration: the user configuration.
     ///   - frameworkDirectory: resolved `.framework` directory (maps to
     ///     `framework_dir_path`), or nil to let CEF use defaults.
-    ///   - locale: the Chromium locale to start with (``CefLocalization``,
+    ///   - locale: the Chromium locale to start with (``CefRuntime/Localization``,
     ///     resolved), or nil for CEF's default, `en-US`.
-    init(configuration: CefConfiguration, frameworkDirectory: URL?, locale: String? = nil) {
+    init(configuration: CefRuntime.Configuration, frameworkDirectory: URL?, locale: String? = nil) {
         raw.size = MemoryLayout<cef_settings_t>.stride
         raw.no_sandbox = configuration.isSandboxEnabled ? 0 : 1
         // Chromium's message loop is driven from the app's run loop
@@ -34,7 +34,7 @@ final class MappedCefSettings {
         // cacheDirectory is given, derive the root from it so the pair is always valid.
         let rootCache = configuration.resolvedRootCacheDirectory
         try? FileManager.default.createDirectory(at: rootCache, withIntermediateDirectories: true)
-        configuration.protectedMedia.installPreinstalledCDM(rootCache: rootCache)
+        configuration.services.protectedMedia.installPreinstalledCDM(rootCache: rootCache)
         CefStringUtil.set(rootCache.path, into: &raw.root_cache_path)
         CefStringUtil.set((configuration.cacheDirectory ?? rootCache).path, into: &raw.cache_path)
 
@@ -42,7 +42,7 @@ final class MappedCefSettings {
         CefStringUtil.set(configuration.userAgent.product, into: &raw.user_agent_product)
         CefStringUtil.set(configuration.userAgent.fullString, into: &raw.user_agent)
         let acceptLanguages = configuration.acceptLanguages.isEmpty
-            ? CefLocalization.defaultAcceptLanguages(locale: locale)
+            ? CefRuntime.Localization.defaultAcceptLanguages(locale: locale)
             : configuration.acceptLanguages
         CefStringUtil.set(acceptLanguages.joined(separator: ","), into: &raw.accept_language_list)
         CefStringUtil.set(configuration.logFile?.path, into: &raw.log_file)

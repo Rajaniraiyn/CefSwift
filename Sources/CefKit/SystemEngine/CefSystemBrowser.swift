@@ -19,7 +19,7 @@ import WebKit
 /// ```swift
 /// func browser(_ browser: CefBrowser, decidePolicyFor navigation: CefNavigationAction) -> CefNavigationDecision {
 ///     guard let url = navigation.url, CefSystemBrowser.prefersSystemEngine(for: url) else { return .allow }
-///     openSystemTab(CefSystemBrowser(url: url, options: .init(profile: browser.options.profile)))
+///     openSystemTab(CefSystemBrowser(url: url, configuration: .init(profile: browser.configuration.profile)))
 ///     return .cancel
 /// }
 /// ```
@@ -34,7 +34,7 @@ import WebKit
 @Observable
 public final class CefSystemBrowser {
     /// How a system browser is set up. Fixed when it is created.
-    public struct Options {
+    public struct Configuration {
         /// Whose website data (cookies, storage, cache) the page uses. Each
         /// ``CefProfile`` has a WebKit data store of its own, separate from
         /// Chromium's: the default profile uses the app's default store, a
@@ -69,7 +69,8 @@ public final class CefSystemBrowser {
     /// Whether every resource on the page arrived over a secure connection.
     public private(set) var hasOnlySecureContent = false
 
-    @ObservationIgnored public let options: Options
+    /// The settings the browser was made with.
+    @ObservationIgnored public let configuration: Configuration
 
     /// Decides each main-frame navigation; `nil` allows all. Return
     /// ``CefNavigationDecision/cancel`` to send a URL elsewhere, such as
@@ -86,21 +87,21 @@ public final class CefSystemBrowser {
     @ObservationIgnored private let coordinator = Coordinator()
     @ObservationIgnored private var observations: [NSKeyValueObservation] = []
 
-    public init(url: URL? = nil, options: Options = .init()) {
-        self.options = options
-        let configuration = WKWebViewConfiguration()
-        configuration.websiteDataStore = (options.profile ?? .default).systemWebsiteDataStore
-        configuration.preferences.isElementFullscreenEnabled = true
-        configuration.mediaTypesRequiringUserActionForPlayback = []
-        configuration.allowsAirPlayForMediaPlayback = true
-        if options.identifiesAsSafari {
-            configuration.applicationNameForUserAgent = Self.safariApplicationName
+    public init(url: URL? = nil, configuration: Configuration = .init()) {
+        self.configuration = configuration
+        let webViewConfiguration = WKWebViewConfiguration()
+        webViewConfiguration.websiteDataStore = (configuration.profile ?? .default).systemWebsiteDataStore
+        webViewConfiguration.preferences.isElementFullscreenEnabled = true
+        webViewConfiguration.mediaTypesRequiringUserActionForPlayback = []
+        webViewConfiguration.allowsAirPlayForMediaPlayback = true
+        if configuration.identifiesAsSafari {
+            webViewConfiguration.applicationNameForUserAgent = Self.safariApplicationName
         }
-        for script in options.userScripts {
-            configuration.userContentController.addUserScript(Self.webKitScript(for: script))
+        for script in configuration.userScripts {
+            webViewConfiguration.userContentController.addUserScript(Self.webKitScript(for: script))
         }
-        nativeView = WKWebView(frame: .zero, configuration: configuration)
-        nativeView.allowsBackForwardNavigationGestures = options.allowsBackForwardNavigationGestures
+        nativeView = WKWebView(frame: .zero, configuration: webViewConfiguration)
+        nativeView.allowsBackForwardNavigationGestures = configuration.allowsBackForwardNavigationGestures
         nativeView.allowsMagnification = true
         coordinator.browser = self
         nativeView.navigationDelegate = coordinator

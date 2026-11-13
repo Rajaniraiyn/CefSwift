@@ -21,7 +21,7 @@ extension SelfTest {
     ]
 
     /// Changes the configuration for the probe `name`.
-    static func configure(_ configuration: inout CefConfiguration, forProbe name: String) {
+    static func configure(_ configuration: inout CefRuntime.Configuration, forProbe name: String) {
         switch name {
         case "chromiumSignIn":
             configuration.authenticationPrompt = .chromium

@@ -19,21 +19,21 @@ extension CefBrowser {
     /// Builds everything browser creation needs. Each returned reference is
     /// consumed by the CEF creation call it is passed to.
     private func makeBlueprint(offscreenHost: CefOffscreenHost? = nil, frameRate: Int = 0) -> Blueprint {
-        precondition(CefRuntime.shared.isInitialized, "Create browsers after CefRuntime.shared.initialize().")
+        precondition(CefRuntime.shared.isRunning, "Create browsers after CefRuntime.shared.initialize().")
         precondition(
             (state == .pending || isDiscarded) && client == nil, "This CefBrowser has already been created.")
 
         let client = CefBrowserClient(
             browser: self,
-            requestFilter: options.requestFilter,
-            chromeUI: CefRuntime.shared.configuration?.chromeUI ?? .init())
+            requestFilter: configuration.requestFilter,
+            chromeToolbar: CefRuntime.shared.configuration?.chromeToolbar ?? .init())
         client.offscreenHost = offscreenHost
         self.client = client
 
         var settings = cef_browser_settings_t()
         settings.size = MemoryLayout<cef_browser_settings_t>.stride
         settings.windowless_frame_rate = Int32(frameRate)
-        if let color = options.backgroundColor {
+        if let color = configuration.backgroundColor {
             settings.background_color = cefColor(color.cgColor)
         }
 
@@ -42,15 +42,15 @@ extension CefBrowser {
         // session before the first real document, so such browsers start
         // blank and navigate once set up, as does every browser created
         // again after a discard.
-        options.bridges.forEach { $0.attach(to: self) }
-        isBootstrapping = !options.passkeys.isChromium || isDiscarded
+        configuration.bridges.forEach { $0.attach(to: self) }
+        isBootstrapping = !configuration.passkeys.isChromium || isDiscarded
         let url = isBootstrapping ? "about:blank" : (initialURL?.absoluteString ?? "about:blank")
 
         return Blueprint(
             client: client.makeClient(),
             settings: settings,
             url: url,
-            requestContext: (options.profile ?? .default).makeRequestContext(),
+            requestContext: (configuration.profile ?? .default).makeRequestContext(),
             extraInfo: pageScripting.makeExtraInfo())
     }
 
@@ -100,11 +100,8 @@ extension CefBrowser {
         windowInfo.size = MemoryLayout<cef_window_info_t>.stride
         windowInfo.bounds = cef_rect_t(parentView.bounds)
         windowInfo.parent_view = Unmanaged.passUnretained(parentView).toOpaque()
-        var style = options.runtimeStyle
-        if style == .default, let configured = CefRuntime.shared.configuration?.defaultRuntimeStyle {
-            style = configured
-        }
-        windowInfo.runtime_style = style.cefValue
+        // CEF always gives a browser in a parent view Alloy style.
+        windowInfo.runtime_style = CEF_RUNTIME_STYLE_DEFAULT
         hostView = parentView
         isEmbeddedView = true
 
@@ -120,9 +117,9 @@ extension CefBrowser {
     func createOffscreen(host: CefOffscreenHost, size: CGSize) {
         precondition(
             CefRuntime.shared.configuration?.isOffscreenRenderingEnabled == true,
-            "Offscreen browsers need CefConfiguration.isOffscreenRenderingEnabled = true at initialize().")
+            "Offscreen browsers need CefRuntime.Configuration.isOffscreenRenderingEnabled = true at initialize().")
         var frameRate = 60
-        if case .offscreen(let requested) = options.rendering { frameRate = requested }
+        if case .offscreen(let requested) = configuration.rendering { frameRate = requested }
         var blueprint = makeBlueprint(offscreenHost: host, frameRate: frameRate)
 
         var windowInfo = cef_window_info_t()
@@ -216,7 +213,7 @@ extension CefBrowser {
         }
         if isBootstrapping {
             Task { await bootstrap() }
-        } else if !options.passkeys.isChromium {
+        } else if !configuration.passkeys.isChromium {
             // A popup: Chromium loads its page right away, so its first
             // document may be answered by Chromium.
             Task { await startPasskeys() }
@@ -224,13 +221,13 @@ extension CefBrowser {
     }
 
     /// Takes WebAuthn requests over from Chromium, for
-    /// ``CefBrowserOptions/passkeys`` other than ``CefPasskeyMode/chromium``.
+    /// ``CefBrowser/Configuration/passkeys`` other than ``CefBrowser/PasskeyPolicy/chromium``.
     ///
     /// A browser discarded by closing it starts again here when it is
     /// created anew, since its DevTools state went with the old browser.
     private func startPasskeys() async {
         passkeyAuthenticator?.stop()
-        let authenticator = CefPasskeyAuthenticator(browser: self, mode: options.passkeys)
+        let authenticator = CefPasskeyAuthenticator(browser: self, mode: configuration.passkeys)
         passkeyAuthenticator = authenticator
         do {
             try await authenticator.start()
@@ -253,7 +250,7 @@ extension CefBrowser {
                 await devTools.enableDomainsAgain()
                 reassertAccessibilityState()
             }
-            if !options.passkeys.isChromium { await startPasskeys() }
+            if !configuration.passkeys.isChromium { await startPasskeys() }
         }
         isBootstrapping = false
         guard state == .live else { return }

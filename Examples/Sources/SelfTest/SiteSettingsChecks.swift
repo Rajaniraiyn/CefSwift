@@ -84,7 +84,7 @@ extension SelfTest {
         let preferences = profile.preferences
         let boolKeys: [CefPreferences.Key<Bool>] = [
             .savesPasswords, .fillsAddresses, .fillsPaymentCards, .asksWhereToSaveDownloads, .checksSpelling,
-            .showsHomeButton, .offersTranslation, .safeBrowsing, .searchSuggestions, .httpsOnly, .sendsDoNotTrack,
+            .showsHomeButton, .offersTranslation, .usesSafeBrowsing, .showsSearchSuggestions, .usesHTTPSOnlyMode, .sendsDoNotTrack,
         ]
         let missing = boolKeys.map(\.name).filter { preferences.value(named: $0) == nil }
             + [CefPreferences.Key<Int>.defaultFontSize, .defaultFixedFontSize, .minimumFontSize].map(\.name)

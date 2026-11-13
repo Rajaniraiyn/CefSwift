@@ -1,11 +1,11 @@
 import Foundation
 
-extension CefPermissionKind {
+extension CefPermissionRequest.Kinds {
     /// The site permissions these kinds are stored as. ``other`` has none,
     /// and neither has ``protectedMediaIdentifier``: Chromium keeps no such
     /// setting on macOS.
     public var sitePermissions: [CefSitePermission] {
-        let mapping: [(CefPermissionKind, CefSitePermission)] = [
+        let mapping: [(CefPermissionRequest.Kinds, CefSitePermission)] = [
             (.camera, .camera), (.microphone, .microphone), (.geolocation, .geolocation),
             (.notifications, .notifications), (.clipboard, .clipboard), (.midi, .midiSystemExclusive),
             (.pointerLock, .pointerLock), (.storageAccess, .storageAccess), (.sensors, .sensors),
@@ -15,8 +15,8 @@ extension CefPermissionKind {
     }
 
     /// The single kinds in this set.
-    var members: [CefPermissionKind] {
-        (0..<32).map { CefPermissionKind(rawValue: 1 << $0) }.filter { contains($0) }
+    var members: [CefPermissionRequest.Kinds] {
+        (0..<32).map { CefPermissionRequest.Kinds(rawValue: 1 << $0) }.filter { contains($0) }
     }
 }
 
@@ -24,16 +24,16 @@ extension CefPermissionKind {
 /// asked.
 struct CefStoredPermissionAnswer: Equatable {
     /// Kinds the profile allows.
-    var allowed: CefPermissionKind = []
+    var allowed: CefPermissionRequest.Kinds = []
     /// Kinds the profile blocks.
-    var blocked: CefPermissionKind = []
+    var blocked: CefPermissionRequest.Kinds = []
     /// Kinds nothing decides yet: the delegate is asked about these.
-    var undecided: CefPermissionKind = []
+    var undecided: CefPermissionRequest.Kinds = []
 
     /// Sorts `kinds` by the stored setting of each: a kind is allowed or
     /// blocked when every site permission it maps to is, and undecided
-    /// otherwise, as is ``CefPermissionKind/other``.
-    init(kinds: CefPermissionKind, setting: (CefSitePermission) -> CefSitePermission.Setting) {
+    /// otherwise, as is ``CefPermissionRequest/Kinds/other``.
+    init(kinds: CefPermissionRequest.Kinds, setting: (CefSitePermission) -> CefSitePermission.Setting) {
         for kind in kinds.members {
             let settings = kind.sitePermissions.map(setting)
             if !settings.isEmpty, settings.allSatisfy({ $0 == .allow }) {
@@ -48,14 +48,14 @@ struct CefStoredPermissionAnswer: Equatable {
 
     /// The kinds granted once the delegate has answered about
     /// ``undecided`` with `decision` (`nil` when it was not asked).
-    func granted(after decision: CefPermissionDecision?) -> CefPermissionKind {
+    func granted(after decision: CefPermissionDecision?) -> CefPermissionRequest.Kinds {
         decision?.grants == true ? allowed.union(undecided) : allowed
     }
 }
 
 extension CefBrowser {
     /// The profile this browser stores site settings in.
-    var siteSettingsProfile: CefProfile { options.profile ?? .default }
+    var siteSettingsProfile: CefProfile { configuration.profile ?? .default }
 
     /// What the profile stores about `request`'s kinds for its origin.
     func storedAnswer(to request: CefPermissionRequest) -> CefStoredPermissionAnswer {
@@ -68,7 +68,7 @@ extension CefBrowser {
 
     /// Stores `decision` for `kinds` on `origin` when it is one of the
     /// remembering decisions.
-    func remember(_ decision: CefPermissionDecision, for kinds: CefPermissionKind, origin: String) {
+    func remember(_ decision: CefPermissionDecision, for kinds: CefPermissionRequest.Kinds, origin: String) {
         let setting: CefSitePermission.Setting
         switch decision {
         case .alwaysAllow: setting = .allow

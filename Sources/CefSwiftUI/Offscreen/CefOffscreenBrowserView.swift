@@ -16,7 +16,7 @@ import Foundation
 /// When its window is occluded or miniaturized, or the view is hidden, the
 /// view tells the browser it is hidden, and Chromium stops painting.
 ///
-/// `CefWebView` uses this for browsers whose ``CefBrowserOptions/rendering``
+/// `CefWebView` uses this for browsers whose ``CefBrowser/Configuration/rendering``
 /// is `.offscreen`; use it directly in AppKit by assigning ``browser``.
 @MainActor
 public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
@@ -40,7 +40,7 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
     lazy var accessibilityBridge = CefOffscreenAccessibilityBridge(view: self)
 
     /// Whether the view draws the built-in swipe indicator that
-    /// ``CefBrowserOptions/navigationGestureIndicator`` chooses. `CefWebView`
+    /// ``CefBrowser/Configuration/navigationGestureIndicator`` chooses. `CefWebView`
     /// turns it off for an indicator of the app's own.
     public var showsBuiltInGestureIndicator = true {
         didSet {
@@ -450,9 +450,9 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
 // MARK: - Gestures
 
 // Pinch and smart magnify change the page zoom (``CefBrowser/zoomLevel``),
-// swipes navigate when ``CefBrowserOptions/allowsBackForwardNavigationGestures``
+// swipes navigate when ``CefBrowser/Configuration/allowsBackForwardNavigationGestures``
 // is set, and raw trackpad touches reach the page only when
-// ``CefBrowserOptions/forwardsRawTouchEvents`` is set.
+// ``CefBrowser/Configuration/forwardsRawTouchEvents`` is set.
 extension CefOffscreenBrowserView {
 
     /// The zoom level a smart magnify toggles to; each level is a factor of
@@ -502,7 +502,7 @@ extension CefOffscreenBrowserView {
     }
 
     private func forwardTouches(in event: NSEvent, phase: NSTouch.Phase, as touchPhase: CefTouchEvent.Phase) {
-        guard let browser, browser.options.forwardsRawTouchEvents else { return }
+        guard let browser, browser.configuration.forwardsRawTouchEvents else { return }
         let size = bounds.size
         for touch in event.touches(matching: phase, in: self) {
             // Trackpad touches have normalized, bottom-left positions.

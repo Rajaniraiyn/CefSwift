@@ -18,8 +18,8 @@ extension SelfTest {
         await settingsPageChecks()
         // "Hold ⌘Q to Quit" is an application-wide setting, not a profile's.
         check("preference: configured application-wide preference applied",
-              CefRuntime.shared.preference("browser.confirm_to_quit")?.boolValue == false,
-              detail: "\(String(describing: CefRuntime.shared.preference("browser.confirm_to_quit")))")
+              CefRuntime.shared.preferences.value(named: "browser.confirm_to_quit")?.boolValue == false,
+              detail: "\(String(describing: CefRuntime.shared.preferences.value(named: "browser.confirm_to_quit")))")
     }
 
     // MARK: Bridge, as the Showcase uses it
@@ -31,9 +31,9 @@ extension SelfTest {
             total += amount
             return total
         }
-        var options = CefBrowserOptions()
-        options.bridges = [counter]
-        let browser = CefBrowser(url: URL(string: "selftest://edge/tab.html")!, options: options)
+        var configuration = CefBrowser.Configuration()
+        configuration.bridges = [counter]
+        let browser = CefBrowser(url: URL(string: "selftest://edge/tab.html")!, configuration: configuration)
         let window = CefBrowserWindow(browser: browser)
         window.show()
         _ = await waitUntil { browser.title == "tab" }
@@ -218,9 +218,9 @@ extension SelfTest {
         """
 
     static func settingsPageChecks() async {
-        var options = CefBrowserOptions()
-        options.userScripts = [.styleSheet(settingsStyles, matching: "chrome://settings/*")]
-        let browser = CefBrowser(url: URL(string: "chrome://settings/")!, options: options)
+        var configuration = CefBrowser.Configuration()
+        configuration.userScripts = [.styleSheet(settingsStyles, matching: "chrome://settings/*")]
+        let browser = CefBrowser(url: URL(string: "chrome://settings/")!, configuration: configuration)
         let window = CefBrowserWindow(browser: browser)
         window.show()
         _ = await waitUntil { browser.title == "Settings" && !browser.isLoading }
@@ -307,7 +307,7 @@ final class Recorder: CefBrowserDelegate {
     private(set) var terminations: [CefTerminationReason] = []
 
     func browser(_ browser: CefBrowser, decideDestinationFor download: CefDownload, suggestedName: String) async -> CefDownloadDecision {
-        downloadDestination.map { .allow(destination: $0.appendingPathComponent(suggestedName)) } ?? .deny
+        downloadDestination.map { .save(to: $0.appendingPathComponent(suggestedName)) } ?? .cancel
     }
 
     func browser(_ browser: CefBrowser, confirmLeavingPage isReload: Bool) async -> Bool {

@@ -161,7 +161,7 @@ private actor ProbeActor {
     }
 }
 
-@Suite struct EnergySaverTests {
+@Suite struct EnergyPolicyTests {
     @Test func constrainedInLowPowerModeOrUnderSeriousHeat() {
         #expect(CefEnergyConditions(isLowPowerModeEnabled: true, thermalState: .nominal).isConstrained)
         #expect(CefEnergyConditions(isLowPowerModeEnabled: false, thermalState: .serious).isConstrained)
@@ -170,9 +170,9 @@ private actor ProbeActor {
     }
 
     @Test func presets() {
-        #expect(CefEnergySaver.automatic.reducedOffscreenFrameRate == 30)
-        #expect(CefEnergySaver.off.reducedOffscreenFrameRate == nil)
-        #expect(CefEnergySaver(reducedOffscreenFrameRate: 0).reducedOffscreenFrameRate == 1)
+        #expect(CefRuntime.EnergyPolicy.automatic.reducedOffscreenFrameRate == 30)
+        #expect(CefRuntime.EnergyPolicy.disabled.reducedOffscreenFrameRate == nil)
+        #expect(CefRuntime.EnergyPolicy(reducedOffscreenFrameRate: 0).reducedOffscreenFrameRate == 1)
     }
 
     @Test func lifecycleVisibility() {

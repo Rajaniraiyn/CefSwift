@@ -1,7 +1,7 @@
 import os
 
 /// CefSwift's own diagnostics, in the unified log under the `CefSwift`
-/// subsystem (Chromium's log is configured by `CefConfiguration.logFile`).
+/// subsystem (Chromium's log is configured by `CefRuntime.Configuration.logFile`).
 enum CefLog {
     private static let logger = Logger(subsystem: "CefSwift", category: "runtime")
 

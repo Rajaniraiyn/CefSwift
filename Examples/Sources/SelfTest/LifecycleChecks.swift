@@ -16,7 +16,7 @@ extension SelfTest {
         }
         await tabGroupChecks(.windowed)
         await tabGroupChecks(.chromeStyle)
-        await energySaverChecks()
+        await energyPolicyChecks()
     }
 
     /// Whether the browser and its page agree that it is visible (or
@@ -143,7 +143,7 @@ extension SelfTest {
             """).intValue) ?? 0
     }
 
-    static func energySaverChecks() async {
+    static func energyPolicyChecks() async {
         guard let hosted = await HostedBenchmarkBrowser(.offscreen, url: URL(string: "selftest://bench/animated.html")!) else { return }
         _ = await waitUntil { hosted.browser.title == "animated" }
         try? await Task.sleep(for: .milliseconds(500))
@@ -165,9 +165,9 @@ extension SelfTest {
         let shownAgain = await sample()
         CefRuntime.shared.simulateEnergyConditions(lowPowerMode: false, thermalState: .serious)
         let hot = await sample()
-        CefRuntime.shared.energySaver = .off
+        CefRuntime.shared.energyPolicy = .disabled
         let off = await sample()
-        CefRuntime.shared.energySaver = .automatic
+        CefRuntime.shared.energyPolicy = .automatic
         CefRuntime.shared.stopSimulatingEnergyConditions()
         let back = await sample()
         // On battery with Low Power Mode on, the Mac itself constrains energy.

@@ -36,7 +36,7 @@ extension SelfTest {
         let browser = CefBrowser(url: URL(string: "http://127.0.0.1:\(server.port)/page")!)
         var configuration = CefBrowserWindow.Configuration()
         configuration.frame = CGRect(x: 160, y: 160, width: 900, height: 640)
-        var ui = CefChromiumUI()
+        var ui = CefBrowserWindow.ChromiumUI()
         ui[.statusBubble] = .hidden
         ui[.zoom] = .hidden
         configuration.chromiumUI = ui
@@ -306,9 +306,9 @@ extension SelfTest {
     /// Chrome-style windows swipe with Chrome's `HistorySwiper`; these
     /// checks drive its `HistoryOverlayController` as the swiper does.
     static func chromeSwipeChecks() async {
-        var options = CefBrowserOptions()
-        options.allowsBackForwardNavigationGestures = true
-        let browser = CefBrowser(url: URL(string: "selftest://app/second.html")!, options: options)
+        var configuration = CefBrowser.Configuration()
+        configuration.allowsBackForwardNavigationGestures = true
+        let browser = CefBrowser(url: URL(string: "selftest://app/second.html")!, configuration: configuration)
         let window = CefBrowserWindow(browser: browser)
         window.show()
         _ = await waitUntil { browser.title == "second" }
@@ -369,12 +369,12 @@ extension SelfTest {
 
     /// The built-in indicator in views, offscreen and windowed.
     static func viewSwipeIndicatorChecks() async {
-        for rendering in [CefRendering.windowed, .offscreen] {
+        for rendering in [CefBrowser.Rendering.windowed, .offscreen] {
             let name = rendering == .windowed ? "windowed" : "offscreen"
-            var options = CefBrowserOptions()
-            options.rendering = rendering
-            options.allowsBackForwardNavigationGestures = true
-            let browser = CefBrowser(url: URL(string: "selftest://app/second.html")!, options: options)
+            var configuration = CefBrowser.Configuration()
+            configuration.rendering = rendering
+            configuration.allowsBackForwardNavigationGestures = true
+            let browser = CefBrowser(url: URL(string: "selftest://app/second.html")!, configuration: configuration)
             let view: NSView
             if rendering == .windowed {
                 let windowed = CefWindowedBrowserView()

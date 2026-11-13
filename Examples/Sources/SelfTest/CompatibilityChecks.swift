@@ -45,15 +45,15 @@ extension SelfTest {
         bridge.handle("greet") { (person: [String: String], call: CefBridgeCall) in
             "Hello, \(person["name"] ?? "") from \(call.isMainFrame ? "main" : "sub")!"
         }
-        var options = CefBrowserOptions()
-        options.bridges = [bridge]
-        options.userScripts = [
+        var configuration = CefBrowser.Configuration()
+        configuration.bridges = [bridge]
+        configuration.userScripts = [
             CefUserScript(source: "window.__start = document.readyState;"),
             CefUserScript(
                 source: "document.body.dataset.end = document.readyState;",
                 injectionTime: .documentEnd, frames: .mainFrame),
         ]
-        let browser = CefBrowser(url: URL(string: "selftest://app/compat.html")!, options: options)
+        let browser = CefBrowser(url: URL(string: "selftest://app/compat.html")!, configuration: configuration)
         let view = CefWindowedBrowserView()
         view.frame = window.contentView!.bounds
         window.contentView!.addSubview(view)
@@ -94,11 +94,11 @@ extension SelfTest {
     private static func offscreenGeometryChecks() async {
         // A window draws at the display's rate whatever the energy saver
         // does; compare at full rate, as on a Mac on power.
-        CefRuntime.shared.energySaver = .off
-        defer { CefRuntime.shared.energySaver = .automatic }
-        var options = CefBrowserOptions()
-        options.rendering = .offscreen
-        let browser = CefBrowser(url: URL(string: "selftest://app/compat.html")!, options: options)
+        CefRuntime.shared.energyPolicy = .disabled
+        defer { CefRuntime.shared.energyPolicy = .automatic }
+        var configuration = CefBrowser.Configuration()
+        configuration.rendering = .offscreen
+        let browser = CefBrowser(url: URL(string: "selftest://app/compat.html")!, configuration: configuration)
         let view = CefOffscreenBrowserView()
         view.frame = window.contentView!.bounds
         window.contentView!.addSubview(view)

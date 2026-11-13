@@ -24,7 +24,7 @@ final class CefBrowserClient {
     weak var offscreenHost: CefOffscreenHost?
 
     let requestFilter: CefRequestFilter?
-    let chromeUI: CefChromeUIConfiguration
+    let chromeToolbar: CefRuntime.Configuration.ChromeToolbar
 
     /// Handler structs, readable from any thread (CEF calls the getters from
     /// the IO thread too). Emptied when the last browser closes, which breaks
@@ -44,11 +44,11 @@ final class CefBrowserClient {
     /// The most recent context-menu target, for commands that arrive later.
     var contextMenuTarget = CefContextMenuTarget()
 
-    init(browser: CefBrowser?, requestFilter: CefRequestFilter?, chromeUI: CefChromeUIConfiguration) {
+    init(browser: CefBrowser?, requestFilter: CefRequestFilter?, chromeToolbar: CefRuntime.Configuration.ChromeToolbar) {
         self.primary = browser
         self.pending = browser
         self.requestFilter = requestFilter
-        self.chromeUI = chromeUI
+        self.chromeToolbar = chromeToolbar
         self.isDefaultClient = browser == nil
     }
 
@@ -109,7 +109,7 @@ final class CefBrowserClient {
         // window, or a tab opened through Chrome's own UI.
         let isPopup = browser.pointee.is_popup(browser) != 0
         let opener = isPopup ? primary : nil
-        let profile = opener?.options.profile ?? CefProfile.owning(contextOf: browser)
+        let profile = opener?.configuration.profile ?? CefProfile.owning(contextOf: browser)
         let wrapper = CefBrowser(adopting: CefRef(adopting: browser), client: self, opener: opener, profile: profile)
         if isPopup {
             wrapper.popupFeatures = pendingPopupFeatures

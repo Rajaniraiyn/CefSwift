@@ -76,9 +76,9 @@ public final class CefMediaRouter {
     private init() {}
 
     /// Whether Chromium's media router runs: not when the `MediaRouter`
-    /// feature is turned off, as ``CefConfiguration/embedded`` does.
+    /// feature is turned off, as ``CefRuntime/Configuration/embedded`` does.
     public var isAvailable: Bool {
-        guard let configuration = CefRuntime.shared.configuration, CefRuntime.shared.isInitialized else { return false }
+        guard let configuration = CefRuntime.shared.configuration, CefRuntime.shared.isRunning else { return false }
         return !configuration.disabledFeatures.contains("MediaRouter")
     }
 

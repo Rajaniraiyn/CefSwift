@@ -43,7 +43,7 @@ final class CefPageScripting {
 
     private var configuration: CefJSON {
         guard let browser else { return .null }
-        return Self.configuration(bridges: browser.options.bridges, scripts: browser.userScripts, generation: generation)
+        return Self.configuration(bridges: browser.configuration.bridges, scripts: browser.userScripts, generation: generation)
     }
 
     /// A browser's `extra_info` for creation, with one reference, which the
@@ -167,7 +167,7 @@ final class CefPageScripting {
             var reader = payload.reader
             reader.skipHeader()
             guard let browser, let name = try? reader.readString(),
-                  let bridge = browser.options.bridges.first(where: { $0.name == name })
+                  let bridge = browser.configuration.bridges.first(where: { $0.name == name })
             else { return true }
             bridge.received(payload, reader: reader, in: browser, from: frame)
         default:

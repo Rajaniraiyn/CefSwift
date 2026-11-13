@@ -169,7 +169,7 @@ final class CefInternalServices {
     /// The host to call `module` on: one already running, or the first the
     /// profile can open.
     private func runningHost(for module: CefServiceModule) throws -> CefServiceHostBrowser {
-        guard CefRuntime.shared.isInitialized, !CefRuntime.shared.isTerminating else {
+        guard CefRuntime.shared.isRunning, !CefRuntime.shared.isTerminating else {
             throw CefError.notInitialized
         }
         if let running = module.hosts.lazy.compactMap({ self.hosts[$0] }).first {
@@ -346,17 +346,17 @@ final class CefServiceHostBrowser {
     }
 
     private func launch() async throws -> CefBrowser {
-        var options = CefBrowserOptions()
-        options.profile = profile
-        options.bridges = [eventBridge]
+        var configuration = CefBrowser.Configuration()
+        configuration.profile = profile
+        configuration.bridges = [eventBridge]
         let browser = CefBrowser(
-            url: URL(string: host.document), options: options, delegate: delegate)
+            url: URL(string: host.document), configuration: configuration, delegate: delegate)
         CefRuntime.shared.registerServiceBrowser(browser)
-        var configuration = CefBrowserWindow.Configuration()
+        var windowConfiguration = CefBrowserWindow.Configuration()
         // The compositor sizes its buffers to the window.
-        configuration.frame = CGRect(x: 0, y: 0, width: 1, height: 1)
-        configuration.titleFollowsPage = false
-        let window = CefBrowserWindow(browser: browser, configuration: configuration)
+        windowConfiguration.frame = CGRect(x: 0, y: 0, width: 1, height: 1)
+        windowConfiguration.titleFollowsPage = false
+        let window = CefBrowserWindow(browser: browser, configuration: windowConfiguration)
         window.isService = true
         window.onClose = { [weak self] in self?.windowDidClose() }
         self.browser = browser

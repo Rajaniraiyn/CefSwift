@@ -4,8 +4,8 @@ import SwiftUI
 
 extension CefBrowserWindow {
     /// Replaces one of Chromium's surfaces with a SwiftUI view, shown in a
-    /// panel under the kind's anchor (``CefChromiumUI/anchors``, or
-    /// ``CefChromiumUI/anchor`` for surfaces that hang from the toolbar), or
+    /// panel under the kind's anchor (``CefBrowserWindow/ChromiumUI/anchors``, or
+    /// ``CefBrowserWindow/ChromiumUI/anchor`` for surfaces that hang from the toolbar), or
     /// at the top right of the page. The panel closes when the surface is
     /// dismissed (``CefChromiumSurface/dismiss()``), on Esc, and on a click
     /// elsewhere.

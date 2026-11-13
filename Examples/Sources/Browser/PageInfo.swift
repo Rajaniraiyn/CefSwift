@@ -41,7 +41,7 @@ struct PageInfoView: View {
         return URL(string: "\(scheme)://\(host)\(url.port.map { ":\($0)" } ?? "")")
     }
 
-    private var siteSettings: CefSiteSettings { (browser.options.profile ?? .default).siteSettings }
+    private var siteSettings: CefSiteSettings { (browser.configuration.profile ?? .default).siteSettings }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {

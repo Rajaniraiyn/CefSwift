@@ -2,68 +2,72 @@ import AppKit
 import CCef
 import Foundation
 
-/// A reason a browser cannot be discarded right now.
-public enum CefDiscardBlocker: Sendable, Hashable, CustomStringConvertible {
-    /// The browser is on screen: the selected tab of a visible window, or
-    /// a view in one.
-    case visible
-    /// ``CefBrowser/allowsDiscarding`` is off, or an extension protects the
-    /// tab.
-    case exempt
-    /// The browser is not open, is still loading, or shows DevTools.
-    case notLoaded
-    /// The page is playing sound, or did so in the last minute.
-    case playingAudio
-    /// The page uses the camera, microphone or screen capture, or is being
-    /// cast.
-    case capturingMedia
-    /// The page shows picture in picture.
-    case pictureInPicture
-    /// The page is connected to a Bluetooth or USB device.
-    case connectedToDevice
-    /// The user has typed into the page or changed its form fields.
-    case formInteraction
-    /// The page has a `beforeunload` handler: it may ask before it is left.
-    case beforeUnloadHandler
-    /// The browser's DevTools window is open.
-    case devToolsOpen
-    /// A download the browser started is still in progress.
-    case downloading
-    /// CefKit could not tell whether the page may be unloaded, and keeps it:
-    /// a check failed or timed out, Chromium gave a reason CefKit does not
-    /// know, or Chromium lists no tab, or more than one, that could be this
-    /// browser's. The string says which.
-    case unknown(String)
+extension CefBrowser {
+    /// A reason a browser cannot be discarded right now.
+    public enum DiscardBlocker: Sendable, Hashable, CustomStringConvertible {
+        /// The browser is on screen: the selected tab of a visible window, or
+        /// a view in one.
+        case visible
+        /// ``CefBrowser/allowsDiscarding`` is off, or an extension protects the
+        /// tab.
+        case exempt
+        /// The browser is not open, is still loading, or shows DevTools.
+        case notLoaded
+        /// The page is playing sound, or did so in the last minute.
+        case playingAudio
+        /// The page uses the camera, microphone or screen capture, or is being
+        /// cast.
+        case capturingMedia
+        /// The page shows picture in picture.
+        case pictureInPicture
+        /// The page is connected to a Bluetooth or USB device.
+        case connectedToDevice
+        /// The user has typed into the page or changed its form fields.
+        case formInteraction
+        /// The page has a `beforeunload` handler: it may ask before it is left.
+        case beforeUnloadHandler
+        /// The browser's DevTools window is open.
+        case devToolsOpen
+        /// A download the browser started is still in progress.
+        case downloading
+        /// CefKit could not tell whether the page may be unloaded, and keeps it:
+        /// a check failed or timed out, Chromium gave a reason CefKit does not
+        /// know, or Chromium lists no tab, or more than one, that could be this
+        /// browser's. The string says which.
+        case unknown(String)
 
-    public var description: String {
-        switch self {
-        case .visible: "visible"
-        case .exempt: "exempt"
-        case .notLoaded: "notLoaded"
-        case .playingAudio: "playingAudio"
-        case .capturingMedia: "capturingMedia"
-        case .pictureInPicture: "pictureInPicture"
-        case .connectedToDevice: "connectedToDevice"
-        case .formInteraction: "formInteraction"
-        case .beforeUnloadHandler: "beforeUnloadHandler"
-        case .devToolsOpen: "devToolsOpen"
-        case .downloading: "downloading"
-        case .unknown(let reason): "unknown(\(reason))"
+        public var description: String {
+            switch self {
+            case .visible: "visible"
+            case .exempt: "exempt"
+            case .notLoaded: "notLoaded"
+            case .playingAudio: "playingAudio"
+            case .capturingMedia: "capturingMedia"
+            case .pictureInPicture: "pictureInPicture"
+            case .connectedToDevice: "connectedToDevice"
+            case .formInteraction: "formInteraction"
+            case .beforeUnloadHandler: "beforeUnloadHandler"
+            case .devToolsOpen: "devToolsOpen"
+            case .downloading: "downloading"
+            case .unknown(let reason): "unknown(\(reason))"
+            }
         }
     }
 }
 
-/// Why ``CefBrowser/discard()`` did not discard a browser.
-public enum CefDiscardError: Error, Sendable, Equatable, CustomStringConvertible {
-    /// Something on the page, or the browser's situation, keeps it loaded.
-    case blocked(Set<CefDiscardBlocker>)
-    /// Chromium did not discard the page.
-    case failed(String)
+extension CefBrowser {
+    /// Why ``CefBrowser/discard()`` did not discard a browser.
+    public enum DiscardError: Error, Sendable, Equatable, CustomStringConvertible {
+        /// Something on the page, or the browser's situation, keeps it loaded.
+        case blocked(Set<CefBrowser.DiscardBlocker>)
+        /// Chromium did not discard the page.
+        case failed(String)
 
-    public var description: String {
-        switch self {
-        case .blocked(let blockers): "not discardable: " + blockers.map(\.description).sorted().joined(separator: ", ")
-        case .failed(let message): message
+        public var description: String {
+            switch self {
+            case .blocked(let blockers): "not discardable: " + blockers.map(\.description).sorted().joined(separator: ", ")
+            case .failed(let message): message
+            }
         }
     }
 }
@@ -122,7 +126,7 @@ extension CefBrowser {
     /// back/forward list starts again from the current page. In both cases
     /// bridges and user scripts work as before, DevTools event streams keep
     /// delivering, and form input that was not submitted is lost.
-    public func discard() async throws(CefDiscardError) {
+    public func discard() async throws(CefBrowser.DiscardError) {
         guard !isDiscarded else { return }
         guard discardPhase == .none else { throw .failed("The browser is already being discarded or restored.") }
         let checkpoint = DiscardCheckpoint(self)
@@ -148,7 +152,7 @@ extension CefBrowser {
             throw error
         }
         discardSnapshot = snapshot
-        CefRuntime.shared.memorySaverMonitor.browserDidDiscard(self)
+        CefRuntime.shared.discardMonitor.browserDidDiscard(self)
         delegate?.browserDidDiscard(self)
     }
 
@@ -162,7 +166,7 @@ extension CefBrowser {
             raw.map { $0.pointer.pointee.reload($0.pointer) }
         case .closed:
             guard state == .live else { return }
-            if case .offscreen = options.rendering, let offscreenHost = restoringOffscreenHost {
+            if case .offscreen = configuration.rendering, let offscreenHost = restoringOffscreenHost {
                 host(offscreenIn: offscreenHost, size: offscreenHost.offscreenViewInfo.size)
             } else if let view = hostView, view.window != nil {
                 host(windowedIn: view)
@@ -182,8 +186,8 @@ extension CefBrowser {
     /// `beforeunload` handler. Browsers in a `CefWebView` report audio and
     /// form input only for `<audio>`, `<video>`, `<input>` and `<textarea>`
     /// elements of the main frame. A check that cannot be made counts as a
-    /// blocker, ``CefDiscardBlocker/unknown(_:)``.
-    public func discardBlockers() async -> Set<CefDiscardBlocker> {
+    /// blocker, ``CefBrowser/DiscardBlocker/unknown(_:)``.
+    public func discardBlockers() async -> Set<CefBrowser.DiscardBlocker> {
         guard !isDiscarded else { return [] }
         var blockers = stateBlockers()
         if discardPhase != .none { blockers.insert(.notLoaded) }
@@ -202,8 +206,8 @@ extension CefBrowser {
     }
 
     /// The blockers CefKit knows without asking the page.
-    private func stateBlockers() -> Set<CefDiscardBlocker> {
-        var blockers = Set<CefDiscardBlocker>()
+    private func stateBlockers() -> Set<CefBrowser.DiscardBlocker> {
+        var blockers = Set<CefBrowser.DiscardBlocker>()
         if !allowsDiscarding { blockers.insert(.exempt) }
         guard state == .live, raw != nil, !isBootstrapping, !isLoading, let url, url.scheme != "devtools" else {
             blockers.insert(.notLoaded)
@@ -218,7 +222,7 @@ extension CefBrowser {
 
     /// Throws unless the browser is still on the document `checkpoint` saw
     /// and nothing CefKit knows of keeps it loaded.
-    private func checkStillDiscardable(since checkpoint: DiscardCheckpoint) throws(CefDiscardError) {
+    private func checkStillDiscardable(since checkpoint: DiscardCheckpoint) throws(CefBrowser.DiscardError) {
         guard !isDiscarded, state == .live else { throw .failed("The browser was discarded, restored or closed meanwhile.") }
         let blockers = stateBlockers()
         guard blockers.isEmpty else { throw .blocked(blockers) }
@@ -235,7 +239,7 @@ extension CefBrowser {
     /// Chromium's list of tabs carries no identifier CefKit can map to a
     /// browser, only each tab's address and title, so the discard goes ahead
     /// only when exactly one tab matches (``CefTabDiscarder``).
-    private func discardInChromium() async throws(CefDiscardError) {
+    private func discardInChromium() async throws(CefBrowser.DiscardError) {
         // CEF stops counting a tab's frames when Chromium discards it. A
         // browser of CefKit's that lost its frames although it was not the
         // one asked for was discarded in its place.
@@ -263,7 +267,7 @@ extension CefBrowser {
 
     /// Closes the Chromium browser and keeps this one, to be created again
     /// in the same view.
-    private func discardByClosing() async throws(CefDiscardError) {
+    private func discardByClosing() async throws(CefBrowser.DiscardError) {
         discardPhase = .closing
         let closing: Void? = withHost { $0.pointee.close_browser($0, 1) }
         guard closing != nil else {
@@ -374,7 +378,7 @@ extension CefBrowser {
 
     /// For browsers Chromium's discard rules do not cover: playing media
     /// and edited form fields in the main frame.
-    private func pageContentBlockers() async -> Set<CefDiscardBlocker> {
+    private func pageContentBlockers() async -> Set<CefBrowser.DiscardBlocker> {
         let state = await withTimeout(.seconds(3)) {
             try await self.pageScripting.evaluate("""
                 ({
@@ -389,7 +393,7 @@ extension CefBrowser {
         guard let audio = state?["audio"].boolValue, let edited = state?["edited"].boolValue else {
             return [.unknown("Could not read the page's media and form fields.")]
         }
-        var blockers = Set<CefDiscardBlocker>()
+        var blockers = Set<CefBrowser.DiscardBlocker>()
         if audio { blockers.insert(.playingAudio) }
         if edited { blockers.insert(.formInteraction) }
         return blockers

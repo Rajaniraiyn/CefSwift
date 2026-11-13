@@ -32,23 +32,23 @@ struct HandlerLogicTests {
     @Test func permissionRequestTypeMapping() {
         let cameraMic = UInt32(CEF_PERMISSION_TYPE_CAMERA_STREAM.rawValue)
             | UInt32(CEF_PERMISSION_TYPE_MIC_STREAM.rawValue)
-        let kinds = CefPermissionKind.fromRequestTypes(cameraMic)
+        let kinds = CefPermissionRequest.Kinds.fromRequestTypes(cameraMic)
         #expect(kinds.contains(.camera))
         #expect(kinds.contains(.microphone))
         #expect(!kinds.contains(.geolocation))
 
-        let geo = CefPermissionKind.fromRequestTypes(UInt32(CEF_PERMISSION_TYPE_GEOLOCATION.rawValue))
+        let geo = CefPermissionRequest.Kinds.fromRequestTypes(UInt32(CEF_PERMISSION_TYPE_GEOLOCATION.rawValue))
         #expect(geo.contains(.geolocation))
 
         // An unmapped type surfaces as .other rather than vanishing.
-        let unmapped = CefPermissionKind.fromRequestTypes(UInt32(CEF_PERMISSION_TYPE_VR_SESSION.rawValue))
+        let unmapped = CefPermissionRequest.Kinds.fromRequestTypes(UInt32(CEF_PERMISSION_TYPE_VR_SESSION.rawValue))
         #expect(unmapped.contains(.other))
     }
 
     @Test func mediaPermissionMapping() {
         let audioVideo = UInt32(CEF_MEDIA_PERMISSION_DEVICE_AUDIO_CAPTURE.rawValue)
             | UInt32(CEF_MEDIA_PERMISSION_DEVICE_VIDEO_CAPTURE.rawValue)
-        let kinds = CefPermissionKind.fromMediaTypes(audioVideo)
+        let kinds = CefPermissionRequest.Kinds.fromMediaTypes(audioVideo)
         #expect(kinds.contains(.microphone))
         #expect(kinds.contains(.camera))
 
@@ -131,7 +131,7 @@ struct ProfilePathTests {
     }
 
     @Test func bothEnginesUseTheRootDerivedFromAnExplicitCacheDirectory() {
-        var configuration = CefConfiguration()
+        var configuration = CefRuntime.Configuration()
         configuration.cacheDirectory = URL(fileURLWithPath: "/tmp/app/Data/Default")
         #expect(configuration.resolvedRootCacheDirectory.path == "/tmp/app/Data")
         let storage = CefProfile.storage(for: .persistent(id: "work"), rootCacheDirectory: configuration.resolvedRootCacheDirectory)

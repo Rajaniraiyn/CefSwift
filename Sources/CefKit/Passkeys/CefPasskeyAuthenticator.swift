@@ -1,7 +1,7 @@
 import Foundation
 
-/// Answers one browser's WebAuthn requests for ``CefPasskeyMode/app(_:)``
-/// and ``CefPasskeyMode/disabled``, through the DevTools Protocol.
+/// Answers one browser's WebAuthn requests for ``CefBrowser/PasskeyPolicy/app(_:)``
+/// and ``CefBrowser/PasskeyPolicy/disabled``, through the DevTools Protocol.
 ///
 /// - `WebAuthn.enable`, without Chromium's UI, puts the browser's pages in a
 ///   virtual authenticator environment: Chromium's own dialog, security
@@ -28,7 +28,7 @@ import Foundation
 @MainActor
 final class CefPasskeyAuthenticator {
     private weak var browser: CefBrowser?
-    private let mode: CefPasskeyMode
+    private let mode: CefBrowser.PasskeyPolicy
 
     private struct Context {
         var origin: String
@@ -57,7 +57,7 @@ final class CefPasskeyAuthenticator {
     /// The address the document-start script reports its pause under.
     nonisolated static let holdScriptURL = "cefswift://passkeys/document-start.js"
 
-    init(browser: CefBrowser, mode: CefPasskeyMode) {
+    init(browser: CefBrowser, mode: CefBrowser.PasskeyPolicy) {
         self.browser = browser
         self.mode = mode
     }
@@ -224,7 +224,7 @@ final class CefPasskeyAuthenticator {
         let mode = mode
         let decided = await browser.decision(.page) { delegate in
             await Self.decide(request, mode: mode) { request in
-                await delegate.browser(browser, decidePasskeyRequest: request)
+                await delegate.browser(browser, decidePasskeyFor: request)
             } failed: { error in
                 delegate.browser(browser, passkeyStoreDidFail: error)
             }
@@ -268,7 +268,7 @@ final class CefPasskeyAuthenticator {
     /// a key the page receives cannot be withdrawn once its save fails, and
     /// an assertion needs the store's passkeys.
     static func decide(
-        _ request: CefPasskeyRequest, mode: CefPasskeyMode,
+        _ request: CefPasskeyRequest, mode: CefBrowser.PasskeyPolicy,
         ask: (CefPasskeyRequest) async -> CefPasskeyDecision,
         failed: (CefPasskeyStoreError) -> Void
     ) async -> CefPasskeyDecision {

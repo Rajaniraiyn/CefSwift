@@ -1,59 +1,61 @@
 import AppKit
 import Foundation
 
-/// When CefKit discards hidden browsers on its own to free memory; set it
-/// as ``CefRuntime/memorySaver``.
-///
-/// ```swift
-/// CefRuntime.shared.memorySaver = .after(.seconds(30 * 60))     // and under memory pressure
-/// CefRuntime.shared.memorySaver = .underMemoryPressure     // only when macOS runs low
-/// CefRuntime.shared.memorySaver = .off                     // the default
-/// ```
-///
-/// A browser counts as hidden while it is off screen: a window tab that is
-/// not selected, a minimized or hidden window, or a `CefWebView` that is not
-/// in a visible window. Each browser is discarded at most once per hidden
-/// spell, and only when ``CefBrowser/discardBlockers()`` allows.
-public struct CefMemorySaver: Sendable, Equatable {
-    /// How long a browser has to stay hidden before it is discarded; `nil`
-    /// discards none for that reason.
-    public var hiddenDuration: Duration?
-    /// Whether every hidden browser is discarded when macOS reports memory
-    /// pressure.
-    public var discardsUnderMemoryPressure: Bool
+extension CefRuntime {
+    /// When CefKit discards hidden browsers on its own to free memory; set it
+    /// as ``CefRuntime/discardPolicy``.
+    ///
+    /// ```swift
+    /// CefRuntime.shared.discardPolicy = .after(.seconds(30 * 60))     // and under memory pressure
+    /// CefRuntime.shared.discardPolicy = .underMemoryPressure     // only when macOS runs low
+    /// CefRuntime.shared.discardPolicy = .disabled                      // the default
+    /// ```
+    ///
+    /// A browser counts as hidden while it is off screen: a window tab that is
+    /// not selected, a minimized or hidden window, or a `CefWebView` that is not
+    /// in a visible window. Each browser is discarded at most once per hidden
+    /// spell, and only when ``CefBrowser/discardBlockers()`` allows.
+    public struct DiscardPolicy: Sendable, Equatable {
+        /// How long a browser has to stay hidden before it is discarded; `nil`
+        /// discards none for that reason.
+        public var hiddenDuration: Duration?
+        /// Whether every hidden browser is discarded when macOS reports memory
+        /// pressure.
+        public var discardsUnderMemoryPressure: Bool
 
-    public init(hiddenDuration: Duration? = nil, discardsUnderMemoryPressure: Bool = false) {
-        self.hiddenDuration = hiddenDuration
-        self.discardsUnderMemoryPressure = discardsUnderMemoryPressure
-    }
+        public init(hiddenDuration: Duration? = nil, discardsUnderMemoryPressure: Bool = false) {
+            self.hiddenDuration = hiddenDuration
+            self.discardsUnderMemoryPressure = discardsUnderMemoryPressure
+        }
 
-    /// Discards nothing on its own.
-    public static let off = CefMemorySaver()
+        /// Discards nothing on its own.
+        public static let disabled = CefRuntime.DiscardPolicy()
 
-    /// Discards browsers hidden for `duration`, and, unless told otherwise,
-    /// every hidden browser under memory pressure.
-    public static func after(_ duration: Duration, orUnderMemoryPressure: Bool = true) -> CefMemorySaver {
-        CefMemorySaver(hiddenDuration: duration, discardsUnderMemoryPressure: orUnderMemoryPressure)
-    }
+        /// Discards browsers hidden for `duration`, and, unless told otherwise,
+        /// every hidden browser under memory pressure.
+        public static func after(_ duration: Duration, orUnderMemoryPressure: Bool = true) -> CefRuntime.DiscardPolicy {
+            CefRuntime.DiscardPolicy(hiddenDuration: duration, discardsUnderMemoryPressure: orUnderMemoryPressure)
+        }
 
-    /// Discards every hidden browser when macOS reports memory pressure.
-    public static let underMemoryPressure = CefMemorySaver(discardsUnderMemoryPressure: true)
+        /// Discards every hidden browser when macOS reports memory pressure.
+        public static let underMemoryPressure = CefRuntime.DiscardPolicy(discardsUnderMemoryPressure: true)
 
-    /// How often hidden browsers are checked.
-    var checkInterval: Duration? {
-        hiddenDuration.map { min(max($0 / 4, .milliseconds(250)), .seconds(30)) }
+        /// How often hidden browsers are checked.
+        var checkInterval: Duration? {
+            hiddenDuration.map { min(max($0 / 4, .milliseconds(250)), .seconds(30)) }
+        }
     }
 }
 
 // MARK: - Monitor
 
 /// Tracks how long each browser has been hidden, applies
-/// ``CefRuntime/memorySaver``, and brings back browsers discarded by closing
+/// ``CefRuntime/discardPolicy``, and brings back browsers discarded by closing
 /// them when their view is shown again. The lifecycle coordinator reports
 /// every change of what is on screen.
 @MainActor
-final class CefMemorySaverMonitor {
-    var policy = CefMemorySaver.off {
+final class CefDiscardMonitor {
+    var policy = CefRuntime.DiscardPolicy.disabled {
         didSet {
             guard policy != oldValue else { return }
             schedule()
@@ -185,7 +187,7 @@ final class CefMemorySaverMonitor {
 final class CefTabDiscarder {
     /// Chromium's reasons, mapped to blockers, for keeping the tab of
     /// `browser`. A failed look-up is a blocker too.
-    func blockers(for browser: CefBrowser) async -> Set<CefDiscardBlocker> {
+    func blockers(for browser: CefBrowser) async -> Set<CefBrowser.DiscardBlocker> {
         do {
             return Self.blockers(fromLookUp: try await call("(s, a) => s.lookUp(a)", arguments(for: browser)))
         } catch {
@@ -195,7 +197,7 @@ final class CefTabDiscarder {
 
     /// Discards the tab of `browser` if Chromium lists exactly one that can
     /// be its tab, and that tab is hidden and has no reason to stay.
-    func discard(_ browser: CefBrowser) async throws(CefDiscardError) {
+    func discard(_ browser: CefBrowser) async throws(CefBrowser.DiscardError) {
         let reply: CefJSON
         do {
             reply = try await call(
@@ -229,7 +231,7 @@ final class CefTabDiscarder {
     }
 
     /// The blockers a look-up's reply (``matcher``) reports.
-    static func blockers(fromLookUp reply: CefJSON) -> Set<CefDiscardBlocker> {
+    static func blockers(fromLookUp reply: CefJSON) -> Set<CefBrowser.DiscardBlocker> {
         guard let count = reply["count"].intValue else { return [.unknown("chrome://discards gave no answer.")] }
         guard count == 1 else {
             return [.unknown(count == 0
@@ -255,8 +257,8 @@ final class CefTabDiscarder {
 
     /// The blocker for one of Chromium's reasons (`CannotDiscardReasonToString`,
     /// `cannot_discard_reason.cc`): `nil` for an overridden reason, and
-    /// ``CefDiscardBlocker/unknown(_:)`` for one CefKit does not know.
-    static func blocker(forReason reason: String) -> CefDiscardBlocker? {
+    /// ``CefBrowser/DiscardBlocker/unknown(_:)`` for one CefKit does not know.
+    static func blocker(forReason reason: String) -> CefBrowser.DiscardBlocker? {
         if overriddenReasons.contains(reason) { return nil }
         switch reason {
         case "Tab is currently visible": return .visible

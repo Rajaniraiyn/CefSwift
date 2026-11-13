@@ -58,21 +58,21 @@ final class BrowserController: CefBrowserDelegate {
     func openTab(
         url: URL? = nil, isPrivate: Bool = false, inBackground: Bool = false, sharingProfileOf source: CefBrowser? = nil
     ) -> CefBrowser {
-        var options = CefBrowserOptions()
+        var configuration = CefBrowser.Configuration()
         // Tabs opened from a private tab stay in its private session.
-        let profile = source?.options.profile ?? (isPrivate ? .incognito() : .default)
+        let profile = source?.configuration.profile ?? (isPrivate ? .incognito() : .default)
         let isPrivate = profile !== CefProfile.default
-        options.profile = profile
+        configuration.profile = profile
         if BrowserPasskeys.isEnabled {
-            options.passkeys = .app(isPrivate ? BrowserPasskeys.shared.privateStore : BrowserPasskeys.shared)
+            configuration.passkeys = .app(isPrivate ? BrowserPasskeys.shared.privateStore : BrowserPasskeys.shared)
         }
-        options.userScripts = Self.internalPageStyles
-        options.bridges = [library.startPageBridge]
+        configuration.userScripts = Self.internalPageStyles
+        configuration.bridges = [library.startPageBridge]
         // Two-finger swipes go back and forward, with CefSwift's indicator.
-        options.allowsBackForwardNavigationGestures = true
-        options.contextMenu.showsInspectElement = true
-        options.contextMenu.hiddenCommands = [.viewSource]
-        options.contextMenu.items = [
+        configuration.allowsBackForwardNavigationGestures = true
+        configuration.contextMenu.showsInspectElement = true
+        configuration.contextMenu.hiddenCommands = [.viewSource]
+        configuration.contextMenu.items = [
             CefContextMenuItem("Open Link in New Tab", isVisible: { $0.linkURL != nil }) { [weak self] browser, target in
                 self?.openTab(url: target.linkURL, inBackground: true, sharingProfileOf: browser)
             },
@@ -80,14 +80,14 @@ final class BrowserController: CefBrowserDelegate {
                 browser.execute(.createQRCode)
             },
         ]
-        let browser = CefBrowser(url: url ?? newTabPage, options: options, delegate: self)
+        let browser = CefBrowser(url: url ?? newTabPage, configuration: configuration, delegate: self)
 
-        var configuration = CefBrowserWindow.Configuration()
-        configuration.tabbingIdentifier = Self.tabbingIdentifier
+        var windowConfiguration = CefBrowserWindow.Configuration()
+        windowConfiguration.tabbingIdentifier = Self.tabbingIdentifier
         // Titled by mirrorTabTitle(of:), which names blank tabs "New Tab".
-        configuration.titleFollowsPage = false
-        configuration.frame = windows.last?.window?.frame
-        let window = CefBrowserWindow(browser: browser, configuration: configuration)
+        windowConfiguration.titleFollowsPage = false
+        windowConfiguration.frame = windows.last?.window?.frame
+        let window = CefBrowserWindow(browser: browser, configuration: windowConfiguration)
         window.setToolbar {
             NavigationButtons(browser: browser)
         } principal: {
@@ -246,7 +246,7 @@ final class BrowserController: CefBrowserDelegate {
         // Streaming services play in WebKit, which has FairPlay.
         if let url = navigation.url, SystemEngineTab.opensStreamingSitesAutomatically,
            !keptInChromium.contains(ObjectIdentifier(browser)), CefSystemBrowser.prefersSystemEngine(for: url) {
-            openSystemTab(url: url, profile: browser.options.profile ?? .default, replacing: browser)
+            openSystemTab(url: url, profile: browser.configuration.profile ?? .default, replacing: browser)
             return .cancel
         }
         // Show this app's pages in place of some of Chromium's.
@@ -301,11 +301,11 @@ final class BrowserController: CefBrowserDelegate {
         guard let browser = current, let url = browser.url, url.scheme == "https" || url.scheme == "http",
               let window = windows.first(where: { $0.browser === browser })
         else { return }
-        openSystemTab(url: url, profile: browser.options.profile ?? .default)
+        openSystemTab(url: url, profile: browser.configuration.profile ?? .default)
         window.close()
     }
 
-    func browser(_ browser: CefBrowser, decideWindowOpenFor request: CefWindowOpenRequest) -> CefWindowOpenAction {
+    func browser(_ browser: CefBrowser, decideWindowOpenFor request: CefWindowOpenRequest) -> CefWindowOpenDecision {
         // Real popups (sign-in windows and the like) keep Chromium's handling
         // and arrive through the window's onPopup.
         guard request.disposition != .newPopup, let url = request.targetURL else { return .allowNativePopup }
@@ -416,9 +416,9 @@ extension NSView {
     }
 }
 
-extension CefPermissionKind {
+extension CefPermissionRequest.Kinds {
     var summary: String {
-        let names: [(CefPermissionKind, String)] = [
+        let names: [(CefPermissionRequest.Kinds, String)] = [
             (.camera, "the camera"), (.microphone, "the microphone"), (.geolocation, "your location"),
             (.notifications, "notifications"), (.clipboard, "the clipboard"),
         ]

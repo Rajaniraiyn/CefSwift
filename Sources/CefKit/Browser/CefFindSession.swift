@@ -24,7 +24,7 @@ import Observation
 /// }
 /// ```
 ///
-/// In a ``CefBrowserWindow`` whose ``CefChromiumUI`` presents
+/// In a ``CefBrowserWindow`` whose ``CefBrowserWindow/ChromiumUI`` presents
 /// ``CefChromiumSurface/Kind/findBar`` as ``CefChromiumSurface/Presentation/custom``,
 /// ⌘F and ``CefChromeCommand/find`` begin the session instead of showing
 /// Chromium's find bar.
@@ -108,7 +108,7 @@ public final class CefFindSession {
 
     /// Selects the first match of a new search once Chromium has counted
     /// them, as Chrome's find bar does.
-    func didReceive(_ result: CefFindResult) {
+    func didReceive(_ result: CefBrowser.FindResult) {
         guard selectsFirstMatch, result.isFinal else { return }
         selectsFirstMatch = false
         guard result.matchCount > 0, result.activeMatchIndex <= 0, !text.isEmpty else { return }

@@ -11,7 +11,7 @@ import CefBase
 /// pages included, which makes them the tool for customizing those pages:
 ///
 /// ```swift
-/// options.userScripts = [
+/// configuration.userScripts = [
 ///     // Hide Chromium's update status on the settings About page.
 ///     .styleSheet("settings-about-page #updateStatusContainer { display: none }",
 ///                 matching: "chrome://settings/*"),
