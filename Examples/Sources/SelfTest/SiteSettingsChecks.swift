@@ -82,14 +82,14 @@ extension SelfTest {
     static func preferenceChecks(_ profile: CefProfile) async {
         let preferences = profile.preferences
         let boolKeys: [CefPreferences.Key<Bool>] = [
-            .savesPasswords, .fillsAddresses, .fillsPaymentCards, .asksWhereToSaveDownloads, .checksSpelling,
+            .savesPasswords, .fillsAddresses, .fillsPaymentCards, .checksSpelling,
             .showsHomeButton, .offersTranslation, .usesSafeBrowsing, .showsSearchSuggestions, .usesHTTPSOnlyMode, .sendsDoNotTrack,
         ]
         let missing = boolKeys.map(\.name).filter { preferences.value(named: $0) == nil }
             + [CefPreferences.Key<Int>.defaultFontSize, .defaultFixedFontSize, .minimumFontSize].map(\.name)
                 .filter { preferences.value(named: $0) == nil }
             + [CefPreferences.Key<String>.homePage.name, CefPreferences.Key<[String]>.acceptLanguages.name,
-               CefPreferences.Key<[String]>.spellingLanguages.name, CefPreferences.Key<URL>.downloadDirectory.name,
+               CefPreferences.Key<[String]>.spellingLanguages.name,
                CefPreferences.Key<CefPreferences.ThirdPartyCookies>.thirdPartyCookies.name]
                 .filter { preferences.value(named: $0) == nil }
         check("preferences: every typed profile key names a preference", missing.isEmpty, detail: missing.joined(separator: ", "))

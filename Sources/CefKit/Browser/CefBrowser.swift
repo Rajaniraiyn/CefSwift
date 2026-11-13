@@ -79,6 +79,7 @@ public final class CefBrowser: Identifiable {
     /// Status text, such as the URL of the link under the pointer.
     public internal(set) var statusText = ""
     /// Downloads started by this browser, oldest first.
+    /// ``CefProfile/downloads`` lists those of every browser of its profile.
     public internal(set) var downloads: [CefDownload] = []
     /// Progress of a back or forward swipe
     /// (``CefBrowser/Configuration/allowsBackForwardNavigationGestures``): 0 at
@@ -150,6 +151,9 @@ public final class CefBrowser: Identifiable {
     @ObservationIgnored public weak var delegate: CefBrowserDelegate?
     /// The creation-time settings the browser was made with.
     @ObservationIgnored public let configuration: Configuration
+    /// The profile the browser browses with: its configuration's, or the
+    /// default profile.
+    var effectiveProfile: CefProfile { configuration.profile ?? .default }
     /// Chromium's identifier for this browser; `-1` until created.
     @ObservationIgnored public internal(set) var identifier: Int32 = -1
     /// The browser that opened this one, for popups.
@@ -196,7 +200,6 @@ public final class CefBrowser: Identifiable {
     /// Whether the current renderer's ending reloads the page: the answer
     /// to its unresponsive question was ``CefUnresponsivePageDecision/reload``.
     @ObservationIgnored var reloadsWhenRendererEnds = false
-    @ObservationIgnored var downloadControls: [UInt32: CefRef<cef_download_item_callback_t>] = [:]
     @ObservationIgnored var isChromeStyle = false
     @ObservationIgnored var isEmbeddedView = false
     /// How far discarding has got; see `CefBrowser+Discarding.swift`.

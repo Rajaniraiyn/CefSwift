@@ -314,7 +314,7 @@ extension CefBrowser {
         statusText = ""
         findResult = nil
         isCapturingMedia = false
-        downloadControls = [:]
+        for download in downloads { download.control = nil }
         cancelDecisions { _ in true }
         devTools.prepareForNewSession()
         pageScripting.failPendingEvaluations()

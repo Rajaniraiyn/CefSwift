@@ -36,12 +36,17 @@ public enum CefUnresponsivePagePresenter {
     /// the page started responding again or the browser closed.
     public static func present(for browser: CefBrowser, in window: NSWindow?) async -> CefUnresponsivePageDecision {
         let alert = NSAlert()
-        alert.messageText = "Page Unresponsive"
-        let site = browser.url?.host() ?? browser.url?.absoluteString
-        alert.informativeText = site.map { "\($0) is not responding. You can wait for it or reload it." }
-            ?? "The page is not responding. You can wait for it or reload it."
-        alert.addButton(withTitle: "Wait")
-        alert.addButton(withTitle: "Force Reload")
+        alert.messageText = String(localized: "Page Unresponsive", bundle: .cefKit, comment: "Title of the sheet shown when a page stops responding.")
+        if let site = browser.url?.host() ?? browser.url?.absoluteString {
+            alert.informativeText = String(localized: "\(site) is not responding. You can wait for it or reload it.", bundle: .cefKit,
+                                           comment: "Unresponsive page sheet: %@ is the website's host, such as example.com.")
+        } else {
+            alert.informativeText = String(localized: "The page is not responding. You can wait for it or reload it.", bundle: .cefKit,
+                                           comment: "Unresponsive page sheet, when the page has no host to name.")
+        }
+        alert.addButton(withTitle: String(localized: "Wait", bundle: .cefKit, comment: "Unresponsive page sheet: the button that keeps waiting."))
+        alert.addButton(withTitle: String(localized: "Force Reload", bundle: .cefKit,
+                                          comment: "Unresponsive page sheet: the button that ends the page's process and loads it again."))
         let response = await CefDialogPresenter.run(alert, in: window)
         return response == .alertSecondButtonReturn ? .reload : .wait
     }

@@ -54,8 +54,10 @@ struct AppBundler {
 
         let executable = macOS.appendingPathComponent(appName)
         try fm.copyItem(at: product.executable, to: executable)
-        // SwiftPM's generated Bundle.module looks in Bundle.main.resourceURL
-        // first.
+        // Where CefSwift's targets, Xcode's Bundle.module and that of
+        // SwiftPM's Swift Build system look: Bundle.main.resourceURL.
+        // (SwiftPM's older native build system, Swift 6.1's default, looks
+        // in the app's root, which signing forbids.)
         var resourceBundles: [URL] = []
         if !product.resourceBundles.isEmpty {
             try fm.createDirectory(at: resources, withIntermediateDirectories: true)

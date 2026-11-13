@@ -125,24 +125,76 @@ extension SelfTest {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("cefswift-selftest-downloads-\(getpid())")
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
+        let base = "http://127.0.0.1:\(server.port)"
         let recorder = Recorder()
         recorder.downloadDestination = directory
-        let browser = CefBrowser(url: URL(string: "selftest://edge/tab.html")!, delegate: recorder)
+        // A profile of its own, so its policy and download list are the checks' alone.
+        let profile = CefProfile.incognito()
+        var configuration = CefBrowser.Configuration()
+        configuration.profile = profile
+        let browser = CefBrowser(url: URL(string: "selftest://edge/tab.html")!, configuration: configuration, delegate: recorder)
         let window = CefWindow(browser: browser)
         window.show()
         _ = await loaded(browser, title: "tab")
+        func download(named name: String) -> CefDownload? { browser.downloads.last { $0.url?.lastPathComponent == name } }
+        func describe() -> String {
+            browser.downloads.map { "\($0.suggestedFilename) \($0.state) \($0.fileURL?.path ?? "-")" }.joined(separator: "; ")
+        }
 
-        browser.load(URL(string: "http://127.0.0.1:\(server.port)/report.txt")!)
+        check("download: the profile's policy starts as the Downloads folder", profile.downloadPolicy == .downloadsFolder)
+        // The delegate's decision wins over the policy.
+        profile.downloadPolicy = .disabled
+        browser.load(URL(string: "\(base)/report.txt")!)
         check("download: attachment is saved where the delegate says", await waitUntil {
-            browser.downloads.contains { $0.state == .completed && $0.destinationURL?.deletingLastPathComponent().lastPathComponent == directory.lastPathComponent }
-        }, detail: "\(browser.downloads)")
+            download(named: "report.txt")?.state == .completed
+                && download(named: "report.txt")?.fileURL?.deletingLastPathComponent().lastPathComponent == directory.lastPathComponent
+        }, detail: describe())
         check("download: page stays put", browser.title == "tab")
+        if let report = download(named: "report.txt") {
+            check("download: the item has its name, type, size and progress",
+                  report.suggestedFilename == "report.txt" && report.mimeType == "text/plain"
+                      && report.receivedBytes == 2048 * 9 && report.fractionCompleted == 1 && !report.canResume,
+                  detail: "\(report.suggestedFilename) \(report.mimeType) \(report.receivedBytes) \(String(describing: report.fractionCompleted))")
+            check("download: the profile lists it, and its browser",
+                  profile.downloads.contains { $0 === report } && report.browser === browser)
+        }
 
         recorder.downloadDestination = nil
-        browser.load(URL(string: "http://127.0.0.1:\(server.port)/denied.txt")!)
+        browser.load(URL(string: "\(base)/denied.txt")!)
         check("download: denied download is cancelled", await waitUntil {
-            browser.downloads.contains { $0.url?.lastPathComponent == "denied.txt" && $0.state == .cancelled }
-        }, detail: "\(browser.downloads)")
+            download(named: "denied.txt")?.state == .cancelled
+        }, detail: describe())
+
+        // Without a decision of the delegate's, the profile's policy applies.
+        recorder.followsDownloadPolicy = true
+        defer { recorder.followsDownloadPolicy = false }
+        let policyFolder = directory.appendingPathComponent("policy", isDirectory: true)
+        try? FileManager.default.createDirectory(at: policyFolder, withIntermediateDirectories: true)
+        try? Data("taken".utf8).write(to: policyFolder.appendingPathComponent("policy.txt"))
+        profile.downloadPolicy = .folder(policyFolder)
+        browser.load(URL(string: "\(base)/policy.txt")!)
+        check("download: the policy's folder is used, and a taken name is numbered", await waitUntil {
+            download(named: "policy.txt")?.state == .completed
+                && download(named: "policy.txt")?.fileURL?.lastPathComponent == "policy (1).txt"
+        }, detail: describe())
+        profile.downloadPolicy = .disabled
+        browser.load(URL(string: "\(base)/disabled.txt")!)
+        check("download: a disabled policy cancels", await waitUntil {
+            download(named: "disabled.txt")?.state == .cancelled
+        }, detail: describe())
+
+        // Asking shows the save panel as a sheet; cancelling it cancels the download.
+        profile.downloadPolicy = .ask
+        browser.load(URL(string: "\(base)/asked.txt")!)
+        let hostWindow = browser.hostWindow
+        _ = await waitUntil(timeout: .seconds(10)) { hostWindow?.attachedSheet is NSSavePanel }
+        let panel = hostWindow?.attachedSheet as? NSSavePanel
+        check("download: asking shows a save panel named for the file", panel?.nameFieldStringValue == "asked.txt",
+              detail: "\(String(describing: hostWindow?.attachedSheet))")
+        panel?.cancel(nil)
+        check("download: cancelling the panel cancels the download", await waitUntil {
+            download(named: "asked.txt")?.state == .cancelled
+        }, detail: describe())
 
         window.close()
         _ = await waitUntil { window.isClosed }
@@ -295,6 +347,8 @@ extension SelfTest {
 @MainActor
 final class Recorder: CefBrowserDelegate {
     var downloadDestination: URL?
+    /// Leaves downloads to the profile's policy instead of ``downloadDestination``.
+    var followsDownloadPolicy = false
     var leavesPage = true
     var credential: CefCredential?
     /// Answers to give before ``credential``, one per challenge.
@@ -304,8 +358,9 @@ final class Recorder: CefBrowserDelegate {
     private(set) var challenges: [CefAuthenticationChallenge] = []
     private(set) var terminations: [CefTerminationReason] = []
 
-    func browser(_ browser: CefBrowser, decideDestinationFor download: CefDownload, suggestedName: String) async -> CefDownloadDecision {
-        downloadDestination.map { .save(to: $0.appendingPathComponent(suggestedName)) } ?? .cancel
+    func browser(_ browser: CefBrowser, decideDestinationFor download: CefDownload) async -> CefDownloadDecision {
+        if followsDownloadPolicy { return .default(for: download) }
+        return downloadDestination.map { .save(to: $0.appendingPathComponent(download.suggestedFilename)) } ?? .cancel
     }
 
     func browser(_ browser: CefBrowser, confirmLeavingPage isReload: Bool) async -> Bool {

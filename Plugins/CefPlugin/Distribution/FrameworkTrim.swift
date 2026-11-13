@@ -109,17 +109,23 @@ enum FrameworkTrim {
         infoPlist["CFBundleLocalizations"]?.strings ?? []
     }
 
+    /// The prefix of the resource bundles of CefSwift's own targets.
+    static let cefSwiftBundlePrefix = "CefSwift_"
+
     /// The development language from an Info.plist.
     static func developmentLanguage(infoPlist: PlistDictionary) -> String {
         infoPlist["CFBundleDevelopmentRegion"]?.stringValue ?? "en"
     }
 
     /// The localizations of SwiftPM resource bundles: the names of their
-    /// `.lproj` directories, without `Base`.
+    /// `.lproj` directories, without `Base`. CefSwift's own bundles
+    /// (`CefSwift_CefKit.bundle`, …), which hold the built-in sheets'
+    /// strings, do not count: the languages a library has are not the app's,
+    /// and macOS would pick one of them for an app whose interface lacks it.
     static func resourceLocalizations(in bundles: [URL]) -> [String] {
         let fm = FileManager.default
         var found = Set<String>()
-        for bundle in bundles {
+        for bundle in bundles where !bundle.lastPathComponent.hasPrefix(cefSwiftBundlePrefix) {
             for directory in [bundle, bundle.appendingPathComponent("Contents/Resources")] {
                 for name in (try? fm.contentsOfDirectory(atPath: directory.path)) ?? [] where name.hasSuffix(".lproj") {
                     let localization = String(name.dropLast(".lproj".count))

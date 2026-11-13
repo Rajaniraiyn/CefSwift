@@ -324,8 +324,6 @@ extension CefPreferences.Key where Value == Bool {
     public static var fillsAddresses: Self { Self("autofill.profile_enabled") }
     /// Filling payment cards (`autofill.credit_card_enabled`).
     public static var fillsPaymentCards: Self { Self("autofill.credit_card_enabled") }
-    /// Asking where to save each download (`download.prompt_for_download`).
-    public static var asksWhereToSaveDownloads: Self { Self("download.prompt_for_download") }
     /// Checking spelling while typing (`browser.enable_spellchecking`).
     public static var checksSpelling: Self { Self("browser.enable_spellchecking") }
     /// Showing the home button in Chrome's toolbar (`browser.show_home_button`).
@@ -364,11 +362,6 @@ extension CefPreferences.Key where Value == [String] {
     public static var acceptLanguages: Self { .commaSeparated("intl.accept_languages") }
     /// The spelling dictionaries in use (`spellcheck.dictionaries`).
     public static var spellingLanguages: Self { Self("spellcheck.dictionaries") }
-}
-
-extension CefPreferences.Key where Value == URL {
-    /// Where downloads are saved (`download.default_directory`).
-    public static var downloadDirectory: Self { .fileURL("download.default_directory") }
 }
 
 extension CefPreferences {

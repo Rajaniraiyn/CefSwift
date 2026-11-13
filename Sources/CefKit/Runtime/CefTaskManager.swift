@@ -166,7 +166,9 @@ public final class CefTaskManager {
         setTasks(Self.assignProcesses(raw))
     }
 
-    /// The main task of `browser`: the renderer showing its page.
+    /// The main task of `browser`: the renderer showing its page, whose
+    /// CPU and memory it shares with any browser in the same process
+    /// (``browsers(in:)``).
     public func task(for browser: CefBrowser) -> Task? {
         keepRefreshing()
         guard browser.identifier >= 0, let manager = manager() else { return nil }
@@ -332,11 +334,4 @@ extension CefRuntime {
 
 extension CefTaskManager {
     static let shared = CefTaskManager()
-}
-
-extension CefBrowser {
-    /// The task of the renderer showing this browser's page: its CPU and
-    /// memory, shared with any browser in the same process
-    /// (``CefTaskManager/browsers(in:)``).
-    public var rendererTask: CefTaskManager.Task? { CefRuntime.shared.taskManager.task(for: self) }
 }

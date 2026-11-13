@@ -97,3 +97,21 @@ import CefBase
         #expect(CefStringUtil.string(from: &mapped.raw.accept_language_list) == "de-CH")
     }
 }
+
+/// The built-in sheets' strings: CefKit's resource bundle, found in the
+/// build directory under `swift test`.
+@Suite struct SheetStringTests {
+    @Test func stringsComeFromTheResourceBundle() {
+        #expect(Bundle.cefKit.bundleURL.lastPathComponent == "CefSwift_CefKit.bundle")
+        #expect(Bundle.cefKit.localizedString(forKey: "Sign In to Website", value: "missing", table: nil) == "Sign in")
+        #expect(Bundle.cefKit.developmentLocalization == "en")
+    }
+
+    @Test func formatsTakeTheirValues() {
+        let host = "example.com"
+        #expect(String(localized: "\(host) requires a username and password.", bundle: .cefKit)
+                    == "example.com requires a username and password.")
+        let subject = "Jane", issuer = "Example CA"
+        #expect(String(localized: "\(subject) (\(issuer))", bundle: .cefKit) == "Jane (Example CA)")
+    }
+}

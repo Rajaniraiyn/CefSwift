@@ -38,6 +38,7 @@ The runtime, browser, window and profile APIs are `@MainActor`.
   - [User scripts and style sheets](#user-scripts-and-style-sheets)
   - [Bridge](#bridge)
 - [Decisions](#decisions)
+  - [Built-in sheets](#built-in-sheets)
   - [HTTP authentication](#http-authentication)
   - [Navigation and new windows](#navigation-and-new-windows)
   - [Downloads](#downloads)
@@ -1035,10 +1036,10 @@ renderers that report the same figures side by side are grouped as one,
 which undercounts the total, and tasks not measured yet stay apart. Show
 the grouping; do not decide anything by it.
 
-`browser.rendererTask` is the task of the renderer showing a browser's page,
-and `taskManager.browsers(in:)` lists the browsers in the same estimated
-process, so a browser's memory is that process's memory shared with those
-browsers.
+`taskManager.task(for: browser)` is the task of the renderer showing a
+browser's page, and `taskManager.browsers(in:)` lists the browsers in the
+same estimated process, so a browser's memory is that process's memory
+shared with those browsers.
 
 ### Unresponsive pages
 
@@ -1251,7 +1252,7 @@ final class Policy: CefBrowserDelegate {
 | `browser(_:shouldProceedDespite:) async` (certificate errors) | `false`: the load is cancelled |
 | `browser(_:selectClientCertificateFor:) async` | Native sheet; asked only with `CefBrowser.Configuration.clientCertificates = .delegate`, otherwise Chromium's picker. See [Client certificates](#client-certificates) |
 | `browserPageIsUnresponsive(_:) async` | Native sheet; Chrome-style browsers show Chromium's dialog instead. See [Unresponsive pages](#unresponsive-pages) |
-| `browser(_:decideDestinationFor:suggestedName:) async` | `.saveToDownloadsFolder`: `~/Downloads` |
+| `browser(_:decideDestinationFor:) async` | `CefDownloadDecision.default(for:)`: the profile's `downloadPolicy`, the Downloads folder unless set. See [Downloads](#downloads) |
 | `browser(_:decidePolicyFor:)` | `.allow` |
 | `browser(_:decideWindowOpenFor:)` | `CefWindowOpenDecision.default(for:)` |
 | `browser(_:handleKeyEvent:isBeforePage:)` | `false` |
@@ -1273,6 +1274,61 @@ the delegate), `browser(_:didFinishLoadWithStatus:)`,
 
 `CefDialogPresenter` provides the native sheets behind the defaults, so your
 delegate can keep them for some cases.
+
+### Built-in sheets
+
+Every sheet CefSwift shows by default answers a delegate method, so an app
+replaces any of them by implementing that method, and keeps the stock one
+for some cases by calling its presenter:
+
+| Sheet | Delegate method | Presenter |
+|---|---|---|
+| `alert`, `confirm`, `prompt` | `browser(_:runJavaScriptDialog:)` | `CefDialogPresenter.present(_:in:)` |
+| Leaving a page (`beforeunload`) | `browser(_:confirmLeavingPage:)` | `CefDialogPresenter.confirmLeaving(isReload:in:)` |
+| HTTP sign-in | `browser(_:credentialFor:)` | `CefDialogPresenter.requestCredential(for:in:)` |
+| Client certificate | `browser(_:selectClientCertificateFor:)` | `CefClientCertificatePresenter` |
+| Unresponsive page | `browserPageIsUnresponsive(_:)` | `CefUnresponsivePagePresenter` |
+| File chooser | `browser(_:runFileDialog:)` | `CefFileDialogPresenter` |
+| Download save panel | `browser(_:decideDestinationFor:)` | `CefDownloadPresenter` |
+| Passkeys | `CefPasskeyDelegate.browser(_:decidePasskeyFor:)` | `CefPasskeyPresenter` |
+
+The context menu's Inspect item is a configuration
+(`contextMenu.showsInspectElement`), and the offscreen view's accessibility
+label (“Web content”) gives way to one set with `setAccessibilityLabel(_:)`.
+
+Their text comes from three places:
+
+- **CefSwift's resource bundles**: the titles, messages and buttons of the
+  sheets above, CefKit's in `CefSwift_CefKit.bundle` and CefPasskeys' in
+  `CefSwift_CefPasskeys.bundle`, from `Sources/<Target>/Resources/<language>.lproj/Localizable.strings`.
+  CefSwift ships English. Foundation picks their language as for every
+  bundle an app loads: the app's own, the localization macOS chose for the
+  app, when the bundle has it, else English.
+- **AppKit**: the OK button of `alert` and of the no-passkey sheet, and
+  everything in the open and save panels (file choosers, downloads), in the
+  system's language.
+- **Chromium**: its own interface (Chrome-style windows, `chrome://` pages,
+  its dialogs, its context-menu items, Inspect included), in
+  `CefRuntime.shared.locale`, which `configuration.localization` chooses
+  (see [Languages](#languages)), with `configuration.stringOverrides` for
+  single strings.
+
+With the default `localization`, `.application`, both follow the app's
+language: an English-only app shows English sheets and an English
+Chromium to a French user, and an app localized in French shows French
+ones, once CefSwift has French strings. With `.system`, Chromium follows
+the user's languages while the sheets keep the app's.
+
+To add a language to the sheets, add
+`Sources/CefKit/Resources/<language>.lproj/Localizable.strings` (and
+`Sources/CefPasskeys/Resources/…` for passkeys), a copy of the English file
+with its values translated, to CefSwift (a contribution, or a local copy of
+the package with `swift package edit`). Keys are the English text; the
+comment above each says where it appears and what each `%@` stands for. A
+string the new file lacks shows in English. `cef bundle` copies the bundles
+into the app's `Contents/Resources`; their languages do not change the
+app's `CFBundleLocalizations` (see [Bundling](bundling.md#locale-packs)).
+For text of your own, in any language, replace the presenter.
 
 ### HTTP authentication
 
@@ -1339,23 +1395,84 @@ func browser(_ browser: CefBrowser, decideWindowOpenFor request: CefWindowOpenRe
 
 ### Downloads
 
-`browser.downloads` lists the browser's downloads, oldest first, as
-`CefDownload` values with `receivedBytes`, `expectedBytes` (`nil` when the
-server gives no size), `destinationURL` and a `state`: `.inProgress`,
-`.paused`, `.completed`, `.cancelled`, or `.interrupted(reason)` when an
-error stopped it. Control them with `pauseDownload(_:)`,
-`resumeDownload(_:)` and `cancelDownload(_:)`, and start one with
-`startDownload(_:)`. A paused or interrupted download keeps its controls,
-so `canResume` downloads continue with `resumeDownload(_:)`.
-
-Each download asks the delegate where to save:
+A download goes where its profile's `downloadPolicy` says, unless the
+browser's delegate decides otherwise. The policy is a setting an app, or
+its settings window, sets without writing a delegate; it belongs to the
+profile because Chromium keeps downloads per profile:
 
 ```swift
-func browser(_ browser: CefBrowser, decideDestinationFor download: CefDownload, suggestedName: String) async -> CefDownloadDecision {
-    guard let folder = await chooseFolder() else { return .cancel }
-    return .save(to: folder.appending(path: suggestedName))
+profile.downloadPolicy = .ask   // .downloadsFolder (the default), .folder(url), .ask, .disabled
+```
+
+| Policy | Effect |
+|---|---|
+| `.downloadsFolder` | Saves in the user's Downloads folder under the suggested name, numbered (`report (1).pdf`) when the name is taken. The default. |
+| `.folder(url)` | The same, in `url`. |
+| `.ask` | Shows a save panel for each download, as a sheet on the browser's window, proposing the suggested name and type. Cancel cancels the download. |
+| `.disabled` | Cancels every download. |
+
+The default is the Downloads folder, as in Safari and Chrome: a download
+the user started should arrive without a question, and a panel that opens
+on its own would stall an app nobody is watching. `WKWebView` has no
+default and makes its delegate choose; CefSwift's delegate methods all
+have one, and this is it.
+
+To decide per download, implement
+`browser(_:decideDestinationFor:)`. Its answer wins over the policy;
+`CefDownloadDecision.default(for:)` is what the policy would do:
+
+```swift
+func browser(_ browser: CefBrowser, decideDestinationFor download: CefDownload) async -> CefDownloadDecision {
+    if download.mimeType == "application/pdf" { return .ask }
+    guard download.url?.host() != "ads.example" else { return .cancel }
+    return .default(for: download)
 }
 ```
+
+`.save(to: file)` saves as exactly that file, `.saveInFolder(folder)` under
+the suggested name, numbered when taken, `.ask` shows the save panel and
+`.cancel` cancels. To show a panel of your own, show it and return
+`.save(to:)` with the user's choice, or `.cancel`. `CefDownloadPresenter`
+is the stock panel, for a delegate that keeps it for some downloads.
+
+Each download is one observable `CefDownload` for its whole life, updated
+as it goes: `url`, `suggestedFilename`, `mimeType`, `fileURL` (the file
+being written, then the finished file), `receivedBytes`, `expectedBytes`
+(`nil` when the server gives no size), `fractionCompleted`,
+`bytesPerSecond`, `estimatedTimeRemaining`, the `browser` that started it,
+and a `state`: `.inProgress`, `.paused`, `.completed`, `.cancelled`, or
+`.interrupted(reason)` when an error stopped it. `pause()`, `resume()` and
+`cancel()` control it while the browser that started it is open; a paused
+or interrupted download keeps its controls, so one that `canResume`
+continues with `resume()`. `browser.startDownload(_:)` starts one.
+
+`browser.downloads` lists a browser's downloads, oldest first, and
+`profile.downloads` those of every browser of the profile, so a download
+manager reads one list instead of being every browser's delegate:
+
+```swift
+struct DownloadsList: View {
+    let profile: CefProfile
+
+    var body: some View {
+        List(profile.downloads.reversed()) { download in
+            HStack {
+                Text(download.fileURL?.lastPathComponent ?? download.suggestedFilename)
+                if download.state == .inProgress {
+                    ProgressView(value: download.fractionCompleted ?? 0)
+                    Button("Cancel", systemImage: "xmark.circle", action: download.cancel)
+                }
+            }
+        }
+    }
+}
+```
+
+The lists last as long as the app runs, an incognito profile's as long as
+the profile. CefSwift keeps no download history across launches; an app
+that wants one saves what it needs from `profile.downloads`. The delegate's
+`browser(_:downloadDidUpdate:)` reports each change too, for code that
+does not observe.
 
 ### File choosers
 
@@ -1539,8 +1656,9 @@ browserConfiguration.contextMenu.items = [
 - `items` are added below Chromium's. `isVisible` decides per click, from
   the `CefContextMenuTarget`: `linkURL`, `sourceURL`, `pageURL`,
   `selectedText`, `mediaType`, `isEditable`, `location`.
-- `showsInspectElement` adds Inspect Element, which opens DevTools on the
-  clicked element.
+- `showsInspectElement` adds Chromium's Inspect item, which opens DevTools
+  on the clicked element, titled in Chromium's locale as the rest of the
+  menu.
 - `isEnabled = false` removes the menu.
 
 For menus that depend on app state, implement
@@ -1548,7 +1666,7 @@ For menus that depend on app state, implement
 and edits the `CefMenuModel` directly, and handle your command IDs in
 `browser(_:handleContextMenuCommand:for:)`. Take IDs from
 `CefMenuModel.userCommandIDs`; `items` use IDs from its start and Inspect
-Element its last ID.
+its last ID.
 
 ## Chrome-style windows
 

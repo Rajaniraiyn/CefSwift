@@ -134,9 +134,17 @@ build.
 - The executable.
 - The resource bundle of each target the product is built from, its
   dependencies' targets included, that declares resources:
-  `<Package>_<Target>.bundle`, the bundle `Bundle.module` loads. They go in
-  `Contents/Resources/`, the first place SwiftPM's generated accessor looks
-  (`Bundle.main.resourceURL`). A missing one is an error.
+  `<Package>_<Target>.bundle`, the bundle `Bundle.module` loads, CefKit's
+  and CefPasskeys' (the built-in sheets' strings) among them. They go in
+  `Contents/Resources/` (`Bundle.main.resourceURL`), where CefSwift's
+  targets look, as does the `Bundle.module` that Xcode and SwiftPM's
+  Swift Build system generate. A missing one is an error. The
+  `Bundle.module` of SwiftPM's older native build system, Swift 6.1's
+  default, looks in the app's root directory instead, where code signing
+  allows no files, and then in the build directory: on the Mac that built
+  the app it works, elsewhere it stops the app. A target of your own that
+  loads resources and is built that way should look in
+  `Bundle.main.resourceURL` first, as CefSwift's do.
 - Each dynamic library and framework the executable loads through `@rpath`
   from the build directory, such as a `.dynamic` library product of a
   dependency, and the ones those load. They go in `Contents/Frameworks/`.
@@ -196,7 +204,8 @@ variants beside each. With `"localizations": "application"`, the default,
   `cefapp.json`'s `infoPlist`. When the Info.plist does not set it and the
   app's resource bundles are localized (`.lproj` directories, as a String
   Catalog produces), `bundle` sets `CFBundleLocalizations` to their
-  localizations, so that macOS picks the app's language from them;
+  localizations, so that macOS picks the app's language from them.
+  CefSwift's own bundles do not count: their languages are not the app's;
 - the development language, `CFBundleDevelopmentRegion` (`en`);
 - English, Chromium's last fallback.
 
@@ -249,7 +258,8 @@ MyApp.app/
     ├── MacOS/
     │   └── MyApp                          # your product
     ├── Resources/
-    │   └── MyApp_MyApp.bundle             # each target's resources (Bundle.module)
+    │   ├── MyApp_MyApp.bundle             # each target's resources (Bundle.module)
+    │   └── CefSwift_CefKit.bundle         # the built-in sheets' strings
     └── Frameworks/
         ├── libMyLibrary.dylib             # dynamic libraries the product loads
         ├── libcefswift_helper_startup.dylib   # seals the helpers' sandbox

@@ -22,7 +22,12 @@ extension CefOffscreenBrowserView {
 
     public override func accessibilityRole() -> NSAccessibility.Role? { .group }
 
-    public override func accessibilityLabel() -> String? { "Web content" }
+    /// What VoiceOver calls the view: “Web content”, unless the app set
+    /// a label with `setAccessibilityLabel(_:)`.
+    public override func accessibilityLabel() -> String? {
+        super.accessibilityLabel()
+            ?? String(localized: "Web content", bundle: .cefKit, comment: "Accessibility label of an offscreen browser view: the web page it shows.")
+    }
 
     public override func accessibilityChildren() -> [Any]? {
         onMain {

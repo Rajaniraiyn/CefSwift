@@ -20,7 +20,7 @@ extension SelfTest {
         let tasks = manager.tasks
         check("processes: the browser process is listed first", tasks.first?.kind == .browser,
               detail: tasks.map { "\($0.kind) \($0.title)" }.joined(separator: "; "))
-        let task = browser.rendererTask
+        let task = manager.task(for: browser)
         check("processes: a browser maps to its renderer task", task?.kind == .renderer && task?.canTerminate == true,
               detail: "\(String(describing: task))")
         let served = task.map { manager.browsers(in: $0.process) } ?? []
@@ -28,8 +28,8 @@ extension SelfTest {
               detail: "\(served.map(\.identifier)) vs \(browser.identifier); \(manager.tasks.map { "\($0.id)/\($0.process)" })")
         check("processes: memory is measured", await waitUntil(timeout: .seconds(10)) {
             manager.refresh()
-            return (browser.rendererTask?.memory ?? 0) > 1_000_000
-        }, detail: "\(String(describing: browser.rendererTask?.memory))")
+            return (manager.task(for: browser)?.memory ?? 0) > 1_000_000
+        }, detail: "\(String(describing: manager.task(for: browser)?.memory))")
         _ = manager.tasks
         check("processes: reading the tasks keeps them refreshing", manager.isRefreshing)
         check("processes: refreshing stops when nobody reads",
@@ -41,8 +41,8 @@ extension SelfTest {
         browser.executeJavaScript("setTimeout(spin, 100)")
         check("processes: a busy page's CPU use shows", await waitUntil(timeout: .seconds(10)) {
             manager.refresh()
-            return (browser.rendererTask?.cpuUsage ?? 0) > 50
-        }, detail: "\(String(describing: browser.rendererTask?.cpuUsage))")
+            return (manager.task(for: browser)?.cpuUsage ?? 0) > 50
+        }, detail: "\(String(describing: manager.task(for: browser)?.cpuUsage))")
         browser.sendTestInput()
         check("processes: an unresponsive page asks the delegate", await waitUntil(timeout: .seconds(40)) {
             recorder.asked > 0
@@ -58,7 +58,7 @@ extension SelfTest {
 
         // End Process.
         let before = recorder.terminations
-        if let task = browser.rendererTask {
+        if let task = manager.task(for: browser) {
             let ended = manager.terminate(task)
             let reported = await waitUntil(timeout: .seconds(10)) { recorder.terminations > before }
             check("processes: terminate ends the renderer", ended && reported)

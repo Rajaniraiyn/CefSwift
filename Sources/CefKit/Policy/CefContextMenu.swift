@@ -258,7 +258,7 @@ public struct CefContextMenuItem {
 
 extension CefBrowser.Configuration {
     /// Shapes a browser's context menu without a delegate: hide Chromium's
-    /// items, add your own, and optionally add Inspect Element.
+    /// items, add your own, and optionally add Chromium's Inspect item.
     ///
     /// ```swift
     /// configuration.contextMenu.hiddenCommands = [.viewSource, .print]
@@ -279,15 +279,23 @@ extension CefBrowser.Configuration {
         public var isEnabled = true
         /// Chromium items to remove.
         public var hiddenCommands: Set<CefContextMenuCommand> = []
-        /// Adds "Inspect Element", opening DevTools on the clicked node.
+        /// Adds Chromium's Inspect item, opening DevTools on the clicked node.
         public var showsInspectElement = false
         /// Your items, added below Chromium's.
         public var items: [CefContextMenuItem] = []
 
         public init() {}
 
-        /// Inspect Element takes the last user ID; ``items`` count up from the first.
+        /// Inspect takes the last user ID; ``items`` count up from the first.
         static let inspectCommandID = CefMenuModel.userCommandIDs.upperBound
+
+        /// Chromium's own title for the item, in the language of the rest
+        /// of the menu (``CefRuntime/locale``); CefKit's when Chromium has none.
+        static var inspectTitle: String {
+            CefRuntime.shared.localizedString(CefRuntime.StringID(rawValue: IDS_CONTENT_CONTEXT_INSPECTELEMENT))
+                ?? String(localized: "Inspect", bundle: .cefKit,
+                          comment: "Context menu item that opens the developer tools on the element under the pointer. Shown only when Chromium has no string of its own for it.")
+        }
 
         /// Applies the configuration to a menu about to be shown.
         func apply(to menu: CefMenuModel, for target: CefContextMenuTarget) {
@@ -308,7 +316,7 @@ extension CefBrowser.Configuration {
             }
             if showsInspectElement {
                 if !visible.isEmpty { menu.addSeparator() }
-                menu.addItem(commandID: Self.inspectCommandID, title: "Inspect Element")
+                menu.addItem(commandID: Self.inspectCommandID, title: Self.inspectTitle)
             }
         }
 

@@ -145,8 +145,8 @@ struct SiteSettingsTests {
         #expect(languages.encode(["en", "de"]) == .string("en,de"))
         #expect(CefPreferences.Key<Int>.defaultFontSize.decode(.number(16)) == 16)
         #expect(CefPreferences.Key<Bool>.savesPasswords.decode(.number(1)) == nil)
-        #expect(CefPreferences.Key<URL>.downloadDirectory.decode(.string("")) == nil)
-        #expect(CefPreferences.Key<URL>.downloadDirectory.decode(.string("/tmp/x"))?.path == "/tmp/x")
+        #expect(CefPreferences.Key<URL>.fileURL("savefile.default_directory").decode(.string("")) == nil)
+        #expect(CefPreferences.Key<URL>.fileURL("savefile.default_directory").decode(.string("/tmp/x"))?.path == "/tmp/x")
         #expect(CefPreferences.Key<CefPreferences.ThirdPartyCookies>.thirdPartyCookies.decode(.number(2)) == .block)
     }
 

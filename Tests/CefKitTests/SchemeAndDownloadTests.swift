@@ -55,50 +55,132 @@ import CefBase
     }
 
     @Test func interruptedDownloadsKeepTheirControl() {
-        let browser = CefBrowser()
+        let browser = CefBrowser(configuration: Self.configuration(profile: .incognito()))
         func update(_ state: CefDownload.State) {
             let control = CefRef(adopting: cefAllocate(cef_download_item_callback_t.self, owner: NSObject()))
-            browser.applyDownload(
-                CefDownload(id: 7, url: nil, receivedBytes: 10, expectedBytes: nil, state: state, destinationURL: nil),
-                control: control)
+            browser.applyDownload(CefDownload.Snapshot(id: 7, receivedBytes: 10, state: state), control: control)
         }
         update(.interrupted(.networkDisconnected))
-        #expect(browser.downloadControls[7] != nil)
-        #expect(browser.downloads.first?.canResume == true)
+        let download = try! #require(browser.downloads.first)
+        #expect(download.control != nil && download.canResume)
         update(.paused)
-        #expect(browser.downloadControls[7] != nil)
+        #expect(download.control != nil)
         update(.completed)
-        #expect(browser.downloadControls[7] == nil)
-        #expect(browser.downloads.count == 1 && browser.downloads.first?.canResume == false)
+        #expect(download.control == nil)
+        #expect(browser.downloads.count == 1 && !download.canResume)
+    }
+
+    /// One object per download, updated in place, listed by its browser and
+    /// its profile.
+    @Test func updatesKeepOneObjectPerDownload() {
+        let profile = CefProfile.incognito()
+        let first = CefBrowser(configuration: Self.configuration(profile: profile))
+        let second = CefBrowser(configuration: Self.configuration(profile: profile))
+        first.applyDownload(CefDownload.Snapshot(id: 1, suggestedFilename: "a.zip", mimeType: "application/zip",
+                                                 receivedBytes: 10, expectedBytes: 40, bytesPerSecond: 10), control: nil)
+        second.applyDownload(CefDownload.Snapshot(id: 2, suggestedFilename: "b.txt"), control: nil)
+        let download = try! #require(first.downloads.first)
+        #expect(download.fractionCompleted == 0.25)
+        #expect(download.estimatedTimeRemaining == .seconds(3))
+        first.applyDownload(CefDownload.Snapshot(id: 1, suggestedFilename: "", receivedBytes: 40, expectedBytes: 40,
+                                                 state: .completed), control: nil)
+        #expect(first.downloads.count == 1 && first.downloads.first === download)
+        #expect(download.state == .completed && download.suggestedFilename == "a.zip" && download.mimeType == "application/zip")
+        #expect(download.bytesPerSecond == 0 && download.estimatedTimeRemaining == nil && download.fractionCompleted == 1)
+        #expect(profile.downloads.map(\.suggestedFilename) == ["a.zip", "b.txt"])
+        #expect(second.downloads.map(\.suggestedFilename) == ["b.txt"])
+        #expect(download.browser === first)
+    }
+
+    static func configuration(profile: CefProfile) -> CefBrowser.Configuration {
+        var configuration = CefBrowser.Configuration()
+        configuration.profile = profile
+        return configuration
     }
 }
 
+@MainActor
 @Suite struct CefDownloadDecisionTests {
-    @Test func cancelResolvesToNil() {
-        #expect(CefDownloadDestination.resolve(decision: .cancel, suggestedName: "file.zip") == nil)
+    let folder = URL(fileURLWithPath: "/tmp/cefswift-downloads", isDirectory: true)
+
+    private func resolve(_ decision: CefDownloadDecision, _ name: String, existing: Set<String> = []) -> CefDownloadDestination {
+        CefDownloadDestination.resolve(decision, suggestedFilename: name) { existing.contains($0.lastPathComponent) }
     }
 
-    @Test func explicitDestinationWins() {
-        let destination = URL(fileURLWithPath: "/tmp/custom/save-here.zip")
-        #expect(
-            CefDownloadDestination.resolve(decision: .save(to: destination), suggestedName: "x.zip")
-                == destination)
+    @Test func policyMapsToDecision() {
+        #expect(CefDownloadDecision(.downloadsFolder) == .saveInFolder(CefDownloadDestination.downloadsFolder))
+        #expect(CefDownloadDecision(.folder(folder)) == .saveInFolder(folder))
+        #expect(CefDownloadDecision(.ask) == .ask)
+        #expect(CefDownloadDecision(.disabled) == .cancel)
     }
 
-    @Test func defaultDestinationIsDownloadsPlusSuggestedName() throws {
-        let resolved = try #require(
-            CefDownloadDestination.resolve(decision: .saveToDownloadsFolder, suggestedName: "report.pdf"))
-        #expect(resolved.lastPathComponent == "report.pdf")
+    @Test func defaultPolicyIsTheDownloadsFolder() {
+        #expect(CefProfile.incognito().downloadPolicy == .downloadsFolder)
         let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
-        #expect(resolved.deletingLastPathComponent().path == downloads?.path)
+        #expect(CefDownloadDestination.downloadsFolder.path == downloads?.path)
     }
 
-    @Test func hostileSuggestedNameIsSanitized() throws {
-        let resolved = try #require(
-            CefDownloadDestination.resolve(decision: .saveToDownloadsFolder, suggestedName: "../../etc/passwd"))
-        #expect(resolved.lastPathComponent == "passwd")
-        let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
-        #expect(resolved.deletingLastPathComponent().path == downloads?.path)
+    /// The default delegate follows the download's profile; a delegate's
+    /// own answer wins over it.
+    @Test func delegateFollowsThePolicyUnlessItDecides() async {
+        let profile = CefProfile.incognito()
+        let browser = CefBrowser(configuration: CefDownloadStateTests.configuration(profile: profile))
+        browser.applyDownload(CefDownload.Snapshot(id: 3, suggestedFilename: "r.pdf"), control: nil)
+        let download = browser.downloads[0]
+        let standard = CefDefaultBrowserDelegate.shared
+        profile.downloadPolicy = .folder(folder)
+        #expect(await standard.browser(browser, decideDestinationFor: download) == .saveInFolder(folder))
+        profile.downloadPolicy = .disabled
+        #expect(await standard.browser(browser, decideDestinationFor: download) == .cancel)
+        profile.downloadPolicy = .ask
+        #expect(await standard.browser(browser, decideDestinationFor: download) == .ask)
+        #expect(await PDFsToFolder(folder: folder).browser(browser, decideDestinationFor: download)
+                    == .save(to: folder.appendingPathComponent("r.pdf")))
+    }
+
+    @Test func cancelAndAskResolveToThemselves() {
+        #expect(resolve(.cancel, "file.zip") == .cancel)
+        #expect(resolve(.ask, "file.zip") == .ask)
+    }
+
+    @Test func explicitFileWinsEvenWhenTaken() {
+        let file = folder.appendingPathComponent("save-here.zip")
+        #expect(resolve(.save(to: file), "x.zip", existing: ["save-here.zip"]) == .file(file))
+    }
+
+    @Test func folderTakesTheSuggestedName() {
+        #expect(resolve(.saveInFolder(folder), "report.pdf") == .file(folder.appendingPathComponent("report.pdf")))
+    }
+
+    @Test func takenNamesAreNumbered() {
+        #expect(resolve(.saveInFolder(folder), "report.pdf", existing: ["report.pdf", "report (1).pdf"])
+                    == .file(folder.appendingPathComponent("report (2).pdf")))
+        #expect(resolve(.saveInFolder(folder), "README", existing: ["README"]) == .file(folder.appendingPathComponent("README (1)")))
+        // A download still being written holds its name.
+        #expect(resolve(.saveInFolder(folder), "a.zip", existing: ["a.zip.crdownload"]) == .file(folder.appendingPathComponent("a (1).zip")))
+    }
+
+    @Test func hostileSuggestedNamesStayInTheFolder() {
+        #expect(resolve(.saveInFolder(folder), "../../etc/passwd") == .file(folder.appendingPathComponent("passwd")))
+        #expect(resolve(.saveInFolder(folder), "..") == .file(folder.appendingPathComponent("download")))
+        #expect(resolve(.saveInFolder(folder), "") == .file(folder.appendingPathComponent("download")))
+    }
+
+    @Test func savePanelProposesTheType() {
+        #expect(CefDownloadPresenter.contentType(suggestedFilename: "a.pdf", mimeType: "application/octet-stream") == .pdf)
+        #expect(CefDownloadPresenter.contentType(suggestedFilename: "a", mimeType: "image/png") == .png)
+        #expect(CefDownloadPresenter.contentType(suggestedFilename: "a", mimeType: "application/octet-stream") == nil)
+        #expect(CefDownloadPresenter.contentType(suggestedFilename: "a.zzzunknown", mimeType: "") == nil)
+    }
+}
+
+@MainActor
+private final class PDFsToFolder: CefBrowserDelegate {
+    let folder: URL
+    init(folder: URL) { self.folder = folder }
+
+    func browser(_ browser: CefBrowser, decideDestinationFor download: CefDownload) async -> CefDownloadDecision {
+        download.suggestedFilename.hasSuffix(".pdf") ? .save(to: folder.appendingPathComponent(download.suggestedFilename)) : .default(for: download)
     }
 }
 

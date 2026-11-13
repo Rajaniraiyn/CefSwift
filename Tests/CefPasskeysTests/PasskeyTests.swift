@@ -209,3 +209,12 @@ final class FakeAuthenticationContext: CefLocalAuthenticationContext, @unchecked
         lock.withLock { wasInvalidated = true }
     }
 }
+
+@Suite struct PasskeySheetStringTests {
+    @Test func stringsComeFromTheResourceBundle() {
+        #expect(Bundle.cefPasskeys.bundleURL.lastPathComponent == "CefSwift_CefPasskeys.bundle")
+        #expect(Bundle.cefPasskeys.localizedString(forKey: "Choose an account.", value: "missing", table: nil) == "Choose an account.")
+        let host = "example.com"
+        #expect(String(localized: "Save a passkey for “\(host)”?", bundle: .cefPasskeys) == "Save a passkey for “example.com”?")
+    }
+}

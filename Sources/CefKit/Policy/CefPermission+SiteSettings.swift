@@ -58,15 +58,12 @@ struct CefStoredPermissionAnswer: Equatable {
 }
 
 extension CefBrowser {
-    /// The profile this browser stores site settings in.
-    var siteSettingsProfile: CefProfile { configuration.profile ?? .default }
-
     /// What the profile stores about `request`'s kinds for its origin.
     func storedAnswer(to request: CefPermissionRequest) -> CefStoredPermissionAnswer {
         guard let origin = URL(string: request.origin), origin.host() != nil else {
             return CefStoredPermissionAnswer(kinds: request.kinds) { _ in .ask }
         }
-        let settings = siteSettingsProfile.siteSettings
+        let settings = effectiveProfile.siteSettings
         return CefStoredPermissionAnswer(kinds: request.kinds) { settings.setting(for: $0, origin: origin) }
     }
 
@@ -80,7 +77,7 @@ extension CefBrowser {
         case .allow, .deny, .dismiss: return
         }
         guard let url = URL(string: origin), url.host() != nil else { return }
-        let settings = siteSettingsProfile.siteSettings
+        let settings = effectiveProfile.siteSettings
         for permission in kinds.sitePermissions where permission.supportedSettings.contains(setting) {
             settings.set(setting, for: permission, origin: url)
         }

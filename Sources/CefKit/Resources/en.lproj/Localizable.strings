@@ -1,0 +1,84 @@
+/*
+  CefKit's built-in sheets, in English, the development language.
+
+  To add a language, copy this file to <language>.lproj/Localizable.strings
+  in this directory (de.lproj, pt-BR.lproj, zh-Hans.lproj, …) and translate
+  the values; keep the keys. %@ stands for a value given in the comment.
+  Chromium's own interface is not here: it comes from Chromium's locale
+  packs (CefRuntime.Configuration.localization).
+*/
+
+/* JavaScript confirm() and prompt(): the button that accepts. */
+"OK" = "OK";
+
+/* A button that dismisses a sheet without answering it. */
+"Cancel" = "Cancel";
+
+/* Title of the sheet a page's beforeunload handler raises when the user navigates away. */
+"Leave this page?" = "Leave this page?";
+
+/* Title of the sheet a page's beforeunload handler raises when the user reloads. */
+"Reload this page?" = "Reload this page?";
+
+/* Message of the beforeunload sheet. */
+"Changes you made may not be saved." = "Changes you made may not be saved.";
+
+/* beforeunload sheet: the button that leaves the page. */
+"Leave" = "Leave";
+
+/* beforeunload sheet: the button that reloads the page. */
+"Reload" = "Reload";
+
+/* beforeunload sheet: the button that stays on the page. */
+"Stay" = "Stay";
+
+/* Title of the HTTP authentication sheet. */
+"Sign In to Website" = "Sign in";
+
+/* HTTP authentication sheet: %@ is the website's host, such as example.com. */
+"%@ requires a username and password." = "%@ requires a username and password.";
+
+/* HTTP authentication sheet for a proxy: %@ is the proxy's host and port, such as proxy.example.com:8080. */
+"The proxy %@ requires a username and password." = "The proxy %@ requires a username and password.";
+
+/* HTTP authentication sheet: placeholder of the user name field. */
+"Username" = "Username";
+
+/* HTTP authentication sheet: placeholder of the password field. */
+"Password" = "Password";
+
+/* HTTP authentication sheet: the button that sends the user name and password. */
+"Sign In" = "Sign In";
+
+/* Title of the sheet that asks which client certificate to identify the user with. */
+"Select a certificate" = "Select a certificate";
+
+/* Client certificate sheet: %@ is the website's host, such as example.com. */
+"%@ requests a certificate to identify you." = "%@ requests a certificate to identify you.";
+
+/* Client certificate sheet: one certificate in the menu. The first %@ is whom it was issued to, the second who issued it. */
+"%@ (%@)" = "%1$@ (%2$@)";
+
+/* Client certificate sheet: the button that identifies with the chosen certificate. */
+"Continue" = "Continue";
+
+/* Title of the sheet shown when a page stops responding. */
+"Page Unresponsive" = "Page Unresponsive";
+
+/* Unresponsive page sheet: %@ is the website's host, such as example.com. */
+"%@ is not responding. You can wait for it or reload it." = "%@ is not responding. You can wait for it or reload it.";
+
+/* Unresponsive page sheet, when the page has no host to name. */
+"The page is not responding. You can wait for it or reload it." = "The page is not responding. You can wait for it or reload it.";
+
+/* Unresponsive page sheet: the button that keeps waiting. */
+"Wait" = "Wait";
+
+/* Unresponsive page sheet: the button that ends the page's process and loads it again. */
+"Force Reload" = "Force Reload";
+
+/* Context menu item that opens the developer tools on the element under the pointer. Shown only when Chromium has no string of its own for it. */
+"Inspect" = "Inspect";
+
+/* Accessibility label of an offscreen browser view: the web page it shows. */
+"Web content" = "Web content";
