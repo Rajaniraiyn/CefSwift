@@ -155,3 +155,21 @@ extension CefBrowser {
         }
     }
 }
+
+/// Bridges `cef_pdf_print_callback_t` to a continuation, which resumes with
+/// `false` if CEF drops the callback without calling it.
+final class PDFPrintCallback: Sendable {
+    private let continuation: CefResumeOnce<Bool>
+
+    init(continuation: CheckedContinuation<Bool, Never>) {
+        self.continuation = CefResumeOnce(continuation, fallback: false)
+    }
+
+    func makeCallback() -> UnsafeMutablePointer<cef_pdf_print_callback_t> {
+        let callback = cefAllocate(cef_pdf_print_callback_t.self, owner: self)
+        callback.pointee.on_pdf_print_finished = { s, _, ok in
+            cefOwner(PDFPrintCallback.self, s)?.continuation.resume(returning: ok != 0)
+        }
+        return callback
+    }
+}
