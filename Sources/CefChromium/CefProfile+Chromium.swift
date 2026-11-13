@@ -66,6 +66,22 @@ extension CefProfile {
     @_spi(Testing) public func pingHistoryService(timeout: Duration) async throws {
         _ = try await serviceHosts.call(CefHistory.historyModule, "async () => true", timeout: timeout)
     }
+
+    /// Calls the history service with a function that answers after
+    /// `duration`, or rejects as soon as its call's signal aborts: for
+    /// checks of cancellation and of a host that stops mid-call.
+    @_spi(Testing) public func slowHistoryCall(lasting duration: Duration, isIdempotent: Bool) async throws {
+        _ = try await serviceHosts.call(
+            CefHistory.historyModule,
+            """
+            (s, a, c) => new Promise((resolve, reject) => {
+              const timer = setTimeout(() => resolve(true), a.ms);
+              c.signal.addEventListener('abort', () => { clearTimeout(timer); reject(c.signal.reason); }, { once: true });
+            })
+            """,
+            ["ms": .number(Double(duration.components.seconds * 1000 + duration.components.attoseconds / 1_000_000_000_000_000))],
+            as: Bool.self, isIdempotent: isIdempotent)
+    }
 }
 
 /// A profile's stores, held weakly so each can hold the profile, and the

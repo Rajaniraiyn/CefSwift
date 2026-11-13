@@ -210,6 +210,7 @@ extension SelfTest {
         "localization": .seconds(150),
         "internalPages": .seconds(120),
         "serviceHosts": .seconds(90),
+        "serviceCalls": .seconds(120),
         "protectedMedia": .seconds(120),
         "systemEngine": .seconds(90),
         "discard": .seconds(90),

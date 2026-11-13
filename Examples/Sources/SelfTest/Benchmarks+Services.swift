@@ -224,14 +224,15 @@ final class ServiceBench {
         meter.start()
         MallocCounter.start()
         var yielded: [CefAutocomplete.Result] = []
-        var issuedAt: [String: ContinuousClock.Instant] = [:]
-        var firstResult: [String: Double] = [:]
+        // Texts issued and not yet answered, and how long each first answer took.
+        var awaiting: [String: ContinuousClock.Instant] = [:]
+        var firstResults: [Double] = []
         let consumer = Task { @MainActor in
             do {
                 for try await result in self.profile.autocomplete.results(following: stream) {
                     yielded.append(result)
-                    if firstResult[result.text] == nil, let at = issuedAt[result.text] {
-                        firstResult[result.text] = (ContinuousClock.now - at).benchMilliseconds
+                    if let at = awaiting.removeValue(forKey: result.text) {
+                        firstResults.append((ContinuousClock.now - at).benchMilliseconds)
                     }
                 }
             } catch { print("bench error \(error)") }
@@ -239,7 +240,7 @@ final class ServiceBench {
         var lastIssued = ContinuousClock.now
         for text in texts {
             lastIssued = ContinuousClock.now
-            issuedAt[text] = issuedAt[text] ?? lastIssued
+            awaiting = [text: lastIssued]
             typed.yield(text)
             try? await Task.sleep(for: .milliseconds(20))
         }
@@ -254,9 +255,9 @@ final class ServiceBench {
         let finalComplete = yielded.last.map { $0.text == last && $0.isComplete } ?? false
         let stale = yielded.indices.dropLast().filter { yielded[$0].isComplete && yielded[$0].text == last }.count
         print(String(
-            format: "bench services typing (results(following:), 200 texts at 20 ms): stream ended %.0f ms after the last text, last element complete for the last text: %@; %d results yielded for %d distinct texts; first result after a text p50 %.1f ms; result decodes %d; renderer calls %d, %.0f ms renderer time; main thread busy %.0f ms (%.1f%%); main-thread allocations %d; pending operations after: %@; in flight in the host after: %d; extra complete results for the last text %d",
+            format: "bench services typing (results(following:), 200 texts at 20 ms): stream ended %.0f ms after the last text, last element complete for the last text: %@; %d results yielded for %d distinct texts; first result within the text's 20 ms p50 %.1f ms (for %d of the texts); result decodes %d; renderer calls %d, %.0f ms renderer time; main thread busy %.0f ms (%.1f%%); main-thread allocations %d; pending operations after: %@; in flight in the host after: %d; extra complete results for the last text %d",
             finalLatency, finalComplete ? "yes" : "NO", yielded.count, Set(yielded.map(\.text)).count,
-            Percentiles(Array(firstResult.values)).percentile(0.5), CefDiagnostics.counter(.serviceDecode).count,
+            Percentiles(firstResults).percentile(0.5), firstResults.count, CefDiagnostics.counter(.serviceDecode).count,
             jsAfter.calls - jsBefore.calls, jsAfter.ms - jsBefore.ms, meter.busy.benchMilliseconds, meter.busyFraction * 100,
             allocations, pendingOperations, jsAfter.inFlight, stale))
     }
