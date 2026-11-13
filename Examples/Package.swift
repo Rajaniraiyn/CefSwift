@@ -46,5 +46,7 @@ let package = Package(
             ],
             exclude: ["cefapp.json"]
         ),
+        // Unit tests of the Browser example's own logic.
+        .testTarget(name: "BrowserTests", dependencies: ["Browser"]),
     ]
 )

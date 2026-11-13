@@ -1015,12 +1015,24 @@ page. Closing a browser
 never ends a renderer process another browser shares; Chromium keeps the
 process until its last frame goes.
 
-`CefRuntime.discardPolicy` is applied by a monitor that polls which browsers
-are off screen, at a quarter of the policy's interval and at most every 30
-seconds, and listens for memory pressure through
-`DispatchSource.makeMemoryPressureSource`. The lifecycle coordinator tells
-it of every change of what is on screen, which restores browsers
-discarded by closing when their view comes back.
+An Alloy browser's blockers are only what CefKit knows natively: its own
+state (on screen, loading, DevTools, downloads, media capture from
+`on_media_access_change`) and the `beforeunload` listener the DevTools
+Protocol reports. CEF exposes no audible state without diverting the
+audio, and nothing about form input, and CefKit does not read the page's
+DOM to guess, so neither is a blocker for Alloy browsers; the app decides
+whether such a page may be discarded.
+
+The library has the capability, not a policy: nothing in CefKit discards a
+browser unasked. The lifecycle coordinator restores a discarded browser
+when it comes on screen (a new Chromium browser for one discarded by
+closing it; a reload, after a moment, for a Chrome-style tab that
+Chromium has not loaded by itself). When to discard is the app's:
+`CefBrowser.lifecycle` and `lifecycleChangedAt` tell how long a browser
+has been hidden, and `DispatchSource.makeMemoryPressureSource` reports
+memory pressure. The Browser example's Memory Saver
+(`Examples/Sources/Browser/TabDiscarding.swift`) builds the usual policy
+from those.
 
 ## Lifecycle
 

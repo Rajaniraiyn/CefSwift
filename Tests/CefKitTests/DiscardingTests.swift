@@ -4,25 +4,6 @@ import Testing
 
 @testable import CefKit
 
-@Suite struct DiscardPolicyTests {
-    @Test func presets() {
-        #expect(CefRuntime.DiscardPolicy.disabled == CefRuntime.DiscardPolicy(hiddenDuration: nil, discardsUnderMemoryPressure: false))
-        #expect(CefRuntime.DiscardPolicy.underMemoryPressure.hiddenDuration == nil)
-        #expect(CefRuntime.DiscardPolicy.underMemoryPressure.discardsUnderMemoryPressure)
-        let after = CefRuntime.DiscardPolicy.after(.seconds(1800))
-        #expect(after.hiddenDuration == .seconds(1800) && after.discardsUnderMemoryPressure)
-        #expect(!CefRuntime.DiscardPolicy.after(.seconds(60), orUnderMemoryPressure: false).discardsUnderMemoryPressure)
-    }
-
-    @Test func checkIntervalFollowsTheDuration() {
-        #expect(CefRuntime.DiscardPolicy.disabled.checkInterval == nil)
-        #expect(CefRuntime.DiscardPolicy.underMemoryPressure.checkInterval == nil)
-        #expect(CefRuntime.DiscardPolicy.after(.seconds(2)).checkInterval == .milliseconds(500))
-        #expect(CefRuntime.DiscardPolicy.after(.milliseconds(100)).checkInterval == .milliseconds(250))
-        #expect(CefRuntime.DiscardPolicy.after(.seconds(3600)).checkInterval == .seconds(30))
-    }
-}
-
 @Suite struct DiscardBlockerTests {
     @MainActor @Test func chromiumReasonsMapToBlockers() {
         #expect(CefTabDiscarder.blocker(forReason: "Tab is playing audio") == .playingAudio)

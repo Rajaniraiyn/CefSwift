@@ -279,7 +279,6 @@ public final class CefRuntime {
         requestsInFlightAtShutdown = URLRequestRegistry.shared.count
         for profile in CefProfile.all { profile.stopServiceHosts() }
         lifecycleCoordinator.stop()
-        discardMonitor.policy = .disabled
         widevineInstallation?.cancel()
         CefMediaRouter.shared.tearDown()
         CefProfile.releaseRequestContexts()
@@ -491,28 +490,6 @@ public final class CefRuntime {
 
     /// Whether the app is quitting, so no new service browsers should start.
     var isTerminating: Bool { isTerminationRequested }
-
-    // MARK: Discard policy
-
-    /// When CefKit discards browsers on its own to free memory. `.disabled`, the
-    /// default, leaves discarding to ``CefBrowser/discard()``.
-    ///
-    /// ```swift
-    /// // Discard tabs hidden for 30 minutes, and hidden tabs whenever
-    /// // macOS runs low on memory.
-    /// CefRuntime.shared.discardPolicy = .after(.seconds(30 * 60))
-    /// ```
-    ///
-    /// Only hidden browsers are discarded, and only those
-    /// ``CefBrowser/discardBlockers()`` lets through: not one playing audio,
-    /// holding unsaved form input, or with ``CefBrowser/allowsDiscarding``
-    /// turned off.
-    public var discardPolicy: CefRuntime.DiscardPolicy {
-        get { discardMonitor.policy }
-        set { discardMonitor.policy = newValue }
-    }
-
-    @ObservationIgnored private(set) lazy var discardMonitor = CefDiscardMonitor()
 
     // MARK: Energy policy
 

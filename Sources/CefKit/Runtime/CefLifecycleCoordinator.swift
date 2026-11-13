@@ -88,7 +88,9 @@ struct CefEnergyConditions: Equatable {
 ///   report their own visibility through `was_hidden`; Chrome-style
 ///   windows are Chromium's.
 /// - Energy: offscreen frame rates under ``CefRuntime/energyPolicy``.
-/// - Memory: ``CefRuntime/discardPolicy`` hears every visibility change.
+/// - Discarding: a discarded browser that comes on screen loads its page
+///   again. When to discard is the app's to decide
+///   (``CefBrowser/discard()``).
 ///
 /// Chromium watches memory pressure and system sleep itself, and turns
 /// App Nap off for the browser process (`NSAppSleepDisabled`), so none of
@@ -175,7 +177,30 @@ final class CefLifecycleCoordinator {
             applyFrameRate(browser, conditions: conditions)
         }
         responderObservations = responderObservations.filter { windows.contains($0.key) }
-        CefRuntime.shared.discardMonitor.visibilityDidChange()
+        restoreDiscardedBrowsersOnScreen()
+    }
+
+    // MARK: Discarded browsers
+
+    /// Restores discarded browsers that are on screen again.
+    private func restoreDiscardedBrowsersOnScreen() {
+        for browser in CefRuntime.shared.browsers where browser.isDiscarded && browser.isOnScreen {
+            switch browser.discardPhase {
+            case .closed:
+                browser.restore()
+            case .discarded:
+                // Chromium loads a discarded tab again when it is shown; make
+                // sure, in case the tab was discarded while merely covered.
+                Task { @MainActor [weak browser] in
+                    try? await Task.sleep(for: .milliseconds(500))
+                    if let browser, browser.isDiscarded, browser.discardPhase == .discarded, browser.isOnScreen {
+                        browser.restore()
+                    }
+                }
+            default:
+                break
+            }
+        }
     }
 
     /// Focus moves without a notification; `firstResponder` is observable.

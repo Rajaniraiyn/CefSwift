@@ -3,13 +3,13 @@ import CefSwiftUI
 import Darwin
 
 /// Tab discarding: Chromium's own discard for Chrome-style windows, closing
-/// and re-creating for views, blockers, the Memory Saver policy, and
-/// quitting with discarded browsers.
+/// and re-creating for views, blockers, and quitting with discarded
+/// browsers. When to discard is the app's policy (the Browser example's
+/// Memory Saver, tested in Examples/Tests/BrowserTests).
 extension SelfTest {
     static func discardChecks() async {
         await windowDiscardChecks()
         await discardBlockerChecks()
-        await memorySaverChecks()
         await viewDiscardChecks()
     }
 
@@ -130,8 +130,7 @@ extension SelfTest {
     static func discardBlockerChecks() async {
         let audible = CefBrowserWindow(browser: CefBrowser(url: URL(string: "selftest://edge/tab.html?audio")!))
         let leaving = CefBrowserWindow(browser: CefBrowser(url: URL(string: "selftest://edge/leave.html")!))
-        let pinned = CefBrowserWindow(browser: CefBrowser(url: URL(string: "selftest://edge/tab.html?pinned")!))
-        let windows = [audible, leaving, pinned]
+        let windows = [audible, leaving]
         windows.forEach { $0.show() }
         _ = await allLoaded(windows.map(\.browser))
 
@@ -143,7 +142,6 @@ extension SelfTest {
             tone.start();
             context.state
             """, userGesture: true)  // Audio starts only after a user gesture.
-        pinned.browser.allowsDiscarding = false
         try? await Task.sleep(for: .seconds(1))
         windows.forEach { $0.hide() }
 
@@ -158,8 +156,6 @@ extension SelfTest {
                 return blockers.contains(.beforeUnloadHandler) && !leaving.browser.isDiscarded
             }
         }
-        let exempt = await pinned.browser.discardBlockers()
-        check("discard blockers: allowsDiscarding = false exempts a tab", exempt == [.exempt], detail: "\(exempt)")
 
         for window in windows { window.close() }
         // The beforeunload page asks before it closes; answer for it.
@@ -229,26 +225,6 @@ extension SelfTest {
         hook.body = { _ in }
         check("discard identity: a tab that navigates while it is being discarded stays loaded",
               movedError != nil && !browser.isDiscarded, detail: "\(String(describing: movedError))")
-        window.close()
-        _ = await waitUntil { window.isClosed }
-    }
-
-    // MARK: Memory Saver
-
-    static func memorySaverChecks() async {
-        let browser = CefBrowser(url: URL(string: "selftest://edge/tab.html?saver")!)
-        let window = CefBrowserWindow(browser: browser)
-        window.show()
-        _ = await loaded(browser, title: "tab")
-        CefRuntime.shared.discardPolicy = .after(.seconds(2), orUnderMemoryPressure: false)
-        try? await Task.sleep(for: .seconds(3))
-        check("memory saver: a visible tab stays loaded", !browser.isDiscarded)
-        window.hide()
-        check("memory saver: a hidden tab is discarded after the interval",
-              await waitUntil(timeout: .seconds(15)) { browser.isDiscarded })
-        CefRuntime.shared.discardPolicy = .disabled
-        window.show()
-        check("memory saver: the tab comes back when shown", await waitUntil { !browser.isDiscarded && !browser.isLoading })
         window.close()
         _ = await waitUntil { window.isClosed }
     }
