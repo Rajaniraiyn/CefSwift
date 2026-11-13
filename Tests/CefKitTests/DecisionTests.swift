@@ -67,7 +67,7 @@ struct DecisionTests {
     @Test func anAwaitedDecisionReturnsNilWhenItEnded() async {
         let browser = CefBrowser()
         let gate = Gate()
-        async let answer = browser.decision(.page) { _ in
+        async let answer = browser.decision(.page) {
             await gate.wait()
             return 7
         }
@@ -76,7 +76,7 @@ struct DecisionTests {
         gate.open()
         #expect(await answer == nil)
 
-        let kept = await browser.decision(.page) { _ in 8 }
+        let kept = await browser.decision(.page) { 8 }
         #expect(kept == 8)
     }
 }

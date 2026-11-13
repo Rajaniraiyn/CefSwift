@@ -117,7 +117,7 @@ public final class CefDevTools {
     }
 
     /// How many users hold `domain` (`"Debugger"`, say) enabled.
-    func leaseCount(_ domain: String) -> Int {
+    package func leaseCount(_ domain: String) -> Int {
         domainLeases[domain + ".enable"] ?? 0
     }
 
@@ -224,13 +224,13 @@ public final class CefDevTools {
     // MARK: Internal listeners
 
     /// Registers a synchronous event listener. Returns a token for removal.
-    func addListener(for method: String, _ handler: @escaping @MainActor (CefJSON) -> Void) -> UUID {
+    package func addListener(for method: String, _ handler: @escaping @MainActor (CefJSON) -> Void) -> UUID {
         let token = UUID()
         listeners[method, default: [:]][token] = handler
         return token
     }
 
-    func removeListener(_ token: UUID, for method: String) {
+    package func removeListener(_ token: UUID, for method: String) {
         listeners[method]?[token] = nil
         streams[token] = nil
     }

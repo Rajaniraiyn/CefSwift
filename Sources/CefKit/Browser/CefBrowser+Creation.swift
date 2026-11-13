@@ -38,12 +38,12 @@ extension CefBrowser {
         }
 
         // Bridges and user scripts reach the renderer with the browser
-        // itself (extra_info). App-answered passkeys set up a DevTools
-        // session before the first real document, so such browsers start
-        // blank and navigate once set up, as does every browser created
-        // again after a discard.
+        // itself (extra_info). Attachments that must prepare before any
+        // page runs do so before the first real document, so such
+        // browsers start blank and navigate once set up, as does every
+        // browser created again after a discard.
         configuration.bridges.forEach { $0.attach(to: self) }
-        isBootstrapping = !configuration.passkeys.isChromium || isDiscarded
+        isBootstrapping = attachmentsPrepareBeforeFirstDocument || isDiscarded
         let url = isBootstrapping ? "about:blank" : (initialURL?.absoluteString ?? "about:blank")
 
         return Blueprint(
@@ -206,29 +206,25 @@ extension CefBrowser {
         }
         if isBootstrapping {
             Task { await bootstrap() }
-        } else if !configuration.passkeys.isChromium {
-            // A browser Chromium created by itself with this policy: not a
-            // page's popup, which `route(_:)` opens bootstrapped instead,
-            // but one such as a tab Chrome's own UI opened. Its first
-            // document may run before this; see CefBrowser.PasskeyPolicy.
-            Task { await startPasskeys() }
+        } else if !configuration.attachments.isEmpty {
+            // Nothing waits for these. A browser Chromium created by itself
+            // with attachments that prepare first is not a page's popup,
+            // which `route(_:)` opens bootstrapped instead, but a popup
+            // that never reached `route(_:)`; its first document may run
+            // before this.
+            Task {
+                // An attachment told after the close would never hear of it.
+                for attachment in configuration.attachments where state == .live {
+                    await attachment.browserDidCreate(self)
+                }
+            }
         }
     }
 
-    /// Takes WebAuthn requests over from Chromium, for
-    /// ``CefBrowser/Configuration/passkeys`` other than ``CefBrowser/PasskeyPolicy/chromium``.
-    ///
-    /// A browser discarded by closing it starts again here when it is
-    /// created anew, since its DevTools state went with the old browser.
-    private func startPasskeys() async {
-        passkeyAuthenticator?.stop()
-        let authenticator = CefPasskeyAuthenticator(browser: self, mode: configuration.passkeys)
-        passkeyAuthenticator = authenticator
-        do {
-            try await authenticator.start()
-        } catch {
-            CefLog.error("passkeys: setup failed for browser \(identifier): \(error)")
-        }
+    /// Whether an attachment needs the browser set up before its first
+    /// document; see ``CefBrowserAttachment/preparesBeforeFirstDocument``.
+    var attachmentsPrepareBeforeFirstDocument: Bool {
+        configuration.attachments.contains { $0.preparesBeforeFirstDocument }
     }
 
     /// Sets up what needs the DevTools protocol before the first real
@@ -237,15 +233,23 @@ extension CefBrowser {
     /// A browser created again after a discard always comes through here,
     /// so everything a page relies on is in place before its document
     /// starts: the DevTools domains enabled before the discard, the
-    /// accessibility state and passkeys. Bridges and user scripts travel
-    /// with the browser's creation instead.
+    /// accessibility state and the attachments. Bridges and user scripts
+    /// travel with the browser's creation instead.
     private func bootstrap() async {
         await Self.$settingUp.withValue(id) {
-            if isDiscarded {
+            let isRestoring = isDiscarded
+            if isRestoring {
                 await devTools.enableDomainsAgain()
                 reassertAccessibilityState()
             }
-            if !configuration.passkeys.isChromium { await startPasskeys() }
+            // An attachment told after the close would never hear of it.
+            for attachment in configuration.attachments where state == .live {
+                if isRestoring {
+                    await attachment.browserDidRestore(self)
+                } else {
+                    await attachment.browserDidCreate(self)
+                }
+            }
         }
         isBootstrapping = false
         guard state == .live else { return }

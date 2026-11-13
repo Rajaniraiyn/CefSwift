@@ -103,20 +103,6 @@ public protocol CefBrowserDelegate: AnyObject {
     func browser(_ browser: CefBrowser, selectClientCertificateFor request: CefClientCertificateRequest) async -> CefCertificate?
     /// Decide where a download goes. The default saves to `~/Downloads`.
     func browser(_ browser: CefBrowser, decideDestinationFor download: CefDownload, suggestedName: String) async -> CefDownloadDecision
-    /// Answer a page's request to register or use a passkey, for browsers
-    /// whose ``CefBrowser/Configuration/passkeys`` is ``CefBrowser/PasskeyPolicy/app(_:)``.
-    /// The default asks the user with ``CefPasskeyPresenter``.
-    ///
-    /// The page stays stopped at its `navigator.credentials` call until you
-    /// answer, as it does for `alert()`; JavaScript you evaluate in it
-    /// meanwhile waits too. When the page navigates away or the browser
-    /// closes first, the call's task is cancelled and its answer ignored.
-    func browser(_ browser: CefBrowser, decidePasskeyFor request: CefPasskeyRequest) async -> CefPasskeyDecision
-    /// The passkey store failed while a WebAuthn request was answered. A
-    /// failed availability check or read refuses the page's call; a failed
-    /// save happens after the page has its answer and carries the passkey
-    /// that was not saved. The default logs the error.
-    func browser(_ browser: CefBrowser, passkeyStoreDidFail error: CefPasskeyStoreError)
 
     // MARK: Downloads
 
@@ -178,13 +164,6 @@ extension CefBrowserDelegate {
     }
     public func browser(_ browser: CefBrowser, decideDestinationFor download: CefDownload, suggestedName: String) async -> CefDownloadDecision {
         .saveToDownloadsFolder
-    }
-
-    public func browser(_ browser: CefBrowser, decidePasskeyFor request: CefPasskeyRequest) async -> CefPasskeyDecision {
-        await CefPasskeyPresenter.present(request, in: browser.hostWindow)
-    }
-    public func browser(_ browser: CefBrowser, passkeyStoreDidFail error: CefPasskeyStoreError) {
-        CefLog.error("passkeys: \(error)")
     }
 
     public func browser(_ browser: CefBrowser, downloadDidUpdate download: CefDownload) {}

@@ -52,10 +52,9 @@ extension CefBrowser {
         /// (Offscreen only) Forward raw trackpad touches to Chromium instead of
         /// translating gestures natively.
         public var forwardsRawTouchEvents = false
-        /// Who answers the pages' WebAuthn requests (passkeys and security
-        /// keys): Chromium (the default), the app from a ``CefPasskeyStore``,
-        /// or nobody. Popups use their opener's mode.
-        public var passkeys: CefBrowser.PasskeyPolicy = .chromium
+        /// Code that sets up each browser made with this configuration, in
+        /// order; see ``CefBrowserAttachment``. Popups get their opener's.
+        public var attachments: [any CefBrowserAttachment] = []
         /// (Offscreen only) When Chromium builds the page's accessibility tree,
         /// which VoiceOver and other assistive apps read. Building it costs
         /// time and memory, so by default it starts on first demand.

@@ -13,6 +13,7 @@ let package = Package(
             name: "Browser",
             dependencies: [
                 .product(name: "CefSwiftUI", package: "CefSwift"),
+                .product(name: "CefPasskeys", package: "CefSwift"),
                 "SystemEngine",
             ],
             exclude: ["cefapp.json", "Browser.entitlements", "Browser-Distribution.entitlements"]
@@ -43,7 +44,10 @@ let package = Package(
         // it hosts browsers with CefKit's views and imports no SwiftUI.
         .executableTarget(
             name: "Compat",
-            dependencies: [.product(name: "CefKit", package: "CefSwift")],
+            dependencies: [
+                .product(name: "CefKit", package: "CefSwift"),
+                .product(name: "CefPasskeys", package: "CefSwift"),
+            ],
             exclude: ["cefapp.json"]
         ),
         // End-to-end checks against the real Chromium runtime; CI runs it.
@@ -51,6 +55,7 @@ let package = Package(
             name: "SelfTest",
             dependencies: [
                 .product(name: "CefSwiftUI", package: "CefSwift"),
+                .product(name: "CefPasskeys", package: "CefSwift"),
                 "SystemEngine",
             ],
             exclude: ["cefapp.json"]

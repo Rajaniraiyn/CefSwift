@@ -65,7 +65,8 @@ final class BrowserController: CefBrowserDelegate {
         let isPrivate = profile !== CefProfile.default
         configuration.profile = profile
         if BrowserPasskeys.isEnabled {
-            configuration.passkeys = .app(isPrivate ? BrowserPasskeys.shared.privateStore : BrowserPasskeys.shared)
+            let passkeys = BrowserPasskeys.shared
+            configuration.attachments.append(isPrivate ? passkeys.privateController : passkeys.controller)
         }
         configuration.userScripts = Self.internalPageStyles
         configuration.bridges = [library.startPageBridge]

@@ -173,7 +173,7 @@ public final class CefRuntime {
     }
 
     /// Logs one line naming what the app's signature leaves out, such as
-    /// passkeys beyond security keys; at info level when nothing is.
+    /// the keychain for safe storage; at info level when nothing is.
     private func logCapabilities() {
         let capabilities = CefAppCapabilities.current
         let limitations = capabilities.limitationsSummary()
@@ -184,10 +184,7 @@ public final class CefRuntime {
                     "locale \(locale ?? "en-US")")
         if limitations == nil {
             CefLog.info("CefSwift: signed \(capabilities.signature.rawValue), team " +
-                        "\(capabilities.teamIdentifier ?? "none"); passkeys: " +
-                        CefAppCapabilities.PasskeyAuthenticator.allCases
-                            .filter(capabilities.passkeyAuthenticators.contains).map(\.description)
-                            .joined(separator: ", "))
+                        "\(capabilities.teamIdentifier ?? "none")")
         }
     }
 
@@ -260,8 +257,8 @@ public final class CefRuntime {
     /// has gone. Never from inside a Chromium callback, and never with a
     /// CEF window left, which crashes `cef_shutdown()`.
     ///
-    /// Tears down in order: what is left of discarded browsers, service
-    /// hosts, observers and timers, media router registrations, profile
+    /// Tears down in order: the shutdown participants (such as service
+    /// hosts and media router registrations), observers and timers, profile
     /// request contexts, the message pump, then Chromium itself, with jobs
     /// for the thread actors waiting it out.
     ///
@@ -277,10 +274,11 @@ public final class CefRuntime {
         }
         state = .stopping
         requestsInFlightAtShutdown = URLRequestRegistry.shared.count
-        for profile in CefProfile.all { profile.stopServiceHosts() }
+        let participants = shutdownParticipants.compactMap(\.participant)
+        shutdownParticipants = []
+        participants.forEach { $0.runtimeWillShutDown() }
         lifecycleCoordinator.stop()
         widevineInstallation?.cancel()
-        CefMediaRouter.shared.tearDown()
         CefProfile.releaseRequestContexts()
         messagePump?.stop()
         messagePump = nil
@@ -291,6 +289,21 @@ public final class CefRuntime {
         settings = nil
         state = .stopped
     }
+
+    /// Adds `participant`, held weakly, to the objects that release what
+    /// they hold of Chromium when it shuts down; see
+    /// ``CefShutdownParticipant``. Adding one twice adds it once.
+    package func addShutdownParticipant(_ participant: any CefShutdownParticipant) {
+        shutdownParticipants.removeAll { $0.participant == nil }
+        guard !shutdownParticipants.contains(where: { $0.participant === participant }) else { return }
+        shutdownParticipants.append(WeakShutdownParticipant(participant: participant))
+    }
+
+    private struct WeakShutdownParticipant {
+        weak var participant: (any CefShutdownParticipant)?
+    }
+
+    @ObservationIgnored private var shutdownParticipants: [WeakShutdownParticipant] = []
 
     // MARK: Browser registry / termination
 

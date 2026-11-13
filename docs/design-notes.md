@@ -63,6 +63,19 @@ reading the page is not something the library does. The blocker set now
 holds only what is known natively, and for Alloy browsers says nothing
 about audio or form input; the app decides for pages it knows.
 
+## Passkeys: a module on an attachment, not a CefKit option
+
+App-answered passkeys used to be `CefBrowser.Configuration.passkeys`, with
+passkey members on `CefBrowserDelegate` and a passkey case in CefKit's
+popup handling. They do not need CefKit's internals beyond a DevTools
+session that is in place before the first document, so they moved to the
+optional `CefPasskeys` module, built on `CefBrowserAttachment`. What made
+passkeys special in CefKit, holding the first document and refusing to
+let Chromium create native popups, became one general property an
+attachment declares (`preparesBeforeFirstDocument`): any attachment that
+must see every document from its first script needs both. A browser with
+no such attachment keeps native popups and starts on its page at once.
+
 ## Memory settings measured and not used
 
 These were measured on the Minimal example and are not used: they saved

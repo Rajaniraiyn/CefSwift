@@ -36,6 +36,8 @@ let package = Package(
 `CefSwiftUI` re-exports `CefKit`, the core library. An AppKit app depends on
 `CefKit` alone: its `CefWindowedBrowserView` and `CefOffscreenBrowserView`
 host a browser without SwiftUI (see [In AppKit](docs/guide.md#in-appkit)).
+Optional features are libraries of their own on top of `CefKit`: add
+`CefPasskeys` for passkeys the app answers.
 
 ### Show a web page
 
@@ -168,6 +170,8 @@ covers identifiers, signing, entitlements, notarization and the bundle layout;
 | Bookmarks, history, address-bar suggestions | `CefBookmarks`, `CefHistory`, `CefAutocomplete` | [Bookmarks, history and suggestions](docs/guide.md#bookmarks-history-and-suggestions) |
 | Discarding hidden browsers to free memory, and restoring them when shown; when to discard is the app's policy | `discard()`, `discardBlockers()`, `lifecycle`, `lifecycleChangedAt` | [Discarding browsers](docs/guide.md#discarding-browsers) |
 | Chrome DevTools Protocol, in-process | `CefDevTools` | [DevTools](docs/guide.md#devtools) |
+| Your own set-up code for every browser of a configuration, before its first page if it must | `CefBrowserAttachment` | [Attachments](docs/guide.md#attachments) |
+| Passkeys answered by the app from its own store, or refused (the `CefPasskeys` library) | `CefPasskeyController`, `CefPasskeyStore` | [Passkeys](docs/guide.md#passkeys) |
 | Content served from your own URL scheme | `CefSchemeHandler` | [Serving your own content](docs/guide.md#serving-your-own-content) |
 | Protected media: Widevine in Chromium; the Browser example shows FairPlay services in the system's WebKit beside it | `CefRuntime.Configuration.services.protectedMedia` | [Playing streaming services](docs/guide.md#playing-streaming-services) |
 

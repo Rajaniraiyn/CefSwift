@@ -1,3 +1,4 @@
+import CefPasskeys
 import CefSwiftUI
 import SwiftUI
 
@@ -22,6 +23,12 @@ final class BrowserPasskeys: CefPasskeyStore {
     private let memory = CefInMemoryPasskeyStore()
     /// Private tabs keep their passkeys to themselves, for the session.
     let privateStore = CefInMemoryPasskeyStore()
+
+    /// Answers the passkey requests of tabs that use this store, asking the
+    /// user with CefPasskeys' own sheet.
+    @ObservationIgnored private(set) lazy var controller = CefPasskeyController(policy: .app(self))
+    /// The same for private tabs, from ``privateStore``.
+    @ObservationIgnored private(set) lazy var privateController = CefPasskeyController(policy: .app(privateStore))
 
     private var store: CefPasskeyStore { isPersistent ? keychain : memory }
 

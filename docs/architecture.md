@@ -8,8 +8,10 @@ How CefSwift works inside, and why. For how to use it, see the
 ```
 CefSwiftUI   CefSwiftApp, CefWebView (over CefKit's host views), SwiftUI modifiers,
     │        CefBrowserWindow.setToolbar and setTabAccessory
+    │  CefPasskeys  optional: CefPasskeyController (a CefBrowserAttachment), passkey
+    │     │         stores and the passkey sheet
 CefKit       CefRuntime, CefBrowser, CefBrowserWindow, CefBrowserDelegate, CefBridge,
-    │        CefDevTools, CefProfile, configuration and policy types; the AppKit
+    │        CefDevTools, CefProfile, CefBrowserAttachment, configuration and policy types; the AppKit
     │        host views CefWindowedBrowserView and CefOffscreenBrowserView
     │        (with its compositor and accessibility elements), no SwiftUI
 CCef         vendored CEF C headers, the generated bridge, the runtime loader (C)
@@ -22,6 +24,38 @@ CefHelper    the helper-process executable (cefswift-helper)
 CefPlugin    swift package cef download | bundle | info | clean; builds the
              helper products and assembles the app
 ```
+
+### Extension points
+
+CefKit names no optional feature. An optional module, such as
+CefPasskeys, plugs into it at three points:
+
+- `CefBrowserAttachment` (public), through
+  `CefBrowser.Configuration.attachments`: told when Chromium has created a
+  browser (`browserDidCreate(_:)`), when a discarded one is created anew
+  (`browserDidRestore(_:)`) and when it closes (`browserDidClose(_:)`). An
+  attachment whose `preparesBeforeFirstDocument` is `true` holds the first
+  page: the browser starts on `about:blank`, `CefBrowser.bootstrap()`
+  awaits every attachment with the task-local `settingUp` set (so their
+  DevTools calls do not wait for `ready()`), and only then loads the page.
+  Such a browser's native popups are opened in a browser CefKit creates
+  (`openPopupInNewBrowser`), since Chromium runs a native popup's first
+  document before anything can attach to it.
+- `CefShutdownParticipant` (package): an object holding CEF references
+  outside any browser adds itself with
+  `CefRuntime.addShutdownParticipant(_:)`, held weakly, and is told to
+  release them after the last browser and window and before the
+  profiles' request contexts and `cef_shutdown()`. The internal-page
+  service hosts and the media router are participants.
+- `CefProfile.moduleState(_:make:)` (package): one object per type that a
+  module keeps for a profile, made on first use.
+
+A module also uses a few `package` members of CefKit that are not public
+API: `CefDevTools.addListener(for:_:)`, `removeListener(_:for:)` and
+`leaseCount(_:)` (synchronous, ordered event listeners and domain leases),
+`CefBrowser.decision(_:_:)` with `CefBrowser.DecisionScope` (a question
+cancelled when its page or browser goes), `CefDialogPresenter.run(_:in:)`
+(an alert that dismisses itself on cancellation) and `CefLog`.
 
 ## The C bridge
 
@@ -574,7 +608,7 @@ protection"). These use it:
 | `browser.devTools` | Whatever the app sends. |
 | `evaluateJavaScript(_:userGesture: true)` | `Runtime.evaluate` with `userGesture`, the only way to grant a user activation. |
 | `snapshot()` | `Page.captureScreenshot`, for windowed browsers; an offscreen browser's snapshot is the frame its view shows. |
-| `CefBrowser.PasskeyPolicy.app` and `.disabled` | `WebAuthn`, `Debugger`, `Page` and `Runtime` enabled for the browser's lifetime; see [Passkeys](#passkeys). |
+| CefPasskeys' `CefPasskeyController` | `WebAuthn`, `Debugger`, `Page` and `Runtime` enabled for the browser's lifetime; see [Passkeys](#passkeys). |
 | `discard()` | `Runtime.evaluate` and `DOMDebugger.getEventListeners` on the page's window, to find a `beforeunload` listener, which JavaScript cannot list. |
 | Offscreen accessibility actions | `Accessibility.enable` for the length of one lookup, then `DOM.focus`, `DOM.scrollIntoViewIfNeeded`; `Input.insertText` only for a field that takes no input-method text. |
 
@@ -886,9 +920,10 @@ with its incognito profile.
 
 ## Passkeys
 
-With `CefBrowser.Configuration.passkeys` set to `.app` or `.disabled`,
-`CefPasskeyAuthenticator` takes a browser's WebAuthn calls over through
-its DevTools connection, before the browser loads its first page:
+A `CefPasskeyController` (CefPasskeys) is an attachment that prepares
+before the first document. For each browser it is attached to, a
+`CefPasskeySession` takes the WebAuthn calls over through the browser's
+DevTools connection, before the browser loads its first page:
 
 - `WebAuthn.enable`, without Chromium's UI, puts the browser's pages in a
   virtual authenticator environment. Chromium's dialog and its real
@@ -913,7 +948,7 @@ its DevTools connection, before the browser loads its first page:
   page, is resumed at once unless someone else debugs the page: the app,
   holding its own `Debugger.enable` lease on the browser's session, or
   the browser's DevTools window. Those pauses are theirs to resume.
-- While the page is stopped, the delegate decides, and CefKit adds a
+- While the page is stopped, the delegate decides, and the session adds a
   virtual authenticator (CTAP 2.1, internal transport, resident keys,
   user verification) for that one call: empty for a registration, holding
   only the chosen passkey (its PKCS #8 key from the store) for an
@@ -929,17 +964,18 @@ its DevTools connection, before the browser loads its first page:
   decision, so no call is answered unasked.
 
 An Alloy browser discarded by closing it gets a new DevTools session when
-it is created again, so the environment and the breakpoints are set up
-again then; a Chrome-style tab discarded in place keeps them.
+it is created again, so the controller sets the environment and the
+breakpoints up again in `browserDidRestore(_:)`; a Chrome-style tab
+discarded in place keeps them.
 
 The private key of a passkey lives in the store, and in Chromium's browser
 process only while an authenticator answers one call. A page learns only
 what WebAuthn gives it: the credential ID, the public key, the user handle
 and signatures.
 
-Chromium's own WebAuthn dialog (`.chromium`) is a views widget: a child
+Chromium's own WebAuthn dialog (a browser without a controller) is a views widget: a child
 window of a `CefBrowserWindow`, or a free-standing window for a browser in
-a view. CefKit leaves it alone; closing it from AppKit crashes Chromium.
+a view. CefSwift leaves it alone; closing it from AppKit crashes Chromium.
 The iCloud Keychain authenticator in Chromium (`device/fido/mac`) calls
 AuthenticationServices itself and checks for the
 `com.apple.developer.web-browser.public-key-credential` entitlement;
@@ -1006,9 +1042,10 @@ CefKit closes the Chromium browser and keeps the `CefBrowser` in
 or the browser is used, a new Chromium browser is created in the same view.
 It always starts on `about:blank` and is set up before it navigates to the
 saved address: `CefDevTools` enables again the domains enabled before, so
-event streams keep delivering; the accessibility state is applied; then
-passkeys, user scripts (scripts added with `addUserScript` included) and
-bridges are installed, as for a new browser. Calls that wait for the
+event streams keep delivering; the accessibility state is applied; the
+attachments' `browserDidRestore(_:)` runs (a passkey controller sets
+itself up again there); user scripts (scripts added with `addUserScript`
+included) and bridges are installed, as for a new browser. Calls that wait for the
 restore resume when that page starts loading, and
 `browserDidRestore(_:)` follows. Its back/forward list starts from that
 page. Closing a browser
@@ -1102,8 +1139,9 @@ the last browser and the last Chromium window are destroyed, it calls
 `terminate(_:)` again from the run loop. It then waits for the profile
 requests in flight to end on the IO thread (see “The app’s requests”), declining once
 more and calling `terminate(_:)` again when they have, and shuts Chromium
-down in a fixed order: service hosts, lifecycle observers and the discard policy's
-timer, the media router's registrations, the preference and site-setting
+down in a fixed order: the shutdown participants (service hosts, the
+media router's registrations), lifecycle observers and the discard policy's
+timer, the preference and site-setting
 observer registrations (`CefObserverRegistration`, whose streams finish)
 and the task manager object, every profile's request context,
 the message pump, then `cef_shutdown()` with the thread actors' jobs

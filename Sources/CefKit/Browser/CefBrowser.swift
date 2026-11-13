@@ -182,7 +182,6 @@ public final class CefBrowser: Identifiable {
     @ObservationIgnored weak var restoringOffscreenHost: CefOffscreenHost?
     @ObservationIgnored var initialURL: URL?
     @ObservationIgnored var isBootstrapping = false
-    @ObservationIgnored var passkeyAuthenticator: CefPasskeyAuthenticator?
     /// The main frame's navigations, for ``waitUntilLoaded(timeout:)``.
     @ObservationIgnored let loads = CefLoadTracker()
     /// Calls waiting for ``ready()``.
@@ -466,8 +465,9 @@ public final class CefBrowser: Identifiable {
     @ObservationIgnored var signInPromptURL: URL?
 
     /// Suspends until the browser exists in Chromium and has set up what
-    /// its page relies on (passkeys, and after a discard the DevTools
-    /// domains enabled before), restoring it first if it is discarded.
+    /// its page relies on (its ``Configuration/attachments``, and after a
+    /// discard the DevTools domains enabled before), restoring it first if
+    /// it is discarded.
     ///
     /// Throws ``CefError/browserClosed`` if the browser closes first, and
     /// `CancellationError` if the calling task is cancelled.

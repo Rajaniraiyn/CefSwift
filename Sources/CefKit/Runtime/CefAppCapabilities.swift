@@ -2,8 +2,8 @@ import Foundation
 import Security
 
 /// What the running app's code signature, entitlements and Info.plist let
-/// Chromium do, so an app can adapt its UI (for example, hide a "Use
-/// iCloud Keychain" hint on an ad hoc build).
+/// Chromium do, so an app can adapt its UI (for example, hide a hint about
+/// a feature its signature leaves out).
 ///
 /// `swift package cef doctor <App.app>` reports the same for a bundle on
 /// disk; docs/bundling.md lists what each feature needs.
@@ -29,25 +29,6 @@ public struct CefAppCapabilities: Sendable, Equatable {
         }
     }
 
-    /// A WebAuthn authenticator Chromium can offer when
-    /// ``CefBrowser/PasskeyPolicy/chromium`` answers a page.
-    public enum PasskeyAuthenticator: String, Sendable, Hashable, CaseIterable {
-        /// USB and NFC security keys. Always available.
-        case securityKey
-        /// A phone or tablet, through a QR code and Bluetooth. Needs
-        /// `NSBluetoothAlwaysUsageDescription` (and, under the hardened
-        /// runtime, `com.apple.security.device.bluetooth`).
-        case hybrid
-        /// Chromium's own profile passkeys, verified with Touch ID. Needs
-        /// the keychain group CEF compiles in, which a provisioning profile
-        /// cannot authorize (see docs/bundling.md), so stock CEF builds do
-        /// not offer it.
-        case touchID
-        /// iCloud Keychain passkeys, through AuthenticationServices. Needs
-        /// `com.apple.developer.web-browser.public-key-credential`.
-        case iCloudKeychain
-    }
-
     public let signature: SignatureKind
     /// The signature's team identifier; nil when unsigned, ad hoc or
     /// self-signed.
@@ -63,8 +44,6 @@ public struct CefAppCapabilities: Sendable, Equatable {
     public let keychainAccessGroups: [String]
     /// The `NS…UsageDescription` keys in the app's Info.plist.
     public let usageDescriptions: Set<String>
-    /// The authenticators Chromium can offer with ``CefBrowser/PasskeyPolicy/chromium``.
-    public let passkeyAuthenticators: Set<PasskeyAuthenticator>
     /// Whether the helper that runs Chromium's content decryption module
     /// (`<App> Helper.app`) can load Google's Widevine CDM. Under the
     /// hardened runtime, library validation refuses a library signed by
@@ -73,10 +52,6 @@ public struct CefAppCapabilities: Sendable, Equatable {
     /// `protectedMedia` capability in `cefapp.json`). Whether Chromium has
     /// downloaded the CDM is ``CefRuntime/widevine``.
     public let canLoadWidevine: Bool
-
-    /// The keychain access group Chromium's Touch ID authenticator checks
-    /// for in CEF 156, without a team prefix.
-    static let chromiumWebAuthnKeychainGroup = ".org.chromium.Chromium.webauthn"
 
     /// The running app's capabilities.
     public static let current = CefAppCapabilities(
@@ -113,21 +88,6 @@ public struct CefAppCapabilities: Sendable, Equatable {
         isAppSandboxed = (entitlementValues["com.apple.security.app-sandbox"] as? Bool) == true
         usageDescriptions = Set(infoDictionary.keys.filter { $0.hasPrefix("NS") && $0.hasSuffix("UsageDescription") })
 
-        var authenticators: Set<PasskeyAuthenticator> = [.securityKey]
-        if usageDescriptions.contains("NSBluetoothAlwaysUsageDescription"),
-           !isHardenedRuntime || entitlements.contains("com.apple.security.device.bluetooth") {
-            authenticators.insert(.hybrid)
-        }
-        // macOS refuses to launch an app whose restricted entitlements no
-        // profile authorizes, so a running app's entitlements are real.
-        if teamIdentifier != nil, keychainAccessGroups.contains(Self.chromiumWebAuthnKeychainGroup) {
-            authenticators.insert(.touchID)
-        }
-        if teamIdentifier != nil, entitlements.contains("com.apple.developer.web-browser.public-key-credential") {
-            authenticators.insert(.iCloudKeychain)
-        }
-        passkeyAuthenticators = authenticators
-
         let helper = helperInfo ?? info
         let helperFlags = (helper?[kSecCodeInfoFlags as String] as? NSNumber)?.uint32Value ?? 0
         let helperEntitlements = helper?[kSecCodeInfoEntitlementsDict as String] as? [String: Any] ?? [:]
@@ -157,19 +117,6 @@ public struct CefAppCapabilities: Sendable, Equatable {
             (teamIdentifier.map { ", team \($0)" } ?? ", no team")
         if teamIdentifier == nil {
             parts.append("safe storage uses a mock keychain")
-        }
-        var missing: [String] = []
-        if !passkeyAuthenticators.contains(.hybrid) {
-            missing.append("phones (NSBluetoothAlwaysUsageDescription" +
-                           (isHardenedRuntime ? " and com.apple.security.device.bluetooth)" : ")"))
-        }
-        if !passkeyAuthenticators.contains(.iCloudKeychain) {
-            missing.append("iCloud Keychain (com.apple.developer.web-browser.public-key-credential and a team signature)")
-        }
-        if !missing.isEmpty {
-            let available = PasskeyAuthenticator.allCases.filter(passkeyAuthenticators.contains)
-                .map(\.description).joined(separator: " and ")
-            parts.append("Chromium passkeys offer only \(available); unavailable: \(missing.joined(separator: ", "))")
         }
         guard !parts.isEmpty else { return nil }
         return "CefSwift: \(signed): " + parts.joined(separator: "; ") + ". See docs/bundling.md#features."
@@ -209,17 +156,6 @@ public struct CefAppCapabilities: Sendable, Equatable {
               SecCodeCopySigningInformation(staticCode, flags, &information) == errSecSuccess
         else { return nil }
         return information as? [String: Any]
-    }
-}
-
-extension CefAppCapabilities.PasskeyAuthenticator: CustomStringConvertible {
-    public var description: String {
-        switch self {
-        case .securityKey: return "security keys"
-        case .hybrid: return "phones"
-        case .touchID: return "Touch ID"
-        case .iCloudKeychain: return "iCloud Keychain"
-        }
     }
 }
 

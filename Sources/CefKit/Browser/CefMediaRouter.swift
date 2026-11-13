@@ -56,7 +56,7 @@ public struct CefMediaRouteError: Error, Sendable, CustomStringConvertible {
 /// offer it, so Chromium's own Cast dialog stays the way to mirror a tab.
 @MainActor
 @Observable
-public final class CefMediaRouter {
+public final class CefMediaRouter: CefShutdownParticipant {
     /// The router for every profile.
     public static let shared = CefMediaRouter()
 
@@ -73,7 +73,9 @@ public final class CefMediaRouter {
     @ObservationIgnored private var sinkObjects: [String: CefRef<cef_media_sink_t>] = [:]
     @ObservationIgnored private var routeObjects: [String: CefRef<cef_media_route_t>] = [:]
 
-    private init() {}
+    private init() {
+        CefRuntime.shared.addShutdownParticipant(self)
+    }
 
     /// Whether Chromium's media router runs: not when the `MediaRouter`
     /// feature is turned off, as ``CefRuntime/Configuration/embedded`` does.
@@ -104,7 +106,7 @@ public final class CefMediaRouter {
     }
 
     /// Releases every Chromium object, before Chromium shuts down.
-    func tearDown() {
+    package func runtimeWillShutDown() {
         stopDiscovery()
         sinkObjects = [:]
         routeObjects = [:]

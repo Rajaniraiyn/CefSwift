@@ -2,18 +2,18 @@ import os
 
 /// CefSwift's own diagnostics, in the unified log under the `CefSwift`
 /// subsystem (Chromium's log is configured by `CefRuntime.Configuration.logFile`).
-enum CefLog {
+package enum CefLog {
     private static let logger = Logger(subsystem: "CefSwift", category: "runtime")
 
-    static func error(_ message: String) {
+    package static func error(_ message: String) {
         logger.error("\(message, privacy: .public)")
     }
 
-    static func notice(_ message: String) {
+    package static func notice(_ message: String) {
         logger.notice("\(message, privacy: .public)")
     }
 
-    static func info(_ message: String) {
+    package static func info(_ message: String) {
         logger.info("\(message, privacy: .public)")
     }
 }

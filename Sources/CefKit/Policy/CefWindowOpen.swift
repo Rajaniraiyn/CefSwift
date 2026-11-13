@@ -160,10 +160,10 @@ public enum CefWindowOpenDecision: Sendable, Equatable {
     /// Let Chromium open the popup, tab or window itself. For offscreen
     /// browsers, which cannot host a native popup, this acts as
     /// ``openInCurrentBrowser``, or ``deny`` when there is no URL. For a
-    /// browser whose passkeys are ``CefBrowser/PasskeyPolicy/app(_:)`` or
-    /// ``CefBrowser/PasskeyPolicy/disabled``, CefKit opens the URL in a
-    /// browser of its own instead, which the page cannot script; see
-    /// ``CefBrowser/PasskeyPolicy``.
+    /// browser with an attachment that must prepare before the first
+    /// document, CefKit opens the URL in a browser of its own instead,
+    /// which the page cannot script; see
+    /// ``CefBrowserAttachment/preparesBeforeFirstDocument``.
     case allowNativePopup
     /// You opened the content yourself, for example in a new
     /// ``CefBrowserWindow``; Chromium does nothing more.

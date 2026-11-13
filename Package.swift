@@ -7,6 +7,7 @@ let package = Package(
     products: [
         .library(name: "CefKit", targets: ["CefKit"]),
         .library(name: "CefSwiftUI", targets: ["CefSwiftUI"]),
+        .library(name: "CefPasskeys", targets: ["CefPasskeys"]),
         .plugin(name: "CefPlugin", targets: ["CefPlugin"]),
         // The helper processes' executable and its startup library, which
         // `swift package cef bundle` builds and puts in the app bundle.
@@ -53,6 +54,12 @@ let package = Package(
             dependencies: ["CCef", "CefBase"],
             linkerSettings: [.linkedFramework("AppKit")]
         ),
+        // Optional: WebAuthn answered by the app, or refused, instead of
+        // Chromium. A CefBrowserAttachment over the DevTools protocol.
+        .target(
+            name: "CefPasskeys",
+            dependencies: ["CefKit"]
+        ),
         // SwiftUI integration: `CefWebView`, `CefSwiftApp` and modifiers,
         // built on CefKit's AppKit host views.
         .target(
@@ -88,6 +95,10 @@ let package = Package(
         .testTarget(
             name: "CefKitAppKitTests",
             dependencies: ["CefKit"]
+        ),
+        .testTarget(
+            name: "CefPasskeysTests",
+            dependencies: ["CefPasskeys", "CefKit"]
         ),
     ],
     cLanguageStandard: .c11

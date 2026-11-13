@@ -136,10 +136,10 @@ extension CefBrowser {
     func route(_ request: CefWindowOpenRequest) -> Bool {
         let decided = (delegate ?? CefDefaultBrowserDelegate.shared).browser(self, decideWindowOpenFor: request)
         switch CefWindowOpenPolicy.resolve(decided, for: request) {
-        case .allowNativePopup where !configuration.passkeys.isChromium:
+        case .allowNativePopup where attachmentsPrepareBeforeFirstDocument:
             // Chromium would create it and run its first document before
-            // passkey interception is in place; see openPopupWithPasskeys.
-            openPopupWithPasskeys(request)
+            // the attachments are in place; see openPopupInNewBrowser.
+            openPopupInNewBrowser(request)
             return true
         case .allowNativePopup:
             // Chromium opens it next, in a popup or a tab of its own window.
@@ -154,20 +154,19 @@ extension CefBrowser {
     }
 
     /// Opens what a page asked for in a browser CefKit creates, for a
-    /// browser whose ``Configuration/passkeys`` is ``PasskeyPolicy/app(_:)``
-    /// or ``PasskeyPolicy/disabled``.
+    /// browser with an attachment that prepares before the first document
+    /// (``CefBrowserAttachment/preparesBeforeFirstDocument``).
     ///
     /// A native popup is created by Chromium and runs its first document
-    /// at once, before DevTools can attach to it, so a call to
-    /// `navigator.credentials` there would reach Chromium's own
-    /// authenticators. This browser instead has the opener's configuration
-    /// and is bootstrapped as every browser CefKit creates is: interception
-    /// is in place before its first document starts. It arrives where a
+    /// at once, before an attachment can prepare it. This browser instead
+    /// has the opener's configuration and is bootstrapped as every browser
+    /// CefKit creates is: the attachments are in place before its first
+    /// document starts. It arrives where a
     /// native popup would: ``CefBrowserDelegate/browser(_:didOpen:)``, then
     /// the opener's window's ``CefBrowserWindow/onPopup``, or a window of
     /// its own. The page cannot script it: `window.open` returns `null` and
     /// the popup has no `window.opener`. A blank popup (no URL) is refused.
-    func openPopupWithPasskeys(_ request: CefWindowOpenRequest) {
+    func openPopupInNewBrowser(_ request: CefWindowOpenRequest) {
         guard let url = request.targetURL else { return }
         let popup = CefBrowser(url: url, configuration: configuration, delegate: delegate)
         popup.opener = self
@@ -195,7 +194,7 @@ extension CefBrowser {
 
     /// What a pending delegate decision belongs to, which decides when it
     /// stops mattering.
-    enum DecisionScope: Equatable {
+    package enum DecisionScope: Equatable {
         /// The current page: ends when the main frame starts loading
         /// another document.
         case page
@@ -232,18 +231,22 @@ extension CefBrowser {
         startDecision(scope, ask, then: apply)
     }
 
-    /// Asks the delegate as ``decide(_:_:then:)`` does and returns the
-    /// answer, or `nil` when the decision ended first.
+    /// Asks a question tracked as ``decide(_:_:then:)`` tracks the
+    /// delegate's, such as one a module's own delegate answers, and returns
+    /// the answer, or `nil` when the decision ended first: `ask`'s task is
+    /// cancelled when `scope` ends or the browser closes.
     ///
     /// The answer was valid when the decision was consumed, but the caller
     /// resumes after that, so a caller that applies it through further
     /// suspensions must check again that what it applies to still exists.
-    func decision<Decision: Sendable>(
-        _ scope: DecisionScope, _ ask: @escaping @MainActor (CefBrowserDelegate) async -> Decision
+    package func decision<Decision: Sendable>(
+        _ scope: DecisionScope, _ ask: @escaping @MainActor () async -> Decision
     ) async -> Decision? {
         await withCheckedContinuation { (continuation: CheckedContinuation<Decision?, Never>) in
             // Exactly one of the two runs: the asking task always finishes.
-            startDecision(scope, ask, then: { continuation.resume(returning: $0) }, ended: { continuation.resume(returning: nil) })
+            startDecision(
+                scope, { _ in await ask() },
+                then: { continuation.resume(returning: $0) }, ended: { continuation.resume(returning: nil) })
         }
     }
 
@@ -300,8 +303,7 @@ extension CefBrowser {
         isShowingDevTools = false
         frames = []
         downloadControls = [:]
-        passkeyAuthenticator?.stop()
-        passkeyAuthenticator = nil
+        for attachment in configuration.attachments { attachment.browserDidClose(self) }
         accessibilityDidClose()
         cancelDecisions { _ in true }
         endUnresponsiveEpisode()
