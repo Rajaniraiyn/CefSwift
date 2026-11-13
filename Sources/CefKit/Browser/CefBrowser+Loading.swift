@@ -50,7 +50,8 @@ public struct CefLoadResult: Sendable, Equatable {
 ///   ``CefError/navigationSuperseded``.
 /// - **Crashed**: the page's render process ended while the committed
 ///   document loaded: ``CefError/renderProcessTerminated(_:)``.
-/// - **Closed**: the browser closed: ``CefError/browserClosed``.
+/// - **Closed**: the browser closed: ``CefError/browserClosed``, also for
+///   a load Chromium aborts because the browser is closing.
 ///
 /// A navigation asked of a browser that is not created yet, still setting
 /// up or discarded starts once the browser is (it is not superseded by the
