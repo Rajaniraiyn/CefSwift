@@ -17,7 +17,7 @@ extension SelfTest {
     private static func plainBrowserChecks() async {
         let browser = CefBrowser(url: URL(string: "selftest://app/compat.html")!)
         let view = hostWindowed(browser)
-        _ = await waitUntil { browser.title == "compat" && !browser.isLoading }
+        _ = await loaded(browser, title: "compat")
 
         await expect("compatibility: navigator.webdriver is false") {
             try await browser.evaluateJavaScript("[navigator.webdriver, window.__webdriver]") == [false, false]
@@ -50,7 +50,7 @@ extension SelfTest {
         ]
         let browser = CefBrowser(url: URL(string: "selftest://app/compat.html")!, configuration: configuration)
         let view = hostWindowed(browser)
-        _ = await waitUntil { browser.title == "compat" && !browser.isLoading }
+        _ = await loaded(browser, title: "compat")
 
         await expect("compatibility: user scripts run at document start and end") {
             try await browser.evaluateJavaScript("[window.__start, document.body.dataset.end]") == ["loading", "interactive"]
@@ -90,7 +90,7 @@ extension SelfTest {
         configuration.rendering = .offscreen
         let browser = CefBrowser(url: URL(string: "selftest://app/compat.html")!, configuration: configuration)
         let view = hostOffscreen(browser)
-        _ = await waitUntil { browser.title == "compat" && !browser.isLoading }
+        _ = await loaded(browser, title: "compat")
 
         guard let screen = window.screen else {
             skip("compatibility: offscreen geometry", because: "the test window has no screen", .environment)

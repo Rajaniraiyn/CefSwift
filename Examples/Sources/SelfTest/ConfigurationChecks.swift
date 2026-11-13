@@ -58,7 +58,7 @@ extension SelfTest {
             browser.close(force: true)
             view.removeFromSuperview()
         }
-        guard await waitUntil({ browser.title == "ping-page" }) else {
+        guard await loaded(browser, title: "ping-page") else {
             check(label, false, detail: "the page did not load: '\(browser.title)'")
             return
         }

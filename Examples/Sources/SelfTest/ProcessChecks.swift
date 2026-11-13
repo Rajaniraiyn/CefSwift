@@ -11,7 +11,7 @@ extension SelfTest {
         browser.delegate = recorder
         let view = hostWindowed(browser)
         defer { view.removeFromSuperview() }
-        guard await waitUntil({ browser.title == "busy" && !browser.isLoading }) else {
+        guard await loaded(browser, title: "busy") else {
             check("processes: page loads", false, detail: browser.title)
             return
         }

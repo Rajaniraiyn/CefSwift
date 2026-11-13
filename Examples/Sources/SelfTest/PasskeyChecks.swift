@@ -50,7 +50,7 @@ extension SelfTest {
             window?.close()
             view?.removeFromSuperview()
         }
-        guard await waitUntil(timeout: .seconds(20), { browser.title == "passkeys" && !browser.isLoading }) else {
+        guard await loaded(browser, title: "passkeys", timeout: .seconds(20)) else {
             check("passkeys (\(style)): page loads", false, detail: browser.title)
             return
         }
@@ -153,7 +153,7 @@ extension SelfTest {
         let browser = CefBrowser(url: url, configuration: configuration, delegate: policy)
         let window = CefBrowserWindow(browser: browser)
         window.show()
-        _ = await waitUntil(timeout: .seconds(20)) { browser.title == "passkeys" && !browser.isLoading }
+        _ = await loaded(browser, title: "passkeys", timeout: .seconds(20))
         let start = ContinuousClock.now
         let result = await PasskeyCall.run(browser, "register()")
         check("passkeys (disabled): requests are refused without asking",
@@ -173,7 +173,7 @@ extension SelfTest {
         let browser = CefBrowser(url: url, configuration: configuration, delegate: delegate)
         let view = hostWindowed(browser)
         defer { view.removeFromSuperview() }
-        if await waitUntil(timeout: .seconds(20), { browser.title == "passkeys" && !browser.isLoading }) {
+        if await loaded(browser, title: "passkeys", timeout: .seconds(20)) {
             browser.executeJavaScript("register()")
             let asked = await waitUntil(timeout: .seconds(5)) { delegate.started == 1 && browser.pendingDecisionCount == 1 }
             browser.load(URL(string: "selftest://app/second.html")!)
@@ -193,7 +193,7 @@ extension SelfTest {
         // saved passkey, goes when the browser closes.
         let sheetBrowser = CefBrowser(url: url, configuration: configuration)
         view.browser = sheetBrowser
-        guard await waitUntil(timeout: .seconds(20), { sheetBrowser.title == "passkeys" && !sheetBrowser.isLoading }) else {
+        guard await loaded(sheetBrowser, title: "passkeys", timeout: .seconds(20)) else {
             check("passkeys (sheet): page loads", false, detail: sheetBrowser.title)
             return
         }
@@ -234,7 +234,7 @@ extension SelfTest {
         let window = CefBrowserWindow(browser: browser)
         window.show()
         defer { window.close() }
-        guard await waitUntil(timeout: .seconds(20), { browser.title == "passkeys" && !browser.isLoading }) else {
+        guard await loaded(browser, title: "passkeys", timeout: .seconds(20)) else {
             check("passkeys (failing store): page loads", false, detail: browser.title)
             return
         }

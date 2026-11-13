@@ -112,7 +112,18 @@ description to `.cef/update/`.
 ## CI
 
 `.github/workflows/ci.yml` runs on pushes and pull requests to `main`, and
-when dispatched, on one `macos-15` runner:
+when dispatched. Its `ci` job, on a `macos-15` runner, does everything
+below; two short jobs run beside it without CEF:
+
+- `intel` compiles the package and its tests for x86_64
+  (`swift build --build-tests --arch x86_64`) on the same arm64 runner,
+  and checks that the result is x86_64 for macOS 14. CefKit loads the CEF
+  framework at run time and the plugin builds the helper only when it
+  bundles, so compiling needs no `macosx64` CEF archive.
+- `macos-14` builds and runs the unit tests on a `macos-14` runner, with
+  the newest Xcode on that image.
+
+The `ci` job:
 
 1. Print the macOS, Xcode and Swift versions. The `macos-15` label selects
    an image family that GitHub updates in place, so these can change
@@ -142,14 +153,15 @@ when dispatched, on one `macos-15` runner:
 What CI verifies, and what it does not:
 
 - Compiling against the macOS 14 deployment target means the compiler
-  rejects any newer API used without an availability check. Nothing runs
-  on macOS 14, so `if #available` fallbacks and behavior that differs on
-  macOS 14 are untested.
-- Everything runs on Apple silicon. Nothing is built or run for Intel.
-  Covering it needs an Intel runner (`macos-15-intel` or `macos-13`), the
-  `macosx64` CEF archive in the cache, `cef bundle --platform macosx64`
-  there, and a SelfTest run; on a schedule rather than per pull request,
-  given what those runners cost.
+  rejects any newer API used without an availability check. On macOS 14
+  only the unit tests run (CefKit's macOS 14 executor path among them);
+  Chromium, and with it SelfTest, runs on macOS 15 only.
+- Everything compiles for Intel, and nothing runs there. Running on Intel
+  needs an Intel runner (`macos-15-intel`), the `macosx64` CEF archive in
+  the cache, `cef bundle --platform macosx64` there, and a SelfTest run;
+  on a schedule rather than per pull request, given what those runners
+  cost. (`cef bundle` cannot cross-bundle: it bundles for the architecture
+  SwiftPM builds for.)
 - One toolchain: whichever Xcode the runner image selects. The oldest
   Swift 6 toolchain the package claims is not built with.
 
@@ -158,3 +170,10 @@ What CI verifies, and what it does not:
 Pushing a `v*` tag creates a GitHub release with generated notes
 (`.github/workflows/release.yml`). SwiftPM resolves the tag itself, so there
 are no assets to build.
+
+The release is made only for a commit CI passed: before it creates the
+release, the workflow reads the tagged commit's check runs and requires
+the latest `ci`, `intel` and `macos-14` runs to have succeeded, waiting up
+to 75 minutes for runs still in progress. A commit pushed to `main` has
+those runs. For another commit, run CI on the tag first
+(`gh workflow run ci.yml --ref v0.1.0`), then re-run the release workflow.

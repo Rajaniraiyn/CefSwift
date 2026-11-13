@@ -27,7 +27,7 @@ extension SelfTest {
         let recorder = NotificationRecorder(view: view)
         defer { recorder.stop() }
 
-        check("accessibility: page loads offscreen", await waitUntil { browser.title == "ax" }, detail: browser.title)
+        check("accessibility: page loads offscreen", await loaded(browser, title: "ax"), detail: browser.title)
         let assistiveAppPresent = NSWorkspace.shared.isVoiceOverEnabled || CefApplication.isAccessibilityRequested
         if assistiveAppPresent {
             skip("accessibility: tree stays off until asked", because: "an assistive app is already running", .environment)
@@ -183,7 +183,7 @@ extension SelfTest {
         configuration.rendering = .offscreen
         let browser = CefBrowser(url: URL(string: "selftest://ax/page.html")!, configuration: configuration)
         let view = hostOffscreen(browser)
-        _ = await waitUntil { browser.title == "ax" }
+        _ = await loaded(browser, title: "ax")
         print("READY \(ProcessInfo.processInfo.processIdentifier)")
         check("external: tree turns on for an outside client", await waitUntil(timeout: .seconds(30)) {
             browser.isAccessibilityEnabled && browser.accessibilityTree.nodeCount > 40
@@ -230,7 +230,7 @@ extension SelfTest {
         configuration.offscreenAccessibility = .disabled
         let browser = CefBrowser(url: URL(string: "selftest://ax/page.html")!, configuration: configuration)
         let view = hostOffscreen(browser)
-        _ = await waitUntil { browser.title == "ax" }
+        _ = await loaded(browser, title: "ax")
         _ = view.accessibilityChildren()
         try? await Task.sleep(for: .milliseconds(300))
         check("accessibility: .disabled keeps the page a single element",
@@ -254,7 +254,7 @@ extension SelfTest {
             window.contentView!.addSubview(view)
             let start = ContinuousClock.now
             view.browser = browser
-            _ = await waitUntil(timeout: .seconds(30)) { browser.title == "large" && !browser.isLoading }
+            _ = await loaded(browser, title: "large", timeout: .seconds(30))
             let loaded = ContinuousClock.now - start
             var treeReady = Duration.zero
             if mode == .enabled {

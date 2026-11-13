@@ -43,7 +43,7 @@ extension SelfTest {
         let window = CefBrowserWindow(browser: browser, configuration: configuration)
         window.show()
         defer { window.close() }
-        guard await waitUntil({ browser.title == "page" && !browser.isLoading }), let nsWindow = window.window else {
+        guard await loaded(browser, title: "page"), let nsWindow = window.window else {
             check("surfaces: status bubble off at creation: page loads", false, detail: browser.title)
             return
         }
@@ -94,7 +94,7 @@ extension SelfTest {
         let anchorRect = CGRect(x: 240, y: 560, width: 400, height: 24)
         window.chromiumUI.anchor = .rect(anchorRect, alignment: .leading)
         window.show()
-        _ = await waitUntil { browser.title == "page" && !browser.isLoading }
+        _ = await loaded(browser, title: "page")
         guard let nsWindow = window.window else { return }
 
         // A SwiftUI view in the toolbar registers itself as an anchor (and
@@ -321,7 +321,7 @@ extension SelfTest {
         let browser = CefBrowser(url: URL(string: "selftest://app/second.html")!, configuration: configuration)
         let window = CefBrowserWindow(browser: browser)
         window.show()
-        _ = await waitUntil { browser.title == "second" }
+        _ = await loaded(browser, title: "second")
         guard let contentView = window.window?.contentView,
               let overlay = CefTesting.beginChromeSwipe(in: window, forward: false)
         else {
@@ -348,7 +348,7 @@ extension SelfTest {
         let plain = CefBrowser(url: URL(string: "selftest://app/second.html")!)
         let plainWindow = CefBrowserWindow(browser: plain)
         plainWindow.show()
-        _ = await waitUntil { plain.title == "second" }
+        _ = await loaded(plain, title: "second")
         if let contentView = plainWindow.window?.contentView {
             check("swipe: off by default in browser windows",
                   historySwipingAllowed(in: contentView) == false && !CefTesting.gestureIndicator(in: contentView).isInstalled,
@@ -397,7 +397,7 @@ extension SelfTest {
             }
             view.frame = window.contentView!.bounds
             window.contentView!.addSubview(view)
-            _ = await waitUntil { browser.title == "second" }
+            _ = await loaded(browser, title: "second")
             check("swipe indicator: \(name) view has it", CefTesting.gestureIndicator(in: view) == (true, false))
             CefTesting.setNavigationGestureProgress(0.6, for: browser)
             check("swipe indicator: \(name) view shows progress",

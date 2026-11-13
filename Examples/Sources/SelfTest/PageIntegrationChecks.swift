@@ -102,7 +102,7 @@ extension SelfTest {
 
         let recorder = FileDialogRecorder()
         let (browser, view) = hostedBrowser(URL(string: "selftest://frames/files.html")!, delegate: recorder)
-        _ = await waitUntil { browser.title == "files" && !browser.isLoading }
+        _ = await loaded(browser, title: "files")
 
         recorder.answer = [files[0]]
         _ = try? await browser.evaluateJavaScript("single.click(); 0", userGesture: true)
@@ -157,7 +157,7 @@ extension SelfTest {
         let tab = CefBrowser(url: URL(string: "selftest://frames/files.html")!, delegate: tabRecorder)
         let tabWindow = CefBrowserWindow(browser: tab)
         tabWindow.show()
-        _ = await waitUntil { tab.title == "files" && !tab.isLoading }
+        _ = await loaded(tab, title: "files")
         _ = try? await tab.evaluateJavaScript("single.click(); 0", userGesture: true)
         check("file dialog: a Chrome-style browser asks the delegate", await waitUntil(timeout: .seconds(5)) {
             tabRecorder.dialogs.count == 1
@@ -184,7 +184,7 @@ extension SelfTest {
         view.nextKeyView = after
         after.nextKeyView = before
         window.makeKeyAndOrderFront(nil)
-        _ = await waitUntil { browser.title == "focus" && !browser.isLoading }
+        _ = await loaded(browser, title: "focus")
 
         func activeID() async -> String {
             (try? await browser.evaluateJavaScript("document.activeElement?.id ?? ''").stringValue) ?? "?"
@@ -239,7 +239,7 @@ extension SelfTest {
         let offscreenView = hostOffscreen(offscreen, inset: 40)
         before.nextKeyView = offscreenView
         offscreenView.nextKeyView = after
-        _ = await waitUntil { offscreen.title == "focus" && !offscreen.isLoading }
+        _ = await loaded(offscreen, title: "focus")
         window.makeFirstResponder(before)
         window.selectKeyView(following: before)
         check("focus (offscreen): Tab into the page focuses its first element", await waitUntilAsync(timeout: .seconds(5)) {

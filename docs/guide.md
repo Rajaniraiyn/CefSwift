@@ -425,9 +425,9 @@ when it is first shown.
 | Kind | Members |
 |---|---|
 | State | `url`, `title`, `isLoading`, `estimatedProgress`, `canGoBack`, `canGoForward`, `favicon`, `faviconURL`, `zoomLevel`, `isFullscreen`, `statusText`, `downloads`, `findResult`, `state` (`.pending`, `.live`, `.closed`) |
-| Navigation | `load(_:)`, `goBack()`, `goForward()`, `reload(ignoringCache:)`, `stopLoading()` |
+| Navigation | `load(_:)` (returns a `CefNavigation`), `goBack()`, `goForward()`, `reload(ignoringCache:)`, `stopLoading()`, `waitUntilLoaded(timeout:)` ([waiting for a load](#waiting-for-a-load)) |
 | Page | `isAudioMuted`, `find(_:backwards:caseSensitive:)`, `stopFinding(clearingSelection:)`, `findSession` (an observable find-bar model), `print()`, `pdf(configuration:)`, `printToPDF(at:configuration:)` ([PDF](#pdf)), `snapshot()` |
-| JavaScript | `evaluateJavaScript(_:)`, `evaluateJavaScript(_:as:)`, `executeJavaScript(_:)`, `addUserScript(_:)` |
+| JavaScript | `evaluateJavaScript(_:timeout:)`, `evaluateJavaScript(_:as:timeout:)`, `executeJavaScript(_:)`, `addUserScript(_:)` |
 | DevTools | `devTools`, `showDevTools(inspecting:)`, `closeDevTools()`, `isShowingDevTools` |
 | Lifetime | `ready()`, `close(force:)` |
 | Memory | `isDiscarded`, `discard()`, `restore()`, `discardBlockers()`, `allowsDiscarding`, `discardSnapshot` ([discarding](#discarding-browsers)) |
@@ -491,6 +491,53 @@ released at once and the browser falls back to the default decisions.
 A browser you create lives until you call `close()`. Unless you pass
 `force: true`, the page's `beforeunload` handler can ask the user to stay.
 After `state` becomes `.closed`, create a new `CefBrowser` to browse again.
+
+### Waiting for a load
+
+`load(_:)` returns the `CefNavigation` it started. Await it to continue
+once that page has loaded:
+
+```swift
+let result = try await browser.load(url).waitUntilLoaded(timeout: .seconds(30))
+print(result.url as Any, result.httpStatus ?? 0)
+```
+
+`waitUntilLoaded(timeout:)` on the browser waits for whatever it loads
+now, and returns at once when it has loaded already. It suits a browser
+just created, a reload, or a page that navigates by itself:
+
+```swift
+let browser = CefBrowser(url: home)
+// …once a view or window shows it:
+try await browser.waitUntilLoaded(timeout: .seconds(30))
+```
+
+CEF gives navigations no identity of their own. The navigation a
+`CefNavigation` stands for is the first main-frame navigation Chromium
+starts as a direct load after `load(_:)` was called; links, scripts,
+reloads and history steps do not count as it. Each wait ends in exactly
+one of these ways:
+
+| Outcome | What the wait returns or throws |
+|---|---|
+| The document committed and its `load` event ran | `CefLoadResult`: the final `url` after redirects, the `httpStatus` |
+| A server redirect, or a script or `<meta>` refresh navigating before the page finished | Part of the same navigation; `url` is where it ended |
+| Only the fragment differs from the page shown | Finishes as the address changes, with `isSameDocument` set |
+| A network or HTTP-level failure | The `CefLoadError` the delegate's `didFailLoad` gets |
+| No new page: a download, a 204 or 205 response, `stopLoading()`, the delegate cancelling it | `CefLoadError` with `isCancellation` (`ERR_ABORTED`) |
+| Another `load(_:)`, a link, a script, back or forward starts first | `CefError.navigationSuperseded` |
+| The renderer crashed while the document loaded (`chrome://crash` included) | `CefError.renderProcessTerminated(_:)` |
+| The browser closed | `CefError.browserClosed` |
+| `timeout` ran out | `CefError.timedOut`; the navigation goes on |
+| The waiting task was cancelled | `CancellationError`; the navigation goes on |
+
+The browser-wide `waitUntilLoaded(timeout:)` follows a superseded
+navigation to the one that replaced it, so it ends only when the browser
+has settled; when the last navigation failed, it throws that error, even
+if the browser settled earlier. A browser not created yet waits for its
+first page, and a discarded browser is restored first. A load asked of a
+browser that is still being created, setting up or discarded starts once
+it can, and is not superseded by the browser's own set-up.
 
 ### PDF
 
@@ -907,6 +954,22 @@ form decodes it into any `Decodable` type. An exception thrown by the script
 arrives as `CefJavaScriptError`, and so does a navigation that replaces the
 page before the result is ready. `executeJavaScript(_:)` runs a script
 without waiting for a result.
+
+A script that may never settle takes a `timeout`. When it runs out, the
+call throws `CefError.timedOut`; only the wait ends, and the script, with
+any promise it returned, goes on running in the page:
+
+```swift
+do {
+    let ready = try await browser.evaluateJavaScript("app.whenReady()", as: Bool.self, timeout: .seconds(5))
+    print(ready)
+} catch CefError.timedOut {
+    print("still waiting for the page")
+}
+```
+
+The frame variants, `evaluateJavaScript(_:in:timeout:)` and
+`evaluateJavaScript(_:as:in:timeout:)`, take one too.
 
 Some web APIs need a user gesture: opening a popup, entering fullscreen,
 starting audio, a `beforeunload` prompt. `evaluateJavaScript(_:userGesture:
@@ -1384,7 +1447,8 @@ and its frame, title, ordering and tabbing are yours.
 | `toolbar` | `.none` (default) shows only the page; `.chrome` shows Chrome's toolbar and omnibox; `.location` shows Chrome's read-only location bar. |
 | `frame` | Initial frame in screen coordinates. `nil` centers a 1200 × 800 window. |
 | `tabbingIdentifier` | Windows that share one are grouped as native tabs. `nil` keeps the window out of tab groups. |
-| `titleFollowsPage` | Keeps the window title in sync with the page title. On by default. |
+| `titleFollowsPage` | Keeps the window title in sync with the page, as `title` makes it. On by default. |
+| `title` | Makes the window title from the browser: by default its page title, or the host while the page has none. Re-run whenever the observable state it reads changes, so `{ $0.title.isEmpty ? "New Tab" : $0.title }` titles blank tabs. |
 | `isFrameless` | Removes the title bar and window buttons. |
 
 `CefRuntime.shared.openChromeWindow(url:frame:configuration:delegate:)` opens a

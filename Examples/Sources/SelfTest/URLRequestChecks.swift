@@ -141,7 +141,7 @@ extension SelfTest {
             browser.close(force: true)
             view.removeFromSuperview()
         }
-        guard await waitUntil({ browser.title == "page" && !browser.isLoading }) else {
+        guard await loaded(browser, title: "page") else {
             check("urlRequest: the cookie page loads", false, detail: "title '\(browser.title)'")
             return
         }

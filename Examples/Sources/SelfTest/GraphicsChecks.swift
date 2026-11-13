@@ -43,7 +43,7 @@ extension SelfTest {
                 browser.close(force: true)
                 view.removeFromSuperview()
             }
-            guard await waitUntil({ browser.title == "tab" }) else {
+            guard await loaded(browser, title: "tab") else {
                 check("graphics (\(label)): loads", false, detail: browser.title)
                 continue
             }

@@ -53,7 +53,7 @@ extension SelfTest {
         window.setToolbar { TitleProbe(browser: browser, log: renders) }
         window.setTabAccessory { TitleProbe(browser: browser, log: renders) }
         window.show()
-        _ = await waitUntil { browser.title == "second" && !browser.isLoading }
+        _ = await loaded(browser, title: "second")
         check("toolbar: installed in the window",
               window.window?.toolbar?.items.count == 5 && window.window?.tab.accessoryView != nil)
         check("toolbar: its views follow the browser's state", await waitUntil { renders.titles.last == "second" },
@@ -96,13 +96,12 @@ extension SelfTest {
         let browser = CefBrowser(url: URL(string: "selftest://app/second.html")!, configuration: configuration)
         let window = CefBrowserWindow(browser: browser)
         window.show()
-        _ = await waitUntil { browser.title == "second" }
+        _ = await loaded(browser, title: "second")
         await expect("bridge scope: a permitted origin gets the bridge, not its raw binding") {
             try await browser.evaluateJavaScript(
                 "typeof __cefswift_scoped === 'undefined' ? scoped.ping() : 'binding visible'").stringValue == "pong"
         }
-        browser.load(URL(string: "selftest://edge/tab.html")!)
-        _ = await waitUntil { browser.title == "tab" }
+        _ = await load(URL(string: "selftest://edge/tab.html")!, in: browser, title: "tab")
         await expect("bridge scope: other origins have no global at all") {
             try await browser.evaluateJavaScript(
                 "typeof scoped === 'undefined' && typeof __cefswift_scoped === 'undefined'").boolValue == true
@@ -129,7 +128,7 @@ extension SelfTest {
             var configuration = CefBrowser.Configuration()
             configuration.profile = profile
             let window = CefBrowserWindow(browser: CefBrowser(url: URL(string: "selftest://app/second.html")!, configuration: configuration))
-            check("service lifetime: incognito tab loads", await waitUntil { window.browser.title == "second" })
+            check("service lifetime: incognito tab loads", await loaded(window.browser, title: "second"))
             // Starts the profile's suggestions host.
             await expect("service lifetime: incognito suggestions answer") {
                 try await !profile.autocomplete.suggestions(for: "cefswift").isEmpty

@@ -8,7 +8,7 @@ extension SelfTest {
     static func pdfChecks() async {
         let browser = CefBrowser(url: capabilityOrigin.appending(path: "print.html"))
         let view = hostWindowed(browser)
-        guard await waitUntil({ browser.title == "print" && !browser.isLoading }) else {
+        guard await loaded(browser, title: "print") else {
             check("pdf: page loads", false, detail: browser.title)
             view.removeFromSuperview()
             return
@@ -33,16 +33,14 @@ extension SelfTest {
             return pdf.pageCount == 3 && close(size(pdf), a4)
         }
         // A page's @page size sets its orientation; this one has none.
-        browser.load(capabilityOrigin.appending(path: "plain.html"))
-        _ = await waitUntil { browser.title == "plain" && !browser.isLoading }
+        _ = await load(capabilityOrigin.appending(path: "plain.html"), in: browser, title: "plain")
         await expect("pdf: landscape turns the paper") {
             let pdf = try await document { $0.isLandscape = true }
             let page = pdf.page(at: 0)
             return (close(size(pdf), CGSize(width: a4.height, height: a4.width)),
                     "\(size(pdf)), rotation \(page?.rotation ?? -1), \(pdf.pageCount) pages")
         }
-        browser.load(capabilityOrigin.appending(path: "print.html"))
-        _ = await waitUntil { browser.title == "print" && !browser.isLoading }
+        _ = await load(capabilityOrigin.appending(path: "print.html"), in: browser, title: "print")
         await expect("pdf: page ranges select pages") {
             try await document { $0.pageRanges = [2...3] }.pageCount == 2
         }

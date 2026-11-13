@@ -27,7 +27,7 @@ extension SelfTest {
         let window = CefBrowserWindow(browser: browser)
         window.show()
         defer { window.close() }
-        guard await waitUntil(timeout: .seconds(20), { browser.title == "links" && !browser.isLoading }) else {
+        guard await loaded(browser, title: "links", timeout: .seconds(20)) else {
             check("Chromium's tabs: page loads", false, detail: browser.title)
             return
         }

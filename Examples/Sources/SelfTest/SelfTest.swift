@@ -264,6 +264,29 @@ enum SelfTest {
         return condition()
     }
 
+    /// Whether `browser` finishes loading what it loads within `timeout`
+    /// (``CefBrowser/waitUntilLoaded(timeout:)``), showing `title` when one
+    /// is given.
+    static func loaded(_ browser: CefBrowser, title: String? = nil, timeout: Duration = .seconds(15)) async -> Bool {
+        guard (try? await browser.waitUntilLoaded(timeout: timeout)) != nil else { return false }
+        return title.map { browser.title == $0 } ?? true
+    }
+
+    /// Whether every one of `browsers` finishes loading within `timeout`,
+    /// as ``loaded(_:title:timeout:)``.
+    static func allLoaded(_ browsers: [CefBrowser], title: String? = nil, timeout: Duration = .seconds(15)) async -> Bool {
+        var all = true
+        for browser in browsers where !(await loaded(browser, title: title, timeout: timeout)) { all = false }
+        return all
+    }
+
+    /// Loads `url` in `browser` and returns whether that navigation finishes
+    /// within `timeout`, showing `title` when one is given.
+    static func load(_ url: URL, in browser: CefBrowser, title: String? = nil, timeout: Duration = .seconds(15)) async -> Bool {
+        guard (try? await browser.load(url).waitUntilLoaded(timeout: timeout)) != nil else { return false }
+        return title.map { browser.title == $0 } ?? true
+    }
+
     static func waitUntilAsync(timeout: Duration = .seconds(10), _ condition: () async -> Bool) async -> Bool {
         let deadline = ContinuousClock.now + timeout
         while ContinuousClock.now < deadline {

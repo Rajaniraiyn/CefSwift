@@ -158,7 +158,7 @@ extension SelfTest {
             await closeHosted(browser, view)
             settings.reset(origin: origin)
         }
-        guard await waitUntil({ browser.title == "permissions" && !browser.isLoading }) else {
+        guard await loaded(browser, title: "permissions") else {
             check("permissions: page loads", false, detail: browser.title)
             await finish()
             return

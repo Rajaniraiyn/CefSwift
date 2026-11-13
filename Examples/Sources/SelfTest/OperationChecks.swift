@@ -56,7 +56,7 @@ extension SelfTest {
         let window = CefBrowserWindow(browser: CefBrowser(url: URL(string: "selftest://edge/one.html")!))
         window.show()
         let browser = window.browser
-        _ = await waitUntil { browser.title == "one" }
+        _ = await loaded(browser, title: "one")
         let evaluationError = await errorAfterCancelling {
             try await browser.evaluateJavaScript("new Promise(() => {})")
         }
@@ -100,7 +100,7 @@ extension SelfTest {
             return !window.browser.isSettingUp
         }
         check("operations: the set-up browser loads its page",
-              await waitUntil { window.browser.title == "ready" }, detail: window.browser.title)
+              await loaded(window.browser, title: "ready"), detail: window.browser.title)
         window.close()
         _ = await waitUntil { window.isClosed }
     }
@@ -116,7 +116,7 @@ extension SelfTest {
             popup.show()
         }
         opener.show()
-        _ = await waitUntil { opener.browser.title == "opener" }
+        _ = await loaded(opener.browser, title: "opener")
         let renderersBefore = rendererProcesses().count
         _ = try? await opener.browser.evaluateJavaScript(
             "window.open('popup.html', 'p', 'width=300,height=200'); 0", userGesture: true)
@@ -150,13 +150,12 @@ extension SelfTest {
             browser: CefBrowser(url: URL(string: "selftest://edge/dialog.html")!, delegate: delegate))
         browserWindow.show()
         let browser = browserWindow.browser
-        _ = await waitUntil { browser.title == "dialog" }
+        _ = await loaded(browser, title: "dialog")
 
         // Permission requests in flight when the page goes: a prompt
         // (geolocation), which Chromium dismisses, and a media request.
         if let server = try? await LocalServer.start() {
-            browser.load(URL(string: "http://127.0.0.1:\(server.port)/page")!)
-            _ = await waitUntil { browser.title == "page" }
+            _ = await load(URL(string: "http://127.0.0.1:\(server.port)/page")!, in: browser, title: "page")
             _ = try? await browser.evaluateJavaScript("""
                 navigator.geolocation.getCurrentPosition(() => {}, () => {});
                 navigator.mediaDevices.getUserMedia({ audio: true }).catch(() => {});
@@ -188,7 +187,7 @@ extension SelfTest {
         // The default sheet goes with its browser, in a window that stays.
         let sheetBrowser = CefBrowser(url: URL(string: "selftest://edge/sheet.html")!)
         let view = hostWindowed(sheetBrowser)
-        _ = await waitUntil { sheetBrowser.title == "sheet" }
+        _ = await loaded(sheetBrowser, title: "sheet")
         sheetBrowser.executeJavaScript("alert('sheet')")
         let sheetShown = await waitUntil(timeout: .seconds(5)) { window.attachedSheet != nil }
         sheetBrowser.close(force: true)
@@ -206,7 +205,7 @@ extension SelfTest {
         let window = CefBrowserWindow(browser: CefBrowser(url: URL(string: "selftest://edge/settings.html")!))
         window.show()
         let browser = window.browser
-        _ = await waitUntil { browser.title == "settings" }
+        _ = await loaded(browser, title: "settings")
 
         let mutedChanged = OSAllocatedUnfairLock(initialState: false)
         withObservationTracking { _ = browser.isAudioMuted } onChange: { mutedChanged.withLock { $0 = true } }
@@ -234,7 +233,7 @@ extension SelfTest {
         let window = CefBrowserWindow(browser: CefBrowser(url: URL(string: "selftest://edge/lease.html")!))
         window.show()
         let browser = window.browser
-        _ = await waitUntil { browser.title == "lease" }
+        _ = await loaded(browser, title: "lease")
         await expect("operations: a domain stays enabled while another user holds it") {
             try await browser.devTools.send("Runtime.enable")  // one user
             try await browser.devTools.send("Runtime.enable")  // another
