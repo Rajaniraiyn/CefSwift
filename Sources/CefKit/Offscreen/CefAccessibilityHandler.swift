@@ -51,7 +51,7 @@ extension CefBrowserClient {
             let parseStarted = CefDiagnostics.start()
             defer { CefDiagnostics.record(.accessibilityIngestBackground, since: parseStarted) }
             let object = try? JSONSerialization.jsonObject(with: Data(text.utf8), options: [.fragmentsAllowed])
-            let json = object.map(CefJSON.init(foundationObject:)) ?? .null
+            let json = CefJSON(foundationValue: object)
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
                     guard let browser = client.primary else { return }
@@ -83,24 +83,6 @@ extension CefBrowserClient {
                     apply(browser, json)
                 }
             }
-        }
-    }
-}
-
-extension CefJSON {
-    /// Converts the output of `JSONSerialization`.
-    init(foundationObject object: Any) {
-        switch object {
-        case let string as String:
-            self = .string(string)
-        case let number as NSNumber:
-            self = CFGetTypeID(number) == CFBooleanGetTypeID() ? .bool(number.boolValue) : .number(number.doubleValue)
-        case let array as [Any]:
-            self = .array(array.map(CefJSON.init(foundationObject:)))
-        case let dictionary as [String: Any]:
-            self = .object(dictionary.mapValues(CefJSON.init(foundationObject:)))
-        default:
-            self = .null
         }
     }
 }
