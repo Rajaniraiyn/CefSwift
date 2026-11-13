@@ -142,10 +142,7 @@ extension SelfTest {
         var browserConfiguration = CefBrowser.Configuration()
         browserConfiguration.profile = profile
         let browser = CefBrowser(url: URL(string: "\(base)/page")!, configuration: browserConfiguration)
-        let view = CefWindowedBrowserView()
-        view.frame = window.contentView!.bounds
-        window.contentView!.addSubview(view)
-        view.browser = browser
+        let view = hostWindowed(browser)
         defer {
             browser.close(force: true)
             view.removeFromSuperview()

@@ -36,11 +36,7 @@ extension SelfTest {
         }
         // The page calls the bridge from an inline script: it must already exist.
         let browser = CefBrowser(url: URL(string: "selftest://app/index.html")!, configuration: configuration)
-        let view = CefWindowedBrowserView()
-        view.frame = window.contentView!.bounds
-        view.autoresizingMask = [.width, .height]
-        window.contentView!.addSubview(view)
-        view.browser = browser
+        let view = hostWindowed(browser)
 
         check("windowed: bridge available at document start",
               await waitUntil { browser.title == "Hello, Ada from main!" }, detail: browser.title)
@@ -121,10 +117,7 @@ extension SelfTest {
         var configuration = CefBrowser.Configuration()
         configuration.rendering = .offscreen
         let browser = CefBrowser(url: URL(string: "selftest://app/second.html")!, configuration: configuration)
-        let view = CefOffscreenBrowserView()
-        view.frame = window.contentView!.bounds
-        window.contentView!.addSubview(view)
-        view.browser = browser
+        let view = hostOffscreen(browser)
 
         check("offscreen: loads", await waitUntil { browser.title == "second" }, detail: browser.title)
         if window.occlusionState.contains(.visible) {

@@ -153,15 +153,9 @@ extension SelfTest {
         let recorder = PermissionRecorder()
         let browser = CefBrowser(url: origin.appending(path: "permissions.html"))
         browser.delegate = recorder
-        let view = CefWindowedBrowserView()
-        view.frame = window.contentView!.bounds
-        view.autoresizingMask = [.width, .height]
-        window.contentView!.addSubview(view)
-        view.browser = browser
+        let view = hostWindowed(browser)
         func finish() async {
-            browser.close(force: true)
-            _ = await waitUntil { browser.state == .closed }
-            view.removeFromSuperview()
+            await closeHosted(browser, view)
             settings.reset(origin: origin)
         }
         guard await waitUntil({ browser.title == "permissions" && !browser.isLoading }) else {

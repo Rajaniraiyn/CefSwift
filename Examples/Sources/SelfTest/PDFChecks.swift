@@ -7,10 +7,7 @@ import PDFKit
 extension SelfTest {
     static func pdfChecks() async {
         let browser = CefBrowser(url: capabilityOrigin.appending(path: "print.html"))
-        let view = CefWindowedBrowserView()
-        view.frame = window.contentView!.bounds
-        window.contentView!.addSubview(view)
-        view.browser = browser
+        let view = hostWindowed(browser)
         guard await waitUntil({ browser.title == "print" && !browser.isLoading }) else {
             check("pdf: page loads", false, detail: browser.title)
             view.removeFromSuperview()
@@ -85,9 +82,7 @@ extension SelfTest {
             try await browser.printToPDF(at: file, configuration: configuration)
             return PDFDocument(url: file).map { close(size($0), NSPrintInfo.shared.paperSize) } ?? false
         }
-        browser.close(force: true)
-        _ = await waitUntil { browser.state == .closed }
-        view.removeFromSuperview()
+        await closeHosted(browser, view)
     }
 
     /// Whether the document has a structure tree, as tagged PDFs do.

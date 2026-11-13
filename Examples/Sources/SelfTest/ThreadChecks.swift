@@ -61,10 +61,7 @@ extension SelfTest {
             return request.url?.path == "/blocked" ? .block : .allow
         }
         let browser = CefBrowser(url: URL(string: "selftest://threads/page.html")!, configuration: configuration)
-        let view = CefWindowedBrowserView()
-        view.frame = window.contentView!.bounds
-        window.contentView!.addSubview(view)
-        view.browser = browser
+        let view = hostWindowed(browser)
         _ = await waitUntil { browser.title == "threads" }
 
         let filtered = await Task { @CefIOActor in ioFilteredRequests }.value
@@ -116,9 +113,7 @@ extension SelfTest {
             try await browser.evaluateJavaScript("fetch('selftest://main-actor/x').then(r => r.text())").stringValue
                 == "from the main actor"
         }
-        browser.close(force: true)
-        _ = await waitUntil { browser.state == .closed }
-        view.removeFromSuperview()
+        await closeHosted(browser, view)
     }
 
     /// Run while the app terminates, after `cef_shutdown()`: a job sent then

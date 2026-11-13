@@ -21,10 +21,7 @@ extension SelfTest {
         var configuration = CefBrowser.Configuration()
         configuration.rendering = .offscreen
         let browser = CefBrowser(url: URL(string: "selftest://ax/page.html")!, configuration: configuration)
-        let view = CefOffscreenBrowserView()
-        view.frame = window.contentView!.bounds
-        window.contentView!.addSubview(view)
-        view.browser = browser
+        let view = hostOffscreen(browser)
         defer { view.removeFromSuperview() }
 
         let recorder = NotificationRecorder(view: view)
@@ -185,10 +182,7 @@ extension SelfTest {
         var configuration = CefBrowser.Configuration()
         configuration.rendering = .offscreen
         let browser = CefBrowser(url: URL(string: "selftest://ax/page.html")!, configuration: configuration)
-        let view = CefOffscreenBrowserView()
-        view.frame = window.contentView!.bounds
-        window.contentView!.addSubview(view)
-        view.browser = browser
+        let view = hostOffscreen(browser)
         _ = await waitUntil { browser.title == "ax" }
         print("READY \(ProcessInfo.processInfo.processIdentifier)")
         check("external: tree turns on for an outside client", await waitUntil(timeout: .seconds(30)) {
@@ -198,9 +192,7 @@ extension SelfTest {
         let hold = Double(ProcessInfo.processInfo.environment["SELFTEST_AX_HOLD"] ?? "") ?? 15
         try? await Task.sleep(for: .seconds(hold))
         print("NOTE external: page title after the client's press: \(browser.title)")
-        browser.close(force: true)
-        _ = await waitUntil { browser.state == .closed }
-        view.removeFromSuperview()
+        await closeHosted(browser, view)
     }
 
     // MARK: Discarding
@@ -210,10 +202,7 @@ extension SelfTest {
         configuration.rendering = .offscreen
         configuration.offscreenAccessibility = .enabled
         let browser = CefBrowser(url: URL(string: "selftest://ax/plain.html")!, configuration: configuration)
-        let view = CefOffscreenBrowserView()
-        view.frame = window.contentView!.bounds
-        window.contentView!.addSubview(view)
-        view.browser = browser
+        let view = hostOffscreen(browser)
         defer { view.removeFromSuperview() }
         func hasButton() -> Bool {
             allElements(under: view).contains { ($0.accessibilityTitle() ?? $0.accessibilityLabel()) == "Plain button" }
@@ -240,19 +229,14 @@ extension SelfTest {
         configuration.rendering = .offscreen
         configuration.offscreenAccessibility = .disabled
         let browser = CefBrowser(url: URL(string: "selftest://ax/page.html")!, configuration: configuration)
-        let view = CefOffscreenBrowserView()
-        view.frame = window.contentView!.bounds
-        window.contentView!.addSubview(view)
-        view.browser = browser
+        let view = hostOffscreen(browser)
         _ = await waitUntil { browser.title == "ax" }
         _ = view.accessibilityChildren()
         try? await Task.sleep(for: .milliseconds(300))
         check("accessibility: .disabled keeps the page a single element",
               !browser.isAccessibilityEnabled && browser.accessibilityTree.isEmpty && (view.accessibilityChildren() ?? []).isEmpty
                   && view.isAccessibilityElement())
-        browser.close(force: true)
-        _ = await waitUntil { browser.state == .closed }
-        view.removeFromSuperview()
+        await closeHosted(browser, view)
     }
 
     // MARK: Cost
@@ -281,9 +265,7 @@ extension SelfTest {
             print("NOTE accessibility cost: \(mode == .enabled ? "tree on " : "tree off") load \(loaded.milliseconds) ms"
                   + (mode == .enabled ? ", tree \(browser.accessibilityTree.nodeCount) nodes at \(treeReady.milliseconds) ms" : "")
                   + ", browser-process RSS \(rss / 1_048_576) MB")
-            browser.close(force: true)
-            _ = await waitUntil { browser.state == .closed }
-            view.removeFromSuperview()
+            await closeHosted(browser, view)
         }
     }
 

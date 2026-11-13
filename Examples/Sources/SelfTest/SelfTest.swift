@@ -216,6 +216,36 @@ enum SelfTest {
         }
     }
 
+    /// Shows `browser` in a windowed view that fills the test window, less
+    /// `inset` points at the top and bottom.
+    static func hostWindowed(_ browser: CefBrowser, inset: CGFloat = 0) -> CefWindowedBrowserView {
+        let view = CefWindowedBrowserView()
+        host(view, inset: inset)
+        view.browser = browser
+        return view
+    }
+
+    /// Shows `browser` in an offscreen view, as ``hostWindowed(_:inset:)``.
+    static func hostOffscreen(_ browser: CefBrowser, inset: CGFloat = 0) -> CefOffscreenBrowserView {
+        let view = CefOffscreenBrowserView()
+        host(view, inset: inset)
+        view.browser = browser
+        return view
+    }
+
+    private static func host(_ view: NSView, inset: CGFloat) {
+        view.frame = window.contentView!.bounds.insetBy(dx: 0, dy: inset)
+        view.autoresizingMask = [.width, .height]
+        window.contentView!.addSubview(view)
+    }
+
+    /// Closes a hosted browser, waits until it has closed and removes its view.
+    static func closeHosted(_ browser: CefBrowser, _ view: NSView) async {
+        browser.close(force: true)
+        _ = await waitUntil { browser.state == .closed }
+        view.removeFromSuperview()
+    }
+
     static func waitUntil(timeout: Duration = .seconds(15), _ condition: () -> Bool) async -> Bool {
         let deadline = ContinuousClock.now + timeout
         while ContinuousClock.now < deadline {

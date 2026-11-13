@@ -400,9 +400,7 @@ extension SelfTest {
             CefTesting.setNavigationGestureProgress(0, for: browser)
             check("swipe indicator: \(name) view hides at rest",
                   await waitUntil(timeout: .seconds(2)) { !CefTesting.gestureIndicator(in: view).isShowing })
-            browser.close(force: true)
-            _ = await waitUntil { browser.state == .closed }
-            view.removeFromSuperview()
+            await closeHosted(browser, view)
         }
     }
 }

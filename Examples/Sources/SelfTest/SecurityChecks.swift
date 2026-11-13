@@ -13,10 +13,7 @@ extension SelfTest {
         configuration.clientCertificates = .delegate
         let browser = CefBrowser(url: URL(string: "selftest://app/second.html")!, configuration: configuration)
         browser.delegate = recorder
-        let view = CefWindowedBrowserView()
-        view.frame = window.contentView!.bounds
-        window.contentView!.addSubview(view)
-        view.browser = browser
+        let view = hostWindowed(browser)
 
         /// Loads `url` and waits until it finishes or `orUntil` holds.
         func load(_ url: URL, title: String? = nil, orUntil done: () -> Bool = { false }) async -> Bool {
@@ -102,9 +99,7 @@ extension SelfTest {
                 return false
             } catch { return true }
         }
-        browser.close(force: true)
-        _ = await waitUntil { browser.state == .closed }
-        view.removeFromSuperview()
+        await closeHosted(browser, view)
     }
 }
 

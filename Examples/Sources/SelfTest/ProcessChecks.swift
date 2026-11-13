@@ -9,11 +9,7 @@ extension SelfTest {
         let recorder = HangRecorder()
         let browser = CefBrowser(url: capabilityOrigin.appending(path: "busy.html"))
         browser.delegate = recorder
-        let view = CefWindowedBrowserView()
-        view.frame = window.contentView!.bounds
-        view.autoresizingMask = [.width, .height]
-        window.contentView!.addSubview(view)
-        view.browser = browser
+        let view = hostWindowed(browser)
         defer { view.removeFromSuperview() }
         guard await waitUntil({ browser.title == "busy" && !browser.isLoading }) else {
             check("processes: page loads", false, detail: browser.title)

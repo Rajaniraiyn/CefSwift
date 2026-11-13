@@ -22,11 +22,7 @@ extension SelfTest {
 
     static func protectedMediaChecks() async {
         let browser = CefBrowser(url: URL(string: "selftest://app/eme.html")!)
-        let view = CefWindowedBrowserView()
-        view.frame = window.contentView!.bounds
-        view.autoresizingMask = [.width, .height]
-        window.contentView!.addSubview(view)
-        view.browser = browser
+        let view = hostWindowed(browser)
         defer {
             browser.close(force: true)
             view.removeFromSuperview()
@@ -58,10 +54,7 @@ extension SelfTest {
     /// an Alloy-style (embedded) and a Chrome-style browser.
     static func widevineProbeChecks() async {
         let embedded = CefBrowser(url: URL(string: "selftest://app/eme.html")!)
-        let view = CefWindowedBrowserView()
-        view.frame = window.contentView!.bounds
-        window.contentView!.addSubview(view)
-        view.browser = embedded
+        let view = hostWindowed(embedded)
         defer {
             embedded.close(force: true)
             view.removeFromSuperview()
