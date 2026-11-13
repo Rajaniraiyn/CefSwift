@@ -32,7 +32,7 @@ import Testing
         #expect(capabilities.passkeyAuthenticators == [.securityKey])
         #expect(capabilities.resolvedSafeStorage(.automatic) == .mockKeychain)
         #expect(capabilities.resolvedSafeStorage(.keychain) == .keychain)
-        let summary = capabilities.limitationsSummary(passkeysUseChromium: true) ?? ""
+        let summary = capabilities.limitationsSummary() ?? ""
         #expect(summary.contains("only security keys"))
         #expect(summary.contains("mock keychain"))
     }

@@ -175,12 +175,13 @@ public final class CefRuntime {
     /// passkeys beyond security keys; at info level when nothing is.
     private func logCapabilities() {
         let capabilities = CefAppCapabilities.current
-        if let summary = capabilities.limitationsSummary(passkeysUseChromium: true) {
-            CefLog.notice(summary)
+        let limitations = capabilities.limitationsSummary()
+        if let limitations {
+            CefLog.notice(limitations)
         }
         CefLog.info("CefSwift: Chromium's sandbox is \(configuration?.isSandboxEnabled == true ? "on" : "off"); " +
                     "locale \(locale ?? "en-US")")
-        if capabilities.limitationsSummary(passkeysUseChromium: true) == nil {
+        if limitations == nil {
             CefLog.info("CefSwift: signed \(capabilities.signature.rawValue), team " +
                         "\(capabilities.teamIdentifier ?? "none"); passkeys: " +
                         CefAppCapabilities.PasskeyAuthenticator.allCases

@@ -151,27 +151,25 @@ public struct CefAppCapabilities: Sendable, Equatable {
 
     /// One line for the log naming what is unavailable because of how the
     /// app is signed, or nil when nothing is.
-    func limitationsSummary(passkeysUseChromium: Bool) -> String? {
+    func limitationsSummary() -> String? {
         var parts: [String] = []
         let signed = "signed \(signature == .adHoc ? "ad hoc" : signature.rawValue)" +
             (teamIdentifier.map { ", team \($0)" } ?? ", no team")
         if teamIdentifier == nil {
             parts.append("safe storage uses a mock keychain")
         }
-        if passkeysUseChromium {
-            var missing: [String] = []
-            if !passkeyAuthenticators.contains(.hybrid) {
-                missing.append("phones (NSBluetoothAlwaysUsageDescription" +
-                               (isHardenedRuntime ? " and com.apple.security.device.bluetooth)" : ")"))
-            }
-            if !passkeyAuthenticators.contains(.iCloudKeychain) {
-                missing.append("iCloud Keychain (com.apple.developer.web-browser.public-key-credential and a team signature)")
-            }
-            if !missing.isEmpty {
-                let available = PasskeyAuthenticator.allCases.filter(passkeyAuthenticators.contains)
-                    .map(\.description).joined(separator: " and ")
-                parts.append("Chromium passkeys offer only \(available); unavailable: \(missing.joined(separator: ", "))")
-            }
+        var missing: [String] = []
+        if !passkeyAuthenticators.contains(.hybrid) {
+            missing.append("phones (NSBluetoothAlwaysUsageDescription" +
+                           (isHardenedRuntime ? " and com.apple.security.device.bluetooth)" : ")"))
+        }
+        if !passkeyAuthenticators.contains(.iCloudKeychain) {
+            missing.append("iCloud Keychain (com.apple.developer.web-browser.public-key-credential and a team signature)")
+        }
+        if !missing.isEmpty {
+            let available = PasskeyAuthenticator.allCases.filter(passkeyAuthenticators.contains)
+                .map(\.description).joined(separator: " and ")
+            parts.append("Chromium passkeys offer only \(available); unavailable: \(missing.joined(separator: ", "))")
         }
         guard !parts.isEmpty else { return nil }
         return "CefSwift: \(signed): " + parts.joined(separator: "; ") + ". See docs/bundling.md#features."
