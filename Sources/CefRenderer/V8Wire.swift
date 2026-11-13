@@ -58,7 +58,7 @@ enum V8Wire {
         } else if v.is_double(value) != 0 {
             buffer.append(v.get_double_value(value))
         } else if v.is_string(value) != 0 {
-            appendString(v.get_string_value(value), to: &buffer)
+            buffer.append(utf16: value)
         } else if v.is_date(value) != 0 {
             buffer.append(JSONValue.isoDate(milliseconds: V8Value.milliseconds(of: v.get_date_value(value))))
         } else if v.is_array_buffer(value) != 0 {
@@ -120,17 +120,6 @@ enum V8Wire {
             }
         }
         buffer.close(container, count: members)
-    }
-
-    /// Transcodes a string CEF returned straight into the buffer, then
-    /// frees it.
-    private static func appendString(_ string: cef_string_userfree_t?, to buffer: inout CefWireBuffer) {
-        guard let string else {
-            buffer.append(utf16: UnsafeBufferPointer(start: nil, count: 0))
-            return
-        }
-        defer { cef_string_userfree_utf16_free(string) }
-        buffer.append(utf16: UnsafeBufferPointer(start: string.pointee.str, count: string.pointee.length))
     }
 
     private static func isSame(_ a: Value, _ b: Value) -> Bool {

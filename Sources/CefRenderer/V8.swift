@@ -25,8 +25,7 @@ final class V8Value {
 
     /// The value with a reference added for CEF, which consumes it.
     func retained() -> UnsafeMutablePointer<cef_v8_value_t> {
-        cefAddRef(raw)
-        return raw
+        reference.retainedPointer()
     }
 
     // MARK: Creating values
@@ -190,8 +189,7 @@ final class V8Context {
     /// The context with a reference added for CEF, which consumes every
     /// object passed to it.
     func retained() -> UnsafeMutablePointer<cef_v8_context_t> {
-        cefAddRef(raw)
-        return raw
+        reference.retainedPointer()
     }
 
     var isValid: Bool { raw.pointee.is_valid(raw) != 0 }
