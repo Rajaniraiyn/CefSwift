@@ -58,7 +58,8 @@ extension SelfTest {
             let start = ContinuousClock.now
             _ = try await profile.history.search(limit: 1)
             elapsed = ContinuousClock.now - start
-            return elapsed < .seconds(2)
+            // Usually 0.2 s; a Mac busy with a build has taken 2.2 s.
+            return elapsed < .seconds(5)
         }
         print("     first history call: \(elapsed)")
 
