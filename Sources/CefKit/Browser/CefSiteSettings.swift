@@ -85,46 +85,6 @@ public enum CefSitePermission: String, CaseIterable, Sendable, Codable {
         case `default`
     }
 
-    /// The name to show for the permission, such as “Camera”.
-    public var localizedName: String {
-        switch self {
-        case .camera: "Camera"
-        case .microphone: "Microphone"
-        case .geolocation: "Location"
-        case .notifications: "Notifications"
-        case .popups: "Pop-ups and redirects"
-        case .javaScript: "JavaScript"
-        case .images: "Images"
-        case .cookies: "Cookies and site data"
-        case .sound: "Sound"
-        case .automaticDownloads: "Automatic downloads"
-        case .clipboard: "Clipboard"
-        case .midiSystemExclusive: "MIDI devices"
-        case .sensors: "Motion sensors"
-        case .usbDevices: "USB devices"
-        case .serialPorts: "Serial ports"
-        case .hidDevices: "HID devices"
-        case .bluetoothDevices: "Bluetooth devices"
-        case .bluetoothScanning: "Bluetooth scanning"
-        case .windowManagement: "Window management"
-        case .localFonts: "Fonts"
-        case .storageAccess: "Embedded content"
-        case .idleDetection: "Your device use"
-        case .fileEditing: "File editing"
-        case .pointerLock: "Pointer lock"
-        case .keyboardLock: "Keyboard lock"
-        case .automaticFullscreen: "Automatic full screen"
-        case .automaticPictureInPicture: "Automatic picture in picture"
-        case .insecureContent: "Insecure content"
-        case .localNetworkAccess: "Local network"
-        case .intrusiveAds: "Intrusive ads"
-        case .backgroundSync: "Background sync"
-        case .paymentHandlers: "Payment handlers"
-        case .cameraPanTiltZoom: "Camera movement"
-        case .javaScriptOptimization: "JavaScript optimization"
-        }
-    }
-
     /// The settings Chromium accepts for this permission, besides
     /// ``Setting/default``. Others are ignored when set.
     public var supportedSettings: [Setting] {
