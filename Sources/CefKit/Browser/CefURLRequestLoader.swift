@@ -123,8 +123,10 @@ final class URLRequestLoader {
     }
 
     private func start() {
+        // Ended before it started: quitting halted it on the IO thread.
+        if isFinished { return deliver(.failure((stopReason ?? .shutdown).error(url: plan.url))) }
         if Task.isCancelled { return finish(.failure(CancellationError())) }
-        guard let context, CefThreadExecutor.io.isOnChromium, URLRequestRegistry.shared.insert(self) else {
+        guard let context, CefThreadExecutor.io.isOnChromium else {
             return finish(.failure(CefError.shutDown))
         }
         self.context = nil
@@ -262,9 +264,15 @@ final class URLRequestLoader {
         isFinished = true
         watchdog?.cancel()
         watchdog = nil
+        // The loader's CEF references go here, on the IO thread.
         context = nil
         request = nil
         URLRequestRegistry.shared.remove(self)
+        deliver(result)
+    }
+
+    /// Hands `result` to whoever waits for the request.
+    private func deliver(_ result: Result<HTTPURLResponse, any Error>) {
         switch result {
         case .success(let head):
             let data = body
@@ -361,8 +369,9 @@ final class URLRequestLoader {
     }
 }
 
-/// The requests in flight, so that quitting can end them while Chromium
-/// still runs.
+/// The requests in flight, from the moment a loader takes a request
+/// context reference, so that quitting can end them while Chromium still
+/// runs.
 final class URLRequestRegistry: Sendable {
     static let shared = URLRequestRegistry()
 
@@ -373,7 +382,7 @@ final class URLRequestRegistry: Sendable {
 
     private let state = OSAllocatedUnfairLock(initialState: State())
 
-    /// Adds a starting request; `false` once Chromium is shutting down.
+    /// Adds a new loader; `false` once Chromium is shutting down.
     func insert(_ loader: URLRequestLoader) -> Bool {
         state.withLock { state in
             guard !state.isClosed else { return false }
@@ -389,16 +398,34 @@ final class URLRequestRegistry: Sendable {
     /// How many requests are in flight.
     var count: Int { state.withLock { $0.loaders.count } }
 
-    /// Chromium is about to shut down: no new requests start, and those in
-    /// flight are cancelled on the IO thread, which runs the cancellations
-    /// before it stops. Their callers get ``CefError/shutDown``.
+    /// No new requests start; those in flight are cancelled on the IO
+    /// thread. Returns once each has cancelled its `cef_urlrequest_t` and
+    /// released its CEF references there, so Chromium can shut down after
+    /// it; their callers get ``CefError/shutDown``. Suspends rather than
+    /// blocks: the main thread keeps running Chromium's message loop.
+    func drainForShutdown() async {
+        let loaders = close()
+        guard !loaders.isEmpty else { return }
+        await Self.halt(loaders)
+    }
+
+    /// Chromium is about to shut down: no new requests start, and any
+    /// still in flight (a drain that timed out) are cancelled on the IO
+    /// thread without waiting.
     func cancelAllForShutdown() {
-        let loaders = state.withLock { state in
+        let loaders = close()
+        guard !loaders.isEmpty else { return }
+        Task { await Self.halt(loaders) }
+    }
+
+    private func close() -> [URLRequestLoader] {
+        state.withLock { state in
             state.isClosed = true
             return Array(state.loaders.values)
         }
-        for loader in loaders {
-            Task { @CefIOActor in loader.halt(.shutdown) }
-        }
+    }
+
+    @CefIOActor private static func halt(_ loaders: [URLRequestLoader]) {
+        for loader in loaders { loader.halt(.shutdown) }
     }
 }

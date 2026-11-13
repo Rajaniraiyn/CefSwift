@@ -107,7 +107,10 @@ public enum CefDialogPresenter {
 
     /// Shows `alert` until the user answers or the calling task is
     /// cancelled, which dismisses it as Cancel (`.abort`): CefKit cancels
-    /// a dialog whose page navigated or closed.
+    /// a dialog whose page navigated or closed. A sheet on `window` when it
+    /// is visible, a modal alert otherwise; a task cancelled already shows
+    /// nothing. Every default presenter that shows an alert uses this, so
+    /// each dismisses itself both ways.
     static func run(_ alert: NSAlert, in window: NSWindow?) async -> NSApplication.ModalResponse {
         guard !Task.isCancelled else { return .abort }
         let dismiss = { @MainActor @Sendable in

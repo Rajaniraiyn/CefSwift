@@ -26,7 +26,7 @@ struct TaskManagerTests {
         let processes = CefTaskManager.processes(of: tasks)
         #expect(processes.map(\.id) == [1, 2, 3, 6, 7])
         #expect(processes[2].tasks.count == 3)
-        #expect(CefTaskManager.Process.totalMemory(of: processes) == 100 + 100 + 50 + 70 + 70)
+        #expect(CefTaskManager.Process.estimatedTotalMemory(of: processes) == 100 + 100 + 50 + 70 + 70)
     }
 
     @Test func unmeasuredFiguresAreNil() {

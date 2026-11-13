@@ -42,23 +42,8 @@ public enum CefUnresponsivePagePresenter {
             ?? "The page is not responding. You can wait for it or reload it."
         alert.addButton(withTitle: "Wait")
         alert.addButton(withTitle: "Force Reload")
-        return await withTaskCancellationHandler {
-            let response: NSApplication.ModalResponse
-            if let window {
-                response = await alert.beginSheetModal(for: window)
-            } else {
-                response = alert.runModal()
-            }
-            return response == .alertSecondButtonReturn ? .reload : .wait
-        } onCancel: {
-            Task { @MainActor in
-                if let sheetParent = alert.window.sheetParent {
-                    sheetParent.endSheet(alert.window, returnCode: .alertFirstButtonReturn)
-                } else if alert.window.isVisible {
-                    NSApp.stopModal(withCode: .alertFirstButtonReturn)
-                }
-            }
-        }
+        let response = await CefDialogPresenter.run(alert, in: window)
+        return response == .alertSecondButtonReturn ? .reload : .wait
     }
 }
 

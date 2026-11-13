@@ -322,6 +322,9 @@ public final class CefProfile {
     }
 
     /// Releases every profile's request context, before Chromium shuts down.
+    /// Quitting has drained the requests in flight already (see
+    /// `URLRequestRegistry.drainForShutdown()`); this cancels any left by
+    /// a drain that gave up.
     static func releaseRequestContexts() {
         URLRequestRegistry.shared.cancelAllForShutdown()
         CefObserverRegistration.releaseAll()

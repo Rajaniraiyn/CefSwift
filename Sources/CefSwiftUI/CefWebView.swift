@@ -250,8 +250,16 @@ public final class CefWindowedBrowserView: NSView {
     public override func becomeFirstResponder() -> Bool {
         guard let browser, super.becomeFirstResponder() else { return false }
         let direction = window?.keyViewSelectionDirection ?? .directSelection
-        // Once AppKit has finished selecting this view.
-        DispatchQueue.main.async { browser.hostViewDidBecomeKey(selecting: direction) }
+        let selectedIn = window
+        // Once AppKit has finished selecting this view, and only if it is
+        // still selected, in the same window, for the same browser: focus
+        // that moved on meanwhile must not be taken back.
+        DispatchQueue.main.async { [weak self, weak browser] in
+            guard let self, let browser, let window = self.window, window === selectedIn,
+                  window.firstResponder === self, self.browser === browser, browser.state == .live
+            else { return }
+            browser.hostViewDidBecomeKey(selecting: direction)
+        }
         return true
     }
 

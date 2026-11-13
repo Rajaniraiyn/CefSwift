@@ -866,14 +866,18 @@ intervals. When nothing does, it stops, and Chromium stops measuring.
 The figures belong to processes, and several tasks can share one: tabs of
 one site in one renderer, a page and its workers. Tasks of one process
 report the same figures and the same `process`; `processes` groups them,
-and `CefTaskManager.Process.totalMemory(of:)` counts each process once.
-Chromium's API names no process, so CefSwift groups the consecutive
-renderer tasks with identical figures, which is what the tasks of one
-process have.
+and `CefTaskManager.Process.estimatedTotalMemory(of:)` counts each process
+once. Chromium's API names no process, so the grouping is an estimate:
+CefSwift groups the consecutive renderer tasks with identical measured
+figures, which is what the tasks of one process have. Two separate
+renderers that report the same figures side by side are grouped as one,
+which undercounts the total, and tasks not measured yet stay apart. Show
+the grouping; do not decide anything by it.
 
 `browser.rendererTask` is the task of the renderer showing a browser's page,
-and `tasks.browsers(in:)` lists every browser a process serves, so a
-browser's memory is that process's memory shared with those browsers.
+and `taskManager.browsers(in:)` lists the browsers in the same estimated
+process, so a browser's memory is that process's memory shared with those
+browsers.
 
 ### Unresponsive pages
 

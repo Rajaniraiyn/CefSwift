@@ -13,6 +13,7 @@ extension SelfTest {
         await readinessChecks()
         await sharedRendererChecks()
         await decisionChecks()
+        await presenterCancellationChecks()
         await observableSettingChecks()
         await domainLeaseChecks()
     }
@@ -141,6 +142,42 @@ extension SelfTest {
         popup.close()
         opener.close()
         _ = await waitUntil { opener.isClosed && popup.isClosed }
+    }
+
+    /// A default presenter with no window shows a modal alert; cancelling
+    /// its task stops that modal session, and a task cancelled before it is
+    /// shown shows nothing. The unresponsive-page, dialog and
+    /// client-certificate presenters share this presentation.
+    static func presenterCancellationChecks() async {
+        let browser = CefBrowser()
+        var answer: CefUnresponsivePageDecision?
+        let task = Task { @MainActor in
+            answer = await CefUnresponsivePagePresenter.present(for: browser, in: nil)
+        }
+        let shown = await waitUntil(timeout: .seconds(5)) { NSApp.modalWindow != nil }
+        task.cancel()
+        let dismissed = await waitUntil(timeout: .seconds(5)) { answer != nil && NSApp.modalWindow == nil }
+        check("operations: cancelling dismisses a presenter's modal alert", shown && dismissed && answer == .wait,
+              detail: "shown \(shown), answer \(String(describing: answer)), modal \(String(describing: NSApp.modalWindow))")
+        if let modal = NSApp.modalWindow, !dismissed {
+            NSApp.stopModal()
+            modal.orderOut(nil)
+        }
+
+        var leaving: Bool?
+        var everShown = false
+        let early = Task { @MainActor in
+            leaving = await CefDialogPresenter.confirmLeaving(isReload: false, in: nil)
+        }
+        early.cancel()
+        let ended = await waitUntil(timeout: .seconds(5)) {
+            everShown = everShown || NSApp.modalWindow != nil
+            return leaving != nil
+        }
+        check("operations: a presenter cancelled before it shows shows nothing",
+              ended && !everShown && leaving == false,
+              detail: "ended \(ended), shown \(everShown), \(String(describing: leaving))")
+        if NSApp.modalWindow != nil { NSApp.stopModal() }
     }
 
     /// Delegate decisions end with the page they belong to.

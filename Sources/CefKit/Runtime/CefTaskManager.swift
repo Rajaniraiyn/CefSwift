@@ -20,8 +20,17 @@ import Observation
 ///
 /// Memory and CPU figures belong to processes. Tasks that share a process
 /// (several tabs of one site in one renderer, workers and their page)
-/// report the same figures and the same ``Task/process``; add each process
-/// once, as ``Process/totalMemory(of:)`` does.
+/// report the same figures; add each process once, as
+/// ``Process/estimatedTotalMemory(of:)`` does.
+///
+/// Chromium's task-manager API names no process for a task: it only lists
+/// the tasks of one process one after another. ``Task/process`` and
+/// ``processes`` are therefore an estimate, made by grouping consecutive
+/// renderer-hosted tasks with identical, measured figures. Two separate
+/// renderers that happen to report the same figures side by side are
+/// grouped as one (their total is then undercounted), and tasks of one
+/// process not measured yet stay apart. Use them for display, not to
+/// decide which pages share a process.
 @MainActor
 @Observable
 public final class CefTaskManager {
@@ -71,13 +80,18 @@ public final class CefTaskManager {
         public var isGPUMemoryAggregate: Bool
         /// Whether ``CefTaskManager/terminate(_:)`` can end it.
         public var canTerminate: Bool
-        /// The process the task runs in, among the tasks of one snapshot.
+        /// The process CefKit estimates the task runs in, among the tasks
+        /// of one snapshot; see ``CefTaskManager`` for how it is inferred.
         public var process: Process.ID
     }
 
-    /// A process, as the tasks running in it.
+    /// A process, as the tasks estimated to run in it: consecutive
+    /// renderer-hosted tasks with identical figures. Chromium names no
+    /// process, so this can join separate renderers that report the same
+    /// figures, or split one whose tasks are not measured yet.
     public struct Process: Identifiable, Sendable, Hashable {
-        /// An identifier, stable while the process keeps its first task.
+        /// The identifier of the group's first task, stable while the
+        /// group keeps it.
         public var id: Int64
         /// The tasks in the process, the process's own first.
         public var tasks: [Task]
@@ -87,8 +101,10 @@ public final class CefTaskManager {
         /// The process's CPU use, counted once.
         public var cpuUsage: Double { tasks.first?.cpuUsage ?? 0 }
 
-        /// The memory of `processes` together, each counted once.
-        public static func totalMemory(of processes: [Process]) -> Int64 {
+        /// The memory of `processes` together, each counted once: an
+        /// estimate, as the grouping is (it undercounts separate renderers
+        /// grouped as one).
+        public static func estimatedTotalMemory(of processes: [Process]) -> Int64 {
             processes.reduce(0) { $0 + max(0, $1.memory ?? 0) }
         }
     }
@@ -101,7 +117,7 @@ public final class CefTaskManager {
         return storedTasks
     }
 
-    /// ``tasks`` grouped by process, in the same order.
+    /// ``tasks`` grouped by estimated process, in the same order.
     public var processes: [Process] {
         Self.processes(of: tasks)
     }
@@ -161,8 +177,10 @@ public final class CefTaskManager {
         return storedTasks.first { $0.id == identifier }
     }
 
-    /// The browsers whose main task runs in `process`. Several browsers can
-    /// share one renderer; its memory is theirs together.
+    /// The browsers whose main task is in the group `process` names. Several
+    /// browsers can share one renderer, whose memory is theirs together;
+    /// since the grouping is an estimate, the list can also include a
+    /// browser of a separate renderer that reported the same figures.
     public func browsers(in process: Process.ID) -> [CefBrowser] {
         keepRefreshing()
         guard let manager = manager() else { return [] }
@@ -232,11 +250,13 @@ public final class CefTaskManager {
         var canTerminate: Bool
     }
 
-    /// Gives each task its process. Chromium lists a process's tasks one
-    /// after another and reports the process's figures for each; its API
-    /// gives no process identifier, so a task belongs to the process of the
-    /// one before it when it is a renderer-hosted task with the same
-    /// figures, as the tasks of one process always have.
+    /// Gives each task its estimated process. Chromium lists a process's
+    /// tasks one after another and reports the process's figures for each;
+    /// its API (`cef_task_info_t`, `cef_task_manager_t` at CEF 156) gives no
+    /// process identifier, so a task is put with the one before it when it
+    /// is a renderer-hosted task with the same measured figures, as the
+    /// tasks of one process always have. The converse does not hold:
+    /// separate renderers with equal figures side by side are joined.
     nonisolated static func assignProcesses(_ raw: [RawTask]) -> [Task] {
         var result: [Task] = []
         var process: Int64 = -1
