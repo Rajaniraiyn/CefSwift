@@ -95,8 +95,9 @@ public final class CefAutocomplete {
                 "text": .string(text),
                 "url": .string(currentURL?.absoluteString ?? ""),
                 "preventInline": .bool(!allowsInlineCompletion),
-            ]
-        ).decode([MatchRecord]?.self)?.map(CefAutocomplete.Suggestion.init) ?? []
+            ],
+            as: [MatchRecord]?.self
+        )?.map(CefAutocomplete.Suggestion.init) ?? []
     }
 
     /// Binds an own `mojom.OmniboxPageHandler` and collects the debug

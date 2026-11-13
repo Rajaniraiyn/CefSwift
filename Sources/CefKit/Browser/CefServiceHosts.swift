@@ -134,7 +134,10 @@ package final class CefServiceHosts: CefShutdownParticipant {
         _ module: CefServiceHost.Module, _ function: String, _ arguments: CefJSON = [:], as type: Result.Type,
         timeout: Duration = .seconds(15)
     ) async throws -> Result {
-        try await call(module, function, arguments, timeout: timeout).decode(Result.self)
+        let json = try await call(module, function, arguments, timeout: timeout)
+        let started = CefDiagnostics.start()
+        defer { CefDiagnostics.record(.serviceDecode, since: started) }
+        return try json.decode(Result.self)
     }
 
     /// Events `module` emits as `emit(name, payload)`, while one of its hosts
@@ -198,6 +201,11 @@ package final class CefServiceHosts: CefShutdownParticipant {
     /// Closes the hosts without a call in progress.
     private func stopIdle() {
         hosts.values.filter(\.isIdle).forEach { $0.stop() }
+    }
+
+    /// The browser of the running host called `name`. For benchmarks.
+    func browser(ofHostNamed name: String) -> CefBrowser? {
+        hosts.first { $0.key.name == name }?.value.liveBrowserIfRunning
     }
 
     /// Kills the renderer of the running host called `name`, as a crash
@@ -273,12 +281,16 @@ final class CefServiceHostBrowser {
 
     fileprivate var isIdle: Bool { callsInProgress == 0 }
 
+    fileprivate var liveBrowserIfRunning: CefBrowser? { browser?.state == .live ? browser : nil }
+
     func call(
         _ module: CefServiceHost.Module, _ function: String, _ arguments: CefJSON, timeout: Duration
     ) async throws -> CefJSON {
         callsInProgress += 1
         idleStop?.cancel()
+        let started = CefDiagnostics.start()
         defer {
+            CefDiagnostics.record(.serviceCall, since: started)
             callsInProgress -= 1
             if callsInProgress == 0 { scheduleIdleStop() }
         }
@@ -292,7 +304,11 @@ final class CefServiceHostBrowser {
         } _: { [self] in
             let browser = try await liveBrowser()
             do {
-                return try await browser.evaluateJavaScript(Self.script(module, function, arguments))
+                let encodeStarted = CefDiagnostics.start()
+                let script = Self.script(module, function, arguments)
+                CefDiagnostics.record(.serviceEncode, since: encodeStarted)
+                CefDiagnostics.record(.serviceRequestBytes, amount: script.utf8.count)
+                return try await browser.evaluateJavaScript(script)
             } catch let error as CefJavaScriptError {
                 throw CefError.operationFailed("\(module.name): \(error.message)")
             } catch CefError.browserClosed {
@@ -314,7 +330,14 @@ final class CefServiceHostBrowser {
                 delete registry[\(name)];
                 throw error;
               }));
-              return await (\(function))(service, \(arguments.text));
+              const stats = window.__cefswiftServiceStats ??= { calls: 0, ms: 0 };
+              const started = performance.now();
+              try {
+                return await (\(function))(service, \(arguments.text));
+              } finally {
+                stats.calls += 1;
+                stats.ms += performance.now() - started;
+              }
             })()
             """
     }
@@ -353,6 +376,7 @@ final class CefServiceHostBrowser {
         windowConfiguration.titleFollowsPage = false
         let window = CefWindow(browser: browser, configuration: windowConfiguration)
         window.isService = true
+        browser.pageScripting.isServiceHost = true
         window.onClose = { [weak self] in self?.windowDidClose() }
         self.browser = browser
         self.window = window
@@ -418,5 +442,28 @@ private final class ServiceBrowserDelegate: CefBrowserDelegate {
 
     func browser(_ browser: CefBrowser, renderProcessDidTerminate reason: CefTerminationReason) {
         onTerminated?()
+    }
+}
+
+extension CefProfile {
+    /// What the running service host called `name` reports about itself:
+    /// its calls and the renderer time they took, and its JavaScript heap.
+    /// For benchmarks.
+    @_spi(Testing) public func serviceHostStatistics(named name: String) async -> CefJSON? {
+        guard let browser = serviceHosts.browser(ofHostNamed: name) else { return nil }
+        return try? await browser.evaluateJavaScript("""
+            ({
+              calls: window.__cefswiftServiceStats?.calls ?? 0,
+              ms: window.__cefswiftServiceStats?.ms ?? 0,
+              heap: performance.memory?.usedJSHeapSize ?? 0,
+              inFlight: window.__cefswiftServices?.calls?.size ?? 0,
+            })
+            """)
+    }
+
+    /// The browser of the running service host called `name`. For
+    /// benchmarks.
+    @_spi(Testing) public func serviceHostBrowser(named name: String) -> CefBrowser? {
+        serviceHosts.browser(ofHostNamed: name)
     }
 }

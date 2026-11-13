@@ -25,6 +25,9 @@ final class CefPageScripting {
     /// The frame each evaluation sent to a frame other than the main one
     /// runs in, by request.
     private var evaluationFrames: [Int: CefFrame.ID] = [:]
+    /// Whether the browser is a service host, whose replies
+    /// ``CefDiagnostics`` counts.
+    var isServiceHost = false
 
     init(browser: CefBrowser) {
         self.browser = browser
@@ -170,6 +173,7 @@ final class CefPageScripting {
             guard let header = try? reader.header() else { return true }
             reader.skipHeader()
             let request = Int(header.target)
+            if isServiceHost { CefDiagnostics.record(.serviceReplyBytes, amount: payload.bytes.count) }
             evaluationFrames[request] = nil
             if header.succeeded != 0 {
                 // Decoding the value validates it; a malformed one throws.

@@ -76,6 +76,15 @@ public final class CefHistory {
         return try await profile.serviceHosts.call(module, function, arguments)
     }
 
+    private func call<Result: Decodable>(
+        _ module: CefServiceHost.Module, _ function: String, _ arguments: CefJSON = [:], as type: Result.Type
+    ) async throws -> Result {
+        guard !profile.isIncognito else {
+            throw CefError.operationFailed("an incognito profile keeps no history")
+        }
+        return try await profile.serviceHosts.call(module, function, arguments, as: type)
+    }
+
     /// Visited pages whose title or address matches `text` (everything
     /// when empty), newest first.
     public func search(_ text: String = "", limit: Int = 100) async throws -> [CefHistory.Entry] {
@@ -96,8 +105,24 @@ public final class CefHistory {
               });
             })
             """,
-            ["text": .string(text), "limit": .number(Double(max(1, limit)))]
-        ).decode([HistoryRecord].self).compactMap(CefHistory.Entry.init)
+            ["text": .string(text), "limit": .number(Double(max(1, limit)))], as: [HistoryRecord].self
+        ).compactMap(CefHistory.Entry.init)
+    }
+
+    /// `count` made-up entries, built by the history host and decoded as
+    /// ``search(_:limit:)`` decodes its results: the transport and decoding
+    /// of a large result without a history that large. For benchmarks.
+    @_spi(Testing) public func syntheticEntries(_ count: Int) async throws -> [CefHistory.Entry] {
+        try await call(
+            Self.historyModule,
+            """
+            (s, a) => Array.from({ length: a.count }, (_, i) => ({
+              url: 'https://example.com/articles/' + i + '/a-page-with-a-typical-length-address',
+              title: 'A typical page title, number ' + i, time: 1.7e12 - i * 60000,
+              times: [1.7e12 - i * 60000], starred: i % 7 === 0 }))
+            """,
+            ["count": .number(Double(count))], as: [HistoryRecord].self
+        ).compactMap(CefHistory.Entry.init)
     }
 
     /// Removes the visits `entries` cover from history.
@@ -122,8 +147,8 @@ public final class CefHistory {
     public func topSites() async throws -> [CefHistory.TopSite] {
         try await call(
             Self.mostVisitedModule,
-            "s => s.tiles().then(tiles => tiles.map(t => ({ url: t.url, title: t.title })))"
-        ).decode([TileRecord].self).compactMap { tile in
+            "s => s.tiles().then(tiles => tiles.map(t => ({ url: t.url, title: t.title })))", as: [TileRecord].self
+        ).compactMap { tile in
             URL(string: tile.url).map { CefHistory.TopSite(url: $0, title: tile.title) }
         }
     }

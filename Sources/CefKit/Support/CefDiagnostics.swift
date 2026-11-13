@@ -25,6 +25,16 @@ import os
         case accessibilityIngestBackground
         /// Main-thread time handling a DevTools event.
         case devToolsEvent
+        /// A service-host call, from the engine's entry to its result.
+        case serviceCall
+        /// Encoding a service call: its script or its arguments.
+        case serviceEncode
+        /// Decoding a service call's result into the caller's type.
+        case serviceDecode
+        /// Bytes sent to service hosts (``Counter/nanoseconds`` holds bytes).
+        case serviceRequestBytes
+        /// Bytes received from service hosts (``Counter/nanoseconds`` holds bytes).
+        case serviceReplyBytes
     }
 
     /// How offscreen accessibility updates are taken from CEF.
@@ -60,12 +70,21 @@ import os
     }
 
     /// A start time, or 0 when measuring is off.
-    static func start() -> UInt64 {
+    package static func start() -> UInt64 {
         isEnabled ? clock_gettime_nsec_np(CLOCK_UPTIME_RAW) : 0
     }
 
+    /// Adds `amount` (bytes, say) to `metric`, when measuring is on.
+    package static func record(_ metric: Metric, amount: Int) {
+        guard isEnabled else { return }
+        state.withLock {
+            $0.counters[metric, default: Counter()].count += 1
+            $0.counters[metric, default: Counter()].nanoseconds += UInt64(max(0, amount))
+        }
+    }
+
     /// Adds the time since `start` to `metric`.
-    static func record(_ metric: Metric, since start: UInt64) {
+    package static func record(_ metric: Metric, since start: UInt64) {
         guard start != 0 else { return }
         let elapsed = clock_gettime_nsec_np(CLOCK_UPTIME_RAW) &- start
         state.withLock {
