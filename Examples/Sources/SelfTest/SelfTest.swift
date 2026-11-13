@@ -179,6 +179,7 @@ enum SelfTest {
         ("internalPages", internalPageDataChecks),
         ("serviceLifetime", serviceLifetimeChecks),
         ("serviceHosts", serviceHostChecks),
+        ("serviceCalls", serviceCallChecks),
         // After the history checks: the pages these visit would crowd the
         // probe out of the most-visited tiles.
         ("nativeUI", nativeUIChecks),

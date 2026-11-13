@@ -2347,8 +2347,12 @@ for await _ in profile.bookmarks.changes { /* refresh your UI */ }
 let visits = try await profile.history.search("swift", limit: 20)
 let topSites = try await profile.history.topSites()
 try await profile.history.remove(visits)
+for try await page in profile.history.entries(matching: "", pageSize: 200) { print(page.count) }
+let icons = try await profile.history.favicons(for: visits.map(\.url))
 
-let suggestions = try await profile.autocomplete.suggestions(for: "cef")
+for try await result in profile.autocomplete.results(for: "cef") {
+    print(result.suggestions.map(\.text), result.isComplete)
+}
 ```
 
 - `bookmarks` also has `bookmark(_:)`, `children(of:)`, `search(_:)`,
@@ -2359,19 +2363,73 @@ let suggestions = try await profile.autocomplete.suggestions(for: "cef")
 - `history` groups visits by day, as `chrome://history` does. It records
   only visits made in Chrome-style browsers. `topSites()` includes visits
   made up to the call and takes up to a second.
+- `history.entries(matching:pageSize:)` reads the same history a page at
+  a time, each page when the loop asks for it, so a long history never
+  sits in memory whole.
 - `history.favicon(for:size:)` returns the icon Chromium keeps for a page
   that is not open, such as a history entry, bookmark or most-visited site,
-  or `nil` when it has none. For an open page, use `browser.favicon`.
+  or `nil` when it has none; `favicons(for:size:)` asks for a whole list in
+  one call. Icons arrive as their pixels, which become the image's bitmap
+  without being encoded on the way. For an open page, use
+  `browser.favicon`.
 - An incognito profile keeps no history: its `history` methods throw. It
   shares the default profile's bookmarks, as Chrome's incognito windows do,
   so `incognito.bookmarks` is `CefProfile.default.bookmarks`.
-- `autocomplete.suggestions(for:currentURL:allowsInlineCompletion:)` returns
-  what Chrome's address bar would show, ranked, each with a `kind` (history,
-  bookmark, open tab, search, …), `detail` (a page's title), `relevance`,
-  `inlineCompletion` and `isBookmarked`. Call it on every keystroke: a newer
-  query supersedes one still running, which then returns no suggestions.
+- `autocomplete.results(for:currentURL:allowsInlineCompletion:)` streams
+  what Chrome's address bar would show, ranked, each suggestion with a
+  `kind` (history, bookmark, open tab, search, …), `detail` (a page's
+  title), `relevance`, `inlineCompletion` and `isBookmarked`. Results come
+  as Chromium's providers answer — local matches within a few milliseconds,
+  the search engine's when the network answers — and the last one
+  `isComplete`. `suggestions(for:)` returns just that last one.
   Search-engine suggestions come from the network; filter on `kind` to keep
   only local results.
+- The latest query wins. Starting one ends the profile's query still
+  running — its stream finishes, `suggestions(for:)` throws
+  `CancellationError` — and Chromium stops working on it, so query on every
+  keystroke without debouncing. Ending the consuming task does the same.
+
+Suggestions as you type, in SwiftUI: `.task(id:)` ends the stream for the
+text it replaces.
+
+```swift
+import CefChromium
+import SwiftUI
+
+struct AddressField: View {
+    let profile: CefProfile
+    @State private var text = ""
+    @State private var suggestions: [CefAutocomplete.Suggestion] = []
+
+    var body: some View {
+        VStack(alignment: .leading) {
+            TextField("Search or enter address", text: $text)
+            ForEach(suggestions) { suggestion in
+                Text(suggestion.text) + Text(suggestion.inlineCompletion).foregroundStyle(.secondary)
+            }
+        }
+        .task(id: text) {
+            do {
+                for try await result in profile.autocomplete.results(for: text) {
+                    suggestions = result.suggestions
+                }
+            } catch {
+                suggestions = []
+            }
+        }
+    }
+}
+```
+
+In AppKit, hand the field's text to `results(following:)` as a stream:
+
+```swift
+let (texts, typed) = AsyncStream.makeStream(of: String.self, bufferingPolicy: .bufferingNewest(1))
+typed.yield("swi")  // in controlTextDidChange(_:), the field's text
+for try await result in profile.autocomplete.results(following: texts) {
+    print(result.text, result.suggestions.prefix(8).map(\.text))
+}
+```
 
 CEF has no API for any of this. CefChromium uses the services Chromium's own
 pages use — `chrome.bookmarks`, and the Mojo handlers of the history, new
@@ -2394,6 +2452,13 @@ change with a Chromium update, which is why they live in the optional
 `CefChromium` library, bound to the pinned CEF; `chrome://omnibox` is a
 debugging page, so `autocomplete` is experimental. SelfTest exercises all
 of them, so a CEF update that breaks one fails CI.
+
+A call costs a renderer round trip, about a tenth of a millisecond, plus
+Chromium's own work: about 0.5 ms for a favicon, a bookmark search or a
+small tree, 1 ms for a page of history, 2 to 3 ms for local suggestions.
+Cancelling a call's task resumes it at once and stops the work in the
+host; results of 64 KB or more decode off the main actor
+([design notes](design-notes.md#service-calls-measured)).
 
 What each host costs while it runs, measured with
 [`Scripts/measure-services.py`](../Scripts/measure-services.py) on the

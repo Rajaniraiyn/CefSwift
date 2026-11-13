@@ -107,19 +107,19 @@ public final class CefBookmarks {
     /// The permanent folders (bookmarks bar, other bookmarks, …) with all
     /// their contents.
     public func tree() async throws -> [CefBookmark] {
-        if let file = try storedBookmarks() { return file.roots }
+        if let file = try await storedBookmarks() { return file.roots }
         return try await nodes("async b => (await b.getTree())[0]?.children ?? []")
     }
 
     /// The bookmark with `id`, or `nil` if there is none.
     public func bookmark(_ id: CefBookmark.ID) async throws -> CefBookmark? {
-        if let file = try storedBookmarks() { return file.node(id)?.withoutChildren }
+        if let file = try await storedBookmarks() { return file.node(id)?.withoutChildren }
         return try await nodes("(b, a) => b.get(a.id).catch(() => [])", ["id": .string(id.rawValue)]).first
     }
 
     /// The direct contents of `folder`, in order.
     public func children(of folder: CefBookmark.ID) async throws -> [CefBookmark] {
-        if let file = try storedBookmarks() {
+        if let file = try await storedBookmarks() {
             guard let node = file.node(folder) else {
                 throw CefError.operationFailed("bookmarks: Can't find parent bookmark for id.")
             }
@@ -141,7 +141,7 @@ public final class CefBookmarks {
 
     /// The most recently added bookmarks, newest first.
     public func recent(limit: Int = 10) async throws -> [CefBookmark] {
-        if let file = try storedBookmarks() { return file.recent(limit: max(1, limit)) }
+        if let file = try await storedBookmarks() { return file.recent(limit: max(1, limit)) }
         return try await nodes("(b, a) => b.getRecent(a.limit)", ["limit": .number(Double(max(1, limit)))])
     }
 
@@ -275,18 +275,18 @@ public final class CefBookmarks {
     /// made through it, the file is in the format CefChromium reads, and the profile has no
     /// enterprise-managed or account bookmarks, which the file does not
     /// hold.
-    private func storedBookmarks() throws -> CefBookmarkFile? {
+    private func storedBookmarks() async throws -> CefBookmarkFile? {
         switch readSource {
         case .service:
             return nil
         case .file:
-            guard let file = loadFile() else { throw CefError.operationFailed("bookmarks: no readable Bookmarks file") }
+            guard let file = await loadFile() else { throw CefError.operationFailed("bookmarks: no readable Bookmarks file") }
             return file
         case .automatic:
             guard !services.isRunning(.bookmarks) else { return nil }
             refreshSaveState()
             guard unsavedWrite == nil else { return nil }
-            return loadFile()
+            return await loadFile()
         }
     }
 
@@ -301,13 +301,26 @@ public final class CefBookmarks {
         unsavedWrite = nil
     }
 
-    private func loadFile() -> CefBookmarkFile? {
+    /// The file, parsed off the main actor, or as last parsed while it
+    /// has not changed since: a tree of 10 000 bookmarks takes about 25 ms
+    /// to parse, and the bookmark bar reads it on every change.
+    private func loadFile() async -> CefBookmarkFile? {
         guard let url = bookmarksFileURL else { return nil }
         let account = url.deletingLastPathComponent().appendingPathComponent("AccountBookmarks")
         guard !FileManager.default.fileExists(atPath: account.path),
-              (profile.preferences.value(named: "policy.managed_bookmarks")?.arrayValue ?? []).isEmpty
+              (profile.preferences.value(named: "policy.managed_bookmarks")?.arrayValue ?? []).isEmpty,
+              let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
         else { return nil }
-        return CefBookmarkFile(contentsOf: url)
+        // Chromium replaces the file to save it, so a save changes its
+        // inode as well as its date and size.
+        let stamp = BookmarkFileStamp(
+            modified: attributes[.modificationDate] as? Date, size: (attributes[.size] as? NSNumber)?.intValue,
+            inode: (attributes[.systemFileNumber] as? NSNumber)?.intValue)
+        let stores = profile.chromiumStores
+        if let cached = stores.bookmarkFile, cached.stamp == stamp { return cached.file }
+        let file = await Task.detached(priority: .userInitiated) { CefBookmarkFile(contentsOf: url) }.value
+        if let file { stores.bookmarkFile = (stamp, file) }
+        return file
     }
 
     private func create(title: String, url: URL?, folder: CefBookmark.ID?, index: Int?) async throws -> CefBookmark {
@@ -319,7 +332,8 @@ public final class CefBookmarks {
     }
 
     private func nodes(_ function: String, _ arguments: CefJSON = [:]) async throws -> [CefBookmark] {
-        try await services.call(Self.module, function, arguments, as: [BookmarkNode].self).map(CefBookmark.init)
+        try await services.call(Self.module, function, arguments, as: [BookmarkNode].self, isIdempotent: true)
+            .map(CefBookmark.init)
     }
 
     private func write(_ function: String, _ arguments: CefJSON) async throws -> CefBookmark {

@@ -6,7 +6,9 @@ import SwiftUI
 /// What the address field suggests while you type: Chromium's ranked
 /// omnibox matches for the tab's profile, shown in a list under the field.
 ///
-/// Each keystroke cancels the query before it. When the top match completes
+/// Each keystroke starts a query, which stops the one before it
+/// (`CefAutocomplete` lets the latest query win), and the list follows
+/// Chromium's providers as they answer. When the top match completes
 /// what you typed, the rest of its address is added after the caret and
 /// selected, as Safari and Chrome do: typing on replaces it, keeping what
 /// still matches; Delete removes it and leaves the next suggestions
@@ -95,19 +97,21 @@ final class AddressSuggestions {
            text.lowercased() == (previous.typed + completion.prefix(1)).lowercased() {
             completeInline(with: String(completion.dropFirst()))
         }
+        // A newer query stops this one, in Chromium too, so there is no
+        // need to wait for a pause in the typing.
+        let results = profile.autocomplete.results(for: text, currentURL: currentURL, allowsInlineCompletion: allowsInline)
         query = Task {
-            // A short pause, so a burst of keystrokes asks only once.
-            try? await Task.sleep(for: .milliseconds(30))
-            guard !Task.isCancelled else { return }
-            let results = try? await profile.autocomplete.suggestions(
-                for: text, currentURL: currentURL, allowsInlineCompletion: allowsInline)
-            guard !Task.isCancelled, let results, typedText == text else { return }
-            show(Array(results.prefix(Self.limit)))
-            if allowsInline, let top = results.first, top.canBeDefault, !top.inlineCompletion.isEmpty {
-                completeInline(with: top.inlineCompletion)
-            } else {
-                removeInlineCompletion()
-            }
+            do {
+                for try await result in results {
+                    guard !Task.isCancelled, typedText == text else { return }
+                    show(Array(result.suggestions.prefix(Self.limit)))
+                    if allowsInline, let top = result.suggestions.first, top.canBeDefault, !top.inlineCompletion.isEmpty {
+                        completeInline(with: top.inlineCompletion)
+                    } else if result.isComplete {
+                        removeInlineCompletion()
+                    }
+                }
+            } catch {}
         }
     }
 

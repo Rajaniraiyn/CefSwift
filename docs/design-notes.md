@@ -44,6 +44,119 @@ three) on a build without the passkey and Chromium-panel code:
 | After typing in the address field, bookmarking the page and opening the menu bar | 9 | 217 MB | 10 | 305 MB |
 | 40 s later, once the hosts have closed | 6 | 157 MB | 10 | 290 MB |
 
+## Service calls, measured
+
+`SelfTest -benchmark services` calls each service on warm hosts and puts
+them under load; the numbers below are from 2026-11-14, before and after
+the changes described under
+[Calls](architecture.md#internal-page-services), on AC power with other
+apps open (three runs after; where they differ by more than noise, the
+range). Main-thread time and allocations
+are the app's main thread, which is also Chromium's UI thread, so they
+include Chromium's own work there: an autocomplete query's 2 250
+allocations are nearly all its controller's.
+
+| Call (warm host) | Before: p50 / p95 | After: p50 / p95 | Main-thread allocations, before → after |
+|---|---|---|---|
+| Evaluating `1` in a host (the floor) | 0.13 / 0.16 ms | 0.13 / 0.16 ms | 33 → 33 |
+| An empty service call | 0.27 / 0.32 ms | 0.31 / 0.37 ms | 90 → 82 |
+| Autocomplete, complete result | 2.8 / 4.9 ms | 2.6–3.3 / 4.5–7.2 ms | 2 365 → 2 249 |
+| Autocomplete, first result (streamed) | – | 1.8 / 3.2 ms | |
+| History search, 20 entries | 1.07 / 2.53 ms | 0.78 / 1.91 ms | 956 → 883 |
+| Favicon | 5.6 / 9.5 ms | 0.50 / 0.67 ms | 356 → 123 |
+| 50 favicons, one call | – | 5.5 ms (0.11 ms each) | |
+| Bookmark tree (40 nodes), host | 0.72 / 1.22 ms | 0.53 / 0.68 ms | 201 → 100 |
+| Bookmark add and remove (two calls) | 1.10 / 1.73 ms | 1.16 / 1.66 ms | 210 → 186 a call |
+| A change through the API → `changes` | 3.9 / 35.6 ms | 2.7 / 11.5 ms | |
+| 5 000 history entries (synthetic, history host) | 152 / 172 ms; main thread 52 ms | 31 / 39 ms; main thread 3.4 ms | 205 000 → 20 100 |
+| Bookmark tree of 10 000, host | 511 / 3 512 ms; main thread 122 ms | 182 / 321 ms; main thread 31 ms | 331 000 → 20 200 |
+| Bookmark tree of 10 000, `Bookmarks` file | 36 ms, on the main thread | 0.10 ms until Chromium saves again; then 27 ms, off the main thread | 90 200 → 126 |
+
+Where the large results' time went, per call:
+
+| 5 000 history entries | Before | After |
+|---|---|---|
+| Building the records and encoding them in the renderer | 1.6 ms building; encoding is the next row's | 19 ms, both |
+| Value → wire through the V8 C API (`V8Wire`), and IPC | 98 ms | 8 ms (the `ArrayBuffer` copied once) |
+| Decoding in Swift | 45 ms (wire → `CefJSON` → JSON text → `JSONDecoder`), main thread | 6.8 ms, wire → records, off the main thread |
+
+The encoder first wrote every string with `TextEncoder.encodeInto`;
+copying short ASCII strings, most keys and values, unit by unit instead
+took the renderer's time from 48 to 19 ms for the 5 000 entries and from
+254 to 134 ms for the 10 000 bookmarks.
+
+Under load:
+
+| Load | Before | After |
+|---|---|---|
+| 200 queries 20 ms apart, each cancelling the one before | cancelled queries resumed about 5 ms after their cancel; main thread busy 20% | 0.10–0.25 ms (p50, under 0.4 ms p95); 10–20% |
+| The same through `results(following:)` | – | a first result for each text 1.7–4.4 ms after it (p50), complete for the last text 117–154 ms after it; nothing from superseded texts |
+| 1 000 concurrent calls across the hosts | 730 ms; favicons p50 484 ms | 194–209 ms; favicons 202 ms |
+| 10 000 bookmark adds, 32 in flight | 5.1 s; 9 550 change events delivered | 2.9 s; about 600 |
+| 10 000 calls, then the host's JavaScript heap | 36.2 → 37.7 MB | 22.6 → 13.3 MB |
+| Pending operations and the census after each load | 0, clean | 0, clean |
+
+A page busy in another browser changes none of these: it has a renderer of
+its own.
+
+What changed: functions compiled once per host document and invoked by
+handle (messages for an autocomplete query went from 2.4 KB of script to
+90 bytes, and the host's heap no longer holds a compiled script per call);
+results wire-encoded in the host by JavaScript and decoded in place, off
+the main actor from 64 KB; favicons as RGBA pixels instead of a canvas
+re-encoded to PNG, base64 and decoded again, and many in one call;
+cancellation that completes the waiter synchronously and aborts the call
+in the host; progress and events one in flight, newest wins; the
+`Bookmarks` file parsed off the main actor and cached until Chromium saves
+it again.
+
+Measured and left alone:
+
+- An empty call costs 0.17 ms more than the evaluation floor: the
+  deadline's operation task and timer (two main-actor turns) and the
+  runtime's bookkeeping. A second deadline mechanism for calls on a live
+  host would save part of it, under 10% of any real call.
+- Invoking by handle saved less than expected on its own (0.26 → 0.21 ms
+  of IPC and compilation on the empty call): V8 compiles a function body
+  lazily, so a large `setup` cost little per call. It stays for the
+  smaller messages and the steady heap.
+- Arguments stay a JSON literal in the one-line script: 40 to 150 bytes,
+  encoded in 5 to 30 µs.
+- A long-lived channel per module (a Mojo pipe of the host's own, or a
+  persistent wire stream) would still reach the browser process through
+  CEF process messages, one created per send; CEF has no other channel
+  from a renderer, so there is nothing to keep open.
+- `chrome.bookmarks.getTree()` and the encoding take 130 ms for 10 000
+  bookmarks, most of it Chromium's extension bindings building the tree
+  as JavaScript objects. `children(of:)` reads one folder at a time, and
+  the `Bookmarks` file serves trees while the host is closed.
+- Chromium's autocomplete runs on its UI thread, the app's main thread.
+  Debouncing would spare it work, but how long to wait is an app's call;
+  the latest-wins API stops every superseded query instead.
+
+### Routes below the WebUI pages
+
+- **Symbols.** The framework exports 2 548 symbols: the 242 functions of
+  CEF's C API, V8's debugging helpers, Rust and Crubit thunks, and app-mode
+  entry points. Nothing of `HistoryService`, `BookmarkModel`,
+  `FaviconService`, `TopSites` or `AutocompleteController` is exported, so
+  there is nothing to reach with `dlsym`; the Objective-C runtime has
+  Chromium's AppKit views, not its stores.
+- **CEF's C API.** `cef_request_context_t` and the preference manager
+  cover preferences and content settings. `get_navigation_entries` visits
+  one browser's back-forward list, not the profile's history.
+  `download_image` could fetch `chrome://favicon2` icons from a service
+  host's browser without the canvas, but each image is its own renderer
+  round trip (Chromium's image downloader runs in the renderer) with no
+  batching, and the generic icon would have to be recognized in Swift.
+  With the floor of a round trip at 0.13 ms against 0.50 ms for one icon
+  and 0.11 ms each for a list now, it would not be clearly better.
+- **Files.** `Bookmarks` is JSON Chromium replaces atomically, so reading
+  it is sound and stays the fast path. History and favicons are SQLite
+  databases Chromium holds with exclusive locking; a copy of one is
+  consistent only between Chromium's transactions, which nothing outside
+  Chromium can tell, so a read-only snapshot is not sound either.
+
 ## Tab discarding: the capability, not a policy
 
 CefKit discards a browser only when asked (`CefBrowser.discard()`) and

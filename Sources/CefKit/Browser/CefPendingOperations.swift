@@ -1,4 +1,5 @@
 import CefBase
+import Foundation
 /// Callers suspended on one kind of asynchronous browser work: waiting for
 /// creation, a script's result, a DevTools reply.
 ///
@@ -10,6 +11,9 @@ import CefBase
 final class CefPendingOperations<Value: Sendable> {
     private var waiting: [Int: CheckedContinuation<Value, Error>] = [:]
     private var nextID = 0
+
+    /// The callers waiting.
+    var count: Int { waiting.count }
 
     /// Suspends until the operation is completed. `start` runs once the
     /// caller is registered, with the identifier to complete it by; it may
@@ -29,7 +33,14 @@ final class CefPendingOperations<Value: Sendable> {
                 start(id)
             }
         } onCancel: {
-            Task { @MainActor [weak self] in self?.complete(id, .failure(CancellationError())) }
+            // Cancelled from the main thread (a SwiftUI task, a superseded
+            // query), the caller resumes at once; from elsewhere, on the
+            // main actor's next turn.
+            if Thread.isMainThread {
+                MainActor.assumeIsolated { self.complete(id, .failure(CancellationError())) }
+            } else {
+                Task { @MainActor [weak self] in self?.complete(id, .failure(CancellationError())) }
+            }
         }
     }
 

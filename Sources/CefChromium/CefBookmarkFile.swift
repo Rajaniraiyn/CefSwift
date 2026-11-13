@@ -9,7 +9,7 @@ import Foundation
 /// fail, and ``CefBookmarks`` asks Chromium's service instead.
 ///
 /// The format is Chromium's own and can change with it.
-struct CefBookmarkFile {
+struct CefBookmarkFile: Sendable {
     /// The permanent folders, in `chrome.bookmarks.getTree()` order.
     let roots: [CefBookmark]
 

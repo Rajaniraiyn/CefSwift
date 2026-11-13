@@ -34,10 +34,12 @@ func withDeadline<T>(
             }
         }
     } onCancel: {
-        Task { @MainActor in
+        let cancel: @MainActor () -> Void = {
             race.work?.cancel()
             race.finish(.failure(CancellationError()))
         }
+        // From the main thread the caller resumes at once.
+        if Thread.isMainThread { MainActor.assumeIsolated(cancel) } else { Task { @MainActor in cancel() } }
     }
     // Kept on the main actor, so `T` need not be `Sendable`.
     guard let value = race.value else { throw CancellationError() }

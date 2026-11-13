@@ -931,13 +931,67 @@ second.
 **Services as modules.** A `CefServiceHost.Module` names the hosts that can
 serve it and a JavaScript `setup` that builds a service object once per
 document — a bound Mojo remote, or an extension API with listeners. A
-call evaluates a function against that object in the host's renderer, as
-`evaluateJavaScript` does, and returns its JSON result; a module that
-serves from several hosts (favicons) uses whichever of them runs. A module
-reports events through a `CefBridge` of the host's
-(`__cefswiftServiceEvents.event(…)`), and subscribers hear them while the
-host runs. Hosts attach no DevTools session. Adding a service is declaring
+call runs a function, `async (service, args, context) => value`, against
+that object in the host's renderer and decodes its value into the caller's
+type; a module that serves from several hosts (favicons) uses whichever of
+them runs. Hosts attach no DevTools session. Adding a service is declaring
 a module and calling it.
+
+**Calls.** The first call in a host document installs a small runtime
+(`CefServiceHostRuntime`, `window.__cefswiftServices`), and the first call
+of each function defines it there, compiled once; every later call is one
+line, `__cefswiftServices.invoke(handle, args, call)`, sent as an
+`evaluate` message. The runtime encodes the function's value in the wire
+format itself, into one `ArrayBuffer`, with JIT-compiled code; walking the
+value through the V8 C API (`V8Wire`) costs about a microsecond a value,
+which for 5 000 history entries was 98 ms of a 152 ms call (now 31 ms). The reply carries
+the buffer as one bytes value. The browser process checks its structure
+with the same validator as any renderer payload, and `CefWireDecoder`
+decodes the caller's type straight from it: no `CefJSON` tree, no JSON
+text. A reply of 64 KB or more is decoded off the main actor.
+
+| Hop | A result under 64 KB | 64 KB or more |
+|---|---|---|
+| JavaScript value → wire bytes | one pass, into the runtime's scratch buffer, then one copy into an exact-size `ArrayBuffer` | the same |
+| `ArrayBuffer` → process message | into the payload buffer, then CEF's `cef_binary_value_t` | once, into shared memory |
+| Browser process | read in place; strings copied into the Swift values | the mapping read in place, on a background thread |
+
+**Cancellation.** Each call has an `AbortController` in the host, whose
+signal the function gets as `context.signal`. Cancelling the calling task
+resumes it at once with `CancellationError` (`CefPendingOperations` and
+`withDeadline` complete a waiter synchronously when cancelled on the main
+thread), then sends `cancel(call)` as an evaluation the renderer does not
+answer (request 0). The signal aborts; the omnibox module stops Chromium's
+controller (below), and a Mojo call that cannot be aborted, such as a
+history query, runs out with its result dropped. A reply that arrives
+after its caller has gone finds no waiter and is released undecoded; the
+runtime forgets the call when its promise settles.
+
+**Progress and events.** `context.progress(value)` sends an intermediate
+value, encoded the same way, through the host's `CefBridge`
+(`__cefswiftServiceEvents.progress({call, data})`). One is in flight per
+call at a time: a value produced while the one before is on its way
+replaces the one waiting, so a slow consumer bounds memory and sees the
+newest, and none is delivered after the call's result. `emit(name,
+payload)` coalesces events of one name the same way, which turns a burst
+of 10 000 bookmark changes into about 600 deliveries. Autocomplete streams
+each response of Chromium's controller as progress, so local matches
+arrive before the search engine's.
+
+**Autocomplete.** `mojom.OmniboxPageHandler` drives one controller per
+handler, and `chrome://omnibox` binds one handler per page, so a profile
+has one query at a time: `CefAutocomplete` lets the latest win, ending the
+stream before it, and the module settles a query superseded in the host.
+The handler has no stop call; an aborted query starts a query for no
+text, since `AutocompleteController::Start` stops every provider (their
+network requests included) before it runs, and no provider answers empty
+input.
+
+**Host failures.** A call whose host stops before it answers — the
+renderer crashed, or the host was closed — throws `"… stopped
+responding"`, unless the call is idempotent (reads), which is then made
+once more on a new host. A call that times out is not repeated: it closes
+the host, and waiting as long again would double the delay.
 
 **Lifetime.** A host starts on the first call that needs it and closes 30
 seconds after its last one, when macOS reports memory pressure, when its

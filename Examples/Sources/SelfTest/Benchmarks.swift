@@ -11,6 +11,7 @@ import Darwin
 /// - `lifecycle`: CPU use of an animated page in each host and state.
 /// - `frames`: offscreen animation frames, pacing, input latency and CPU.
 /// - `compositor`: what `CefOffscreenBrowserView` presents, at three sizes.
+/// - `services`: latency, cost and load behaviour of the service-host calls.
 @MainActor
 enum Benchmarks {
     static var requested: String? { UserDefaults.standard.string(forKey: "benchmark") }
@@ -23,6 +24,7 @@ enum Benchmarks {
         case "probes": await probes()
         case "frames": await frames()
         case "compositor": await compositor()
+        case "services": await services()
         case "bridge", "evaluate", "codec", "axingest", "devtools": await transport(name)
         default: print("bench error: unknown benchmark \(name)")
         }
