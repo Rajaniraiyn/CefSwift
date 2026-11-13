@@ -79,8 +79,12 @@ extension CefBrowser {
     /// The image at `url`, as Chromium decodes it for the page, at its
     /// full size; `nil` when it cannot be loaded.
     func downloadImage(_ url: URL) async -> NSImage? {
-        await withCheckedContinuation { (continuation: CheckedContinuation<NSImage?, Never>) in
-            let callback = ImageDownload { image in continuation.resume(returning: image) }.makeCallback()
+        // The image stays on the main actor from the callback to the
+        // caller; the box only carries it through the continuation.
+        await withCheckedContinuation { (continuation: CheckedContinuation<DownloadedImage, Never>) in
+            let callback = ImageDownload { image in
+                continuation.resume(returning: DownloadedImage(image: image))
+            }.makeCallback()
             let started: Void? = withHost { host in
                 CefStringUtil.withCefString(url.absoluteString) {
                     host.pointee.download_image(host, $0, 0, 0, 0, callback)
@@ -88,9 +92,9 @@ extension CefBrowser {
             }
             if started == nil {
                 cefRelease(callback)
-                continuation.resume(returning: nil)
+                continuation.resume(returning: DownloadedImage(image: nil))
             }
-        }
+        }.image
     }
 
     func mainFrameDidFinishLoad(status: Int) {
@@ -377,4 +381,10 @@ final class ImageDownload: Sendable {
         }
         return result.representations.isEmpty ? nil : result
     }
+}
+
+/// An image on its way through a continuation, made and used on the main
+/// actor.
+private struct DownloadedImage: @unchecked Sendable {
+    let image: NSImage?
 }
