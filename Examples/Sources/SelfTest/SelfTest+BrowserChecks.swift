@@ -9,12 +9,12 @@ extension SelfTest {
     static func capabilityChecks() {
         let capabilities = CefRuntime.shared.capabilities
         let consistent = capabilities.signature.hasAppleTeam == (capabilities.teamIdentifier != nil)
-            && capabilities.passkeyAuthenticators.contains(.securityKey)
+            && capabilities.webAuthnAuthenticators.contains(.securityKey)
             && (capabilities.teamIdentifier != nil
                 || capabilities.resolvedSafeStorage(.automatic) == .mockKeychain)
         check("capabilities: signature (\(capabilities.signature.rawValue)" +
               (capabilities.isHardenedRuntime ? ", hardened runtime" : "") + ") and passkey authenticators (" +
-              capabilities.passkeyAuthenticators.map(\.description).sorted().joined(separator: ", ") + ")",
+              capabilities.webAuthnAuthenticators.map(\.description).sorted().joined(separator: ", ") + ")",
               consistent && capabilities.signature != .unsigned)
     }
 

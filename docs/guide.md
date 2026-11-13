@@ -327,10 +327,8 @@ describes what the running app's signature, entitlements and Info.plist let
 Chromium do, so the app can adapt its UI:
 
 ```swift
-import CefPasskeys
-
 let capabilities = CefRuntime.shared.capabilities
-if !capabilities.passkeyAuthenticators.contains(.iCloudKeychain) {
+if !capabilities.webAuthnAuthenticators.contains(.iCloudKeychain) {
     // Offer the app's own passkeys (CefPasskeyController) instead.
 }
 ```
@@ -342,7 +340,7 @@ if !capabilities.passkeyAuthenticators.contains(.iCloudKeychain) {
 | `isHardenedRuntime`, `isAppSandboxed` | From the signature's flags and entitlements. |
 | `entitlements`, `keychainAccessGroups` | The entitlements the signature grants. |
 | `usageDescriptions` | The `NS…UsageDescription` keys in the Info.plist. |
-| `passkeyAuthenticators` (CefPasskeys) | `.securityKey`, `.hybrid`, `.touchID`, `.iCloudKeychain`: what Chromium's own passkeys can offer. |
+| `webAuthnAuthenticators` | `.securityKey`, `.hybrid`, `.touchID`, `.iCloudKeychain`: Chromium's native WebAuthn authenticators the app has. |
 | `canLoadWidevine` | Whether the base helper can load Google's Widevine CDM: false for a team-signed hardened helper without `disable-library-validation` (the `protectedMedia` capability). |
 | `resolvedSafeStorage(_:)` | The safe-storage policy Chromium gets for a configured one. |
 
@@ -1422,8 +1420,7 @@ it can ([bundling](bundling.md#features)):
 | Chromium's own profile passkeys (Touch ID) | Not available: CEF 156 checks for a keychain access group without a team prefix, which no provisioning profile can authorize. |
 
 An ad hoc signed app gets security keys and, with the Bluetooth key,
-phones. `CefRuntime.shared.capabilities.passkeyAuthenticators`, from
-CefPasskeys, lists what the running app gets. Chromium shows its dialog
+phones. `CefRuntime.shared.capabilities.webAuthnAuthenticators` lists what the running app gets. Chromium shows its dialog
 ("Use your security key with example.com") as a window attached to a
 `CefWindow`, or as a free-standing window for a `CefWebView`.
 

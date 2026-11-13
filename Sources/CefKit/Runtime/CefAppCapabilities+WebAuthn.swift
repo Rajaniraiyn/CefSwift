@@ -1,9 +1,11 @@
-import CefKit
+import Foundation
 
 extension CefAppCapabilities {
-    /// A WebAuthn authenticator Chromium can offer when it answers a page
-    /// itself, as it does in a browser without a ``CefPasskeyController``.
-    public enum PasskeyAuthenticator: String, Sendable, Hashable, CaseIterable {
+    /// One of Chromium's native WebAuthn authenticators: what Chromium can
+    /// offer a page that asks for a passkey or security key when Chromium
+    /// answers the request itself. Which ones the app has depends on how it
+    /// is signed and what it is entitled to.
+    public enum WebAuthnAuthenticator: String, Sendable, Hashable, CaseIterable {
         /// USB and NFC security keys. Always available.
         case securityKey
         /// A phone or tablet, through a QR code and Bluetooth. Needs
@@ -24,9 +26,10 @@ extension CefAppCapabilities {
     /// for in CEF 156, without a team prefix.
     static let chromiumWebAuthnKeychainGroup = ".org.chromium.Chromium.webauthn"
 
-    /// The authenticators Chromium can offer when it answers a page itself.
-    public var passkeyAuthenticators: Set<PasskeyAuthenticator> {
-        var authenticators: Set<PasskeyAuthenticator> = [.securityKey]
+    /// The native WebAuthn authenticators Chromium can offer this app's
+    /// pages when it answers a request itself.
+    public var webAuthnAuthenticators: Set<WebAuthnAuthenticator> {
+        var authenticators: Set<WebAuthnAuthenticator> = [.securityKey]
         if usageDescriptions.contains("NSBluetoothAlwaysUsageDescription"),
            !isHardenedRuntime || entitlements.contains("com.apple.security.device.bluetooth") {
             authenticators.insert(.hybrid)
@@ -43,7 +46,7 @@ extension CefAppCapabilities {
     }
 }
 
-extension CefAppCapabilities.PasskeyAuthenticator: CustomStringConvertible {
+extension CefAppCapabilities.WebAuthnAuthenticator: CustomStringConvertible {
     public var description: String {
         switch self {
         case .securityKey: return "security keys"
