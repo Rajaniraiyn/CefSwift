@@ -45,6 +45,7 @@ are `@MainActor`.
 - [Customizing Chromium's own pages](#customizing-chromiums-own-pages)
 - [Profiles](#profiles)
   - [Network maintenance](#network-maintenance)
+  - [Requests through Chromium's network stack](#requests-through-chromiums-network-stack)
   - [Site settings](#site-settings)
   - [Bookmarks, history and suggestions](#bookmarks-history-and-suggestions)
 - [DevTools](#devtools)
@@ -1386,7 +1387,7 @@ and its frame, title, ordering and tabbing are yours.
 | `titleFollowsPage` | Keeps the window title in sync with the page title. On by default. |
 | `isFrameless` | Removes the title bar and window buttons. |
 
-`CefRuntime.shared.openChromeWindow(url:frame:options:delegate:)` opens a
+`CefRuntime.shared.openChromeWindow(url:frame:configuration:delegate:)` opens a
 window drawn entirely by Chrome instead, with its tab strip, omnibox and
 menus.
 
@@ -1785,6 +1786,69 @@ Clearing certificate exceptions does not close a connection that uses
 one; close all connections too, or the browser keeps going without
 asking. `resolveHost(_:)` uses the profile's DNS settings, Secure DNS
 included, and throws when the name does not resolve.
+
+### Requests through Chromium's network stack
+
+A profile makes the app's own requests the way its pages make theirs:
+with its cookies (sent, and stored from the response), HTTP cache, proxy
+settings, client certificates, Secure DNS and `Accept-Language`, and
+answered by your scheme handlers. `URLSession` shares none of that with
+Chromium, so a request made with it is signed out of the sites the user
+signed in to in a browser.
+
+```swift
+var request = URLRequest(url: URL(string: "https://intranet.example/api/me")!)
+request.setValue("application/json", forHTTPHeaderField: "Accept")
+let (data, response) = try await profile.data(for: request)
+if response.statusCode == 200 { print(String(decoding: data, as: UTF8.self)) }
+
+// The body as it arrives, then into a file.
+let (body, head) = try await profile.bytes(for: URLRequest(url: url))
+for try await chunk in body { print(head.statusCode, chunk.count) }
+let saved = FileManager.default.temporaryDirectory.appending(path: "report.pdf")
+_ = try await profile.download(for: URLRequest(url: url), to: saved)
+```
+
+The `URLRequest` says what it can: method, headers, `httpBody`,
+`cachePolicy`, `timeoutInterval` (the longest wait for the next part of
+the response), `httpShouldHandleCookies` (cookies and stored HTTP
+credentials), and a `Referer` header, which becomes the referrer.
+`RequestConfiguration` holds the rest:
+
+```swift
+var requestConfiguration = CefProfile.RequestConfiguration()
+requestConfiguration.stopsAtRedirects = true            // a 3xx is the response
+requestConfiguration.credential = { challenge in        // HTTP or proxy authentication
+    challenge.host == "intranet.example" ? CefCredential(username: "ada", password: "…") : nil
+}
+requestConfiguration.uploadProgress = { progress in print(progress.fractionCompleted ?? 0) }   // on the IO thread
+let (_, redirect) = try await profile.data(for: URLRequest(url: url), configuration: requestConfiguration)
+print(redirect.value(forHTTPHeaderField: "Location") ?? "")
+```
+
+As with `URLSession`, an HTTP error status is a response. A request that
+fails throws a `CefLoadError` with Chromium's network error (`code`
+`-105`, `message` `net::ERR_NAME_NOT_RESOLVED`); its `urlError` is the
+closest `URLError`. Cancelling the task cancels the request and throws
+`CancellationError`; so does leaving a `bytes(for:)` loop early or
+dropping its body. Without a `credential` closure a challenge is not
+answered, and its 401 or 407 is the response. A request body is bytes
+or a file (`options.bodyFile`, which Chromium reads itself): an
+`httpBodyStream` cannot be sent.
+
+Chromium hands a streamed body over as it reads it and cannot be paused,
+so a body from `bytes(for:)` holds at most `streamBufferLimit` bytes
+(16 MB) the loop has not read; a loop that falls further behind ends
+the request with `ERR_INSUFFICIENT_RESOURCES`. Read a large body off the
+main actor: on a fast connection the main thread can fall megabytes
+behind. `data(for:)` copies each chunk once, into a `Data` sized from
+`Content-Length`.
+
+Redirects are followed or, with `stopsAtRedirects`, returned; Chromium
+does not report the ones it follows. Requests are the profile's, not a
+page's: CEF can tie one to a frame (`cef_frame_t.create_urlrequest`),
+which only routes it through that browser's request filter and
+authentication delegate, so CefSwift does not offer it.
 
 ### Site settings
 
