@@ -19,6 +19,8 @@ extension SelfTest {
         "localization": localizationProbeChecks,
         "policies": policiesProbeChecks,
         "widevine": widevineProbeChecks,
+        "profilePersistence": profilePersistenceProbeChecks,
+        "launchPrompts": launchPromptsProbeChecks,
     ]
 
     /// Changes the configuration for the probe `name`.
@@ -32,6 +34,8 @@ extension SelfTest {
             configurePoliciesProbe(&configuration)
         case "widevine":
             configuration.services.protectedMedia = .automatic
+        case "launchPrompts":
+            configureLaunchPromptsProbe(&configuration)
         default:
             break
         }
@@ -39,15 +43,16 @@ extension SelfTest {
 
     /// Starts this app as the probe `name`, with extra `arguments` and
     /// `environment`, and reports its result lines with `label` in front.
-    /// Returns the probe's output lines.
+    /// Returns the probe's output lines. The probe gets a new root cache
+    /// directory, removed after it, unless given `root`, which stays.
     @discardableResult
     static func runProbe(
-        _ name: String, label: String, arguments: [String] = [], environment extra: [String: String] = [:],
-        timeout: Duration = .seconds(45)
+        _ name: String, label: String, arguments: [String] = [], root given: URL? = nil,
+        environment extra: [String: String] = [:], timeout: Duration = .seconds(45)
     ) async -> [String] {
-        let root = FileManager.default.temporaryDirectory
+        let root = given ?? FileManager.default.temporaryDirectory
             .appendingPathComponent("cefswift-selftest-probe-\(name)-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { if given == nil { try? FileManager.default.removeItem(at: root) } }
         let child = Process()
         child.executableURL = Bundle.main.executableURL ?? URL(fileURLWithPath: CommandLine.arguments[0])
         child.arguments = arguments

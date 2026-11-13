@@ -206,6 +206,8 @@ extension SelfTest {
     /// the checks' own timeouts where they wait for the network.
     static let groupDeadlines: [String: Duration] = [
         "lifecycle": .seconds(180),
+        "profileStorage": .seconds(180),
+        "systemPrompts": .seconds(150),
         "authentication": .seconds(120),
         "localization": .seconds(150),
         "internalPages": .seconds(120),

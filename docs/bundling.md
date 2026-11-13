@@ -283,7 +283,10 @@ MyApp.app/
 ### Helper apps
 
 Chromium runs renderers, the GPU process, plugins and notification
-("alerts") services as separate processes. On macOS each process type is an
+("alerts") services as separate processes. The Alerts helper runs only
+when the app turns system notifications on
+([`services.systemNotifications`](guide.md#system-notifications)); it is
+bundled either way. On macOS each process type is an
 app of its own, with its own bundle identifier and `Info.plist`. All five
 contain the same binary, copied and renamed.
 
@@ -575,7 +578,7 @@ Other features:
 | Chromium's profile passkeys with Touch ID | Not available with CEF 156: Chromium checks for the keychain access group `.org.chromium.Chromium.webauthn`, compiled in from Chromium's branding with an empty team identifier, and a provisioning profile authorizes only groups that start with a team identifier. CefPasskeys' `CefPasskeyController` with `.app(CefKeychainPasskeyStore())` verifies the user with Touch ID instead. |
 | `CefKeychainPasskeyStore` (CefPasskeys) | A team signature with a provisioning profile, which gives the app the `com.apple.application-identifier` entitlement the data protection keychain needs. Ad hoc builds get `errSecMissingEntitlement` (-34018). |
 | Screen sharing (`getDisplayMedia`) | Nothing in the bundle; macOS asks the user for Screen Recording permission. |
-| Notifications | Nothing in the bundle; macOS asks the user. The Alerts helper gets `NSUserNotificationAlertStyle`. |
+| Notifications | Nothing: by default Chromium shows pages' notifications in its own popups and never asks macOS. With `services.systemNotifications = .automatic`, macOS asks the user at the first launch, for the app and for the Alerts helper, which gets `NSUserNotificationAlertStyle`. See [System notifications](guide.md#system-notifications). |
 | `NSAppTransportSecurity` | Nothing: Chromium does its own networking, which App Transport Security does not cover. |
 | FairPlay in a `WKWebView` beside Chromium (the Browser example's WebKit tabs) | Nothing: no entitlement, capability or team signature. |
 | Widevine Verified Media Path | Not available with stock CEF: CEF 156 gives the CDM no host binary to verify, so no signature of yours is checked. See [Playing streaming services](guide.md#playing-streaming-services). |

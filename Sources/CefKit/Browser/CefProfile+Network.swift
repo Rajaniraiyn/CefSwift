@@ -36,7 +36,8 @@ extension CefProfile {
     /// Throws ``CefError/operationFailed(_:)`` with Chromium's network
     /// error when the name does not resolve.
     public func resolveHost(_ host: String) async throws -> [String] {
-        guard let context = requestContext() else { throw CefError.operationFailed("Chromium is not running") }
+        try await ready()
+        guard let context = requestContext() else { throw CefError.notInitialized }
         let url = host.contains("://") ? host : "https://\(host)"
         let result: (Int32, [String]) = await withCheckedContinuation { continuation in
             let callback = ResolveCallback(continuation: continuation).makeCallback()
@@ -53,7 +54,8 @@ extension CefProfile {
     private func completing(
         _ call: (UnsafeMutablePointer<cef_request_context_t>, UnsafeMutablePointer<cef_completion_callback_t>) -> Void
     ) async {
-        guard let context = requestContext() else { return }
+        // A profile Chromium could not load has nothing to clear.
+        guard (try? await ready()) != nil, let context = requestContext() else { return }
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             call(context.pointer, CompletionCallback(continuation: continuation).makeCallback())
         }

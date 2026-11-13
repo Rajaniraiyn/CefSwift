@@ -29,7 +29,7 @@ extension CefProfile {
     /// throws `CancellationError` when its task is cancelled, and
     /// ``CefError/notInitialized`` before Chromium has started.
     public func data(for request: URLRequest, configuration: RequestConfiguration = RequestConfiguration()) async throws -> (Data, HTTPURLResponse) {
-        let loader = try makeLoader(for: URLRequestPlan(request, configuration: configuration), configuration: configuration, mode: .collect)
+        let loader = try await makeLoader(for: URLRequestPlan(request, configuration: configuration), configuration: configuration, mode: .collect)
         return try await loader.collect()
     }
 
@@ -74,7 +74,7 @@ extension CefProfile {
         let limits = URLRequestStreamBuffer.Limits(
             memory: configuration.streamMemoryLimit, overflow: configuration.streamOverflow,
             spillDirectory: spillDirectory, url: plan.url)
-        let loader = try makeLoader(for: plan, configuration: configuration, mode: .stream(limits))
+        let loader = try await makeLoader(for: plan, configuration: configuration, mode: .stream(limits))
         return try await loader.stream()
     }
 
@@ -88,7 +88,7 @@ extension CefProfile {
     /// removes the partial file; one that cannot be written fails with
     /// the `CocoaError`.
     public func download(for request: URLRequest, to destination: URL, configuration: RequestConfiguration = RequestConfiguration()) async throws -> HTTPURLResponse {
-        let loader = try makeLoader(for: URLRequestPlan(request, configuration: configuration), configuration: configuration, mode: .file(destination))
+        let loader = try await makeLoader(for: URLRequestPlan(request, configuration: configuration), configuration: configuration, mode: .file(destination))
         return try await loader.download()
     }
 
@@ -99,7 +99,10 @@ extension CefProfile {
         return directory ?? FileManager.default.temporaryDirectory
     }
 
-    private func makeLoader(for plan: URLRequestPlan, configuration: RequestConfiguration, mode: URLRequestLoader.Mode) throws -> URLRequestLoader {
+    /// Waits for the profile first: a request started on a profile
+    /// Chromium cannot load would go out with an in-memory one's cookies.
+    private func makeLoader(for plan: URLRequestPlan, configuration: RequestConfiguration, mode: URLRequestLoader.Mode) async throws -> URLRequestLoader {
+        try await ready()
         guard let context = requestContext() else { throw CefError.notInitialized }
         let loader = URLRequestLoader(plan: plan, configuration: configuration, context: context, mode: mode)
         // Registered while it holds the context reference, so that quitting

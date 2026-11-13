@@ -120,6 +120,11 @@ public final class CefWindow: Identifiable {
 
     /// Creates the window and its browser. `browser` must not have been
     /// hosted elsewhere. The window stays hidden until ``show()``.
+    ///
+    /// On a profile Chromium is still loading (``CefProfile/ready()``), the
+    /// window opens at once and its browser joins it once the profile is
+    /// loaded. On one Chromium cannot load, the browser closes, and the
+    /// window with it.
     public init(browser: CefBrowser, configuration: Configuration = .init()) {
         self.browser = browser
         self.configuration = configuration
@@ -127,12 +132,46 @@ public final class CefWindow: Identifiable {
         Self.liveCount += 1
         Self.installRuntimeHooks()
 
+        if browser.profileAllowsCreation({ [weak self] _ in self?.addBrowserViewWhenProfileIsReady() }) {
+            browserView = makeBrowserView()
+        } else {
+            browser.isChromeStyle = true
+        }
+        createWindow()
+        if browser.state == .closed { close() }
+    }
+
+    /// A new Chrome-style view for ``browser``.
+    private func makeBrowserView() -> CefRef<cef_browser_view_t>? {
         let viewDelegate = BrowserViewDelegate(toolbar: configuration.toolbar, window: self)
-        browserView = CefRef(adopting: browser.createBrowserView(
+        return CefRef(adopting: browser.createBrowserView(
             delegate: viewDelegate.makeDelegate(),
             showsStatusBubble: configuration.showsChromiumStatusBubble,
             showsZoomBubble: configuration.showsChromiumZoomBubble))
-        createWindow()
+    }
+
+    /// The browser's profile has finished loading since the window opened:
+    /// Chromium creates the browser now that its view joins the window.
+    private func addBrowserViewWhenProfileIsReady() {
+        guard !isClosed, browserView == nil, let window = cefWindow?.pointer else { return }
+        guard browser.profileAllowsCreation({ [weak self] _ in self?.addBrowserViewWhenProfileIsReady() }) else {
+            if browser.state == .closed { close() }
+            return
+        }
+        browserView = makeBrowserView()
+        addBrowserView(to: window)
+        applyLayout()
+    }
+
+    private func addBrowserView(to window: UnsafeMutablePointer<cef_window_t>) {
+        guard let browserView else { return }
+        // add_child_view consumes a reference to the view.
+        cefAddRef(browserView.pointer)
+        window.withMemoryRebound(to: cef_panel_t.self, capacity: 1) { panel in
+            browserView.pointer.withMemoryRebound(to: cef_view_t.self, capacity: 1) { view in
+                panel.pointee.add_child_view(panel, view)
+            }
+        }
     }
 
     /// Wraps a popup's browser view, created by Chromium, in a window.
@@ -437,15 +476,7 @@ public final class CefWindow: Identifiable {
     // MARK: Delegate callbacks
 
     func windowCreated(_ window: UnsafeMutablePointer<cef_window_t>) {
-        if let browserView {
-            // add_child_view consumes a reference to the view.
-            cefAddRef(browserView.pointer)
-            window.withMemoryRebound(to: cef_panel_t.self, capacity: 1) { panel in
-                browserView.pointer.withMemoryRebound(to: cef_view_t.self, capacity: 1) { view in
-                    panel.pointee.add_child_view(panel, view)
-                }
-            }
-        }
+        addBrowserView(to: window)
         cefWindow = CefRef(retaining: window)
         applyLayout()
         if configuration.frame == nil, !isPopup {
@@ -477,6 +508,8 @@ public final class CefWindow: Identifiable {
         cefWindow = nil
         browserView = nil
         isClosed = true
+        // Closed before its profile loaded: the browser never came.
+        if browser.state == .pending { browser.close() }
         Self.all.removeAll { $0 === self }
         Self.liveCount -= 1
         onClose?()

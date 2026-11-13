@@ -275,6 +275,42 @@ addresses. `zoomLevel` is read back with `get_zoom_level` after each
 navigation, each zoom command and each change made through the property,
 in every browser, since Chromium keeps one level per site.
 
+### Profiles and their request contexts
+
+`CefProfile.default` is the global request context, Chromium's `Default`
+profile under `root_cache_path`, loaded as Chromium starts. Every other
+profile creates its own context on first use with
+`cef_request_context_create_context`: an empty `cache_path` for an
+incognito profile, `<root>/Profile-<id>` for a persistent one, the root
+taken with its symbolic links resolved (`realpath`), because Chromium's
+profile manager makes a profile only in a direct child of its user data
+directory, compared that way. Anything else gets an in-memory profile,
+which CEF reports as an initialized context like any other.
+
+A context created that way reports `on_request_context_initialized`
+once Chromium has loaded the profile, asynchronously for a disk profile
+(at once for an in-memory one, possibly before `create_context`
+returns). `CefProfile.readiness` follows it, `.pending`, `.loading`, then
+`.ready` or `.failed(reason)`: the callback checks that the context's
+`get_cache_path` is the directory asked for and that the directory now
+exists, which is how Chromium's silent fall-back to memory is caught. A
+failed profile drops its context, and every call on it fails or does
+nothing.
+
+Browser creation goes through `CefBrowser.profileAllowsCreation(_:)`
+first, in every path: windowed, offscreen, Chrome's own window and
+`CefWindow`'s browser view. `cef_browser_host_create_browser_sync` and
+`cef_browser_view_create` fail on a context that is not initialized
+yet, and the asynchronous `cef_browser_host_create_browser` would go
+ahead on the in-memory fallback, so a browser on a profile still loading
+stays `.pending` and the creation runs again once the profile reports;
+the last host asked for wins. A `CefWindow` creates its window at once
+and adds the browser view when the profile is ready. Popups need nothing:
+they share their opener's context, which is loaded. The default profile
+and loaded profiles take the direct path, with no wait. A browser on a
+failed profile closes as it would on a failed creation, and its
+`ready()` throws `CefError.profileUnavailable`.
+
 ## Hosting
 
 | Host | Style | How it draws |

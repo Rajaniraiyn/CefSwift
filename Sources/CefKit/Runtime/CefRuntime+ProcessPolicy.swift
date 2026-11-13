@@ -43,11 +43,18 @@ extension CefRuntime {
 }
 
 extension CefRuntime.Configuration {
+    /// Chromium's feature for notifications through macOS's notification
+    /// center; see ``Services/systemNotifications``.
+    static let systemNotificationsFeature = "SystemNotifications"
+
     /// The features to pass to Chromium: ``enabledFeatures`` and
-    /// ``disabledFeatures`` with the memory policy's. A feature the app
-    /// names itself wins over the policy's choice.
+    /// ``disabledFeatures`` with the memory policy's and the services'. A
+    /// feature the app names itself wins over their choice.
     var chromiumFeatures: (enabled: Set<String>, disabled: Set<String>) {
-        let policy = processPolicy.features
+        var policy = processPolicy.features
+        if services.systemNotifications == .disabled {
+            policy.disabled.insert(Self.systemNotificationsFeature)
+        }
         return (
             enabledFeatures.union(policy.enabled.subtracting(disabledFeatures)),
             disabledFeatures.union(policy.disabled.subtracting(enabledFeatures))

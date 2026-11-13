@@ -29,6 +29,11 @@ hoc signed bundles from `cef bundle`:
   [design notes](design-notes.md#sandbox).
 - Not covered by SelfTest: system media decoders a sandboxed renderer
   cannot open, which Chromium does not use for web media.
+- The Alerts helper (`<App> Helper (Alerts)`), which posts system
+  notifications, is never sandboxed, as in Chrome. It starts only when the
+  app turns system notifications on
+  ([`services.systemNotifications`](guide.md#system-notifications)); by
+  default it never runs.
 
 ## How it works
 

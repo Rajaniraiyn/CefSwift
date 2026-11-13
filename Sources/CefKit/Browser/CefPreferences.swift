@@ -85,7 +85,7 @@ public struct CefPreferences {
                 let message = CefStringUtil.string(from: error)
                 return message.isEmpty ? "Chromium refused the value" : message
             }
-        } ?? "Chromium is not running"
+        } ?? unavailableReason
         if let failure {
             throw CefError.operationFailed("Cannot set preference '\(name)': \(failure)")
         }
@@ -210,6 +210,16 @@ public struct CefPreferences {
     }
 
     // MARK: Manager
+
+    /// Why there is no preference manager.
+    private var unavailableReason: String {
+        guard case .profile(let profile) = source else { return "Chromium is not running" }
+        switch profile.readiness {
+        case .loading: return "Chromium is still loading the profile; await CefProfile.ready() first"
+        case .failed(let reason): return "Chromium could not load the profile: \(reason)"
+        case .pending, .ready: return "Chromium is not running"
+        }
+    }
 
     private func withManager<R>(_ body: (UnsafeMutablePointer<cef_preference_manager_t>) -> R) -> R? {
         switch source {
