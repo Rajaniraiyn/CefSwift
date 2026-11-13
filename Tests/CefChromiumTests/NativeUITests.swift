@@ -51,7 +51,7 @@ import CefKit
 @MainActor
 @Suite struct ChromiumUITests {
     @Test func presentationsDefaultToNative() {
-        var ui = CefBrowserWindow.ChromiumUI()
+        var ui = CefWindow.ChromiumUI()
         #expect(ui[.qrCode] == .native)
         ui[.qrCode] = .hidden
         #expect(ui[.qrCode] == .hidden)
@@ -59,7 +59,7 @@ import CefKit
     }
 
     @Test func windowAnchorAppliesToToolbarKindsOnly() {
-        var ui = CefBrowserWindow.ChromiumUI()
+        var ui = CefWindow.ChromiumUI()
         let view = NSView()
         ui.anchor = .view(view)
         #expect(ui.anchor(for: .qrCode)?.isAnchored(to: view) == true)

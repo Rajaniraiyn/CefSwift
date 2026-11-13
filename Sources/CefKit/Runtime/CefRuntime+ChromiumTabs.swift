@@ -63,9 +63,9 @@ extension CefRuntime {
     /// browser has no back-forward list yet, and a form submission
     /// (POST) opened in a new tab is loaded again as a plain request.
     ///
-    /// Popups and new tabs a ``CefBrowserWindow`` opens in a view of its
+    /// Popups and new tabs a ``CefWindow`` opens in a view of its
     /// own — `window.open`, and links with `target=_blank` — do not come
-    /// here: ``CefBrowserWindow/onPopup`` takes those browsers themselves,
+    /// here: ``CefWindow/onPopup`` takes those browsers themselves,
     /// with their opener and history. DevTools does not come here either.
     /// Pages CefKit keeps in hidden windows (internal service hosts, for
     /// tab discarding and CefChromium's stores) that Chromium restores

@@ -23,7 +23,7 @@ public enum CefTesting {
     /// Starts a history swipe on Chrome's own overlay controller, as
     /// Chrome's `HistorySwiper` does for a trackpad swipe. `nil` when the
     /// class is missing.
-    public static func beginChromeSwipe(in window: CefBrowserWindow, forward: Bool) -> AnyObject? {
+    public static func beginChromeSwipe(in window: CefWindow, forward: Bool) -> AnyObject? {
         CefHistorySwipeHooks.beginSimulatedSwipe(in: window, forward: forward)
     }
 

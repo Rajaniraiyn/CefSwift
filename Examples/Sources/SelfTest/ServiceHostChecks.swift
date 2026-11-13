@@ -122,7 +122,7 @@ extension SelfTest {
         var changes = 0
         let watcher = Task { for await _ in profile.bookmarks.changes { changes += 1 } }
         defer { watcher.cancel() }
-        let manager = CefBrowserWindow(browser: CefBrowser(url: URL(string: "chrome://bookmarks/strings.m.js")!))
+        let manager = CefWindow(browser: CefBrowser(url: URL(string: "chrome://bookmarks/strings.m.js")!))
         _ = await loaded(manager.browser)
         try? await Task.sleep(for: .milliseconds(500))
         let created = try? await manager.browser.evaluateJavaScript(

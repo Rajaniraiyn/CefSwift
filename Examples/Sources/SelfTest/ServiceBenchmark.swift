@@ -17,11 +17,11 @@ enum ServiceBenchmark {
         let profile = CefProfile.default
         // A page for history, most-visited and favicons to know about, and a
         // hidden Chrome-style tab for the discard queries.
-        let visited = CefBrowserWindow(browser: CefBrowser(url: URL(string: "selftest://edge/favicon.html")!))
+        let visited = CefWindow(browser: CefBrowser(url: URL(string: "selftest://edge/favicon.html")!))
         _ = await SelfTest.waitUntil { visited.browser.favicon != nil }
         visited.close()
         _ = await SelfTest.waitUntil { visited.isClosed }
-        let tab = CefBrowserWindow(browser: CefBrowser(url: URL(string: "selftest://app/second.html")!))
+        let tab = CefWindow(browser: CefBrowser(url: URL(string: "selftest://app/second.html")!))
         _ = await SelfTest.waitUntil { tab.browser.title == "second" }
         try? await Task.sleep(for: .seconds(3))
         await pause("idle")

@@ -91,7 +91,7 @@ extension SelfTest {
         }
 
         let chrome = CefBrowser(url: URL(string: "selftest://app/eme.html")!)
-        let chromeWindow = CefBrowserWindow(browser: chrome)
+        let chromeWindow = CefWindow(browser: chrome)
         chromeWindow.show()
         if await loaded(chrome) {
             await expect("a Chrome-style browser gets com.widevine.alpha") {

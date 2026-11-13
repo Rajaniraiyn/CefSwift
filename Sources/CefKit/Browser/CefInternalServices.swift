@@ -78,7 +78,7 @@ package struct CefServiceModule: Sendable {
 ///   kills a page that sends a malformed Mojo message), closes the host's
 ///   browser; the call throws and the next one starts the host again.
 /// - Service browsers are listed in neither ``CefRuntime/browsers`` nor
-///   ``CefBrowserWindow/all``. Their windows are 1 × 1 point, so their
+///   ``CefWindow/all``. Their windows are 1 × 1 point, so their
 ///   compositor allocates next to nothing, and never shown.
 /// - Their addresses carry the ``addressMarker`` fragment: Chromium saves
 ///   every Chrome-style window in its session and reopens them after a
@@ -239,7 +239,7 @@ final class CefServiceHostBrowser {
     private weak var services: CefInternalServices?
     private let profile: CefProfile
 
-    private var window: CefBrowserWindow?
+    private var window: CefWindow?
     private var browser: CefBrowser?
     private var starting: Task<CefBrowser, Error>?
     private var idleStop: Task<Void, Never>?
@@ -345,11 +345,11 @@ final class CefServiceHostBrowser {
         let browser = CefBrowser(
             url: URL(string: host.document), configuration: configuration, delegate: delegate)
         CefRuntime.shared.registerServiceBrowser(browser)
-        var windowConfiguration = CefBrowserWindow.Configuration()
+        var windowConfiguration = CefWindow.Configuration()
         // The compositor sizes its buffers to the window.
         windowConfiguration.frame = CGRect(x: 0, y: 0, width: 1, height: 1)
         windowConfiguration.titleFollowsPage = false
-        let window = CefBrowserWindow(browser: browser, configuration: windowConfiguration)
+        let window = CefWindow(browser: browser, configuration: windowConfiguration)
         window.isService = true
         window.onClose = { [weak self] in self?.windowDidClose() }
         self.browser = browser

@@ -18,7 +18,7 @@ import CefBase
 /// - ``Toolbar/chrome`` shows Chrome's own toolbar and omnibox.
 ///
 /// ```swift
-/// let window = CefBrowserWindow(browser: CefBrowser(url: home))
+/// let window = CefWindow(browser: CefBrowser(url: home))
 /// window.show()
 /// ```
 ///
@@ -31,7 +31,7 @@ import CefBase
 /// selected one.
 @MainActor
 @Observable
-public final class CefBrowserWindow: Identifiable {
+public final class CefWindow: Identifiable {
 
     /// Which toolbar Chrome draws inside the window.
     public enum Toolbar: Sendable {
@@ -95,7 +95,7 @@ public final class CefBrowserWindow: Identifiable {
 
     /// Called when the page opens a popup window (`window.open` with
     /// features, sign-in flows). The popup arrives as a hidden
-    /// `CefBrowserWindow` of its own, still connected to its opener — give
+    /// `CefWindow` of its own, still connected to its opener — give
     /// it your toolbar, add it to a tab group, and show it.
     ///
     /// When `nil`, Chromium shows popups in a window of its own design.
@@ -103,12 +103,12 @@ public final class CefBrowserWindow: Identifiable {
     /// document, the popup is one CefKit created instead, not connected to
     /// its opener's page; see
     /// ``CefBrowserAttachment/preparesBeforeFirstDocument``.
-    @ObservationIgnored public var onPopup: ((CefBrowserWindow) -> Void)?
+    @ObservationIgnored public var onPopup: ((CefWindow) -> Void)?
 
     public nonisolated var id: ObjectIdentifier { ObjectIdentifier(self) }
 
-    /// Every open browser window, in creation order.
-    public private(set) static var all: [CefBrowserWindow] = []
+    /// Every open window, in creation order.
+    public private(set) static var all: [CefWindow] = []
 
     /// How many windows Chromium has yet to destroy, hidden service windows
     /// included. Shutting down has to wait for this to reach zero.
@@ -136,7 +136,7 @@ public final class CefBrowserWindow: Identifiable {
     }
 
     /// Wraps a popup's browser view, created by Chromium, in a window.
-    fileprivate init(popupView: CefRef<cef_browser_view_t>, browser: CefBrowser, opener: CefBrowserWindow) {
+    fileprivate init(popupView: CefRef<cef_browser_view_t>, browser: CefBrowser, opener: CefWindow) {
         self.browser = browser
         var configuration = opener.configuration
         configuration.frame = nil
@@ -195,12 +195,12 @@ public final class CefBrowserWindow: Identifiable {
     }
 
     /// The open window whose `NSWindow` is `window`.
-    package static func owning(_ window: NSWindow) -> CefBrowserWindow? {
+    package static func owning(_ window: NSWindow) -> CefWindow? {
         all.first { $0.window === window }
     }
 
-    /// The window showing `browser`, if it is a browser window.
-    static func hosting(_ browser: CefBrowser) -> CefBrowserWindow? {
+    /// The window showing `browser`, if it is shown in a ``CefWindow``.
+    static func hosting(_ browser: CefBrowser) -> CefWindow? {
         all.first { $0.browser === browser }
     }
 
@@ -209,7 +209,7 @@ public final class CefBrowserWindow: Identifiable {
     /// What a module built on CefKit keeps for this window: one object per
     /// type, made by `make` on first use and kept as long as the window.
     /// Hold the window weakly from it. An object that is a
-    /// ``CefBrowserWindowParticipant`` is told when the window closes.
+    /// ``CefWindowParticipant`` is told when the window closes.
     package func moduleState<State: AnyObject>(_ type: State.Type = State.self, make: () -> State) -> State {
         let key = ObjectIdentifier(type)
         if let state = moduleStates[key] as? State { return state }
@@ -232,12 +232,12 @@ public final class CefBrowserWindow: Identifiable {
     /// Interceptors run in the order they were added, after the browser's
     /// delegate.
     package static func addChromeCommandInterceptor(
-        _ interceptor: @escaping @MainActor (CefBrowserWindow, CefChromeCommand) -> Bool
+        _ interceptor: @escaping @MainActor (CefWindow, CefChromeCommand) -> Bool
     ) {
         commandInterceptors.append(interceptor)
     }
 
-    private static var commandInterceptors: [@MainActor (CefBrowserWindow, CefChromeCommand) -> Bool] = []
+    private static var commandInterceptors: [@MainActor (CefWindow, CefChromeCommand) -> Bool] = []
 
     /// Whether an interceptor handled `command`.
     func intercept(_ command: CefChromeCommand) -> Bool {
@@ -263,7 +263,7 @@ public final class CefBrowserWindow: Identifiable {
               let raw = popupView.pointer.pointee.get_browser(popupView.pointer)
         else { return false }
         let popup = client.wrapper(adopting: raw)
-        onPopup(CefBrowserWindow(popupView: popupView, browser: popup, opener: self))
+        onPopup(CefWindow(popupView: popupView, browser: popup, opener: self))
         return true
     }
 
@@ -334,7 +334,7 @@ public final class CefBrowserWindow: Identifiable {
         if let window {
             body(window)
         } else if isClosed {
-            CefLog.error("CefBrowserWindow: the window has closed; its setup is ignored")
+            CefLog.error("CefWindow: the window has closed; its setup is ignored")
         } else {
             windowWaiters.append(body)
         }
@@ -501,7 +501,7 @@ public final class CefBrowserWindow: Identifiable {
         serviceWindowObserver.map(NotificationCenter.default.removeObserver)
         serviceWindowObserver = nil
         for state in moduleStates.values {
-            (state as? CefBrowserWindowParticipant)?.browserWindowDidClose(self)
+            (state as? CefWindowParticipant)?.windowDidClose(self)
         }
         accessoryController = nil
         windowWaiters = []
@@ -515,11 +515,11 @@ public final class CefBrowserWindow: Identifiable {
     }
 }
 
-/// An object a module keeps for a ``CefBrowserWindow``
-/// (``CefBrowserWindow/moduleState(_:make:)``) that has to know when the
+/// An object a module keeps for a ``CefWindow``
+/// (``CefWindow/moduleState(_:make:)``) that has to know when the
 /// window closes.
 @MainActor
-package protocol CefBrowserWindowParticipant: AnyObject {
+package protocol CefWindowParticipant: AnyObject {
     /// The window has been destroyed; drop what it held.
-    func browserWindowDidClose(_ window: CefBrowserWindow)
+    func windowDidClose(_ window: CefWindow)
 }

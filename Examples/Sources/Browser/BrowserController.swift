@@ -3,7 +3,7 @@ import CefSwiftUI
 import SystemEngine
 import SwiftUI
 
-/// Owns the browser's tabs. Each tab is one ``CefBrowserWindow``; macOS
+/// Owns the browser's tabs. Each tab is one ``CefWindow``; macOS
 /// groups them into a native tab bar.
 @MainActor
 @Observable
@@ -11,7 +11,7 @@ final class BrowserController: CefBrowserDelegate {
     static let defaultNewTabPage = BrowserPages.start.absoluteString
     static let tabbingIdentifier = "browser"
 
-    private(set) var windows: [CefBrowserWindow] = []
+    private(set) var windows: [CefWindow] = []
     /// Tabs shown by WebKit (`SystemEngineTabs.swift`).
     private(set) var systemTabs: [SystemEngineTab] = []
 
@@ -84,11 +84,11 @@ final class BrowserController: CefBrowserDelegate {
         ]
         let browser = CefBrowser(url: url ?? newTabPage, configuration: configuration, delegate: self)
 
-        var windowConfiguration = CefBrowserWindow.Configuration()
+        var windowConfiguration = CefWindow.Configuration()
         windowConfiguration.tabbingIdentifier = Self.tabbingIdentifier
         windowConfiguration.title = Self.tabTitle(for:)
         windowConfiguration.frame = windows.last?.window?.frame
-        let window = CefBrowserWindow(browser: browser, configuration: windowConfiguration)
+        let window = CefWindow(browser: browser, configuration: windowConfiguration)
         window.setToolbar {
             NavigationButtons(browser: browser)
         } principal: {
@@ -330,14 +330,14 @@ final class BrowserController: CefBrowserDelegate {
 /// and closed along with it.
 @MainActor
 enum PopupPresenter {
-    static func hostPopups(of window: CefBrowserWindow) {
+    static func hostPopups(of window: CefWindow) {
         window.onPopup = { [weak window] popup in
             guard let window else { return }
             present(popup, over: window)
         }
     }
 
-    private static func present(_ popup: CefBrowserWindow, over opener: CefBrowserWindow) {
+    private static func present(_ popup: CefWindow, over opener: CefWindow) {
         guard let parent = opener.window, let panel = popup.window else {
             popup.show()
             return
@@ -375,7 +375,7 @@ enum PopupPresenter {
 
     /// Keeps the site a popup shows in its title bar, as browsers must: a
     /// sign-in popup's page could claim to be anyone.
-    private static func showSite(of popup: CefBrowserWindow) {
+    private static func showSite(of popup: CefWindow) {
         guard !popup.isClosed else { return }
         let host = withObservationTracking {
             popup.browser.url?.host()

@@ -2,7 +2,7 @@ import AppKit
 import CefKit
 import SwiftUI
 
-extension CefBrowserWindow {
+extension CefWindow {
     /// Gives the window a unified title-bar toolbar built from SwiftUI
     /// views, laid out the way Safari's is: `leading` beside the window
     /// buttons, `principal` centered (your address field), `trailing` at the
@@ -63,7 +63,7 @@ extension ToolbarItemProvider {
     /// Makes a toolbar of this provider's items the window's toolbar.
     func install(in nsWindow: NSWindow) {
         let provider = self
-        let toolbar = NSToolbar(identifier: "CefBrowserWindow.toolbar")
+        let toolbar = NSToolbar(identifier: "CefWindow.toolbar")
         toolbar.delegate = provider
         toolbar.displayMode = .iconOnly
         toolbar.centeredItemIdentifiers = [ToolbarItemProvider.principal]
@@ -84,9 +84,9 @@ extension ToolbarItemProvider {
 @MainActor
 private final class ToolbarItemProvider: NSObject, NSToolbarDelegate {
     nonisolated(unsafe) static var associationKey = 0
-    static let leading = NSToolbarItem.Identifier("CefBrowserWindow.leading")
-    static let principal = NSToolbarItem.Identifier("CefBrowserWindow.principal")
-    static let trailing = NSToolbarItem.Identifier("CefBrowserWindow.trailing")
+    static let leading = NSToolbarItem.Identifier("CefWindow.leading")
+    static let principal = NSToolbarItem.Identifier("CefWindow.principal")
+    static let trailing = NSToolbarItem.Identifier("CefWindow.trailing")
 
     private let views: [NSToolbarItem.Identifier: NSView]
 

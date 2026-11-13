@@ -143,7 +143,7 @@ extension CefBrowser {
         if started == 0 { creationFailed() }
     }
 
-    /// Creates a Chrome-style browser view for a ``CefBrowserWindow``.
+    /// Creates a Chrome-style browser view for a ``CefWindow``.
     /// Returns a +1 `cef_browser_view_t`.
     func createBrowserView(
         delegate: UnsafeMutablePointer<cef_browser_view_delegate_t>, showsStatusBubble: Bool, showsZoomBubble: Bool

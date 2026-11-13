@@ -36,7 +36,7 @@ extension SelfTest {
     static func windowDiscardChecks() async {
         let recorder = DiscardRecorder()
         let browser = CefBrowser(url: URL(string: "selftest://edge/heavy.html?1")!, configuration: discardConfiguration(), delegate: recorder)
-        let browserWindow = CefBrowserWindow(browser: browser)
+        let browserWindow = CefWindow(browser: browser)
         browserWindow.show()
         _ = await loaded(browser, title: "heavy")
         browser.load(URL(string: "selftest://edge/heavy.html?2")!)
@@ -128,8 +128,8 @@ extension SelfTest {
     // MARK: Blockers
 
     static func discardBlockerChecks() async {
-        let audible = CefBrowserWindow(browser: CefBrowser(url: URL(string: "selftest://edge/tab.html?audio")!))
-        let leaving = CefBrowserWindow(browser: CefBrowser(url: URL(string: "selftest://edge/leave.html")!))
+        let audible = CefWindow(browser: CefBrowser(url: URL(string: "selftest://edge/tab.html?audio")!))
+        let leaving = CefWindow(browser: CefBrowser(url: URL(string: "selftest://edge/leave.html")!))
         let windows = [audible, leaving]
         windows.forEach { $0.show() }
         _ = await allLoaded(windows.map(\.browser))
@@ -175,7 +175,7 @@ extension SelfTest {
     /// it is being discarded stays loaded.
     static func discardIdentityChecks() async {
         let twinURL = URL(string: "selftest://edge/tab.html?twin")!
-        let twins = [CefBrowserWindow(browser: CefBrowser(url: twinURL)), CefBrowserWindow(browser: CefBrowser(url: twinURL))]
+        let twins = [CefWindow(browser: CefBrowser(url: twinURL)), CefWindow(browser: CefBrowser(url: twinURL))]
         twins.forEach { $0.show() }
         _ = await allLoaded(twins.map(\.browser), title: "tab")
         twins.forEach { $0.hide() }
@@ -205,7 +205,7 @@ extension SelfTest {
 
         let hook = WillDiscardHook()
         let browser = CefBrowser(url: URL(string: "selftest://edge/tab.html?revalidate")!, delegate: hook)
-        let window = CefBrowserWindow(browser: browser)
+        let window = CefWindow(browser: browser)
         window.show()
         _ = await loaded(browser, title: "tab")
         window.hide()
@@ -295,7 +295,7 @@ extension SelfTest {
     static func discardBrowsersForQuitting() async {
         SelfTestResults.shared.group = "quit"
         let tab = CefBrowser(url: URL(string: "selftest://edge/tab.html?quit")!)
-        let tabWindow = CefBrowserWindow(browser: tab)
+        let tabWindow = CefWindow(browser: tab)
         tabWindow.show()
         let viewed = CefBrowser(url: URL(string: "selftest://edge/tab.html?quit-view")!)
         let view = hostWindowed(viewed)

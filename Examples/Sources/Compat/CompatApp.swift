@@ -8,7 +8,7 @@ import CefPasskeys
 /// Launch arguments (read as user defaults):
 ///
 /// - `-url <address>`: the page.
-/// - `-host window|windowed|offscreen`: a Chrome-style `CefBrowserWindow`,
+/// - `-host window|windowed|offscreen`: a Chrome-style `CefWindow`,
 ///   or a `CefWebView`-style view (Alloy), windowed or offscreen.
 /// - `-preset default|browser|embedded`: the `CefRuntime.Configuration` preset.
 /// - `-features <name>,<name>`: `devtools` (a DevTools session with no
@@ -28,7 +28,7 @@ import CefPasskeys
 enum CompatApp {
     static let defaults = UserDefaults.standard
     static var window: NSWindow?
-    static var browserWindow: CefBrowserWindow?
+    static var browserWindow: CefWindow?
     static var browser: CefBrowser!
     static let bridge = CefBridge(name: "compatBridge")
 
@@ -99,9 +99,9 @@ enum CompatApp {
             self.window = window
         default:
             browser = CefBrowser(url: url, configuration: browserConfiguration, delegate: CompatDelegate.shared)
-            var windowConfiguration = CefBrowserWindow.Configuration()
+            var windowConfiguration = CefWindow.Configuration()
             windowConfiguration.frame = frame
-            let browserWindow = CefBrowserWindow(browser: browser, configuration: windowConfiguration)
+            let browserWindow = CefWindow(browser: browser, configuration: windowConfiguration)
             browserWindow.show()
             self.browserWindow = browserWindow
         }

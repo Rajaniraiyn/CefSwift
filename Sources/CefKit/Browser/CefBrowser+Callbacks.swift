@@ -106,8 +106,8 @@ extension CefBrowser {
     /// handled and Chrome must not run it.
     func handleChromeCommand(_ command: CefChromeCommand, disposition: CefWindowOpenDisposition) -> Bool {
         if delegate?.browser(self, handleChromeCommand: command, disposition: disposition) == true { return true }
-        // Modules that handle commands in browser windows (CefChromium).
-        if let window = CefBrowserWindow.hosting(self), window.intercept(command) { return true }
+        // Modules that handle commands in CefWindows (CefChromium).
+        if let window = CefWindow.hosting(self), window.intercept(command) { return true }
         // Chrome runs the command after this returns.
         if command.isZoomCommand { CefBrowser.refreshZoomLevels() }
         return false
@@ -163,7 +163,7 @@ extension CefBrowser {
     /// CefKit creates is: the attachments are in place before its first
     /// document starts. It arrives where a
     /// native popup would: ``CefBrowserDelegate/browser(_:didOpen:)``, then
-    /// the opener's window's ``CefBrowserWindow/onPopup``, or a window of
+    /// the opener's window's ``CefWindow/onPopup``, or a window of
     /// its own. The page cannot script it: `window.open` returns `null` and
     /// the popup has no `window.opener`. A blank popup (no URL) is refused.
     func openPopupInNewBrowser(_ request: CefWindowOpenRequest) {
@@ -172,10 +172,10 @@ extension CefBrowser {
         popup.opener = self
         popup.popupFeatures = request.features
         delegate?.browser(self, didOpen: popup)
-        let openerWindow = CefBrowserWindow.hosting(self)
-        var windowConfiguration = openerWindow?.configuration ?? CefBrowserWindow.Configuration()
+        let openerWindow = CefWindow.hosting(self)
+        var windowConfiguration = openerWindow?.configuration ?? CefWindow.Configuration()
         windowConfiguration.frame = nil
-        let window = CefBrowserWindow(browser: popup, configuration: windowConfiguration)
+        let window = CefWindow(browser: popup, configuration: windowConfiguration)
         if let onPopup = openerWindow?.onPopup {
             onPopup(window)
         } else {

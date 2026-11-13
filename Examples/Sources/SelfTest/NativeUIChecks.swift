@@ -36,13 +36,13 @@ extension SelfTest {
         }
         defer { server.stop() }
         let browser = CefBrowser(url: URL(string: "http://127.0.0.1:\(server.port)/page")!)
-        var configuration = CefBrowserWindow.Configuration()
+        var configuration = CefWindow.Configuration()
         configuration.frame = CGRect(x: 160, y: 160, width: 900, height: 640)
-        var ui = CefBrowserWindow.ChromiumUI()
+        var ui = CefWindow.ChromiumUI()
         ui[.statusBubble] = .hidden
         ui[.zoom] = .hidden
         configuration.chromiumUI = ui
-        let window = CefBrowserWindow(browser: browser, configuration: configuration)
+        let window = CefWindow(browser: browser, configuration: configuration)
         window.show()
         defer { window.close() }
         guard await loaded(browser, title: "page"), let nsWindow = window.window else {
@@ -86,9 +86,9 @@ extension SelfTest {
         defer { server.stop() }
         let pageURL = URL(string: "http://127.0.0.1:\(server.port)/page")!
         let browser = CefBrowser(url: pageURL)
-        var configuration = CefBrowserWindow.Configuration()
+        var configuration = CefWindow.Configuration()
         configuration.frame = CGRect(x: 160, y: 160, width: 900, height: 640)
-        let window = CefBrowserWindow(browser: browser, configuration: configuration)
+        let window = CefWindow(browser: browser, configuration: configuration)
         var announced: [CefChromiumSurface.Kind] = []
         window.onChromiumSurface = { announced.append($0.kind) }
         // In window coordinates: a control wider than the bubble, near the
@@ -321,7 +321,7 @@ extension SelfTest {
         var configuration = CefBrowser.Configuration()
         configuration.allowsBackForwardNavigationGestures = true
         let browser = CefBrowser(url: URL(string: "selftest://app/second.html")!, configuration: configuration)
-        let window = CefBrowserWindow(browser: browser)
+        let window = CefWindow(browser: browser)
         window.show()
         _ = await loaded(browser, title: "second")
         guard let contentView = window.window?.contentView,
@@ -348,7 +348,7 @@ extension SelfTest {
         _ = await waitUntil { window.isClosed }
 
         let plain = CefBrowser(url: URL(string: "selftest://app/second.html")!)
-        let plainWindow = CefBrowserWindow(browser: plain)
+        let plainWindow = CefWindow(browser: plain)
         plainWindow.show()
         _ = await loaded(plain, title: "second")
         if let contentView = plainWindow.window?.contentView {

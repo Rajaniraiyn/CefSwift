@@ -24,7 +24,7 @@ extension SelfTest {
         let page = "data:text/html,<title>links</title><a href='selftest://app/second.html' "
             + "style='display:block;width:300px;height:100px'>second</a>"
         let browser = CefBrowser(url: URL(string: page)!, configuration: configuration)
-        let window = CefBrowserWindow(browser: browser)
+        let window = CefWindow(browser: browser)
         window.show()
         defer { window.close() }
         guard await loaded(browser, title: "links", timeout: .seconds(20)) else {
@@ -48,7 +48,7 @@ extension SelfTest {
         unrelated.orderFront(nil)
         var sawChromiumWindow: String?
         let arrived = await waitUntil {
-            let ours = Set(CefBrowserWindow.all.compactMap(\.window).map(ObjectIdentifier.init))
+            let ours = Set(CefWindow.all.compactMap(\.window).map(ObjectIdentifier.init))
             if sawChromiumWindow == nil, let shown = NSApp.windows.first(where: {
                 $0.isVisible && $0.alphaValue > 0.05 && $0.styleMask.contains(.titled) && $0.parent == nil
                     && $0 !== SelfTest.window && $0 !== unrelated && !ours.contains(ObjectIdentifier($0))

@@ -55,7 +55,7 @@ extension SelfTest {
               await waitUntil(timeout: .seconds(2)) { ended } && isBrowserClosed(closedError),
               detail: "\(String(describing: closedError))")
 
-        let window = CefBrowserWindow(browser: CefBrowser(url: URL(string: "selftest://edge/one.html")!))
+        let window = CefWindow(browser: CefBrowser(url: URL(string: "selftest://edge/one.html")!))
         window.show()
         let browser = window.browser
         _ = await loaded(browser, title: "one")
@@ -96,7 +96,7 @@ extension SelfTest {
         // its first page.
         let attachment = SlowAttachment()
         configuration.attachments = [attachment]
-        let window = CefBrowserWindow(
+        let window = CefWindow(
             browser: CefBrowser(url: URL(string: "selftest://edge/ready.html")!, configuration: configuration))
         window.show()
         await expect("operations: ready() returns once the browser's set-up has finished") {
@@ -117,8 +117,8 @@ extension SelfTest {
     /// page and its popup share the page's renderer, and their first
     /// evaluations are both request 1.
     static func sharedRendererChecks() async {
-        let opener = CefBrowserWindow(browser: CefBrowser(url: URL(string: "selftest://edge/opener.html")!))
-        var popups: [CefBrowserWindow] = []
+        let opener = CefWindow(browser: CefBrowser(url: URL(string: "selftest://edge/opener.html")!))
+        var popups: [CefWindow] = []
         opener.onPopup = { popup in
             popups.append(popup)
             popup.show()
@@ -206,7 +206,7 @@ extension SelfTest {
     /// Delegate decisions end with the page they belong to.
     static func decisionChecks() async {
         let delegate = StallingDelegate()
-        let browserWindow = CefBrowserWindow(
+        let browserWindow = CefWindow(
             browser: CefBrowser(url: URL(string: "selftest://edge/dialog.html")!, delegate: delegate))
         browserWindow.show()
         let browser = browserWindow.browser
@@ -262,7 +262,7 @@ extension SelfTest {
 
     /// Observation tracks settings CEF reports no changes of.
     static func observableSettingChecks() async {
-        let window = CefBrowserWindow(browser: CefBrowser(url: URL(string: "selftest://edge/settings.html")!))
+        let window = CefWindow(browser: CefBrowser(url: URL(string: "selftest://edge/settings.html")!))
         window.show()
         let browser = window.browser
         _ = await loaded(browser, title: "settings")
@@ -290,7 +290,7 @@ extension SelfTest {
 
     /// One user disabling a domain leaves it on for another.
     static func domainLeaseChecks() async {
-        let window = CefBrowserWindow(browser: CefBrowser(url: URL(string: "selftest://edge/lease.html")!))
+        let window = CefWindow(browser: CefBrowser(url: URL(string: "selftest://edge/lease.html")!))
         window.show()
         let browser = window.browser
         _ = await loaded(browser, title: "lease")

@@ -21,7 +21,7 @@ extension SelfTest {
         recorder.credentialQueue = [CefCredential(username: "ada", password: "wrong")]
         recorder.credential = right
         let browser = CefBrowser(url: url, delegate: recorder)
-        let window = CefBrowserWindow(browser: browser)
+        let window = CefWindow(browser: browser)
         window.show()
         check("authentication: the delegate answers the challenge (Chrome style)",
               await waitUntil { browser.title == "authorized" }, detail: "title '\(browser.title)', \(recorder.challenges)")
@@ -140,7 +140,7 @@ extension SelfTest {
         let recorder = Recorder()
         recorder.credential = CefCredential(username: "ada", password: "lovelace")
         let browser = CefBrowser(url: url, delegate: recorder)
-        let window = CefBrowserWindow(browser: browser)
+        let window = CefWindow(browser: browser)
         window.show()
         check("Chromium's sign-in dialog appears",
               await waitUntil { window.window?.childWindows?.isEmpty == false })

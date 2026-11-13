@@ -11,7 +11,7 @@ import SwiftUI
 enum ChromiumPanels {
     static let customPanelsKey = "customChromiumPanels"
 
-    static func configure(_ window: CefBrowserWindow) {
+    static func configure(_ window: CefWindow) {
         window.setFindBar { session in FindBar(session: session) }
         window.setStatusBubble { text in StatusBubble(text: text) }
         guard UserDefaults.standard.bool(forKey: customPanelsKey) else { return }
@@ -123,7 +123,7 @@ private struct CastPicker: View {
             Divider()
             // Mirroring a tab needs Chromium's own dialog.
             Button("Use Chromium's Cast Dialog…") {
-                guard let window = surface.browserWindow else { return }
+                guard let window = surface.parentWindow else { return }
                 surface.dismiss()
                 window.setCustomPresentation(for: .cast, nil)
                 window.browser.execute(.castMedia)

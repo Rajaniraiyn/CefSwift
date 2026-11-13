@@ -57,7 +57,7 @@ import SwiftUI
 @MainActor var tab = CefBrowser()
 @MainActor var browserConfiguration = CefBrowser.Configuration()
 @MainActor var configuration = CefRuntime.Configuration.embedded
-@MainActor var window = CefBrowserWindow(browser: CefBrowser())
+@MainActor var window = CefWindow(browser: CefBrowser())
 @MainActor var profile = CefProfile.default
 @MainActor var bridge = CefBridge(name: "app")
 @MainActor var store = CefKeychainPasskeyStore()

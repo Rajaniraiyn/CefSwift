@@ -42,7 +42,7 @@ extension CefBrowser {
         /// Whether horizontal swipes navigate back and forward, as the system's
         /// "Swipe between pages" setting allows: two-finger scrolls that start
         /// sideways, and the dedicated navigation swipe. Chrome-style browsers
-        /// (``CefBrowserWindow``) use Chrome's own swipe handling; views use
+        /// (``CefWindow``) use Chrome's own swipe handling; views use
         /// CefSwift's. While a swipe is in progress,
         /// ``CefBrowser/navigationGestureProgress`` follows it.
         public var allowsBackForwardNavigationGestures = false

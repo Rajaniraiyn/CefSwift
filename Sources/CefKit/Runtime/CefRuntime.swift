@@ -267,9 +267,9 @@ public final class CefRuntime {
     /// ``State/stopped`` and a later ``initialize(configuration:)`` throws.
     func shutDownChromium() {
         guard state == .running || state == .stopping else { return }
-        guard hasNoBrowsers, CefBrowserWindow.liveCount == 0, messagePump?.isPerformingWork != true else {
+        guard hasNoBrowsers, CefWindow.liveCount == 0, messagePump?.isPerformingWork != true else {
             CefLog.error("CefSwift: shutdown deferred: \(browsers.count + serviceBrowsers.count) browsers, "
-                         + "\(CefBrowserWindow.liveCount) windows still open")
+                         + "\(CefWindow.liveCount) windows still open")
             return
         }
         state = .stopping
@@ -359,7 +359,7 @@ public final class CefRuntime {
     /// callbacks, crashes in `cef_shutdown()`; so `terminate:` is retried
     /// from the run loop once nothing is left.
     func continueTerminationIfReady() {
-        guard isTerminationRequested, hasNoBrowsers, CefBrowserWindow.liveCount == 0 else { return }
+        guard isTerminationRequested, hasNoBrowsers, CefWindow.liveCount == 0 else { return }
         DispatchQueue.main.async {
             self.replyToQuitEvent(cancelled: false)
             NSApp.terminate(nil)
@@ -459,9 +459,9 @@ public final class CefRuntime {
         if hasNoBrowsers {
             // Not from inside Chromium's message loop work, where a Chrome
             // command or a page may have asked to quit.
-            guard CefBrowserWindow.liveCount == 0, messagePump?.isPerformingWork != true else {
+            guard CefWindow.liveCount == 0, messagePump?.isPerformingWork != true else {
                 suspendQuitEventIfNeeded()
-                CefBrowserWindow.all.forEach { $0.close() }
+                CefWindow.all.forEach { $0.close() }
                 continueTerminationIfReady()
                 return false
             }

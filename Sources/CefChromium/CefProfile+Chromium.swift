@@ -8,7 +8,7 @@ import Foundation
 //   pages (CefBookmarks, CefHistory, CefAutocomplete).
 // - Chromium's surfaces in Chrome-style windows, its bubbles, find bar and
 //   status bubble, recognized through overrides of Chromium's AppKit
-//   classes (CefChromiumSurface, CefBrowserWindow.chromiumUI), with their
+//   classes (CefChromiumSurface, CefWindow.chromiumUI), with their
 //   SwiftUI glue.
 //
 // Both are bound to interfaces Chromium keeps private: the Mojo handlers

@@ -4,13 +4,13 @@ import CefKit
 import Foundation
 import Observation
 
-// How a CefBrowserWindow follows Chromium's surfaces: CefSurfaceTracker
+// How a CefWindow follows Chromium's surfaces: CefSurfaceTracker
 // reports each child window Chromium attaches; it is kept invisible until
 // it is recognized, then shown and placed, replaced, or dismissed according
 // to the window's chromiumUI. A window's ChromiumSurfaceController holds
 // all of it, made on first use (see ChromiumSurfaces.activate()).
 
-extension CefBrowserWindow {
+extension CefWindow {
     /// How Chromium's own interface is presented in this window: its
     /// bubbles, dialogs, find bar and status bubble
     /// (``CefChromiumSurface/Kind``). Each kind is drawn by Chromium where
@@ -29,7 +29,7 @@ extension CefBrowserWindow {
     ///
     /// CefChromium starts following Chromium's surfaces, in every browser
     /// window, the first time any of its window API is used, this property
-    /// and ``CefBrowserWindow/Configuration/chromiumUI`` included. Until
+    /// and ``CefWindow/Configuration/chromiumUI`` included. Until
     /// then Chromium shows its interface as it does without CefChromium;
     /// surfaces already on screen then are taken up as they are. Set it
     /// before showing the window, so no surface shows before it applies.
@@ -102,20 +102,20 @@ extension CefBrowserWindow {
     }
 }
 
-extension CefBrowserWindow.Configuration {
+extension CefWindow.Configuration {
     /// How Chromium's interface is presented at first:
-    /// ``CefBrowserWindow/chromiumUI`` starts as this, or with every
+    /// ``CefWindow/chromiumUI`` starts as this, or with every
     /// surface ``CefChromiumSurface/Presentation/native`` when `nil`.
     /// A status bubble or zoom bubble hidden here is never created, as the
     /// browser starts with Chromium's own switched off
     /// (`cef_browser_settings_t`); hiding one later keeps Chromium's window
     /// invisible instead. Popups start with every surface native.
     @MainActor
-    public var chromiumUI: CefBrowserWindow.ChromiumUI? {
-        get { moduleValues[ObjectIdentifier(CefBrowserWindow.ChromiumUI.self)] as? CefBrowserWindow.ChromiumUI }
+    public var chromiumUI: CefWindow.ChromiumUI? {
+        get { moduleValues[ObjectIdentifier(CefWindow.ChromiumUI.self)] as? CefWindow.ChromiumUI }
         set {
             ChromiumSurfaces.activate()
-            moduleValues[ObjectIdentifier(CefBrowserWindow.ChromiumUI.self)] = newValue
+            moduleValues[ObjectIdentifier(CefWindow.ChromiumUI.self)] = newValue
             showsChromiumStatusBubble = newValue?[.statusBubble] != .hidden
             showsChromiumZoomBubble = newValue?[.zoom] != .hidden
         }
@@ -143,20 +143,20 @@ enum ChromiumSurfaces {
         guard !isActive else { return }
         isActive = true
         CefSurfaceTracker.install()
-        CefBrowserWindow.addChromeCommandInterceptor { window, command in
+        CefWindow.addChromeCommandInterceptor { window, command in
             window.surfaces.handleSurfaceCommand(command)
         }
     }
 }
 
-/// What CefChromium keeps for one ``CefBrowserWindow``.
+/// What CefChromium keeps for one ``CefWindow``.
 @MainActor
 @Observable
-final class ChromiumSurfaceController: CefBrowserWindowParticipant {
-    @ObservationIgnored private weak var window: CefBrowserWindow?
+final class ChromiumSurfaceController: CefWindowParticipant {
+    @ObservationIgnored private weak var window: CefWindow?
     private let browser: CefBrowser
 
-    var ui: CefBrowserWindow.ChromiumUI {
+    var ui: CefWindow.ChromiumUI {
         didSet { applyChromiumUI() }
     }
 
@@ -169,10 +169,10 @@ final class ChromiumSurfaceController: CefBrowserWindowParticipant {
     @ObservationIgnored private var isPlacingSurface = false
     @ObservationIgnored private var pendingSurfaces: [ObjectIdentifier: (window: NSWindow, alpha: CGFloat)] = [:]
 
-    init(window: CefBrowserWindow) {
+    init(window: CefWindow) {
         self.window = window
         browser = window.browser
-        ui = window.configuration.chromiumUI ?? CefBrowserWindow.ChromiumUI()
+        ui = window.configuration.chromiumUI ?? CefWindow.ChromiumUI()
     }
 
     /// Follows the window's frame, and takes up the surfaces Chromium
@@ -189,7 +189,7 @@ final class ChromiumSurfaceController: CefBrowserWindowParticipant {
         }
     }
 
-    func browserWindowDidClose(_ window: CefBrowserWindow) {
+    func windowDidClose(_ window: CefWindow) {
         frameObservers.forEach(NotificationCenter.default.removeObserver)
         frameObservers = []
         surfaces.forEach(stopTracking)
@@ -227,7 +227,7 @@ final class ChromiumSurfaceController: CefBrowserWindowParticipant {
         let url = kind == .qrCode ? recognized.text.flatMap(URL.init(string:)) ?? browser.url : browser.url
         let surface = CefChromiumSurface(
             kind: kind, title: recognized.title, browser: browser, url: url,
-            window: child, browserWindow: window)
+            window: child, parentWindow: window)
         let presentation = presentationForSurface?(surface) ?? ui[kind]
         surface.presentation = presentation
         switch presentation {
@@ -345,7 +345,7 @@ final class ChromiumSurfaceController: CefBrowserWindowParticipant {
         surfaces.filter { $0.kind == kind && $0.window == nil }.forEach { $0.dismiss() }
         let surface = CefChromiumSurface(
             kind: kind, title: title, browser: browser, url: url,
-            window: nil, browserWindow: window)
+            window: nil, parentWindow: window)
         surface.presentation = .custom
         surface.onDismiss = { [weak self, weak surface] in
             self?.surfaces.removeAll { $0 === surface }

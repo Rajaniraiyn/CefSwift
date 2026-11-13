@@ -191,17 +191,17 @@ these conventions on top. Follow them for new API, so that the library keeps
 reading as one.
 
 - **Principal types** carry the `Cef` prefix: `CefRuntime`, `CefBrowser`,
-  `CefBrowserWindow`, `CefProfile`, `CefDevTools`. So do types several owners
+  `CefWindow`, `CefProfile`, `CefDevTools`. So do types several owners
   share, and the values delegate methods take and return (`CefNavigationAction`,
   `CefDownload`, `CefPermissionRequest`).
 - **Types that belong to one owner nest in it**, without the prefix:
   `CefBrowser.Configuration`, `CefBrowser.FindResult`,
   `CefRuntime.ProcessPolicy`, `CefChromiumSurface.Anchor`,
   `CefPermissionRequest.Kinds`. A runtime-wide option nests in `CefRuntime`,
-  a browser option in `CefBrowser`, a window option in `CefBrowserWindow`.
+  a browser option in `CefBrowser`, a window option in `CefWindow`.
 - **`Configuration`** is the creation-time value bag of a principal type:
   `CefRuntime.Configuration`, `CefBrowser.Configuration`,
-  `CefBrowserWindow.Configuration`, `CefBrowser.PDFConfiguration` for one
+  `CefWindow.Configuration`, `CefBrowser.PDFConfiguration` for one
   operation. Its property is `configuration`, and so is the initializer
   label. Never `Options`.
 - **Groups** inside a configuration are named for their topic, without a

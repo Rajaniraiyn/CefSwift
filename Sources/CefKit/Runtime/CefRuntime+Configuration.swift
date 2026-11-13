@@ -142,7 +142,7 @@ extension CefRuntime {
 
         /// Unpacked extension directories (each containing a `manifest.json`)
         /// to load at startup. Extensions run in Chrome-style browsers
-        /// (``CefBrowserWindow``); more can be installed at runtime from
+        /// (``CefWindow``); more can be installed at runtime from
         /// `chrome://extensions` or the Chrome Web Store.
         public var extensions: [URL] = []
 

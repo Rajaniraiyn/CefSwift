@@ -27,7 +27,7 @@ extension CefWebView {
     }
 }
 
-extension CefBrowserWindow {
+extension CefWindow {
     /// Replaces the built-in swipe indicator with a SwiftUI view, laid over
     /// the page. `content` receives ``CefBrowser/navigationGestureProgress``
     /// and is redrawn as it changes; it is shown at rest too, with a

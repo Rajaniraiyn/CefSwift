@@ -12,7 +12,7 @@ extension CefBrowser {
         /// color once releasing would navigate.
         case automatic
         /// Chromium's own indicator in Chrome-style browsers
-        /// (``CefBrowserWindow``); ``automatic`` elsewhere.
+        /// (``CefWindow``); ``automatic`` elsewhere.
         case chromium
         /// No indicator. Draw your own from
         /// ``CefBrowser/navigationGestureProgress``.
@@ -201,7 +201,7 @@ final class CefNavigationGestureIndicatorView: NSView {
 /// progress to ``CefBrowser/navigationGestureProgress``, and hide Chrome's
 /// overlay unless the browser asks for ``CefBrowser/NavigationGestureIndicator/chromium``.
 ///
-/// Only windows of a ``CefBrowserWindow`` are affected; windows from
+/// Only windows of a ``CefWindow`` are affected; windows from
 /// ``CefRuntime/openChromeWindow(url:frame:configuration:delegate:)`` keep
 /// Chrome's behavior.
 @MainActor
@@ -321,18 +321,18 @@ enum CefHistorySwipeHooks {
         ])
     }
 
-    /// The browser of the ``CefBrowserWindow`` that shows `view`.
+    /// The browser of the ``CefWindow`` that shows `view`.
     private static func browser(showing view: NSView) -> CefBrowser? {
         guard let window = view.window else { return nil }
-        return CefBrowserWindow.owning(window)?.browser
+        return CefWindow.owning(window)?.browser
     }
 
     /// Starts a swipe on Chrome's own overlay controller as `HistorySwiper`
     /// does, so tests can exercise these overrides without a trackpad.
     /// Returns `nil` when the class is missing.
-    static func beginSimulatedSwipe(in browserWindow: CefBrowserWindow, forward: Bool) -> NSObject? {
+    static func beginSimulatedSwipe(in window: CefWindow, forward: Bool) -> NSObject? {
         guard let cls = NSClassFromString("HistoryOverlayController") as? NSObject.Type,
-              let page = browserWindow.browser.nativeView,
+              let page = window.browser.nativeView,
               let allocated = cls.perform(NSSelectorFromString("alloc"))?.takeUnretainedValue() as? NSObject,
               let initImp = class_getMethodImplementation(cls, NSSelectorFromString("initForMode:")),
               let showImp = class_getMethodImplementation(cls, NSSelectorFromString("showPanelForView:")),

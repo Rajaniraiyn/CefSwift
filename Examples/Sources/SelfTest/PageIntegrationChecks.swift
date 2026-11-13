@@ -73,7 +73,7 @@ extension SelfTest {
 
         // Chrome style reports frames the same way.
         let tab = CefBrowser(url: URL(string: "selftest://frames/top.html")!)
-        let tabWindow = CefBrowserWindow(browser: tab)
+        let tabWindow = CefWindow(browser: tab)
         tabWindow.show()
         check("frames: a Chrome-style browser lists its frames", await waitUntil { tab.frames.count == 3 },
               detail: "\(tab.frames.count)")
@@ -155,7 +155,7 @@ extension SelfTest {
         let tabRecorder = FileDialogRecorder()
         tabRecorder.answer = [files[1]]
         let tab = CefBrowser(url: URL(string: "selftest://frames/files.html")!, delegate: tabRecorder)
-        let tabWindow = CefBrowserWindow(browser: tab)
+        let tabWindow = CefWindow(browser: tab)
         tabWindow.show()
         _ = await loaded(tab, title: "files")
         _ = try? await tab.evaluateJavaScript("single.click(); 0", userGesture: true)

@@ -21,7 +21,7 @@ extension CefBrowser {
 /// can send it.
 ///
 /// A `CefBrowser` is an observable model object. Create it up front, bind UI
-/// to its state, and hand it to a `CefWebView` or ``CefBrowserWindow`` — the
+/// to its state, and hand it to a `CefWebView` or ``CefWindow`` — the
 /// underlying Chromium browser is created when it is first shown.
 ///
 /// ```swift
@@ -440,9 +440,9 @@ public final class CefBrowser: Identifiable {
             // browser closes under it. A navigation dismisses the window, so
             // leave the page first and close once the window has gone.
             self.signInPromptURL = nil
-            let browserWindows = Set(CefBrowserWindow.all.compactMap(\.window).map(ObjectIdentifier.init))
+            let cefWindows = Set(CefWindow.all.compactMap(\.window).map(ObjectIdentifier.init))
             let chromiumWindows = NSApp.windows.filter {
-                $0.isVisible && $0 !== hostWindow && !browserWindows.contains(ObjectIdentifier($0))
+                $0.isVisible && $0 !== hostWindow && !cefWindows.contains(ObjectIdentifier($0))
                     && NSStringFromClass(type(of: $0)) == "NativeWidgetMacNSWindow"
             }.map { WeakWindow(window: $0) }
             load(URL(string: "about:blank")!)

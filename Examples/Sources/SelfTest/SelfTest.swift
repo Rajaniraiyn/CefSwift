@@ -162,7 +162,7 @@ enum SelfTest {
         ("graphics", graphicsChecks),
         ("accessibility", offscreenAccessibilityChecks),
         ("profile", profileChecks),
-        ("browserWindow", browserWindowChecks),
+        ("window", windowChecks),
         ("behavior", browserBehaviorChecks),
         ("authentication", authenticationChecks),
         ("urlRequest", urlRequestChecks),

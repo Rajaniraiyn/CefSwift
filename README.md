@@ -65,7 +65,7 @@ runs.
 
 ### Build a tabbed browser
 
-Each tab is a `CefBrowserWindow`, a Chrome-style window that macOS groups
+Each tab is a `CefWindow`, a Chrome-style window that macOS groups
 with others under a native tab bar. The toolbar is SwiftUI. This app uses
 `defaultLaunchBehavior(_:)`, so set `platforms: [.macOS(.v15)]`.
 
@@ -80,7 +80,7 @@ struct MyBrowser: CefSwiftApp {
     @NSApplicationDelegateAdaptor private var appDelegate: AppDelegate
 
     var body: some Scene {
-        // Browser windows are not SwiftUI scenes. Settings is the only
+        // `CefWindow`s are not SwiftUI scenes. Settings is the only
         // scene, so keep SwiftUI from opening it at launch.
         Settings { EmptyView() }
             .defaultLaunchBehavior(.suppressed)   // macOS 15
@@ -100,9 +100,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func openTab() {
         let browser = CefBrowser(url: URL(string: "https://www.swift.org")!)
-        var configuration = CefBrowserWindow.Configuration()
+        var configuration = CefWindow.Configuration()
         configuration.tabbingIdentifier = "tabs"
-        let window = CefBrowserWindow(browser: browser, configuration: configuration)
+        let window = CefWindow(browser: browser, configuration: configuration)
         window.setToolbar {
             BackButton(browser: browser)
         } principal: {
@@ -152,7 +152,7 @@ covers identifiers, signing, entitlements, notarization and the bundle layout;
 | | Showing web content | Building a browser |
 |---|---|---|
 | Configuration | `CefRuntime.Configuration.embedded` | `CefRuntime.Configuration.browser` |
-| Host | `CefWebView` in your own windows | `CefBrowserWindow`, or `CefRuntime.shared.openChromeWindow(url:)` for Chrome's complete UI |
+| Host | `CefWebView` in your own windows | `CefWindow`, or `CefRuntime.shared.openChromeWindow(url:)` for Chrome's complete UI |
 | Chrome runtime (`chrome://` pages, extensions, history) | No | Yes |
 | Background services | Off | On |
 
@@ -167,7 +167,7 @@ covers identifiers, signing, entitlements, notarization and the bundle layout;
 | Typed calls between JavaScript and Swift | `CefBridge` | [Bridge](docs/guide.md#bridge) |
 | Asynchronous decisions: permissions, dialogs, downloads, certificate errors | `CefBrowserDelegate` | [Decisions](docs/guide.md#decisions) |
 | Context menu | `CefBrowser.Configuration.ContextMenu` | [Context menu](docs/guide.md#context-menu) |
-| Chrome-style windows, SwiftUI toolbars, popups, native tabs | `CefBrowserWindow` | [Building a browser](docs/guide.md#building-a-browser) |
+| Chrome-style windows, SwiftUI toolbars, popups, native tabs | `CefWindow` | [Building a browser](docs/guide.md#building-a-browser) |
 | Chrome commands and Chrome UI trimming | `CefChromeCommand`, `CefRuntime.Configuration.ChromeToolbar` | [Chrome commands](docs/guide.md#chrome-commands) |
 | Rebranded and restyled `chrome://` pages | `productName`, `stringOverrides`, `CefUserScript.styleSheet(_:matching:includingShadowRoots:)` | [Chromium's own pages](docs/guide.md#customizing-chromiums-own-pages) |
 | Profiles, cookies, Chromium preferences | `CefProfile` | [Profiles](docs/guide.md#profiles) |

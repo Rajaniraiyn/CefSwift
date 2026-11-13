@@ -45,7 +45,7 @@ public struct CefMostVisitedSite: Sendable, Identifiable, Hashable {
 /// let tiles = try await history.mostVisited()
 /// ```
 ///
-/// Chromium records visits made in Chrome-style browsers (``CefBrowserWindow``
+/// Chromium records visits made in Chrome-style browsers (``CefWindow``
 /// and Chrome UI windows). Browsers embedded with `CefWebView` use the Alloy
 /// style, which keeps no history. An incognito profile has none either: its
 /// methods throw.

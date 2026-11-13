@@ -2,10 +2,10 @@ import AppKit
 import CefKit
 import SwiftUI
 
-extension CefBrowserWindow {
+extension CefWindow {
     /// Replaces one of Chromium's surfaces with a SwiftUI view, shown in a
-    /// panel under the kind's anchor (``CefBrowserWindow/ChromiumUI/anchors``, or
-    /// ``CefBrowserWindow/ChromiumUI/anchor`` for surfaces that hang from the toolbar), or
+    /// panel under the kind's anchor (``CefWindow/ChromiumUI/anchors``, or
+    /// ``CefWindow/ChromiumUI/anchor`` for surfaces that hang from the toolbar), or
     /// at the top right of the page. The panel closes when the surface is
     /// dismissed (``CefChromiumSurface/dismiss()``), on Esc, and on a click
     /// elsewhere.
@@ -102,14 +102,14 @@ private final class PassthroughHostingContainer: NSView {
 
 extension View {
     /// Makes this view the anchor of Chromium's surfaces in the
-    /// ``CefBrowserWindow`` it is in, such as a view of the window's
+    /// ``CefWindow`` it is in, such as a view of the window's
     /// toolbar: Chromium's bubbles appear beneath it instead of where
     /// Chrome's toolbar would be.
     ///
     /// Without `kinds`, the view becomes the window's
-    /// ``CefBrowserWindow/ChromiumUI/anchor``, which every surface that hangs from Chrome's
+    /// ``CefWindow/ChromiumUI/anchor``, which every surface that hangs from Chrome's
     /// toolbar follows; with them, it is the anchor of those kinds in
-    /// ``CefBrowserWindow/ChromiumUI/anchors``, Chromium's surfaces and your own interface
+    /// ``CefWindow/ChromiumUI/anchors``, Chromium's surfaces and your own interface
     /// for them alike. The anchor is removed when the view leaves the
     /// window.
     ///
@@ -143,12 +143,12 @@ private struct SurfaceAnchorRepresentable: NSViewRepresentable {
 }
 
 /// An invisible view that registers itself as a surface anchor with the
-/// browser window it is in.
+/// ``CefWindow`` it is in.
 private final class SurfaceAnchorView: NSView {
     private var kinds: Set<CefChromiumSurface.Kind>?
     private var alignment = CefChromiumSurface.Anchor.Alignment.center
     private var spacing: CGFloat = 4
-    private weak var registeredWindow: CefBrowserWindow?
+    private weak var registeredWindow: CefWindow?
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
@@ -178,7 +178,7 @@ private final class SurfaceAnchorView: NSView {
     }
 
     private func register() {
-        guard let window, let owner = CefBrowserWindow.owning(window) else { return }
+        guard let window, let owner = CefWindow.owning(window) else { return }
         let anchor = CefChromiumSurface.Anchor.view(self, alignment: alignment, spacing: spacing)
         if let kinds {
             for kind in kinds { owner.chromiumUI.anchors[kind] = anchor }
@@ -203,7 +203,7 @@ private final class SurfaceAnchorView: NSView {
 
 // MARK: - Panel for custom surfaces
 
-/// A borderless panel that shows a custom surface over the browser window
+/// A borderless panel that shows a custom surface over the window
 /// and closes with it.
 @MainActor
 private final class SurfacePanel: NSPanel {
@@ -211,7 +211,7 @@ private final class SurfacePanel: NSPanel {
     private var clickMonitor: Any?
 
     static func present(_ surface: CefChromiumSurface, content: AnyView) {
-        guard let parent = surface.browserWindow?.window else { return }
+        guard let parent = surface.parentWindow?.window else { return }
         let panel = SurfacePanel(surface: surface, content: content)
         parent.addChildWindow(panel, ordered: .above)
         surface.position(panel)

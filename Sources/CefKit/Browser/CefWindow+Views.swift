@@ -97,12 +97,12 @@ final class PageOverlayView: NSView {
 /// Owner of a `cef_browser_view_delegate_t`. Popups opened from the view get
 /// a delegate of their own showing Chrome's location bar.
 final class BrowserViewDelegate: Sendable {
-    let toolbar: CefBrowserWindow.Toolbar
+    let toolbar: CefWindow.Toolbar
     /// The window whose page may open popups; UI thread only.
-    private let windowReference: CefWeak<CefBrowserWindow>
-    private var window: CefBrowserWindow? { windowReference.object }
+    private let windowReference: CefWeak<CefWindow>
+    private var window: CefWindow? { windowReference.object }
 
-    init(toolbar: CefBrowserWindow.Toolbar, window: CefBrowserWindow?) {
+    init(toolbar: CefWindow.Toolbar, window: CefWindow?) {
         self.toolbar = toolbar
         windowReference = CefWeak(window)
     }
@@ -156,11 +156,11 @@ final class BrowserViewDelegate: Sendable {
 
 /// Owner of a `cef_window_delegate_t`. Callbacks arrive on the UI thread.
 final class WindowDelegate: Sendable {
-    private let ownerReference: CefWeak<CefBrowserWindow>
-    private var owner: CefBrowserWindow? { ownerReference.object }
+    private let ownerReference: CefWeak<CefWindow>
+    private var owner: CefWindow? { ownerReference.object }
 
     @MainActor
-    init(owner: CefBrowserWindow) {
+    init(owner: CefWindow) {
         ownerReference = CefWeak(owner)
     }
 
@@ -168,7 +168,7 @@ final class WindowDelegate: Sendable {
         _ delegateSelf: UnsafeMutablePointer<S>?,
         _ window: UnsafeMutablePointer<cef_window_t>?,
         default fallback: R,
-        _ body: @MainActor (CefBrowserWindow) -> R
+        _ body: @MainActor (CefWindow) -> R
     ) -> R {
         defer { cefRelease(window) }
         guard let delegate = cefOwner(WindowDelegate.self, delegateSelf) else { return fallback }
