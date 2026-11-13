@@ -3,11 +3,31 @@
 How CefSwift works inside, and why. For how to use it, see the
 [guide](guide.md).
 
+CefSwift is a library for embedding CEF in a macOS app. The core, `CefKit`,
+wraps CEF's C API and the Chromium behavior an embedder has to work with or
+around: the runtime and its processes, browsers and their handlers,
+profiles, AppKit host views, CEF Views windows, offscreen rendering and its
+accessibility, discarding. `CefSwiftUI` adds SwiftUI. `CefPasskeys` and
+`CefChromium` are optional modules that reach Chromium internals some apps
+want. Browser-product decisions (UI, defaults, heuristics) live in the
+examples.
+
+| Where | What | Examples |
+|---|---|---|
+| `CefKit` (core) | What any app embedding CEF needs and could not write itself: the runtime, browsers, profiles, the AppKit host views, CEF Views windows (`CefWindow`), handlers and delegates, offscreen rendering and its accessibility, discarding | `CefRuntime`, `CefBrowser`, `CefProfile`, `CefOffscreenBrowserView`, `CefWindow` |
+| `CefSwiftUI` | SwiftUI on top of `CefKit`, nothing else | `CefSwiftApp`, `CefWebView`, `setToolbar`, `setPageOverlay` |
+| `CefPasskeys`, `CefChromium` (optional) | Capabilities on Chromium internals some apps want: passkeys the app answers; Chromium's bookmark, history and suggestion stores and its bubbles | `CefPasskeyController`, `CefBookmarks`, `CefChromiumSurface` |
+| `Examples` | Product decisions written against the public API: UI, defaults, heuristics for when to use a capability | the Browser's toolbar, swipe indicator, Memory Saver, permission names |
+
+The rule: the library holds what an app cannot write against its public
+API, because it calls the CEF C API, hooks Chromium or works around a CEF
+or Chromium limit. Everything else belongs to the app.
+
 ## Modules
 
 ```
 CefSwiftUI   CefSwiftApp, CefWebView (over CefKit's host views), SwiftUI modifiers,
-    │        CefWindow.setToolbar and setTabAccessory
+    │        CefWindow.setToolbar, setTabAccessory and setPageOverlay
     │  CefPasskeys  optional: CefPasskeyController (a CefBrowserAttachment), passkey
     │     │         stores and the passkey sheet
     │     │  CefChromium  optional, bound to the pinned CEF: CefBookmarks, CefHistory,

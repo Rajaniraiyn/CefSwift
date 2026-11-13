@@ -1,10 +1,17 @@
 # Guide
 
-Task-oriented reference for CefSwift. Snippets assume `import CefSwiftUI`,
-which re-exports `CefKit`; an AppKit app imports `CefKit` alone (see
-[In AppKit](#in-appkit)), and passkey snippets also `import CefPasskeys`,
-an optional library product. The runtime, browser, window and profile APIs
-are `@MainActor`.
+Task-oriented reference for CefSwift, a library that embeds CEF in any
+macOS app and exposes CEF's and Chromium's capabilities to Swift. The core,
+`CefKit`, covers the runtime, browsers, profiles, views and windows;
+`CefSwiftUI` adds SwiftUI; `CefPasskeys` and `CefChromium` are optional
+libraries. What a browser product decides (its UI, defaults, when to use a
+capability) is the app's: the Browser example in `Examples/` shows one
+built this way.
+
+Snippets assume `import CefSwiftUI`, which re-exports `CefKit`; an AppKit
+app imports `CefKit` alone (see [In AppKit](#in-appkit)), and passkey and
+Chromium-store snippets also `import CefPasskeys` or `import CefChromium`.
+The runtime, browser, window and profile APIs are `@MainActor`.
 
 - [Starting Chromium](#starting-chromium)
   - [Configuration](#configuration)
@@ -37,7 +44,7 @@ are `@MainActor`.
   - [File choosers](#file-choosers)
   - [Passkeys](#passkeys)
 - [Context menu](#context-menu)
-- [Building a browser](#building-a-browser)
+- [Chrome-style windows](#chrome-style-windows)
   - [Connection security](#connection-security)
   - [Client certificates](#client-certificates)
   - [Toolbar and window](#toolbar-and-window)
@@ -657,7 +664,7 @@ goes away.
 
 Views embed browsers in the Alloy runtime style, which has no `chrome://`
 pages, extensions or history. For those, use a
-[`CefWindow`](#building-a-browser).
+[`CefWindow`](#chrome-style-windows).
 
 ### In AppKit
 
@@ -1543,10 +1550,10 @@ and edits the `CefMenuModel` directly, and handle your command IDs in
 `CefMenuModel.userCommandIDs`; `items` use IDs from its start and Inspect
 Element its last ID.
 
-## Building a browser
+## Chrome-style windows
 
-`CefWindow` is a window with one Chrome-style browser: the full
-Chrome runtime with `chrome://settings`, `chrome://extensions`, history,
+`CefWindow` is a CEF Views window (`cef_window_t`) with one Chrome-style
+browser: the full Chrome runtime with `chrome://settings`, `chrome://extensions`, history,
 downloads, the password manager, autofill, extensions and PDF viewing.
 Chromium provides Chrome style only in windows it creates, so the window owns
 its `NSWindow` instead of living in a SwiftUI scene.
