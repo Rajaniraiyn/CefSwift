@@ -1,12 +1,13 @@
 import CefSwiftUI
 import SwiftUI
 
-/// A `CefProfile` holds cookies, storage and cache. The default profile
-/// keeps them on disk; an incognito profile keeps them in memory and drops
+/// A `CefProfile` holds cookies, storage and cache. A persistent profile
+/// keeps them on disk, in a directory of its own, and finds them again at
+/// the next launch; an incognito profile keeps them in memory and drops
 /// them with the profile. Browsers in different profiles share nothing.
 struct ProfilesDemo: Demo {
     let title = "Profiles and Cookies"
-    let summary = "The same page in the default profile, kept on disk, and in an incognito one: each keeps its own cookies, read back from Swift."
+    let summary = "The same page in a persistent profile, kept on disk, and in an incognito one: each keeps its own cookies, read back from Swift."
     let symbol = "person.2"
     let category = DemoCategory.network
 
@@ -14,16 +15,25 @@ struct ProfilesDemo: Demo {
 }
 
 private struct ProfilesView: View {
-    @State private var onDisk = CefBrowser.inProfile(.default)
+    // Chromium loads a persistent profile in the background the first
+    // time it is used; the browser waits for it by itself.
+    @State private var onDisk = CefBrowser.inProfile(.persistent(id: "gallery", displayName: "Gallery"))
     @State private var incognito = CefBrowser.inProfile(.incognito())
 
     var body: some View {
         HStack(spacing: 1) {
-            ProfilePane(browser: onDisk, name: "Default, on Disk", symbol: "externaldrive")
+            ProfilePane(browser: onDisk, name: "Persistent, on Disk", symbol: "externaldrive")
             ProfilePane(browser: incognito, name: "Incognito", symbol: "eyeglasses")
         }
         .background(.separator)
-        .readyWhenLoaded(onDisk, incognito)
+        .reportReady {
+            // Throws CefError.profileUnavailable if Chromium could not
+            // give the profile its directory: it never falls back to memory.
+            try await onDisk.configuration.profile?.ready()
+            for browser in [onDisk, incognito] {
+                try await browser.waitUntilLoaded(timeout: .seconds(30))
+            }
+        }
         .onDisappear {
             onDisk.close(force: true)
             incognito.close(force: true)
@@ -36,11 +46,16 @@ private struct ProfilePane: View {
     let name: String
     let symbol: String
     @State private var cookies: [HTTPCookie] = []
+    @State private var failure: String?
 
     var body: some View {
         VStack(spacing: 0) {
             Label(name, systemImage: symbol).font(.headline).padding(8)
-            CefWebView(browser)
+            if let failure {
+                ContentUnavailableView("Profile Unavailable", systemImage: "exclamationmark.triangle", description: Text(failure))
+            } else {
+                CefWebView(browser)
+            }
             List(cookies, id: \.name) { cookie in
                 LabeledContent(cookie.name, value: cookie.value)
             }
@@ -53,6 +68,13 @@ private struct ProfilePane: View {
             .padding(8)
         }
         .background(.background)
+        .task {
+            do {
+                try await browser.configuration.profile?.ready()
+            } catch {
+                failure = "\(error)"
+            }
+        }
         // The profile's cookies for the page, read again after every load.
         .task(id: browser.isLoading) {
             guard !browser.isLoading, let profile = browser.configuration.profile else { return }

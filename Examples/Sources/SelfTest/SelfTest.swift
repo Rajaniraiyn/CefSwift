@@ -55,6 +55,7 @@ enum SelfTest {
             unsetenv("SELFTEST_JSON")
             unsetenv("SELFTEST_STRICT")
         }
+        SystemPromptWatch.shared.install()
         sendJobBeforeStartUp()
         CefDiagnostics.enableCensus()
         do {
@@ -164,6 +165,8 @@ enum SelfTest {
         ("graphics", graphicsChecks),
         ("accessibility", offscreenAccessibilityChecks),
         ("profile", profileChecks),
+        ("profileStorage", profileStorageChecks),
+        ("systemPrompts", systemPromptChecks),
         ("window", windowChecks),
         ("behavior", browserBehaviorChecks),
         ("authentication", authenticationChecks),

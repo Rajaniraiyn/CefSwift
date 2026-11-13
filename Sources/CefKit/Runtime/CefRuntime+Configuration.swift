@@ -51,22 +51,18 @@ extension CefRuntime {
         /// did not make; see `docs/sandbox.md`.
         public var isSandboxEnabled: Bool = true
 
-        /// Root directory for all CEF profile data. Defaults to
-        /// `~/Library/Application Support/<bundle id>/CefSwift`.
+        /// The directory Chromium keeps everything in (`root_cache_path`,
+        /// its user data directory): `Local State` and the other
+        /// installation-wide files, the default profile in `Default`, and
+        /// each persistent profile in a `Profile-<id>` directory beside it
+        /// (``CefProfile/persistent(id:displayName:)``). Defaults to
+        /// `~/Library/Application Support/<bundle id>/CefSwift`. One app
+        /// instance at a time owns it.
         public var rootCacheDirectory: URL?
 
-        /// Global cache (profile) directory. Must be ``rootCacheDirectory`` itself or
-        /// a child of it. Defaults to ``rootCacheDirectory``.
-        public var cacheDirectory: URL?
-
-        /// The root every profile's data lives under: ``rootCacheDirectory``;
-        /// without one, the parent of ``cacheDirectory``; without either, the
-        /// default under Application Support. Persistent profiles live in its
-        /// `Profiles` directory.
+        /// ``rootCacheDirectory``, or the default under Application Support.
         public var resolvedRootCacheDirectory: URL {
-            if let rootCacheDirectory { return rootCacheDirectory }
-            if let cacheDirectory { return cacheDirectory.deletingLastPathComponent() }
-            return MappedCefSettings.defaultRootCacheDirectory()
+            rootCacheDirectory ?? MappedCefSettings.defaultRootCacheDirectory()
         }
 
         /// The language of Chromium's own interface: the app's

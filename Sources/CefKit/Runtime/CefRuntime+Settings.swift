@@ -30,13 +30,16 @@ final class MappedCefSettings {
         raw.remote_debugging_port = Int32(configuration.remoteDebuggingPort ?? 0)
         raw.windowless_rendering_enabled = configuration.isOffscreenRenderingEnabled ? 1 : 0
 
-        // CEF requires cache_path to equal or live under root_cache_path. When only
-        // cacheDirectory is given, derive the root from it so the pair is always valid.
+        // cache_path equal to root_cache_path puts the default profile in
+        // the root's Default directory. Chromium makes profiles only directly
+        // in the root: a cache_path elsewhere is ignored for the global
+        // context (Default again), and gives a request context an in-memory
+        // profile instead (CefProfile.storage(for:rootCacheDirectory:)).
         let rootCache = configuration.resolvedRootCacheDirectory
         try? FileManager.default.createDirectory(at: rootCache, withIntermediateDirectories: true)
         configuration.services.protectedMedia.installPreinstalledCDM(rootCache: rootCache)
         CefStringUtil.set(rootCache.path, into: &raw.root_cache_path)
-        CefStringUtil.set((configuration.cacheDirectory ?? rootCache).path, into: &raw.cache_path)
+        CefStringUtil.set(rootCache.path, into: &raw.cache_path)
 
         CefStringUtil.set(locale, into: &raw.locale)
         CefStringUtil.set(configuration.userAgent.product, into: &raw.user_agent_product)

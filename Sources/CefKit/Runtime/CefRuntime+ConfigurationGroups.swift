@@ -40,6 +40,28 @@ extension CefRuntime.Configuration {
         /// ``ProtectedMedia``.
         public var protectedMedia: ProtectedMedia = .automatic
 
+        /// Whether Chromium shows pages' notifications through macOS's
+        /// notification center, as banners and alerts of the app and of
+        /// its `Helper (Alerts)`, rather than in notification popups it
+        /// draws in the app itself.
+        ///
+        /// ``CefRuntime/Setting/disabled`` by default, in every preset:
+        /// Chromium sets up system notifications for each profile as it
+        /// loads it, before any page shows one, and that asks macOS for
+        /// the app's and the Alerts helper's notification authorization,
+        /// which macOS shows the user as two permission banners at the
+        /// first launch. Off (the `SystemNotifications` feature disabled),
+        /// neither process touches the notification center and the Alerts
+        /// helper never starts; a page that asks for and is given the
+        /// notifications permission still shows its notifications, in
+        /// Chromium's own popups.
+        ///
+        /// ``CefRuntime/Setting/automatic`` is Chromium's choice: system
+        /// notifications, with the authorization request at every launch,
+        /// whether or not a page notifies. Listing `SystemNotifications`
+        /// in ``CefRuntime/Configuration/enabledFeatures`` does the same.
+        public var systemNotifications: CefRuntime.Setting = .disabled
+
         public init() {}
     }
 

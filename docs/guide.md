@@ -17,6 +17,8 @@ The runtime, browser, window and profile APIs are `@MainActor`.
   - [Configuration](#configuration)
   - [Languages](#languages)
   - [Services and privacy](#services-and-privacy)
+  - [System notifications](#system-notifications)
+  - [Prompts macOS shows](#prompts-macos-shows)
   - [Keychain access](#keychain-access)
   - [Enterprise policies](#enterprise-policies)
   - [Preferences](#preferences)
@@ -57,6 +59,7 @@ The runtime, browser, window and profile APIs are `@MainActor`.
   - [Tabs Chromium opens itself](#tabs-chromium-opens-itself)
 - [Customizing Chromium's own pages](#customizing-chromiums-own-pages)
 - [Profiles](#profiles)
+  - [Loading a persistent profile](#loading-a-persistent-profile)
   - [Network maintenance](#network-maintenance)
   - [Requests through Chromium's network stack](#requests-through-chromiums-network-stack)
   - [Site settings](#site-settings)
@@ -155,11 +158,11 @@ Common options:
 | `processPolicy` | How many helper processes Chromium keeps running. See [Footprint and launch time](#footprint-and-launch-time). |
 | `enabledFeatures`, `disabledFeatures` | Chromium feature names, passed as `--enable-features` and `--disable-features`. |
 | `safeStorage`, `keychainItem` | Whether Chromium uses the keychain, and which item. See [Keychain access](#keychain-access). |
-| `services`, `network`, `privacy`, `security`, `credentials` | Component updates, protected media and translation; preloading and DNS over HTTPS; third-party cookies and hyperlink auditing; HTTPS-First; password saving and autofill. See [Services and privacy](#services-and-privacy). |
+| `services`, `network`, `privacy`, `security`, `credentials` | Component updates, protected media, translation and system notifications; preloading and DNS over HTTPS; third-party cookies and hyperlink auditing; HTTPS-First; password saving and autofill. See [Services and privacy](#services-and-privacy). |
 | `enterprisePolicy` | Whether Chromium applies administrator-managed policies, and from which preferences domain. See [Enterprise policies](#enterprise-policies). |
 | `authenticationPrompt` | Who asks for HTTP sign-in credentials. See [HTTP authentication](#http-authentication). |
 | `services.protectedMedia` | Whether Chromium fetches Google's Widevine CDM for protected (DRM) media: `.automatic`, `.disabled` (the `.embedded` preset), or `.preinstalled(widevineDirectory:)`. See [Playing streaming services](#playing-streaming-services). |
-| `rootCacheDirectory`, `cacheDirectory` | Where profile data lives. Defaults to `~/Library/Application Support/<bundle ID>/CefSwift`. |
+| `rootCacheDirectory` | Where Chromium keeps its data: `Local State`, the default profile in `Default`, each persistent profile in `Profile-<id>` beside it. Defaults to `~/Library/Application Support/<bundle ID>/CefSwift`. See [Profiles](#profiles). |
 | `persistsSessionCookies` | Whether session cookies survive a relaunch. |
 | `localization`, `acceptLanguages` | The language of Chromium's own interface, and the languages pages are offered. See [Languages](#languages). |
 | `userAgent` | How the browser names itself to sites: Chromium's own, with your product's token, or a string of your own. See [Compatibility with bot protection](#compatibility-with-bot-protection). |
@@ -268,6 +271,50 @@ configuration.network.secureDNS = .secure(templates: ["https://dns.example/dns-q
 Chromium 156 keeps the Privacy Sandbox ad APIs (Topics, Protected Audience,
 ad measurement) off: their preferences default to off and are cleared at
 start-up, and no setting turns them on, so there is no option for them.
+
+### System notifications
+
+`services.systemNotifications` decides where pages' notifications appear.
+It is the one service option that does not default to Chromium's choice:
+
+| Value | Notifications | Asks macOS |
+|---|---|---|
+| `.disabled` (default, every preset) | In popups Chromium draws in the app. | Never. Neither the app nor `<App> Helper (Alerts)` touches the notification center, and the Alerts helper does not start. |
+| `.automatic` | In macOS's Notification Center, as banners of the app and alerts of its Alerts helper. | At every launch, as Chromium sets up each profile, whether or not a page notifies: macOS shows two permission banners at the first launch, one for the app and one for the Alerts helper. |
+
+A page still has to ask for the notifications permission, and you or the
+user have to grant it (`CefBrowserDelegate`'s permission decision, or
+`profile.siteSettings.set(.allow, for: .notifications, origin:)`), in either
+case. Turn system notifications on only in an app whose users expect
+notifications in Notification Center, and expect the permission banners at
+its first launch:
+
+```swift
+var configuration = CefRuntime.Configuration.chrome
+configuration.services.systemNotifications = .automatic
+```
+
+`.disabled` disables Chromium's `SystemNotifications` feature; an app that
+lists it in `enabledFeatures` turns system notifications on as well.
+
+### Prompts macOS shows
+
+Nothing CefSwift starts asks macOS for a permission unless your app or a
+page asks for the capability first. What each could ask for, and when:
+
+| Prompt | When it can appear | Guard |
+|---|---|---|
+| Notifications (app and Alerts helper) | At launch, only with `services.systemNotifications = .automatic`. | Off by default. |
+| Keychain ("… Safe Storage") | At launch, when Chromium reads its encryption key, with `safeStorage` resolving to `.keychain` (team-signed builds). | Ad hoc and unsigned builds use the mock keychain; see [Keychain access](#keychain-access). |
+| Location | When a page calls the Geolocation API and the permission is granted. Chromium registers a location client at launch, which asks nothing. | The page's permission request and your decision. |
+| Camera, microphone | When a page calls `getUserMedia` and the permission is granted. Chromium only reads the current authorization at launch, which never prompts. | The same. |
+| Local Network | When Cast discovery starts (the Cast dialog, a page's Presentation API) in a configuration with `MediaRouter` on, such as `.chrome`. Chromium browses no service at launch. | `.embedded` disables `MediaRouter`. |
+| Bluetooth | When a page calls Web Bluetooth. | The page's request and your decision. |
+| Input Monitoring | Never: Chromium only checks the current authorization (`CGPreflightListenEventAccess`) in `.chrome`. | — |
+| Passkeys (Touch ID, iCloud Keychain) | When a page asks for a passkey. | The page's request; see [Passkeys](#passkeys). |
+
+SelfTest's `systemPrompts` group checks the notification and TCC rows for
+both presets at every run, from inside the app and from the unified log.
 
 ### Keychain access
 
@@ -2242,12 +2289,16 @@ theme. Browsers that share a profile share all of it.
 
 | Profile | Storage |
 |---|---|
-| `CefProfile.default` | `cacheDirectory`, used when `CefBrowser.Configuration.profile` is `nil`. |
-| `CefProfile.persistent(id:displayName:)` | `<root>/Profiles/<id>`, with characters other than lowercase letters, digits, `-` and `_` percent-encoded. The same identifier returns the same profile. |
+| `CefProfile.default` | `<root>/Default`, Chromium's own profile, loaded as Chromium starts; used when `CefBrowser.Configuration.profile` is `nil`. |
+| `CefProfile.persistent(id:displayName:)` | `<root>/Profile-<id>`, with characters other than lowercase letters, digits, `-` and `_` percent-encoded. The same identifier returns the same profile. |
 | `CefProfile.incognito()` | In memory only; discarded with the profile. Its `isIncognito` is true. |
+
+`<root>` is `CefRuntime.Configuration.rootCacheDirectory`, by default
+`~/Library/Application Support/<bundle ID>/CefSwift`.
 
 ```swift
 let profile = CefProfile.persistent(id: "work", displayName: "Work")
+try await profile.ready()                        // loaded by Chromium, from its directory
 try profile.preferences.set(false, for: .savesPasswords)
 let fontSize = profile.preferences[.defaultFontSize]
 profile.setColorScheme(.dark, accentColor: .systemIndigo)
@@ -2261,9 +2312,8 @@ A profile's `id` is its identity and names its storage in both engines;
 `displayName` is what to show, and can change without moving anything.
 Store `id` to find the profile again. Identifiers map to directory names
 one to one, also on a case-insensitive volume, so `"a/b"`, `"a_b"`,
-`"Work"` and `"work"` are four profiles. `<root>` is
-`CefRuntime.Configuration.resolvedRootCacheDirectory`: `rootCacheDirectory`, or
-the parent of `cacheDirectory` when only that is set. CefChromium's
+`"Work"` and `"work"` are four profiles, and no name is one Chromium uses
+in `<root>` itself (`Default`, `Local State`, `Profile 1`). CefChromium's
 `bookmarks`, `history` and `autocomplete` hold their profile, so
 `CefProfile.incognito().autocomplete` keeps its profile alive while you
 use it; the profile does not hold them back, so neither keeps the other
@@ -2272,6 +2322,50 @@ alive forever.
 `preferences.allValues(includingDefaults:)` returns every preference as one JSON
 object. `setColorScheme(_:accentColor:)` themes Chrome-style UI and sets the
 `prefers-color-scheme` pages see.
+
+### Loading a persistent profile
+
+Chromium loads a persistent profile in the background the first time
+anything uses it in a launch, and creates its directory the first time
+ever; the default and incognito profiles are ready at once. What waits,
+and what does not:
+
+| Called while the profile loads | What happens |
+|---|---|
+| Browsers, in every host (`CefWebView`, the AppKit views, `CefWindow`, `openChromeWindow`) and their popups | Wait, and are created once it is loaded. The browser stays `.pending`, and `load(_:)`, `ready()` and `waitUntilLoaded(timeout:)` work as for any browser being created. A `CefWindow` opens at once and gets its page when the browser comes. |
+| `cookies(for:)`, `setCookie(_:)`, `deleteCookies(for:named:)` | Chromium queues them until the profile is loaded. |
+| `data(for:)`, `bytes(for:)`, `download(for:to:)`, `resolveHost(_:)`, the `clear…` calls | Wait for the profile. |
+| `siteSettings.set(…)`, `setDefaultSetting(_:for:)`, `setColorScheme(_:accentColor:)` | Apply once it is loaded. |
+| `preferences`, and `siteSettings` reads | Have nothing yet: reads return `nil` or `.default`, and `preferences.set` throws. Await `profile.ready()` first. |
+
+If Chromium cannot load the profile from its directory, nothing falls
+back to memory: its browsers close as they are created, `ready()` (the
+profile's and each browser's) throws `CefError.profileUnavailable(reason)`,
+its requests throw the same, and CefKit logs the reason. Something in
+the way of the directory, a file of the same name, is one cause.
+
+The rule behind the layout, from CEF's `cef_types.h` and as Chromium 156
+applies it: `root_cache_path` is Chromium's user data directory, and a
+request context's `cache_path` must be a direct child of it. Chromium's
+profile manager creates profiles nowhere else; for any other path, a
+nested one such as `<root>/Profiles/<id>` included, it logs “Cannot create
+profile at path” and gives the context a new in-memory profile, and CEF
+still reports the context initialized. Chromium compares the paths with
+symbolic links resolved, so a profile path through a link (`/var` for
+`/private/var`, where `FileManager.temporaryDirectory` points) is refused
+too; CefKit resolves the root before it builds profile paths. The
+global `cache_path` is always the root itself: Chromium ignores a child
+there and uses `Default`.
+
+Earlier CefSwift builds put persistent profiles at `<root>/Profiles/<id>`.
+Chromium refused that path, so those profiles were in memory and nothing
+of theirs was saved: what is left there is empty directories, which you
+can delete. Nothing is migrated.
+
+CefKit has no call that deletes a profile's data from disk. Chromium
+keeps a profile it has loaded open until it shuts down, so remove a
+profile's directory only while the app is not running, for instance
+early at the next launch, before `CefRuntime.initialize`.
 
 ### Network maintenance
 

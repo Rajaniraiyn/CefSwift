@@ -59,7 +59,9 @@ public final class CefProfile {
         self.displayName = displayName
     }
 
-    /// The default profile, stored at ``CefRuntime/Configuration/cacheDirectory``.
+    /// The default profile, Chromium's own, stored in the `Default`
+    /// directory of ``CefRuntime/Configuration/rootCacheDirectory`` and
+    /// loaded as Chromium starts.
     public static let `default` = CefProfile(kind: .global, id: "default", displayName: "Default")
 
     /// A fresh in-memory profile; nothing is written to disk and everything
@@ -68,13 +70,21 @@ public final class CefProfile {
         CefProfile(kind: .incognito, id: "incognito-\(UUID().uuidString)", displayName: "Incognito")
     }
 
-    /// The on-disk profile identified by `id`, stored under
-    /// `<rootCacheDirectory>/Profiles/`. The same identifier always yields
-    /// the same profile, and different identifiers different storage:
-    /// characters other than lowercase letters, digits, `-` and `_` are
-    /// percent-encoded in the directory name, so `"a/b"`, `"a_b"`,
+    /// The on-disk profile identified by `id`, stored in a directory of its
+    /// own, `<rootCacheDirectory>/Profile-<id>`. The same identifier always
+    /// yields the same profile, and different identifiers different
+    /// storage: characters other than lowercase letters, digits, `-` and
+    /// `_` are percent-encoded in the directory name, so `"a/b"`, `"a_b"`,
     /// `"Work"` and `"work"` are four profiles, even on a case-insensitive
     /// volume. `"default"` is ``default``.
+    ///
+    /// Chromium loads a profile in the background the first time it is
+    /// used in a launch. Browsers created meanwhile are created once it is
+    /// loaded; await ``ready()`` before reading or changing its
+    /// ``preferences`` or site settings. If Chromium cannot load it,
+    /// browsers on it close at once and ``ready()`` throws
+    /// ``CefError/profileUnavailable(_:)``: nothing falls back to an
+    /// in-memory profile.
     ///
     /// - Parameter displayName: Sets ``displayName``; `nil` keeps the
     ///   profile's current one, which starts as `id`.
@@ -147,23 +157,22 @@ public final class CefProfile {
         set { CefServiceHosts.idleTimeout = newValue }
     }
 
-    /// The directory Chromium keeps this profile's files in; `nil` for an
-    /// incognito profile.
+    /// The directory Chromium keeps this profile's files in: `Default` in
+    /// the root cache directory for the default profile, the profile's own
+    /// for a persistent one; `nil` for an incognito profile and one
+    /// Chromium could not load. A new profile's files appear as Chromium
+    /// first saves them, some seconds after it loads.
     package var directory: URL? {
-        guard let context = requestContext(),
-              let path = CefStringUtil.takingUserFree(context.pointer.pointee.get_cache_path(context.pointer)),
-              !path.isEmpty
-        else { return nil }
-        let url = URL(fileURLWithPath: path, isDirectory: true)
-        // The global context's cache path is Chromium's user data directory
-        // when it equals the root cache path; its profile is "Default". The
-        // paths are compared, not the files: a new profile has no
-        // Preferences until Chromium first saves them, seconds after start.
-        let root = (CefRuntime.shared.configuration ?? CefRuntime.Configuration()).resolvedRootCacheDirectory
-        guard url.resolvingSymlinksInPath().standardizedFileURL.path
-                == root.resolvingSymlinksInPath().standardizedFileURL.path
-        else { return url }
-        return url.appendingPathComponent("Default", isDirectory: true)
+        switch kind {
+        case .incognito:
+            return nil
+        case .persistent:
+            if case .failed = readiness { return nil }
+            return storage.chromiumDirectory
+        case .global:
+            let root = (CefRuntime.shared.configuration ?? CefRuntime.Configuration()).resolvedRootCacheDirectory
+            return root.appendingPathComponent("Default", isDirectory: true)
+        }
     }
 
     // MARK: Appearance
@@ -174,9 +183,11 @@ public final class CefProfile {
     }
 
     /// Themes Chrome-style UI for this profile: light/dark and an optional
-    /// accent color from which Chrome derives its whole palette.
+    /// accent color from which Chrome derives its whole palette. On a
+    /// profile Chromium is still loading, it applies once loaded.
     public func setColorScheme(_ scheme: ColorScheme, accentColor: NSColor? = nil) {
-        guard let context = requestContext() else { return }
+        guard let context = loadedRequestContext(orWhenLoaded: { $0.setColorScheme(scheme, accentColor: accentColor) })
+        else { return }
         let variant: cef_color_variant_t =
             switch scheme {
             case .system: CEF_COLOR_VARIANT_SYSTEM
@@ -250,22 +261,33 @@ public final class CefProfile {
 
     // MARK: Request context
 
-    /// The profile's `cef_request_context_t`, created on first use.
+    /// The profile's `cef_request_context_t`, created on first use; `nil`
+    /// before Chromium runs and for a profile Chromium could not load. A
+    /// persistent profile's context may still be loading when this
+    /// returns (``readiness``).
     func requestContext() -> CefRef<cef_request_context_t>? {
+        if case .failed = readiness { return nil }
         if let context { return context }
         guard CefRuntime.shared.isRunning else { return nil }
-        let preferences = CefRuntime.shared.configuration?.effectivePreferences ?? [:]
         switch kind {
         case .global:
+            // Chromium loads the default profile as it starts.
             context = CefRef(adopting: cef_request_context_get_global_context())
-            applyConfigured(preferences)
+            readiness = .ready
+            applyConfigured()
         case .incognito, .persistent:
             var settings = cef_request_context_settings_t()
             settings.size = MemoryLayout<cef_request_context_settings_t>.stride
             let configuration = CefRuntime.shared.configuration
             // An empty cache_path means in-memory, which is what incognito wants.
             if let path = storage.chromiumDirectory {
-                try? FileManager.default.createDirectory(at: path, withIntermediateDirectories: true)
+                // Chromium makes the directory itself, and makes none where
+                // something else is in the way.
+                var isDirectory: ObjCBool = false
+                if FileManager.default.fileExists(atPath: path.path, isDirectory: &isDirectory), !isDirectory.boolValue {
+                    fail("\(path.path) exists and is not a directory")
+                    return nil
+                }
                 CefStringUtil.set(path.path, into: &settings.cache_path)
                 settings.persist_session_cookies = configuration?.persistsSessionCookies == true ? 1 : 0
             }
@@ -276,18 +298,109 @@ public final class CefProfile {
                 ccef_string_clear(&settings.cache_path)
                 ccef_string_clear(&settings.accept_language_list)
             }
-            // A new context finishes initializing asynchronously; its
-            // preferences can only be set once it reports ready.
-            let handler = preferences.isEmpty
-                ? nil
-                : ContextHandler { [weak self] in self?.applyConfigured(preferences) }.makeHandler()
-            context = CefRef(adopting: cef_request_context_create_context(&settings, handler))
+            // Chromium creates or loads a disk profile asynchronously. An
+            // in-memory one it makes within create_context, usable at once,
+            // though it reports it later.
+            readiness = .loading
+            let handler = ContextHandler { [weak self] path in self?.contextDidInitialize(cachePath: path) }.makeHandler()
+            let created = CefRef(adopting: cef_request_context_create_context(&settings, handler))
+            if case .failed = readiness { return nil }
+            context = created
+            if kind == .incognito, readiness == .loading {
+                readiness = .ready
+                applyConfigured()
+            }
             // Scheme handlers registered with CefRuntime reach only the
             // global context by themselves.
             Self.profilesWithOwnContext.append(WeakProfile(profile: self))
             for handler in CefRuntime.shared.schemeHandlers { register(handler) }
         }
         return context
+    }
+
+    // MARK: Readiness
+
+    /// Where Chromium is with the profile.
+    enum Readiness: Equatable {
+        /// Not asked for yet: nothing has used the profile, or Chromium is
+        /// not running.
+        case pending
+        /// Chromium is creating or loading it.
+        case loading
+        /// Loaded, with the storage asked for.
+        case ready
+        /// Chromium could not give the profile its storage; why.
+        case failed(String)
+    }
+
+    private(set) var readiness = Readiness.pending
+    private let readinessWaiters = CefPendingOperations<Void>()
+
+    /// Suspends until Chromium has loaded the profile, starting to load it
+    /// if nothing has used it yet. The default and incognito profiles are
+    /// ready at once; Chromium loads a persistent one in the background
+    /// the first time it is used in a launch, and creates its directory the
+    /// first time ever.
+    ///
+    /// Browsers wait for their profile by themselves. Await this before
+    /// reading or changing a persistent profile's ``preferences`` or site
+    /// settings, which Chromium has only once the profile is loaded.
+    ///
+    /// Throws ``CefError/profileUnavailable(_:)`` when Chromium cannot
+    /// load the profile from its directory, ``CefError/notInitialized``
+    /// before ``CefRuntime/initialize(configuration:)``, and
+    /// `CancellationError` if the calling task is cancelled.
+    public func ready() async throws {
+        _ = requestContext()
+        switch readiness {
+        case .ready: return
+        case .failed(let reason): throw CefError.profileUnavailable(reason)
+        case .pending: throw CefRuntime.shared.state == .stopped ? CefError.shutDown : CefError.notInitialized
+        case .loading: try await readinessWaiters.wait()
+        }
+    }
+
+    /// Whether Chromium has loaded the profile.
+    @_spi(Testing) public var isReady: Bool { readiness == .ready }
+
+    /// Chromium reports a context initialized whether or not it could give
+    /// it the directory asked for: when it cannot, it logs “Cannot create
+    /// profile at path” and gives the context a new in-memory profile
+    /// instead. That is caught here, by the directory the context ended up
+    /// with, and becomes a failure.
+    private func contextDidInitialize(cachePath actual: String) {
+        guard readiness == .loading else { return }
+        if let expected = storage.chromiumDirectory {
+            var isDirectory: ObjCBool = false
+            let exists = FileManager.default.fileExists(atPath: expected.path, isDirectory: &isDirectory)
+                && isDirectory.boolValue
+            guard !actual.isEmpty, Self.samePath(actual, expected.path), exists else {
+                fail("Chromium did not load it from \(expected.path)"
+                     + (actual.isEmpty ? "" : " (its context's directory is \(actual))")
+                     + " and would have kept it in memory instead")
+                return
+            }
+        }
+        readiness = .ready
+        applyConfigured()
+        readinessWaiters.completeAll(.success(()))
+    }
+
+    /// Marks the profile unusable: no browser is created on it, and its
+    /// request context, if Chromium made one, goes.
+    private func fail(_ reason: String) {
+        CefLog.error("Profile '\(id)' is unavailable: \(reason)")
+        readiness = .failed(reason)
+        context = nil
+        Self.profilesWithOwnContext.removeAll { $0.profile == nil || $0.profile === self }
+        readinessWaiters.completeAll(.failure(CefError.profileUnavailable(reason)))
+    }
+
+    private static func samePath(_ a: String, _ b: String) -> Bool {
+        func normalized(_ path: String) -> String {
+            resolvingLinks(URL(fileURLWithPath: path)).standardizedFileURL.path
+        }
+        return normalized(a) == normalized(b)
     }
 
     private struct WeakProfile {
@@ -314,7 +427,11 @@ public final class CefProfile {
         URLRequestRegistry.shared.cancelAllForShutdown()
         CefObserverRegistration.releaseAll()
         CefTaskManager.shared.releaseForShutdown()
-        for profile in all { profile.context = nil }
+        for profile in all {
+            profile.context = nil
+            if profile.readiness == .loading { profile.readiness = .pending }
+            profile.readinessWaiters.completeAll(.failure(CefError.shutDown))
+        }
         profilesWithOwnContext = []
     }
 
@@ -340,9 +457,29 @@ public final class CefProfile {
         }
     }
 
-    private func applyConfigured(_ preferences: [String: CefJSON]) {
-        // Application-wide ones are CefRuntime's to apply.
-        self.preferences.apply(preferences)
+    /// Applies the configuration's per-profile preferences, once the
+    /// profile is ready. Application-wide ones are CefRuntime's to apply.
+    private func applyConfigured() {
+        let configured = CefRuntime.shared.configuration?.effectivePreferences ?? [:]
+        if !configured.isEmpty { preferences.apply(configured) }
+    }
+
+    /// The request context once the profile is loaded. While Chromium is
+    /// still loading it, `later` runs once it has, and this is `nil`; it is
+    /// `nil` for a profile Chromium could not load, too. For calls Chromium
+    /// ignores on a profile it has not loaded.
+    func loadedRequestContext(
+        orWhenLoaded later: (@MainActor (CefProfile) -> Void)? = nil
+    ) -> CefRef<cef_request_context_t>? {
+        guard let context = requestContext() else { return nil }
+        if readiness == .ready { return context }
+        if let later {
+            Task { [weak self] in
+                guard let self, (try? await self.ready()) != nil else { return }
+                later(self)
+            }
+        }
+        return nil
     }
 
     /// A +1 request context for browser creation, which consumes it.
@@ -350,15 +487,19 @@ public final class CefProfile {
         cefRetained(requestContext()?.pointer)
     }
 
+    /// The cookie manager, which Chromium has queue calls until the profile
+    /// is loaded.
     private func cookieManager() -> CefRef<cef_cookie_manager_t>? {
         guard let context = requestContext() else { return nil }
         return CefRef(adopting: context.pointer.pointee.get_cookie_manager(context.pointer, nil))
     }
 
     /// `cef_request_context_t` extends `cef_preference_manager_t`, so the
-    /// context pointer is also the profile's preference manager.
+    /// context pointer is also the profile's preference manager. `nil`
+    /// until the profile is ready: Chromium has no preferences for a
+    /// profile it is still loading.
     func withPreferences<R>(_ body: (UnsafeMutablePointer<cef_preference_manager_t>) -> R) -> R? {
-        guard let context = requestContext() else { return nil }
+        guard let context = loadedRequestContext() else { return nil }
         return context.pointer.withMemoryRebound(to: cef_preference_manager_t.self, capacity: 1, body)
     }
 
@@ -374,25 +515,37 @@ public final class CefProfile {
 
     /// The one storage layout for a profile kind under `rootCacheDirectory`
     /// (``CefRuntime/Configuration/resolvedRootCacheDirectory``).
+    ///
+    /// A persistent profile's directory is a direct child of the root
+    /// (`root_cache_path`, Chromium's user data directory): Chromium's
+    /// profile manager creates profiles nowhere else, and CEF gives a
+    /// request context with a `cache_path` anywhere else an in-memory
+    /// profile instead.
     static func storage(for kind: Kind, rootCacheDirectory: URL) -> Storage {
         switch kind {
         case .global, .incognito:
             return Storage(chromiumDirectory: nil)
         case .persistent(let id):
             return Storage(
-                chromiumDirectory: rootCacheDirectory
-                    .appendingPathComponent("Profiles", isDirectory: true)
-                    .appendingPathComponent(directoryName(for: id), isDirectory: true))
+                chromiumDirectory: rootCacheDirectory.appendingPathComponent(directoryName(for: id), isDirectory: true))
         }
     }
 
-    /// The directory name for a persistent profile's identifier: lowercase
-    /// letters, digits, `-` and `_` as they are, every other UTF-8 byte as
-    /// `%XX`. The mapping is injective, also on a case-insensitive volume
-    /// (no uppercase letter is kept), and never yields `.`, `..` or a
-    /// separator. A name that would pass 200 characters is cut and ends in
-    /// `~` and the identifier's SHA-256, which no other name contains.
+    /// The directory name for a persistent profile's identifier:
+    /// `Profile-`, then the identifier with lowercase letters, digits, `-`
+    /// and `_` as they are and every other UTF-8 byte as `%XX`. The mapping
+    /// is injective, also on a case-insensitive volume (no uppercase letter
+    /// is kept after the prefix), never yields a separator, and never a
+    /// name Chromium uses in the same directory (`Default`, `Local State`,
+    /// `Guest Profile`, `System Profile`, `Profile 1`…, none of which
+    /// starts with the prefix). A name that would pass 200 characters is
+    /// cut and ends in `~` and the identifier's SHA-256, which no other
+    /// name contains.
     static func directoryName(for id: String) -> String {
+        "Profile-" + encodedName(for: id)
+    }
+
+    private static func encodedName(for id: String) -> String {
         var name = ""
         for byte in id.utf8 {
             switch byte {
@@ -409,29 +562,52 @@ public final class CefProfile {
     }
 
     /// This profile's storage under the running configuration's root.
+    ///
+    /// The root is taken with its symbolic links resolved, as Chromium
+    /// takes its user data directory: a profile path through a link
+    /// (`/var` for `/private/var`, a linked home folder) is not a child of
+    /// it in Chromium's eyes, and would get an in-memory profile.
     var storage: Storage {
+        if case .persistent(let id) = kind, let directory = Self.testDirectories[id] {
+            return Storage(chromiumDirectory: directory)
+        }
         let root = (CefRuntime.shared.configuration ?? CefRuntime.Configuration()).resolvedRootCacheDirectory
-        return Self.storage(for: kind, rootCacheDirectory: root)
+        return Self.storage(for: kind, rootCacheDirectory: Self.resolvingLinks(root))
     }
+
+    /// `url` with every symbolic link resolved (`realpath`), unlike
+    /// `resolvingSymlinksInPath()`, which keeps `/var` rather than
+    /// `/private/var`; `url` itself when it does not exist.
+    static func resolvingLinks(_ url: URL) -> URL {
+        guard let resolved = realpath(url.path, nil) else { return url }
+        defer { free(resolved) }
+        return URL(fileURLWithPath: String(cString: resolved), isDirectory: true)
+    }
+
+    /// Directories to give persistent profiles instead of their own, by
+    /// identifier, to see what Chromium does with one it does not accept.
+    @_spi(Testing) public static var testDirectories: [String: URL] = [:]
 }
 
 // MARK: - Context readiness
 
 /// Owner of a `cef_request_context_handler_t` that reports when a new
 /// context is ready. The callback arrives on the UI thread.
+/// It passes on the context's cache path, empty for an in-memory one.
 private final class ContextHandler: Sendable {
-    private let onInitialized: @MainActor @Sendable () -> Void
+    private let onInitialized: @MainActor @Sendable (_ cachePath: String) -> Void
 
-    init(onInitialized: @escaping @MainActor @Sendable () -> Void) {
+    init(onInitialized: @escaping @MainActor @Sendable (_ cachePath: String) -> Void) {
         self.onInitialized = onInitialized
     }
 
     func makeHandler() -> UnsafeMutablePointer<cef_request_context_handler_t> {
         let handler = cefAllocate(cef_request_context_handler_t.self, owner: self)
         handler.pointee.on_request_context_initialized = { s, context in
-            cefRelease(context)
-            guard let owner = cefOwner(ContextHandler.self, s) else { return }
-            MainActor.assumeIsolated { owner.onInitialized() }
+            defer { cefRelease(context) }
+            guard let context, let owner = cefOwner(ContextHandler.self, s) else { return }
+            let path = CefStringUtil.takingUserFree(context.pointee.get_cache_path(context)) ?? ""
+            MainActor.assumeIsolated { owner.onInitialized(path) }
         }
         return handler
     }

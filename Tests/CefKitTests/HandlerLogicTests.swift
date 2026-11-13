@@ -1,4 +1,5 @@
 import CCef
+import CefBase
 import Foundation
 import Testing
 
@@ -94,9 +95,32 @@ struct ProfilePathTests {
         #expect(CefProfile.storage(for: .incognito, rootCacheDirectory: root) == .init(chromiumDirectory: nil))
     }
 
-    @Test func persistentProfileDerivesUnderProfiles() {
-        #expect(directory("work") == "/tmp/cefroot/Profiles/work")
-        #expect(directory("Work") == "/tmp/cefroot/Profiles/%57ork")
+    @Test func persistentProfileIsADirectChildOfTheRoot() {
+        #expect(directory("work") == "/tmp/cefroot/Profile-work")
+        #expect(directory("Work") == "/tmp/cefroot/Profile-%57ork")
+        // Chromium makes profiles only directly inside root_cache_path, and
+        // gives any other cache_path an in-memory profile.
+        for id in ["work", "a/b", "../../etc", ".", "..", String(repeating: "x", count: 400)] {
+            let path = URL(fileURLWithPath: directory(id) ?? "")
+            #expect(path.deletingLastPathComponent().path == root.path, "\(id)")
+        }
+    }
+
+    @Test func profileDirectoriesNeverTakeChromiumsNames() {
+        // What Chromium keeps in root_cache_path itself, and its own
+        // profile directory names.
+        let chromiums = [
+            "Default", "Local State", "Guest Profile", "System Profile", "Profile 1", "Profile 2",
+            "Safe Browsing", "Dictionaries", "Variations", "component_crx_cache", "BrowserMetrics",
+            "GrShaderCache", "GraphiteDawnCache", "SingletonLock", "WidevineCdm", "Crashpad",
+        ]
+        let ids = ["default ", "Default", "Local State", "Guest Profile", "System Profile", " 1", "1", "", "a"]
+            .filter { !$0.isEmpty }
+        for id in ids {
+            let name = CefProfile.directoryName(for: id)
+            #expect(!chromiums.contains { $0.lowercased() == name.lowercased() }, "\(id) → \(name)")
+            #expect(name.hasPrefix("Profile-"))
+        }
     }
 
     @Test func distinctIdentifiersNeverShareADirectory() {
@@ -109,10 +133,9 @@ struct ProfilePathTests {
         }
     }
 
-    @Test func pathsCannotEscapeTheProfilesDirectory() {
+    @Test func pathsCannotEscapeTheRoot() {
         let path = directory("../../etc")
-        #expect(path?.hasPrefix("/tmp/cefroot/Profiles/") == true)
-        #expect(path.map { URL(fileURLWithPath: $0).deletingLastPathComponent().path } == "/tmp/cefroot/Profiles")
+        #expect(path == "/tmp/cefroot/Profile-%2E%2E%2F%2E%2E%2Fetc")
     }
 
     @Test func longIdentifiersStayWithinNameLimits() {
@@ -123,14 +146,25 @@ struct ProfilePathTests {
         #expect(CefProfile.directoryName(for: long) == CefProfile.directoryName(for: long))
     }
 
-    @Test func profilesUseTheRootDerivedFromAnExplicitCacheDirectory() {
+    @Test func profilesLiveInTheRootCacheDirectory() {
         var configuration = CefRuntime.Configuration()
-        configuration.cacheDirectory = URL(fileURLWithPath: "/tmp/app/Data/Default")
-        #expect(configuration.resolvedRootCacheDirectory.path == "/tmp/app/Data")
+        configuration.rootCacheDirectory = URL(fileURLWithPath: "/tmp/app/Data")
         let storage = CefProfile.storage(for: .persistent(id: "work"), rootCacheDirectory: configuration.resolvedRootCacheDirectory)
-        #expect(storage.chromiumDirectory?.path == "/tmp/app/Data/Profiles/work")
-        configuration.rootCacheDirectory = URL(fileURLWithPath: "/tmp/root")
-        #expect(configuration.resolvedRootCacheDirectory.path == "/tmp/root")
+        #expect(storage.chromiumDirectory?.path == "/tmp/app/Data/Profile-work")
+        // The default profile is Chromium's Default, with cache_path equal
+        // to root_cache_path.
+        let mapped = MappedCefSettings(configuration: configuration, frameworkDirectory: nil)
+        #expect(CefStringUtil.string(from: &mapped.raw.cache_path) == "/tmp/app/Data")
+        #expect(CefStringUtil.string(from: &mapped.raw.root_cache_path) == "/tmp/app/Data")
+    }
+
+    /// Chromium takes its user data directory with symbolic links
+    /// resolved, and a profile path through a link is not inside it.
+    @Test func profileDirectoriesResolveLinksInTheRoot() {
+        let resolved = CefProfile.resolvingLinks(URL(fileURLWithPath: "/tmp", isDirectory: true))
+        #expect(resolved.path == "/private/tmp")
+        let missing = URL(fileURLWithPath: "/tmp/cefswift-no-such-directory-\(UUID().uuidString)")
+        #expect(CefProfile.resolvingLinks(missing) == missing)
     }
 
     @Test func identifiersAndDisplayNamesAreSeparate() {

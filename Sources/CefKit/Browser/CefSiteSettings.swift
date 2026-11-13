@@ -255,7 +255,7 @@ public struct CefSiteSettings {
     /// The setting that applies to `origin`: its own, or the profile's
     /// default for the permission when it has none.
     public func setting(for permission: CefSitePermission, origin: URL) -> CefSitePermission.Setting {
-        guard let context = profile.requestContext() else { return .default }
+        guard let context = profile.loadedRequestContext() else { return .default }
         let site = Self.origin(of: origin)
         return CefStringUtil.withCefString(site) { url in
             CefSitePermission.Setting(cefValue: context.pointer.pointee.get_content_setting(
@@ -268,7 +268,9 @@ public struct CefSiteSettings {
     /// A setting the permission does not support (see
     /// ``CefSitePermission/supportedSettings``) is ignored.
     public func set(_ setting: CefSitePermission.Setting, for permission: CefSitePermission, origin: URL) {
-        guard let context = profile.requestContext() else { return }
+        guard let context = profile.loadedRequestContext(orWhenLoaded: {
+            $0.siteSettings.set(setting, for: permission, origin: origin)
+        }) else { return }
         guard setting == .default || permission.supportedSettings.contains(setting) else { return }
         let site = Self.origin(of: origin)
         CefStringUtil.withCefString(site) { url in
@@ -279,7 +281,7 @@ public struct CefSiteSettings {
     /// The profile's default for `permission`: what applies to a site with
     /// no value of its own.
     public func defaultSetting(for permission: CefSitePermission) -> CefSitePermission.Setting {
-        guard let context = profile.requestContext() else { return .default }
+        guard let context = profile.loadedRequestContext() else { return .default }
         return CefSitePermission.Setting(cefValue: context.pointer.pointee.get_content_setting(
             context.pointer, nil, nil, permission.contentType))
     }
@@ -289,7 +291,9 @@ public struct CefSiteSettings {
     /// incognito profile keeps the default of the profile it came from:
     /// Chromium ignores this there.
     public func setDefaultSetting(_ setting: CefSitePermission.Setting, for permission: CefSitePermission) {
-        guard let context = profile.requestContext() else { return }
+        guard let context = profile.loadedRequestContext(orWhenLoaded: {
+            $0.siteSettings.setDefaultSetting(setting, for: permission)
+        }) else { return }
         guard setting == .default || permission.supportedSettings.contains(setting) else { return }
         context.pointer.pointee.set_content_setting(context.pointer, nil, nil, permission.contentType, setting.cefValue)
     }

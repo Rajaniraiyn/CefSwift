@@ -194,6 +194,9 @@ public final class CefBrowser: Identifiable {
     @ObservationIgnored weak var restoringOffscreenHost: CefOffscreenHost?
     @ObservationIgnored var initialURL: URL?
     @ObservationIgnored var isBootstrapping = false
+    /// The creation to run once the browser's profile is loaded; see
+    /// `profileAllowsCreation(_:)`.
+    @ObservationIgnored var creationAwaitingProfile: (@MainActor (CefBrowser) -> Void)?
     /// The main frame's navigations, for ``waitUntilLoaded(timeout:)``.
     @ObservationIgnored let loads = CefLoadTracker()
     /// Calls waiting for ``ready()``.
@@ -480,8 +483,13 @@ public final class CefBrowser: Identifiable {
     /// discard the DevTools domains enabled before), restoring it first if
     /// it is discarded.
     ///
-    /// Throws ``CefError/browserClosed`` if the browser closes first, and
-    /// `CancellationError` if the calling task is cancelled.
+    /// A browser on a persistent profile Chromium is still loading is
+    /// created once it has (``CefProfile/ready()``).
+    ///
+    /// Throws ``CefError/browserClosed`` if the browser closes first,
+    /// ``CefError/profileUnavailable(_:)`` if it closed because Chromium
+    /// could not load its profile, and `CancellationError` if the calling
+    /// task is cancelled.
     public func ready() async throws {
         // The set-up itself runs while the browser is not ready yet, and
         // needs only the native browser.
@@ -495,7 +503,13 @@ public final class CefBrowser: Identifiable {
         }
         switch state {
         case .live where !isBootstrapping: return
-        case .closed: throw CefError.browserClosed
+        case .closed:
+            // No browser is ever created on a profile Chromium could not
+            // load: that is why this one closed.
+            if case .failed(let reason) = (configuration.profile ?? .default).readiness {
+                throw CefError.profileUnavailable(reason)
+            }
+            throw CefError.browserClosed
         case .pending, .live:
             try await readyWaiters.wait()
         }

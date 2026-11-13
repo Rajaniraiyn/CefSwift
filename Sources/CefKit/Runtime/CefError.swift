@@ -40,6 +40,11 @@ public enum CefError: Error {
     case navigationSuperseded
     /// The page's render process ended while its document was loading.
     case renderProcessTerminated(CefTerminationReason)
+    /// Chromium could not load a persistent profile from its directory.
+    /// The associated value says why. Browsers on the profile close as
+    /// they are created; nothing falls back to an in-memory profile. See
+    /// ``CefProfile/ready()``.
+    case profileUnavailable(String)
 }
 
 extension CefError: CustomStringConvertible {
@@ -89,6 +94,8 @@ extension CefError: CustomStringConvertible {
             return "Another navigation replaced the one awaited."
         case .renderProcessTerminated(let reason):
             return "The page's render process ended (\(reason)) while it loaded."
+        case .profileUnavailable(let reason):
+            return "Chromium could not load the profile: \(reason)"
         }
     }
 }

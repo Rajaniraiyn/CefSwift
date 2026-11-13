@@ -558,3 +558,91 @@ web-compatibility probe (`compat-matrix.py probe`, rows `nothing`,
 `bridge` and `evaluateJavaScript` in the windowed, offscreen and window
 hosts) reads the same with the wire transport as without a feature,
 except for the bridge's own global.
+
+## Persistent profiles: directly in the root, and loaded before use
+
+Observed on 2026-11-14 with CEF 156.0.28 (Chrome runtime) on an M3,
+macOS 27.2, with Chromium's log at `info` and each case run on a new
+root cache directory, then again on the same one.
+
+**The rule.** `cef_types.h` says a request context's `cache_path` must
+be "equal to or a child directory of" `root_cache_path`. Chromium 156 is
+stricter: its profile manager creates profiles only in a direct child of
+the user data directory (`root_cache_path`). With the earlier layout,
+`<root>/Profiles/<id>`, every persistent profile logged
+
+    ERROR:cef/libcef/browser/chrome/chrome_browser_context.cc:116] Cannot create profile at path …/Profiles/<id>
+
+and got a new off-the-record profile instead, in windowed, offscreen and
+Chrome-style browsers alike, at the first launch and every later one:
+the directory CefKit had made stayed empty, cookies, local storage and
+history lasted as long as the process, and CEF still reported the
+context initialized, so nothing in CefKit or SelfTest noticed. Moved to
+`<root>/Profile-<id>`, the same profiles were real: Chromium created the
+directory and wrote `Cookies`, `Local Storage`, `History`, `Preferences`
+and the rest, and found them at the next launch.
+
+**Links count.** The comparison is made with symbolic links resolved: a
+root under `FileManager.temporaryDirectory` (`/var/folders/…`, a link to
+`/private/var/folders/…`) refused every `<root>/Profile-<id>` built from
+it, with the same silent fall-back. CefKit builds profile paths from
+`realpath` of the root. (`URL.resolvingSymlinksInPath()` does not help:
+it keeps `/var`.)
+
+**The global context.** A `cache_path` other than the root itself is
+ignored for the global context: with `<root>/Custom` the directory was
+created and stayed empty, and the default profile lived in
+`<root>/Default`. CefKit therefore no longer has a `cacheDirectory`
+option; the default profile is always `<root>/Default`.
+
+**Creation while loading.** Chromium creates a disk profile
+asynchronously; `on_request_context_initialized` reports it, 0.1–0.3 s
+after `cef_request_context_create_context` the first time, less once its
+directory exists. Until then `cef_browser_host_create_browser_sync`
+(windowed browsers) fails, `cef_browser_view_create` gives a view whose
+browser never appears (a `CefWindow` stayed empty, its browser
+`.pending`), and preferences read `nil` and refuse writes; the
+asynchronous `cef_browser_host_create_browser` (offscreen, Chrome's own
+window) waits by itself. An in-memory profile, incognito or a fall-back,
+is ready at once. CefKit waits for the callback before creating any
+browser on a new profile, then checks the context's `get_cache_path` and
+the directory, so a fall-back becomes `CefError.profileUnavailable`.
+SelfTest's `profileStorage` group creates browsers on brand-new profiles
+in each host, and runs two launches on one root to check what survives.
+
+## System notifications at launch
+
+Observed on 2026-11-14 with CEF 156.0.28 on macOS 27.2, from the unified
+log (`usernoted`'s “Connection <bundle ID> with path …” lines) and with
+`UNUserNotificationCenter` and `NSUserNotificationCenter` swizzled in
+SelfTest, in launches that only open a page.
+
+With Chromium's defaults, every launch, `.embedded` and `.chrome` alike,
+connected the app's bundle and `<App> Helper (Alerts)` to `usernoted`
+within a second of start-up, before any page used notifications: Chromium
+gets `NSUserNotificationCenter.defaultUserNotificationCenter` in the
+browser process and starts the Alerts helper (for about 70 ms) as it sets
+up system notifications for the default profile. At an app's first
+launch that is what shows two “would like to send notifications”
+banners. What stops it:
+
+| Change | App connects | Alerts helper starts | Web notifications |
+|---|---|---|---|
+| None | Yes | Yes | Through Notification Center |
+| `--disable-features=SystemNotifications` | No | No | Shown, in Chromium's own popups (`onshow` fires, permission `granted`) |
+| `--disable-features=NativeNotifications` | No | No | The same |
+| `--disable-notifications` | Yes | Yes | `Notification` is undefined |
+| `LazyKeyedServiceInstantiation` features on | Yes | Yes | — |
+
+CefKit disables `SystemNotifications` unless
+`services.systemNotifications` is `.automatic`. No switch was found that
+keeps system notifications and defers the authorization request until a
+page shows one.
+
+Other prompts, from `tccd`, `locationd` and `mDNSResponder` in the same
+launches: TCC saw only preflights (camera and microphone in both presets,
+Input Monitoring in `.chrome`), which never prompt; `locationd` registered
+a location client of the app's, with no authorization request; nobody
+browsed for Bonjour services, so Local Network was not asked for; there
+was no Bluetooth request. The keychain is the mock keychain in ad hoc
+builds.
