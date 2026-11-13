@@ -348,7 +348,7 @@ enum SiteSecurity {
         }
     }
 
-    @ViewBuilder var badge: some View {
+    @MainActor @ViewBuilder var badge: some View {
         switch self {
         case .secure:
             Image(systemName: "lock.fill")
