@@ -11,10 +11,14 @@ import CefSwiftUI
 /// - `-addressBarText swift` starts editing with that text typed, which
 ///   shows its suggestions.
 /// - `-private YES` opens the tabs as private tabs.
-/// - `-appearance dark` (or `light`, `system`) overrides the setting.
-/// - `-cacheDirectory <path>` keeps Chromium's data there.
+/// - `-cacheDirectory <path>` keeps Chromium's data there
+///   (`CefRuntime.Configuration.browser`).
 /// - `-benchmark YES` reports the first finished load and quits when
 ///   standard input closes, for `Scripts/measure-footprint.py`.
+///
+/// Features read their own: `-appearance` (Appearance), `-showTaskManager`
+/// (TaskManager), `-showPageInfo` (PageInfo) and `-customChromiumPanels`
+/// (ChromiumPanels).
 @MainActor
 struct LaunchOptions {
     var urls: [URL] = []
@@ -27,7 +31,7 @@ struct LaunchOptions {
     init(defaults: UserDefaults = .standard) {
         urls = (defaults.string(forKey: "urls") ?? "")
             .split(separator: " ")
-            .compactMap { AddressBar.destination(for: String($0)) }
+            .compactMap { TypedAddress.destination(for: String($0)) }
         script = defaults.string(forKey: "evaluate")
         addressBarText = defaults.string(forKey: "addressBarText")
         opensPrivateTabs = defaults.bool(forKey: "private")
@@ -35,16 +39,7 @@ struct LaunchOptions {
         focusesAddressBar = defaults.bool(forKey: "focusAddressBar") || addressBarText != nil
     }
 
-    /// A URL from a command-line argument: an address with a scheme, or a
-    /// file path. Switches and anything else give `nil`.
-    static func url(fromArgument argument: String, relativeTo directory: URL?) -> URL? {
-        guard !argument.hasPrefix("-") else { return nil }
-        if argument.contains(":"), let url = URL(string: argument), url.scheme != nil { return url }
-        let file = URL(fileURLWithPath: argument, relativeTo: directory).absoluteURL
-        return FileManager.default.fileExists(atPath: file.path) ? file : nil
-    }
-
-    /// Opens the tabs the options ask for, or one on the start page, and
+    /// Opens the tabs the options ask for, or one on the new tab page, and
     /// does what they ask in the last.
     func openTabs(in controller: BrowserController) {
         let urls = urls.isEmpty ? [nil] : urls.map(Optional.some)
@@ -92,9 +87,10 @@ enum Benchmark {
         }
     }
 
-    /// The `use` benchmark command: types into the address field, bookmarks
-    /// the page and opens the menu bar, as a person trying the browser
-    /// would, then prints `cefswift-benchmark used`.
+    /// The `use` benchmark command (`Scripts/measure-services.py`): types
+    /// into the address field, presses ⌘D to bookmark the page and opens
+    /// the menu bar, as a person trying the browser would, then prints
+    /// `cefswift-benchmark used`.
     private static func useLikeAPerson(_ controller: BrowserController) {
         Task {
             NSApp.activate()
@@ -104,11 +100,31 @@ enum Benchmark {
                 (NSApp.keyWindow?.firstResponder as? NSTextView)?.insertText(String(character), replacementRange: NSRange(location: NSNotFound, length: 0))
                 try? await Task.sleep(for: .milliseconds(150))
             }
-            if let browser = controller.current { controller.library.toggleBookmark(for: browser) }
+            chooseMenuItem(withShortcut: "d")
             NotificationCenter.default.post(name: NSMenu.didBeginTrackingNotification, object: NSApp.mainMenu)
             try? await Task.sleep(for: .seconds(1))
             print("cefswift-benchmark used")
             fflush(stdout)
         }
+    }
+
+    /// Chooses the enabled menu bar item whose shortcut is ⌘`key`, as a
+    /// person pressing it would, so the benchmark needs to know nothing of
+    /// the features. SwiftUI brings a menu's items up to date when the menu
+    /// is about to show, so each menu is asked to first. Returns whether
+    /// there is such an item.
+    @discardableResult
+    private static func chooseMenuItem(withShortcut key: String, in menu: NSMenu? = NSApp.mainMenu) -> Bool {
+        guard let menu else { return false }
+        menu.delegate?.menuNeedsUpdate?(menu)
+        menu.update()
+        for (index, item) in menu.items.enumerated() {
+            if item.keyEquivalent == key, item.keyEquivalentModifierMask == .command, item.isEnabled {
+                menu.performActionForItem(at: index)
+                return true
+            }
+            if chooseMenuItem(withShortcut: key, in: item.submenu) { return true }
+        }
+        return false
     }
 }

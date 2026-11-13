@@ -2,10 +2,23 @@ import AppKit
 import CefSwiftUI
 import SwiftUI
 
-/// Window ▸ Task Manager: Chromium's processes, what runs in them and what
-/// they use.
+/// Window › Task Manager (`-showTaskManager YES`): Chromium's processes,
+/// what runs in them and what they use (`CefTaskManager`), and End Process.
+struct TaskManager: BrowserFeature {
+    func start(_ controller: BrowserController) {
+        if UserDefaults.standard.bool(forKey: "showTaskManager") { TaskManagerWindow.show() }
+    }
+
+    func commands(for controller: BrowserController) -> some Commands {
+        CommandGroup(before: .windowList) {
+            Button("Task Manager") { TaskManagerWindow.show() }
+            Divider()
+        }
+    }
+}
+
 @MainActor
-enum TaskManagerWindow {
+private enum TaskManagerWindow {
     private static var window: NSWindow?
 
     static func show() {
@@ -26,7 +39,7 @@ enum TaskManagerWindow {
     }
 }
 
-struct TaskManagerView: View {
+private struct TaskManagerView: View {
     // Reading `tasks` keeps it refreshing while the window shows it.
     private let manager = CefRuntime.shared.taskManager
     @State private var selection: Set<CefTaskManager.Task.ID> = []

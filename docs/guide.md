@@ -890,7 +890,7 @@ where browser.lifecycle == .hidden && .now - browser.lifecycleChangedAt > .secon
 }
 ```
 
-The Browser example's Memory Saver (`Examples/Sources/Browser/TabDiscarding.swift`)
+The Browser example's Memory Saver (`Examples/Sources/Browser/Features/TabDiscarding`)
 is a complete one, with exemptions left to the app: a tab the user pinned is
 simply never passed to `discard()`.
 
@@ -1635,7 +1635,7 @@ password-manager links.
 
 The Browser example has a Passkeys setting (Chromium or the browser
 itself, through a `CefPasskeyController`) and lists and removes saved
-passkeys in its Settings window (`BrowserPasskeys.swift`).
+passkeys in its Settings window (`Features/Passkeys/Passkeys.swift`).
 
 ## Context menu
 
@@ -2111,8 +2111,8 @@ func browser(_ browser: CefBrowser, decidePolicyFor navigation: CefNavigationAct
 ```
 
 The Browser example replaces Chromium's About page this way and trims
-`chrome://settings` with a style sheet (`BrowserPages.swift`,
-`BrowserController.swift`).
+`chrome://settings` with a style sheet
+(`Examples/Sources/Browser/Features/ChromiumPages/ChromiumPages.swift`).
 
 ## Profiles
 
@@ -2398,9 +2398,10 @@ latency the median of five calls.
 | Discarding | `chrome://discards` | 22 MB | 122 ms | 1 ms |
 
 The Browser example uses them for address-field suggestions
-(`AddressSuggestions.swift`), a bookmark star, Bookmarks and History menus,
-and a start page whose tiles come from `topSites()` and
-`bookmarks.recent()` through a `CefBridge` (`BrowserLibrary.swift`). It
+(`Features/AddressBar`), a bookmark star and a Bookmarks menu
+(`Features/Bookmarks`), a History menu (`Features/History`), and a start
+page whose tiles come from `topSites()` and `bookmarks.recent()` through a
+`CefBridge` (`Features/StartPage`). It
 reads history when the menu bar opens, so at launch it starts no host.
 
 ## DevTools

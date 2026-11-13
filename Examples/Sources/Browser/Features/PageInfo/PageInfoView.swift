@@ -2,29 +2,6 @@ import CefSwiftUI
 import SecurityInterface
 import SwiftUI
 
-/// The lock at the start of the address field; clicking it shows the
-/// site's page info.
-struct PageInfoButton: View {
-    let browser: CefBrowser
-    let security: SiteSecurity
-    @State private var isShowing = false
-
-    var body: some View {
-        Button { isShowing.toggle() } label: { security.badge }
-            .buttonStyle(.borderless)
-            .help("Show page info")
-            .popover(isPresented: $isShowing, arrowEdge: .bottom) {
-                PageInfoView(browser: browser)
-            }
-            .task {
-                // -showPageInfo YES, for screenshots.
-                guard UserDefaults.standard.bool(forKey: "showPageInfo") else { return }
-                try? await Task.sleep(for: .seconds(2))
-                isShowing = true
-            }
-    }
-}
-
 /// A site's page info: who it is, how it is connected, and what it may use.
 struct PageInfoView: View {
     let browser: CefBrowser

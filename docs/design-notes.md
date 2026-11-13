@@ -51,7 +51,7 @@ restores it when it is shown or used. An earlier design also had a
 runtime-wide `discardPolicy` with a timer, memory-pressure handling and a
 per-browser exemption; how long a tab may stay hidden, what counts as
 memory pressure and which tabs are exempt are product decisions, so they
-moved to the Browser example (`TabDiscarding.swift`), built from
+moved to the Browser example (`Features/TabDiscarding`), built from
 `lifecycle`, `lifecycleChangedAt`, `discard()` and Dispatch's memory
 pressure source.
 
