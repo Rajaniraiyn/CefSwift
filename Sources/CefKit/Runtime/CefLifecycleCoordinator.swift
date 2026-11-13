@@ -285,7 +285,7 @@ extension CefBrowser {
     /// The window whose state decides whether the browser can be seen.
     var lifecycleWindow: NSWindow? {
         if let window = hostView?.window { return window }
-        if let window = CefBrowserWindow.all.first(where: { $0.browser === self })?.window { return window }
+        if let window = CefBrowserWindow.hosting(self)?.window { return window }
         return nativeView?.window
     }
 
