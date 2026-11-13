@@ -43,8 +43,8 @@ import Testing
         #expect(try roundTrip(Self.sample) == Self.sample)
         #expect(try roundTrip(42) == 42)
         #expect(try roundTrip("text") == "text")
-        #expect(try roundTrip([1, 2, 3]) == [1, 2, 3])
-        #expect(try roundTrip([Int]()) == [])
+        #expect(try roundTrip([1, 2, 3] as [Int]) == [1, 2, 3] as [Int])
+        #expect(try roundTrip([Int]()) == [Int]())
         #expect(try roundTrip(Optional<Int>.none) == nil)
         #expect(try roundTrip([[1], [2, 3]]) == [[1], [2, 3]])
     }
