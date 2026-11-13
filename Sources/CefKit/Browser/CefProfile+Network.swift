@@ -62,53 +62,34 @@ extension CefProfile {
 
 /// Bridges `cef_completion_callback_t` to a continuation, which also
 /// resumes if CEF drops the callback without calling it.
-final class CompletionCallback: @unchecked Sendable {
-    private var continuation: CheckedContinuation<Void, Never>?
-    private let lock = NSLock()
+private final class CompletionCallback: Sendable {
+    private let continuation: CefResumeOnce<Void>
 
     init(continuation: CheckedContinuation<Void, Never>) {
-        self.continuation = continuation
-    }
-
-    deinit { resume() }
-
-    private func resume() {
-        lock.withLock {
-            continuation?.resume()
-            continuation = nil
-        }
+        self.continuation = CefResumeOnce(continuation, fallback: ())
     }
 
     /// The returned +1 reference is consumed by the call it is passed to.
     func makeCallback() -> UnsafeMutablePointer<cef_completion_callback_t> {
         let callback = cefAllocate(cef_completion_callback_t.self, owner: self)
-        callback.pointee.on_complete = { s in cefOwner(CompletionCallback.self, s)?.resume() }
+        callback.pointee.on_complete = { s in cefOwner(CompletionCallback.self, s)?.continuation.resume(returning: ()) }
         return callback
     }
 }
 
-/// Bridges `cef_resolve_callback_t` to a continuation.
-private final class ResolveCallback: @unchecked Sendable {
-    private var continuation: CheckedContinuation<(Int32, [String]), Never>?
-    private let lock = NSLock()
+/// Bridges `cef_resolve_callback_t` to a continuation, which resumes with
+/// `ERR_FAILED` if CEF drops the callback without calling it.
+private final class ResolveCallback: Sendable {
+    private let continuation: CefResumeOnce<(Int32, [String])>
 
     init(continuation: CheckedContinuation<(Int32, [String]), Never>) {
-        self.continuation = continuation
-    }
-
-    deinit { resume((-2, [])) }
-
-    private func resume(_ result: (Int32, [String])) {
-        lock.withLock {
-            continuation?.resume(returning: result)
-            continuation = nil
-        }
+        self.continuation = CefResumeOnce(continuation, fallback: (-2, []))
     }
 
     func makeCallback() -> UnsafeMutablePointer<cef_resolve_callback_t> {
         let callback = cefAllocate(cef_resolve_callback_t.self, owner: self)
         callback.pointee.on_resolve_completed = { s, result, addresses in
-            cefOwner(ResolveCallback.self, s)?.resume((result.rawValue, cefStrings(from: addresses)))
+            cefOwner(ResolveCallback.self, s)?.continuation.resume(returning: (result.rawValue, cefStrings(from: addresses)))
         }
         return callback
     }

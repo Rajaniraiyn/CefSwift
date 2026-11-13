@@ -158,7 +158,7 @@ extension CefBrowser {
 
 /// Bridges `cef_pdf_print_callback_t` to a continuation, which resumes with
 /// `false` if CEF drops the callback without calling it.
-final class PDFPrintCallback: Sendable {
+private final class PDFPrintCallback: Sendable {
     private let continuation: CefResumeOnce<Bool>
 
     init(continuation: CheckedContinuation<Bool, Never>) {
