@@ -91,8 +91,13 @@ extension SelfTest {
         let bridge = CefBridge(name: "scoped")
         bridge.access = .origins(["selftest://app"])
         bridge.handle("ping") { (_: CefJSON) in "pong" }
+        // Open to every frame: reports the origin the browser process
+        // established for the caller.
+        let probe = CefBridge(name: "probe")
+        probe.access = .anyFrame
+        probe.handle("origin") { (_: CefJSON, call: CefBridgeCall) in call.origin }
         var configuration = CefBrowser.Configuration()
-        configuration.bridges = [bridge]
+        configuration.bridges = [bridge, probe]
         let browser = CefBrowser(url: URL(string: "selftest://app/second.html")!, configuration: configuration)
         let window = CefBrowserWindow(browser: browser)
         window.show()
@@ -101,6 +106,7 @@ extension SelfTest {
             try await browser.evaluateJavaScript(
                 "typeof __cefswift_scoped === 'undefined' ? scoped.ping() : 'binding visible'").stringValue == "pong"
         }
+        await hostlessFrameChecks(browser, bridge: bridge)
         browser.load(URL(string: "selftest://edge/tab.html")!)
         _ = await waitUntil { browser.title == "tab" }
         await expect("bridge scope: other origins have no global at all") {
@@ -114,6 +120,161 @@ extension SelfTest {
             await waitUntilAsync {
                 (try? await browser.evaluateJavaScript("typeof scoped === 'object' && document.readyState === 'complete'").boolValue) == true
             }
+        }
+        window.close()
+        _ = await waitUntil { window.isClosed }
+    }
+
+    /// `srcdoc`, `about:blank` and `blob:` frames of a permitted page reach
+    /// its `.origins` bridge, with the origin the browser process
+    /// establishes from their parent or address; an opaque `data:` frame
+    /// does not, and its calls carry `"null"`. On an HTTP page: Chromium
+    /// gives `about:blank` and `srcdoc` children of a `selftest://` page an
+    /// opaque origin of their own, which both processes then agree on.
+    private static func hostlessFrameChecks(_ browser: CefBrowser, bridge: CefBridge) async {
+        guard let server = try? await LocalServer.start() else {
+            skip("bridge scope: hostless frames", because: "could not start a local HTTP server", .environment)
+            return
+        }
+        defer { server.stop() }
+        let origin = "http://127.0.0.1:\(server.port)"
+        let previousAccess = bridge.access
+        bridge.access = .origins(["selftest://app", origin])
+        defer { bridge.access = previousAccess }
+        try? await Task.sleep(for: .milliseconds(200))
+        browser.load(URL(string: "\(origin)/page")!)
+        guard await waitUntil({ browser.title == "page" && !browser.isLoading }) else {
+            check("bridge scope: hostless frames", false, detail: "the HTTP page did not load: \(browser.title)")
+            return
+        }
+        let script = """
+            (async () => {
+              const make = setup => new Promise(resolve => {
+                const frame = document.createElement('iframe');
+                frame.onload = () => resolve(frame);
+                setup(frame);
+                document.body.appendChild(frame);
+              });
+              const call = async (window, f) => { try { return await f(window); } catch (e) { return 'rejected: ' + e.message; } };
+              const frames = {
+                srcdoc: await make(f => f.srcdoc = '<p>srcdoc</p>'),
+                blank: await make(f => f.src = 'about:blank'),
+                blob: await make(f => f.src = URL.createObjectURL(new Blob(['<p>blob</p>'], { type: 'text/html' }))),
+              };
+              await make(f => f.src = 'data:text/html,<title>data</title>');
+              const results = {};
+              for (const [name, frame] of Object.entries(frames)) {
+                const w = frame.contentWindow;
+                results[name] = {
+                  scoped: typeof w.scoped === 'object' ? await call(w, w => w.scoped.ping()) : 'missing',
+                  origin: await call(w, w => w.probe.origin()),
+                  page: w.location.href + ' ' + w.location.origin,
+                };
+              }
+              return results;
+            })()
+            """
+        struct Outcome: Decodable, CustomStringConvertible {
+            var scoped: String, origin: String, page: String
+            var description: String { "\(scoped), \(origin) (\(page))" }
+        }
+        let outcomes: [String: Outcome]
+        do {
+            outcomes = try await browser.evaluateJavaScript(script, as: [String: Outcome].self)
+        } catch {
+            check("bridge scope: hostless frames", false, detail: "\(error)")
+            return
+        }
+        for name in ["srcdoc", "blank", "blob"] {
+            let outcome = outcomes[name]
+            check("bridge scope: a \(name) frame of a permitted page calls with its parent's origin",
+                  outcome?.scoped == "pong" && outcome?.origin == origin,
+                  detail: "\(outcome.map(\.description) ?? "none"); frames \(browser.frames.map { $0.url?.absoluteString ?? "nil" })")
+        }
+        guard await waitUntil({ browser.frames.contains { $0.url?.scheme == "data" } }),
+              let dataFrame = browser.frames.first(where: { $0.url?.scheme == "data" })
+        else {
+            check("bridge scope: a data: frame has an opaque origin", false, detail: "no data: frame")
+            return
+        }
+        await expect("bridge scope: a data: frame has an opaque origin and no scoped bridge") {
+            let result = try await browser.evaluateJavaScript(
+                "typeof scoped === 'undefined' ? probe.origin() : 'scoped visible'", in: dataFrame)
+            return (result.stringValue == "null", "\(result)")
+        }
+    }
+
+    // MARK: Bridge serialization
+
+    /// What the renderer does with values whose getters run page code:
+    /// detach an `ArrayBuffer` already read, or throw.
+    static func bridgeWireChecks() async {
+        struct Read: Decodable { var a: Data; var b: Int }
+        let wire = CefBridge(name: "wire")
+        wire.handle("read") { (value: Read) in "\(value.a.count):\(value.a.allSatisfy { $0 == 7 })" }
+        wire.handle("echo") { (value: CefJSON) in value }
+        var configuration = CefBrowser.Configuration()
+        configuration.bridges = [wire]
+        let browser = CefBrowser(url: URL(string: "selftest://app/second.html")!, configuration: configuration)
+        let window = CefBrowserWindow(browser: browser)
+        window.show()
+        guard await waitUntil({ browser.title == "second" }) else {
+            check("bridge wire: page loads", false, detail: browser.title)
+            window.close()
+            return
+        }
+        let large = "const big = new ArrayBuffer(4 << 20); new Uint8Array(big).fill(7);"
+        await expect("bridge wire: a large ArrayBuffer survives a later getter transferring it") {
+            // `transfer` moves the bytes to a new buffer and frees the old
+            // memory, which a deferred copy would read after.
+            let result = try await browser.evaluateJavaScript("""
+                (() => { \(large)
+                  return wire.read({ get a() { return big; }, get b() { big.transfer(16); return 1; } }); })()
+                """).stringValue
+            return (result == "\(4 << 20):true", result ?? "nil")
+        }
+        await expect("bridge wire: a large ArrayBuffer survives a later getter detaching it by postMessage") {
+            let result = try await browser.evaluateJavaScript("""
+                (() => { \(large)
+                  return wire.read({ get a() { return big; },
+                    get b() { new MessageChannel().port1.postMessage(big, [big]); return big.byteLength; } }); })()
+                """).stringValue
+            return (result == "\(4 << 20):true", result ?? "nil")
+        }
+        await expect("bridge wire: a large ArrayBuffer read last travels intact") {
+            let result = try await browser.evaluateJavaScript("(() => { \(large) return wire.read({ b: 2, a: big }); })()")
+                .stringValue
+            return (result == "\(4 << 20):true", result ?? "nil")
+        }
+        await expect("bridge wire: a throwing getter rejects the call") {
+            let result = try await browser.evaluateJavaScript("""
+                wire.echo({ ok: 1, get bad() { throw new Error('getter boom'); } }).then(() => 'resolved', e => e.message)
+                """).stringValue
+            return (result?.contains("getter boom") == true, result ?? "nil")
+        }
+        await expect("bridge wire: a Proxy whose ownKeys trap throws rejects the call") {
+            let result = try await browser.evaluateJavaScript("""
+                wire.echo(new Proxy({}, { ownKeys() { throw new Error('keys boom'); } })).then(() => 'resolved', e => e.message)
+                """).stringValue
+            return (result?.contains("keys boom") == true, result ?? "nil")
+        }
+        await expect("bridge wire: only own enumerable properties travel") {
+            let result = try await browser.evaluateJavaScript("""
+                wire.echo(Object.create({ inherited: 1 }, { own: { value: 2, enumerable: true }, hidden: { value: 3 } }))
+                  .then(v => JSON.stringify(v))
+                """).stringValue
+            return (result == #"{"own":2}"#, result ?? "nil")
+        }
+        await expect("bridge wire: a throwing getter fails an evaluation") {
+            do {
+                _ = try await browser.evaluateJavaScript("({ ok: 1, get bad() { throw new Error('eval boom'); } })")
+                return (false, "resolved")
+            } catch let error as CefJavaScriptError {
+                return (error.message.contains("eval boom"), error.message)
+            }
+        }
+        await expect("bridge wire: the page still works after the failures") {
+            try await browser.evaluateJavaScript("wire.echo([1, 'two'])").arrayValue?.count == 2
         }
         window.close()
         _ = await waitUntil { window.isClosed }

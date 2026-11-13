@@ -38,9 +38,17 @@ extension CefJSON {
         }
     }
 
-    /// Reads a wire value. Bytes become a base64 string, as `JSONEncoder`
-    /// writes `Data`.
+    /// Reads a wire value, after checking its structure
+    /// (`CefWireReader.validateValue()`). Bytes become a base64 string, as
+    /// `JSONEncoder` writes `Data`.
     init(wire reader: inout CefWireReader) throws {
+        try reader.validateValue()
+        try self.init(validated: &reader)
+    }
+
+    /// Reads a wire value whose structure has been checked, so counts are
+    /// consistent with the bytes and nesting is bounded.
+    init(validated reader: inout CefWireReader) throws {
         switch try reader.readTag() {
         case .null: self = .null
         case .false: self = .bool(false)
@@ -55,7 +63,7 @@ extension CefJSON {
             let (_, count) = try reader.readContainer()
             var elements: [CefJSON] = []
             elements.reserveCapacity(count)
-            for _ in 0..<count { elements.append(try CefJSON(wire: &reader)) }
+            for _ in 0..<count { elements.append(try CefJSON(validated: &reader)) }
             self = .array(elements)
         case .object:
             let (_, count) = try reader.readContainer()
@@ -63,7 +71,7 @@ extension CefJSON {
             members.reserveCapacity(count)
             for _ in 0..<count {
                 let key = String(decoding: try reader.readRun(), as: UTF8.self)
-                members[key] = try CefJSON(wire: &reader)
+                members[key] = try CefJSON(validated: &reader)
             }
             self = .object(members)
         }

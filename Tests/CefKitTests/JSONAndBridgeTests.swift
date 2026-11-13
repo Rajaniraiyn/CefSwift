@@ -75,15 +75,52 @@ import Testing
         ])
     }
 
+    func established(_ claimed: String, at url: String?, in ancestors: [String?] = []) -> CefBridge.EstablishedOrigin {
+        CefBridge.establishedOrigin(claimed: claimed, url: url) { ancestors }
+    }
+
     @Test func checksTheReportedOriginAgainstTheFrameAddress() {
-        let page = URL(string: "https://example.com:8443/page")
-        #expect(CefBridge.origin("https://example.com:8443", isConsistentWith: page))
-        #expect(!CefBridge.origin("https://other.example", isConsistentWith: page))
+        let page = "https://example.com:8443/page"
+        #expect(established("https://example.com:8443", at: page) == .origin("https://example.com:8443"))
+        #expect(established("https://other.example", at: page) == .inconsistent)
         // A sandboxed document's origin is opaque.
-        #expect(CefBridge.origin("null", isConsistentWith: page))
-        // Documents that inherit their origin.
-        #expect(CefBridge.origin("https://example.com", isConsistentWith: URL(string: "about:blank")))
-        #expect(CefBridge.origin("https://example.com", isConsistentWith: URL(string: "data:text/html,x")))
+        #expect(established("null", at: page) == .opaque)
+        // Default ports are not part of an origin; hosts compare without case.
+        #expect(established("https://example.com", at: "https://EXAMPLE.com:443/") == .origin("https://example.com"))
+        #expect(established("app://start", at: "app://start/index.html") == .origin("app://start"))
+        #expect(established("http://[::1]:8080", at: "http://[::1]:8080/") == .origin("http://[::1]:8080"))
+    }
+
+    @Test func hostlessDocumentsFailClosed() {
+        let allowed = "https://example.com"
+        // Opaque documents are opaque whatever the renderer claims.
+        #expect(established(allowed, at: "data:text/html,x") == .opaque)
+        #expect(established(allowed, at: "javascript:0") == .opaque)
+        #expect(established(allowed, at: "about:version") == .opaque)
+        #expect(established(allowed, at: nil) == .opaque)
+        #expect(established(allowed, at: "") == .opaque)
+        #expect(established(allowed, at: "not a url") == .opaque)
+        // A top-level about:blank (a popup's) has no parent to inherit from.
+        #expect(established(allowed, at: "about:blank") == .opaque)
+        // about:blank and srcdoc inherit the nearest ancestor's origin.
+        #expect(established(allowed, at: "about:srcdoc", in: ["https://example.com/a"]) == .origin(allowed))
+        #expect(established(allowed, at: "about:blank#x", in: ["about:srcdoc", "https://example.com/"]) == .origin(allowed))
+        #expect(established(allowed, at: "about:blank", in: ["https://evil.example/"]) == .inconsistent)
+        #expect(established(allowed, at: "about:srcdoc", in: ["data:text/html,x"]) == .opaque)
+        #expect(established("null", at: "about:srcdoc", in: ["https://example.com/"]) == .opaque)
+        // blob: carries its origin.
+        #expect(established(allowed, at: "blob:https://example.com/0b1e") == .origin(allowed))
+        #expect(established(allowed, at: "blob:https://evil.example/0b1e") == .inconsistent)
+        #expect(established(allowed, at: "blob:null/0b1e") == .opaque)
+        #expect(established(allowed, at: "blob:blob:https://example.com/0b1e") == .opaque)
+    }
+
+    @Test func originScopedBridgesRejectUnconfirmedOrigins() {
+        // The browser-side origin decides: `"null"` never matches `.origins`.
+        #expect(CefBridge.EstablishedOrigin.opaque.origin == nil)
+        #expect(CefBridge.EstablishedOrigin.origin("https://example.com").origin == "https://example.com")
+        #expect(CefBridge.addressOrigin("file:///tmp/x.html") == .tuple("file://"))
+        #expect(CefBridge.addressOrigin("about:srcdoc") == .inherited)
     }
 
     @Test func userScriptsDescribeWhenAndWhereTheyRun() {

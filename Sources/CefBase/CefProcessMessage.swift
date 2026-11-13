@@ -14,6 +14,9 @@ package struct CefProcessMessage: Sendable, Equatable {
         case int(Int32)
         case bool(Bool)
         case double(Double)
+        /// An argument of a type CefSwift does not send (null, binary, a
+        /// dictionary or a list); sent as null.
+        case unsupported
     }
 
     package var name: String
@@ -41,7 +44,7 @@ package struct CefProcessMessage: Sendable, Equatable {
             case VTYPE_DOUBLE:
                 arguments.append(.double(list.pointee.get_double(list, index)))
             default:
-                arguments.append(.string(""))
+                arguments.append(.unsupported)
             }
         }
     }
@@ -58,6 +61,7 @@ package struct CefProcessMessage: Sendable, Equatable {
                 case .int(let value): _ = list.pointee.set_int(list, index, value)
                 case .bool(let value): _ = list.pointee.set_bool(list, index, value ? 1 : 0)
                 case .double(let value): _ = list.pointee.set_double(list, index, value)
+                case .unsupported: _ = list.pointee.set_null(list, index)
                 }
             }
         }
@@ -73,22 +77,31 @@ package struct CefProcessMessage: Sendable, Equatable {
         return true
     }
 
-    package func string(_ index: Int) -> String {
-        guard index < arguments.count, case .string(let value) = arguments[index] else { return "" }
+    // The accessors are total: a message from another process may hold
+    // anything, so a missing argument or one of another type is `nil`, and
+    // so is a `.double` that is not exactly an integer (NaN, an infinity,
+    // a fraction or a value out of `Int`'s range).
+
+    /// The string at `index`, or `nil`.
+    package func string(_ index: Int) -> String? {
+        guard arguments.indices.contains(index), case .string(let value) = arguments[index] else { return nil }
         return value
     }
 
-    package func int(_ index: Int) -> Int {
-        guard index < arguments.count else { return 0 }
+    /// The integer at `index`: an `.int`, or a `.double` that is exactly
+    /// an integer. `nil` otherwise.
+    package func int(_ index: Int) -> Int? {
+        guard arguments.indices.contains(index) else { return nil }
         switch arguments[index] {
         case .int(let value): return Int(value)
-        case .double(let value): return Int(value)
-        default: return 0
+        case .double(let value): return Int(exactly: value)
+        default: return nil
         }
     }
 
-    package func bool(_ index: Int) -> Bool {
-        guard index < arguments.count, case .bool(let value) = arguments[index] else { return false }
+    /// The Boolean at `index`, or `nil`.
+    package func bool(_ index: Int) -> Bool? {
+        guard arguments.indices.contains(index), case .bool(let value) = arguments[index] else { return nil }
         return value
     }
 }

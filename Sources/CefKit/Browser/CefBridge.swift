@@ -46,10 +46,15 @@ import Foundation
 /// bridge.access = .origins(["app://start"])
 /// ```
 ///
-/// Calls are checked again in Swift against the caller's origin and frame,
-/// which a page cannot forge: the renderer reads the origin from the
-/// document, and the browser process checks it against the frame's address.
-/// Each handler can also inspect ``CefBridgeCall/origin``.
+/// Calls are checked again in Swift against the caller's frame and origin,
+/// which the browser process establishes from its own record of the
+/// frame's address, so not even a compromised renderer can claim another
+/// origin. A document whose origin the address cannot confirm (`data:`
+/// documents, sandboxed ones, a popup's `about:blank`) has the opaque
+/// origin `"null"` and never matches ``Access/origins(_:)``. `about:blank`
+/// and `srcdoc` frames have their parent frame's origin, and a `blob:`
+/// document the origin in its address. Each handler can also inspect
+/// ``CefBridgeCall/origin``.
 @MainActor
 public final class CefBridge {
 
@@ -58,7 +63,9 @@ public final class CefBridge {
         /// Only top-level documents (the default).
         case mainFrame
         /// Documents, in any frame, whose origin is listed, e.g.
-        /// `"https://app.example.com"` or `"app://start"`.
+        /// `"https://app.example.com"` or `"app://start"`. The origin is
+        /// the one ``CefBridgeCall/origin`` describes; an opaque one never
+        /// matches.
         case origins(Set<String>)
         /// Every frame of every page. Use only for browsers that load
         /// nothing but your own content.
@@ -210,12 +217,14 @@ public final class CefBridge {
             encoder.buffer.send(CefPageScriptingMessage.reply, from: frame.pointer, to: PID_RENDERER)
         }
         let isMainFrame = frame.pointer.pointee.is_main(frame.pointer) != 0
-        let url = CefStringUtil.takingUserFree(frame.pointer.pointee.get_url(frame.pointer)).flatMap(URL.init(string:))
-        let call = CefBridgeCall(browser: browser, method: method, origin: origin, isMainFrame: isMainFrame)
+        let url = CefStringUtil.takingUserFree(frame.pointer.pointee.get_url(frame.pointer))
 
-        // The renderer reports the document's origin; the browser process
-        // knows the frame and its address, which must agree with it.
-        guard Self.origin(origin, isConsistentWith: url), isPermitted(call) else {
+        // The renderer reports the document's origin, but a compromised
+        // renderer could report any; the browser process's own record of
+        // the frame's address (and its parents') decides.
+        let established = Self.establishedOrigin(claimed: origin, url: url) { Self.ancestorURLs(of: frame.pointer) }
+        let call = CefBridgeCall(browser: browser, method: method, origin: established.origin ?? "null", isMainFrame: isMainFrame)
+        guard established != .inconsistent, isPermitted(call, origin: established) else {
             fail("\(name).\(method): caller is not permitted to use this bridge")
             return
         }
@@ -244,23 +253,115 @@ public final class CefBridge {
         }
     }
 
-    private func isPermitted(_ call: CefBridgeCall) -> Bool {
+    private func isPermitted(_ call: CefBridgeCall, origin: EstablishedOrigin) -> Bool {
         switch access {
         case .mainFrame: return call.isMainFrame
-        case .origins(let allowed): return allowed.contains(call.origin)
+        case .origins(let allowed):
+            // An opaque or unconfirmed origin never matches, even if
+            // `"null"` is listed.
+            guard case .origin(let origin) = origin else { return false }
+            return allowed.contains(origin)
         case .anyFrame: return true
         }
     }
 
-    /// Whether a document at `url` can have `origin`: the address's own
-    /// origin for an address with a host, or an opaque origin (`"null"`,
-    /// a sandboxed document's); any origin for an address that inherits
-    /// its document's origin (`about:blank`, `data:`, `blob:` and the like).
-    static func origin(_ origin: String, isConsistentWith url: URL?) -> Bool {
-        guard let url, let scheme = url.scheme?.lowercased(), let host = url.host, !host.isEmpty else { return true }
-        var expected = "\(scheme)://\(host.lowercased())"
-        if let port = url.port { expected += ":\(port)" }
-        return origin == expected || origin == "null"
+    // MARK: Origins
+
+    /// What the browser process can say about a calling document's origin.
+    enum EstablishedOrigin: Equatable {
+        /// The frame's address confirms the origin the renderer reported.
+        case origin(String)
+        /// The document's origin is opaque (a `data:` document, a
+        /// sandboxed one, `blob:null/…`) or cannot be confirmed (a
+        /// top-level `about:blank`, an unparseable or missing address).
+        case opaque
+        /// The renderer reported an origin the frame's address rules out.
+        case inconsistent
+
+        var origin: String? {
+            if case .origin(let origin) = self { return origin }
+            return nil
+        }
+    }
+
+    /// The origin of a document at `url`, as far as the address tells.
+    enum AddressOrigin: Equatable {
+        /// A scheme, host and port: `https://example.com:8443`.
+        case tuple(String)
+        /// Opaque, or unknown.
+        case opaque
+        /// `about:blank` and `about:srcdoc`, which take their origin from
+        /// the frame that made them.
+        case inherited
+    }
+
+    /// The origin an address gives a document. `blob:` and `filesystem:`
+    /// addresses carry their origin after the scheme; `about:blank` and
+    /// `about:srcdoc` inherit one; `data:`, `javascript:`, other `about:`
+    /// pages and addresses without a host are opaque.
+    nonisolated static func addressOrigin(_ text: String?) -> AddressOrigin {
+        guard let text, let url = URL(string: text), let scheme = url.scheme?.lowercased() else { return .opaque }
+        switch scheme {
+        case "about":
+            let page = text.dropFirst("about:".count).prefix { $0 != "?" && $0 != "#" }.lowercased()
+            return page == "blank" || page == "srcdoc" ? .inherited : .opaque
+        case "blob", "filesystem":
+            // The inner address's origin, if it has a host: `blob:null/…`
+            // and nested `blob:` are opaque.
+            let inner = String(text.dropFirst(scheme.count + 1))
+            guard let innerScheme = URL(string: inner)?.scheme?.lowercased(), innerScheme != "blob", innerScheme != "filesystem",
+                  case .tuple(let origin) = addressOrigin(inner)
+            else { return .opaque }
+            return .tuple(origin)
+        case "file":
+            return .tuple("file://")
+        default:
+            guard let host = url.host, !host.isEmpty else { return .opaque }
+            var origin = "\(scheme)://" + (host.contains(":") ? "[\(host.lowercased())]" : host.lowercased())
+            let defaultPorts = ["http": 80, "https": 443, "ws": 80, "wss": 443]
+            if let port = url.port, defaultPorts[scheme] != port { origin += ":\(port)" }
+            return .tuple(origin)
+        }
+    }
+
+    /// The calling document's origin, established from the browser
+    /// process's own record of its frame's address, `url`, and for an
+    /// inheriting address, of its ancestors' (`ancestors`, nearest first):
+    ///
+    /// - An address with a host confirms `claimed` only if it is the
+    ///   address's origin; `"null"` (a sandboxed document) is opaque, and
+    ///   anything else inconsistent.
+    /// - `blob:https://host/…` is `https://host`'s.
+    /// - `about:blank` and `about:srcdoc` take the nearest ancestor's
+    ///   origin. CEF does not expose the frame that created a document,
+    ///   so a top-level one (a popup's `about:blank`) is opaque.
+    /// - `data:` and every other address are opaque, whatever the renderer
+    ///   claims.
+    nonisolated static func establishedOrigin(
+        claimed: String, url: String?, ancestors: () -> [String?]
+    ) -> EstablishedOrigin {
+        var origin = addressOrigin(url)
+        if origin == .inherited {
+            origin = ancestors().lazy.map(addressOrigin).first { $0 != .inherited } ?? .opaque
+        }
+        guard case .tuple(let expected) = origin else { return .opaque }
+        if claimed == expected { return .origin(expected) }
+        return claimed == "null" ? .opaque : .inconsistent
+    }
+
+    /// The addresses of `frame`'s ancestors, nearest first, as the browser
+    /// process knows them.
+    private static func ancestorURLs(of frame: UnsafeMutablePointer<cef_frame_t>) -> [String?] {
+        var urls: [String?] = []
+        var current = frame.pointee.get_parent(frame)
+        // Frames nest only so deep; the bound guards against a cycle.
+        while let parent = current, urls.count < 64 {
+            urls.append(CefStringUtil.takingUserFree(parent.pointee.get_url(parent)))
+            current = parent.pointee.get_parent(parent)
+            cefRelease(parent)
+        }
+        cefRelease(current)
+        return urls
     }
 }
 
@@ -276,7 +377,12 @@ public struct CefBridgeCall {
     /// The method being called.
     public let method: String
     /// The calling document's origin (`"https://example.com"`), as the
-    /// renderer reads it from the document.
+    /// browser process establishes it from the frame's address: the
+    /// address's origin; for `about:blank` and `about:srcdoc`, the nearest
+    /// parent frame's; for `blob:https://example.com/…`, the one it names.
+    /// `"null"` when the origin is opaque or the address cannot confirm it:
+    /// `data:` documents, sandboxed documents, and a top-level
+    /// `about:blank` such as a new popup's, whose opener CEF does not say.
     public let origin: String
     /// Whether the caller is the top-level document.
     public let isMainFrame: Bool

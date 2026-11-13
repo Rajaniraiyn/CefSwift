@@ -161,6 +161,7 @@ enum SelfTest {
         ("favicon", faviconChecks),
         ("toolbarAndZoom", toolbarAndZoomChecks),
         ("bridgeScope", bridgeScopeChecks),
+        ("bridgeWire", bridgeWireChecks),
         ("compatibility", compatibilityChecks),
         ("internalPages", internalPageDataChecks),
         ("serviceLifetime", serviceLifetimeChecks),

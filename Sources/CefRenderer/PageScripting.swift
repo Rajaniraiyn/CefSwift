@@ -26,10 +26,16 @@ final class PageScripting: CefRendererExtension {
         var name: String
         var access: Access
 
-        func permits(isMainFrame: Bool, origin: String) -> Bool {
+        /// Mirrors `CefBridge`'s check in the browser process, which has the
+        /// last word: a top-level `about:` document (a popup's
+        /// `about:blank`) inherits its opener's origin, which the browser
+        /// process cannot confirm, so an `.origins` bridge leaves it out.
+        func permits(isMainFrame: Bool, origin: String, url: String) -> Bool {
             switch access {
             case .mainFrame: return isMainFrame
-            case .origins(let allowed): return allowed.contains(origin)
+            case .origins(let allowed):
+                if isMainFrame, url.lowercased().hasPrefix("about:") { return false }
+                return allowed.contains(origin)
             case .anyFrame: return true
             }
         }
@@ -176,8 +182,13 @@ final class PageScripting: CefRendererExtension {
         if !atEnd.isEmpty { runAtDocumentEnd(atEnd, global: global, context: context) }
 
         guard !configuration.bridges.isEmpty else { return }
-        let origin = global["location"]?["origin"]?.stringValue ?? ""
-        let permitted = configuration.bridges.filter { $0.permits(isMainFrame: isMainFrame, origin: origin) }
+        // The document's origin, `self.origin`, read before any page script
+        // runs. `location.origin` is its address's, which differs for
+        // `about:blank` and `srcdoc` documents: theirs is opaque, while the
+        // document has its parent's origin.
+        let origin = global["origin"].flatMap { $0.isString ? $0.stringValue : nil }
+            ?? global["location"]?["origin"]?.stringValue ?? ""
+        let permitted = configuration.bridges.filter { $0.permits(isMainFrame: isMainFrame, origin: origin, url: url) }
         guard !permitted.isEmpty else { return }
         nextDocumentID += 1
         let document = Document(
@@ -344,7 +355,13 @@ final class PageScripting: CefRendererExtension {
         payload.append(bridge)
         writeMethod(&payload)
         payload.append(document.origin)
-        V8Wire.write(argument?.raw, to: &payload)
+        do {
+            try V8Wire.write(argument?.raw, to: &payload)
+        } catch {
+            document.pendingCalls[bridge]?[callID] = nil
+            promise.reject("\(bridge).\(describe()): \(error.message)")
+            return promise
+        }
         if !payload.send(CefPageScriptingMessage.call, from: frame, to: PID_BROWSER) {
             document.pendingCalls[bridge]?[callID] = nil
             promise.reject("\(bridge).\(describe()): the document is closing")
@@ -402,12 +419,22 @@ final class PageScripting: CefRendererExtension {
         line: Int = 0, column: Int = 0
     ) {
         var payload = CefWireBuffer()
-        payload.append(header: CefWireHeader(
-            target: request, succeeded: error == nil, line: Int32(clamping: line), column: Int32(clamping: column)))
+        var error = error
+        if error == nil {
+            payload.append(header: CefWireHeader(target: request, succeeded: true))
+            do {
+                try V8Wire.write(value?.raw, to: &payload)
+            } catch let failure {
+                // A getter threw, or the value is too large: the evaluation
+                // fails with that, and the partial value is dropped.
+                error = failure.message
+                payload = CefWireBuffer()
+            }
+        }
         if let error {
+            payload.append(header: CefWireHeader(
+                target: request, succeeded: false, line: Int32(clamping: line), column: Int32(clamping: column)))
             payload.append(error)
-        } else {
-            V8Wire.write(value?.raw, to: &payload)
         }
         payload.send(CefPageScriptingMessage.evaluated, from: frame.raw, to: PID_BROWSER)
     }
@@ -472,8 +499,13 @@ final class PageScripting: CefRendererExtension {
             text = value.stringValue
         } else {
             var payload = CefWireBuffer()
-            V8Wire.write(value.raw, to: &payload)
-            text = JSONValue.text(wire: payload.bytes)
+            do {
+                try V8Wire.write(value.raw, to: &payload)
+                payload.materializeDeferred()
+                text = JSONValue.text(wire: payload.bytes)
+            } catch {
+                text = error.message
+            }
         }
         return "Uncaught (in promise) " + text
     }
@@ -483,7 +515,8 @@ final class PageScripting: CefRendererExtension {
     func received(_ message: CefProcessMessage, in frame: CefRendererFrame) {
         switch message.name {
         case CefPageScriptingMessage.configure.text:
-            guard let json = JSONValue(parsing: message.string(0)), let configuration = Configuration(json: json),
+            guard message.arguments.count == 1, let text = message.string(0),
+                  let json = JSONValue(parsing: text), let configuration = Configuration(json: json),
                   configuration.generation >= (configurations[frame.browserID]?.generation ?? -1)
             else { return }
             configurations[frame.browserID] = configuration

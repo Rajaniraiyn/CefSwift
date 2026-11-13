@@ -142,12 +142,26 @@ final class CefPageScripting {
         case wire(CefPageScriptingMessage.Kind, CefWirePayload)
     }
 
+    /// The generation a `sync` message reports: exactly one `.int`
+    /// argument. `nil` for anything else, which a renderer that is not
+    /// CefSwift's (or a compromised one) may send.
+    nonisolated static func reportedGeneration(_ message: CefProcessMessage) -> Int? {
+        guard message.arguments.count == 1, case .int(let generation) = message.arguments[0] else { return nil }
+        return Int(generation)
+    }
+
     /// A message from one of the browser's renderers. Returns whether it
-    /// was one of page scripting's.
+    /// was one of page scripting's. A renderer may be compromised, so a
+    /// malformed message is dropped (and an evaluation it answers fails);
+    /// nothing here trusts its shape.
     func received(_ received: Received, from frame: CefRef<cef_frame_t>) -> Bool {
         switch received {
         case .message(let message) where message.name == CefPageScriptingMessage.sync.text:
-            if message.int(0) < generation {
+            guard let reported = Self.reportedGeneration(message) else {
+                CefLog.error("CefPageScripting: dropped a malformed \(message.name) message")
+                return true
+            }
+            if reported < generation {
                 CefProcessMessage(CefPageScriptingMessage.configure, [.string(configuration.text)])
                     .send(from: frame.pointer, to: PID_RENDERER)
             }
@@ -158,10 +172,12 @@ final class CefPageScripting {
             let request = Int(header.target)
             evaluationFrames[request] = nil
             if header.succeeded != 0 {
+                // Decoding the value validates it; a malformed one throws.
                 pendingEvaluations.complete(request, .success(payload))
             } else {
                 pendingEvaluations.complete(request, .failure(CefJavaScriptError(
-                    message: (try? reader.readString()) ?? "", line: Int(header.line), column: Int(header.column))))
+                    message: (try? reader.readString()) ?? "The renderer sent a malformed error.",
+                    line: Int(header.line), column: Int(header.column))))
             }
         case .wire(.call, let payload):
             var reader = payload.reader

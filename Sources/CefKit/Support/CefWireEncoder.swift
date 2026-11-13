@@ -39,6 +39,11 @@ final class CefWireEncoder: Encoder {
             buffer.appendNull()
         }
         close(above: base)
+        // The renderer rejects a payload beyond the limits, so it is an
+        // encoding error here rather than a value the page never gets.
+        if base == 0, let problem = buffer.limitViolation {
+            throw EncodingError.invalidValue(value, .init(codingPath: codingPath, debugDescription: "CefWire: \(problem)"))
+        }
     }
 
     /// Types with a wire form of their own.
@@ -47,6 +52,10 @@ final class CefWireEncoder: Encoder {
     /// would box it.
     private func encodeSpecial<T: Encodable>(_ value: T) throws -> Bool {
         if T.self == Data.self, let data = value as? Data {
+            guard data.count <= CefWireLimits.maximumPayloadSize else {
+                throw EncodingError.invalidValue(value, .init(
+                    codingPath: codingPath, debugDescription: "CefWire: \(data.count) bytes are beyond the payload limit"))
+            }
             appendBytes(data)
         } else if T.self == URL.self, let url = value as? URL {
             buffer.append(url.absoluteString)

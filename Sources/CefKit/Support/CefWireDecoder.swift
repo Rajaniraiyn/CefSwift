@@ -30,8 +30,28 @@ final class CefWireDecoder: Decoder {
 
     fileprivate var reader: CefWireReader { CefWireReader(bytes, offset: offset) }
 
+    /// The value whose structure has been checked; values inside it need
+    /// no further check.
+    fileprivate var validated: Range<Int> = 0..<0
+
+    /// Checks the structure of the value at the current offset
+    /// (`CefWireReader.validateValue()`): the bytes may come from a
+    /// compromised renderer, and the containers below trust their counts
+    /// and lengths.
+    private func validate() throws {
+        var reader = self.reader
+        do {
+            try reader.validateValue()
+            try reader.skipValue()
+        } catch {
+            throw corrupted("The wire data is malformed or beyond its limits (\(error))")
+        }
+        validated = offset..<reader.offset
+    }
+
     /// Decodes the value at the current offset and moves past it.
     func decode<T: Decodable>(_ type: T.Type = T.self) throws -> T {
+        if !validated.contains(offset) { try validate() }
         if let special = try decodeSpecial(type) { return special }
         let start = offset
         let value = try T(from: self)
@@ -47,7 +67,7 @@ final class CefWireDecoder: Decoder {
         if T.self == Data.self { return try readData() as? T }
         if T.self == CefJSON.self {
             var reader = self.reader
-            let json = try CefJSON(wire: &reader)
+            let json = try CefJSON(validated: &reader)
             offset = reader.offset
             return json as? T
         }
@@ -340,6 +360,7 @@ final class CefWireDecoder: Decoder {
         let sub = payload.map { CefWireDecoder(payload: $0, offset: position) }
             ?? CefWireDecoder(bytes: bytes, offset: position)
         sub.codingPath = codingPath
+        sub.validated = validated
         return sub
     }
 
@@ -370,7 +391,7 @@ final class CefWireDecoder: Decoder {
         }
 
         private mutating func next<R>(_ body: (CefWireDecoder) throws -> R) throws -> R {
-            guard !isAtEnd else {
+            guard !isAtEnd, position < end else {
                 throw DecodingError.valueNotFound(R.self, .init(
                     codingPath: codingPath + [Index(currentIndex)], debugDescription: "The array has no more elements"))
             }

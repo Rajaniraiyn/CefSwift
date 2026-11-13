@@ -498,14 +498,35 @@ A later renderer-side feature is one more extension type.
 - A bridge is a global object whose named-property interceptor answers
   `invoke`, `on`, `off` and any other name with a native function. A call
   creates a promise, sends `cefswift.page.call` with the argument and the
-  document's origin, and the reply resolves or rejects it. V8 values are
-  read and made through the V8 API, straight into and out of the message
-  ([Data paths](#data-paths)), so no page script, `JSON` object or
-  prototype takes part. The browser process checks the caller's
-  frame and origin against `access`, and the origin against the frame's
-  address, before a handler runs. Cross-site frames run in other renderer
+  document's origin (`self.origin`, read as the context is created), and
+  the reply resolves or rejects it. V8 values are read and made through
+  the V8 API, straight into and out of the message
+  ([Data paths](#data-paths)), with no `JSON` object or injected script;
+  the page's getters, `Proxy` traps and `Object.keys` run as they would
+  for `JSON.stringify`. Cross-site frames run in other renderer
   processes, which get the configuration with the browser, so `access`
   decides for them as for any frame.
+- The browser process does not take the renderer's word for the origin.
+  It establishes the caller's origin from its own record of the frame's
+  committed address (`cef_frame_t.get_url` in the browser process) and
+  checks the caller's frame and that origin against `access` before a
+  handler runs (`CefBridge.establishedOrigin`):
+
+  | Frame's address | Established origin |
+  |---|---|
+  | Scheme, host and port (`https:`, `http:`, a standard custom scheme) | The address's origin, if the renderer reports it; `"null"` if the renderer reports `"null"` (a sandboxed document); anything else rejects the call |
+  | `blob:https://host/…`, `filesystem:https://host/…` | The origin they name, checked the same way; `blob:null/…` is opaque |
+  | `about:blank`, `about:srcdoc` in a subframe | The nearest ancestor's established origin, checked the same way |
+  | `about:blank` at the top (a popup's first document) | Opaque: CEF does not expose the frame that opened it |
+  | `data:`, `javascript:`, other `about:` pages, any other address without a host, an unparseable or missing one | Opaque |
+
+  An opaque origin is reported to handlers as `"null"` and never matches
+  `.origins(...)`, even when `"null"` is listed; `.mainFrame` and
+  `.anyFrame` do not look at origins. `file:` addresses have the origin
+  `file://`, as Chromium serializes it. The renderer installs an
+  `.origins` bridge by the same rules where it can (it leaves out a
+  top-level `about:` document), so a document refused in the browser
+  process normally has no global at all.
 - `evaluateJavaScript` sends `cefswift.page.evaluate` to the main frame,
   whose renderer runs the script in the main world and sends the value
   back the same way. A returned promise is awaited through its `then`.
@@ -579,6 +600,42 @@ succeeded, a line and a column), followed by values:
 Numbers are little-endian. A container's byte length counts what follows
 its own nine bytes, so a reader skips any value without reading it.
 
+**Malformed payloads.** A renderer may be compromised, so the browser
+process treats every payload as untrusted, and the renderer does the same
+for the browser's as a matter of robustness. Before building anything from
+a value, a reader checks its whole structure
+(`CefWireReader.validateValue()`, which recurses no deeper than the depth limit):
+every tag known; every run, key and element inside the payload and inside
+its container; each container's count at most its byte length divided by
+the smallest element (1 byte; 5 for an object member), and its elements
+exactly filling its byte length. `readContainer()` refuses a count larger
+than the byte length even unchecked, so no reader reserves room for more
+elements than the payload holds. A malformed value is a thrown error: a
+`DecodingError` for a handler's argument (the call is rejected) or an
+evaluation's value (`evaluateJavaScript` throws), and `null` in the
+renderer.
+
+Both processes keep to the same limits (`CefWireLimits`), which writers
+enforce and readers check, so every value one side writes, the other
+reads:
+
+| Limit | Value | Writer beyond it | Reader beyond it |
+|---|---|---|---|
+| Nesting of arrays and objects | 64 | The renderer writes `null`, as for a cycle; `CefWireEncoder` throws `EncodingError` | Error |
+| Payload size, header included | 1 GiB | The renderer rejects the call or fails the evaluation; `CefWireEncoder` throws | Error, before reading |
+| Values in a payload (containers, elements, members) | 16 Mi | Same | Error |
+
+The value limit bounds what decoding allocates: a value on the wire takes
+at least a byte, and decoded at most a few dozen (a `CefJSON` case, a
+dictionary slot), so a reader allocates at most a few hundred MB for a
+payload at the limits, never the gigabytes a forged count asks for.
+
+Process messages without a wire payload (`configure`, `sync`) are read
+through `CefProcessMessage`, whose accessors return `nil` for a missing
+argument, another type, or a `.double` that is not exactly an integer.
+Each handler checks the arity and types it expects and drops anything
+else: a `sync` must be exactly one `.int`.
+
 | Message | Header | Values |
 |---|---|---|
 | `cefswift.page.call` | document, call | bridge, method, origin, argument |
@@ -597,13 +654,37 @@ same way, and `evaluateJavaScript(_:)` builds its `CefJSON` from the
 payload. Primitives cost no allocation; `Codable` costs one container
 per struct, array or dictionary.
 
+What the renderer writes is what `JSON.stringify` would: an object's own
+enumerable string-keyed properties, listed by the document's
+`Object.keys` (CEF's `get_keys` also lists enumerable properties of the
+prototype chain, and aborts the renderer when a `Proxy` trap throws, so it
+is not used); `undefined` and functions left out of objects and `null` in
+arrays; Dates as ISO strings; `null` for a cycle or past the depth limit;
+an `ArrayBuffer` as bytes. Reading a property can run page code (getters,
+`Proxy` traps, a replaced `Object.keys`), and when that code throws, or
+CEF reports an exception (`has_exception`) or a value it cannot read,
+the whole value fails: a bridge call's promise rejects with the
+exception's message and an evaluation throws `CefJavaScriptError`, rather
+than sending what was read so far.
+
 Bytes (`ArrayBuffer` in the page, `Data` in Swift) are copied as few
 times as the processes allow:
 
 | Direction | Copies |
 |---|---|
-| `ArrayBuffer` argument → Swift `Data` | One: from the `ArrayBuffer` into shared memory as the message is built. The handler's `Data` is the mapping itself. |
+| `ArrayBuffer` argument → Swift `Data` | One when nothing is read after it: from the `ArrayBuffer` into shared memory as the message is built. The handler's `Data` is the mapping itself. Two otherwise (see below). |
 | Swift `Data` result → page `ArrayBuffer` | Two: into shared memory as the reply is built, then into a V8 backing store the `ArrayBuffer` owns. |
+
+CEF's pointer to an `ArrayBuffer`'s bytes is valid while its
+`cef_v8_value_t` lives, and page code can detach the buffer (`transfer`,
+`postMessage` with a transfer list) and free the memory. So a deferred run
+holds a reference to the value, and before the walk next reads a property
+or an element, anything that can run page code, it copies every deferred
+run into the payload buffer (`CefWireBuffer.materializeDeferred()`). The
+single copy holds for an `ArrayBuffer` that is the argument, or the last
+thing read (`{ data: buffer }`, `[x, buffer]`); one followed by any
+other property or element (`{ data: buffer, name: "x" }`) costs a second
+copy.
 
 V8 cannot use the shared memory itself: Chromium enables V8's sandbox,
 under which an `ArrayBuffer` must live in the sandbox's memory

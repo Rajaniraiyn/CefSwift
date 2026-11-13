@@ -1007,9 +1007,18 @@ const stop = app.on("themeChanged", theme => apply(theme));
   listeners, in every browser the bridge is attached to or in one
   (`to: browser`).
 - `CefBridgeCall` describes the caller: `browser`, `method`, `origin` and
-  `isMainFrame`. The renderer reads the origin from the document and the
-  browser process checks it against the frame's address, so a page cannot
-  forge them.
+  `isMainFrame`. The browser process establishes the origin from its own
+  record of the frame's address, so neither a page nor a compromised
+  renderer can claim another one. `about:blank` and `srcdoc` frames have
+  their parent's origin and a `blob:` document the origin in its address.
+  Where the address cannot confirm an origin (`data:` documents, sandboxed
+  ones, a popup's first `about:blank`) the origin is `"null"`, which no
+  `.origins` list matches.
+- Values travel as `JSON.stringify` would write them: own enumerable
+  properties, read through the page's getters. A getter that throws
+  rejects the call with its exception instead of sending part of the
+  value. Values nest at most 64 deep, and a call's payload holds at most
+  1 GiB and 16 Mi values; past those, the call is rejected.
 
 Handlers run with your app's privileges, so `bridge.access` decides where
 the global exists:
@@ -1017,7 +1026,7 @@ the global exists:
 | Access | Documents that get the bridge |
 |---|---|
 | `.mainFrame` (default) | Top-level documents. |
-| `.origins(["https://app.example.com"])` | Documents from the listed origins, in any frame. |
+| `.origins(["https://app.example.com"])` | Documents from the listed origins, in any frame, including their `about:blank`, `srcdoc` and `blob:` subframes. Never `data:` or sandboxed documents. |
 | `.anyFrame` | Every document. Use it only for browsers that show nothing but your own content. |
 
 A document outside `access` has no global and no way to reach the bridge.

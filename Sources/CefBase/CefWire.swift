@@ -20,6 +20,25 @@ import CCef
 //
 // `byteLength` counts the bytes after the container's own nine, so a
 // reader skips any value in constant time.
+//
+// Payloads come from another process, which may be compromised, so a
+// reader checks a value's structure (`CefWireReader.validateValue()`)
+// before building anything from it, and both processes keep to
+// `CefWireLimits`: a writer refuses a value beyond them and a reader
+// rejects one, so every value one side can write, the other can read.
+
+/// The limits of the wire format, the same for writers and readers.
+package enum CefWireLimits {
+    /// The deepest nesting of arrays and objects. The renderer writes
+    /// `null` for a container deeper than this, as for a cycle.
+    package static let maximumDepth = 64
+    /// The largest payload, header included: 1 GiB.
+    package static let maximumPayloadSize = 1 << 30
+    /// The most values in a payload, containers, elements and members
+    /// all counted: 16 Mi. A value read from the wire costs a reader at
+    /// most a few dozen bytes, so this bounds what decoding allocates.
+    package static let maximumValueCount = 1 << 24
+}
 
 /// The tags of the wire format.
 package enum CefWireTag: UInt8 {
@@ -78,6 +97,14 @@ package struct CefWireBuffer: ~Copyable {
     /// are, and the function that copies them.
     private var deferred: [(position: Int, count: Int, copy: CopyFunction)] = []
     private var deferredBytes = 0
+    /// How often deferred runs were copied into the buffer, which moves
+    /// what follows them.
+    private var materializations = 0
+    /// Values written, for `CefWireLimits.maximumValueCount`.
+    package private(set) var valueCount = 0
+    /// Containers open now, and the most that were open at once.
+    private var openContainers = 0
+    package private(set) var deepestNesting = 0
 
     package init(capacity: Int = 256) {
         self.capacity = max(capacity, 64)
@@ -119,6 +146,7 @@ package struct CefWireBuffer: ~Copyable {
 
     @inline(__always)
     package mutating func append(tag: CefWireTag) {
+        valueCount += 1
         reserve(1)
         storage.storeBytes(of: tag.rawValue, toByteOffset: count, as: UInt8.self)
         count += 1
@@ -135,6 +163,7 @@ package struct CefWireBuffer: ~Copyable {
     package mutating func append(_ value: Bool) { append(tag: value ? .true : .false) }
 
     package mutating func append(_ value: Int32) {
+        valueCount += 1
         reserve(5)
         storage.storeBytes(of: CefWireTag.int32.rawValue, toByteOffset: count, as: UInt8.self)
         storage.storeBytes(of: value.littleEndian, toByteOffset: count + 1, as: Int32.self)
@@ -142,6 +171,7 @@ package struct CefWireBuffer: ~Copyable {
     }
 
     package mutating func append(_ value: Double) {
+        valueCount += 1
         reserve(9)
         storage.storeBytes(of: CefWireTag.float64.rawValue, toByteOffset: count, as: UInt8.self)
         storage.storeBytes(of: value.bitPattern.littleEndian, toByteOffset: count + 1, as: UInt64.self)
@@ -228,7 +258,9 @@ package struct CefWireBuffer: ~Copyable {
 
     /// Bytes (an `ArrayBuffer` or `Data`). A run of at least
     /// ``deferredThreshold`` bytes is copied later by `copy`, once, into
-    /// the payload's final memory; `copy` must stay valid until then.
+    /// the payload's final memory, or into the buffer by
+    /// ``materializeDeferred()``; `copy` must stay valid until then.
+    /// Callers keep `count` within `CefWireLimits.maximumPayloadSize`.
     package mutating func append(bytes count: Int, copy: @escaping CopyFunction) {
         append(tag: .bytes)
         appendUInt32(UInt32(count))
@@ -247,7 +279,13 @@ package struct CefWireBuffer: ~Copyable {
 
     /// Where an open container's header is, for ``close(_:)``.
     package struct Container {
+        /// The header's offset in the buffer's bytes when it was written.
         let position: Int
+        /// The deferred bytes before the header then, and how often
+        /// deferred runs had been copied in: a later copy moves the header
+        /// by those bytes.
+        let deferredBefore: Int
+        let materializations: Int
         let logicalStart: Int
         package var count: UInt32 = 0
     }
@@ -259,14 +297,21 @@ package struct CefWireBuffer: ~Copyable {
         let position = count
         appendUInt32(0)
         appendUInt32(0)
-        return Container(position: position, logicalStart: count + deferredBytes)
+        openContainers += 1
+        deepestNesting = max(deepestNesting, openContainers)
+        return Container(
+            position: position, deferredBefore: deferredBytes, materializations: materializations,
+            logicalStart: count + deferredBytes)
     }
 
     /// Writes `container`'s length and count.
     package mutating func close(_ container: Container) {
+        openContainers -= 1
         let length = UInt32(count + deferredBytes - container.logicalStart)
-        storage.storeBytes(of: length.littleEndian, toByteOffset: container.position, as: UInt32.self)
-        storage.storeBytes(of: container.count.littleEndian, toByteOffset: container.position + 4, as: UInt32.self)
+        let position = container.position
+            + (materializations > container.materializations ? container.deferredBefore : 0)
+        storage.storeBytes(of: length.littleEndian, toByteOffset: position, as: UInt32.self)
+        storage.storeBytes(of: container.count.littleEndian, toByteOffset: position + 4, as: UInt32.self)
     }
 
     /// Writes `container`'s length and the element count `elements`, for
@@ -278,6 +323,41 @@ package struct CefWireBuffer: ~Copyable {
     }
 
     // MARK: Finishing
+
+    /// Copies the deferred runs into the buffer now, a second copy of
+    /// their bytes. The renderer calls it before anything that may run
+    /// page code, which could detach or free an `ArrayBuffer` whose bytes
+    /// a deferred run has yet to read.
+    package mutating func materializeDeferred() {
+        guard !deferred.isEmpty else { return }
+        let total = totalCount
+        var newCapacity = capacity
+        while newCapacity < total { newCapacity *= 2 }
+        let grown = UnsafeMutableRawPointer.allocate(byteCount: newCapacity, alignment: 16)
+        copy(to: grown)
+        storage.deallocate()
+        storage = grown
+        capacity = newCapacity
+        count = total
+        deferred = []
+        deferredBytes = 0
+        materializations += 1
+    }
+
+    /// Why the payload is beyond `CefWireLimits`, or `nil` when it is
+    /// within them.
+    package var limitViolation: String? {
+        if totalCount > CefWireLimits.maximumPayloadSize {
+            return "the value is larger than \(CefWireLimits.maximumPayloadSize >> 20) MB"
+        }
+        if valueCount > CefWireLimits.maximumValueCount {
+            return "the value holds more than \(CefWireLimits.maximumValueCount) values"
+        }
+        if deepestNesting > CefWireLimits.maximumDepth {
+            return "the value nests deeper than \(CefWireLimits.maximumDepth) levels"
+        }
+        return nil
+    }
 
     /// Copies the payload, deferred runs included, to `target`, which has
     /// room for ``totalCount`` bytes.
@@ -307,9 +387,20 @@ package struct CefWireReader {
         self.offset = offset
     }
 
+    /// A reader of `base` that stops at `end`.
+    private init(base: UnsafeRawPointer, end: Int, offset: Int) {
+        self.base = base
+        self.end = end
+        self.offset = offset
+    }
+
     package enum Failure: Error {
         case truncated
         case badTag(UInt8)
+        /// A container whose count, length and contents disagree.
+        case inconsistent
+        /// A payload beyond `CefWireLimits`.
+        case beyondLimits
     }
 
     package func header() throws -> CefWireHeader {
@@ -367,15 +458,60 @@ package struct CefWireReader {
         return UnsafeRawBufferPointer(start: base + offset, count: length)
     }
 
-    /// A container's header after its tag: its end offset and count.
+    /// A container's header after its tag: its end offset and count. The
+    /// count is at most the length, as every element takes a byte or
+    /// more, so a reader may reserve room for it; ``validateValue()``
+    /// checks the rest.
     package mutating func readContainer() throws -> (end: Int, count: Int) {
         let length = Int(try readUInt32())
         let count = Int(try readUInt32())
         guard offset + length <= end else { throw Failure.truncated }
+        guard count <= length else { throw Failure.inconsistent }
         return (offset + length, count)
     }
 
-    /// Skips one value.
+    /// Checks that the value at the offset is well formed, without moving:
+    /// known tags; every run, member and element inside the payload and
+    /// inside its container; each container's count and length describing
+    /// exactly what fills it; and the payload within `CefWireLimits`.
+    /// Readers that build values from another process's payload check this
+    /// first, so malformed data is an error, never a crash, a deep
+    /// recursion or an allocation larger than the payload accounts for.
+    package func validateValue() throws {
+        guard end <= CefWireLimits.maximumPayloadSize else { throw Failure.beyondLimits }
+        var reader = self
+        var budget = CefWireLimits.maximumValueCount
+        try reader.validate(depth: 0, budget: &budget)
+    }
+
+    private mutating func validate(depth: Int, budget: inout Int) throws {
+        budget -= 1
+        guard budget >= 0 else { throw Failure.beyondLimits }
+        let tag = try readTag()
+        switch tag {
+        case .null, .false, .true: break
+        case .int32: try check(4); offset += 4
+        case .float64: try check(8); offset += 8
+        case .string, .bytes: _ = try readRun()
+        case .array, .object:
+            // The depth bounds the recursion, and so the reader's stack.
+            guard depth < CefWireLimits.maximumDepth else { throw Failure.beyondLimits }
+            let (containerEnd, count) = try readContainer()
+            // An element takes at least its tag; a member also its key's
+            // length.
+            let smallest = tag == .array ? 1 : 5
+            guard count <= (containerEnd - offset) / smallest else { throw Failure.inconsistent }
+            var contents = CefWireReader(base: base, end: containerEnd, offset: offset)
+            for _ in 0..<count {
+                if tag == .object { _ = try contents.readRun() }
+                try contents.validate(depth: depth + 1, budget: &budget)
+            }
+            guard contents.offset == containerEnd else { throw Failure.inconsistent }
+            offset = containerEnd
+        }
+    }
+
+    /// Skips one value in constant time, without checking its contents.
     package mutating func skipValue() throws {
         switch try readTag() {
         case .null, .false, .true: break
