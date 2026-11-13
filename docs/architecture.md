@@ -356,7 +356,32 @@ ignoring the mouse, and closes it as Esc would, or for the find bar with
 kept transparent, since Chromium reuses their windows. Chromium fades some
 widgets in by setting their window's alpha, the status bubble on every
 hover, so an override of `-setAlphaValue:` in `NativeWidgetMacNSWindow`
-keeps a hidden surface's window at 0.
+keeps a hidden surface's window at 0, and keeps the alpha Chromium asked
+for, which a reused window gets back when it is shown again.
+
+Two state machines, in `ChromiumSurfaceController`, replace what was
+implicit ordering. Each of Chromium's windows is in a `WidgetPhase`:
+`attaching` (transparent, between `-addChildWindow:` and its return),
+`recognizing` (attached without a view tree yet: transparent, looked at
+again every 50 ms, six times, then shown as `.other("")`), `shown` (a
+native surface, placed and followed) or `suppressed` (hidden or replaced,
+closed natively); it leaves the table when Chromium detaches or closes it,
+and a suppressed window Chromium attaches again is decided afresh. Each
+`CefChromiumSurface` is `presented` until `end(_:_:)` makes it
+`dismissed(reason)`, the one transition out, which also stops its
+observers and, for a custom find bar, the find session. A policy change
+moves each presented surface to its kind's new presentation through the
+same two paths. Custom surfaces end with what they show: the find bar
+with `CefFindSession.isActive`, the status bubble with `statusText`,
+the others with a main-frame navigation to another document (observed on
+`CefBrowser.url`), as Chromium's bubbles close. Closing the window ends
+every surface (`.window`) and drops the app's presenters and callbacks.
+A zoom command the window replaces is passed on to Chromium, which runs
+the interceptor again through `on_chrome_command` in the same turn; that
+second call is recognized and let through. Print preview takes Esc only
+in its page, so it is closed by focusing its `RenderWidgetHostViewCocoa`
+and pressing Esc until it goes: `-[NSWindow close]` on it, as on bubbles,
+ends the browser process.
 
 A widget's kind comes from the class of the view inside it. Views reports
 each view's class name to accessibility as `AXDOMClassList`, so the tracker

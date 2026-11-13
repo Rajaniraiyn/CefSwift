@@ -2098,7 +2098,7 @@ are taken up as they are. Set `chromiumSurfacePolicy` before showing the window,
 nothing shows before it applies. Until then Chromium's interface shows as
 it does without the library.
 
-A status bubble or zoom bubble hidden in the window's configuration is
+A status bubble or zoom bubble hidden or custom in the window's configuration is
 switched off in Chromium when the browser is created
 (`cef_browser_settings_t`'s `chrome_status_bubble` and
 `chrome_zoom_bubble`), so Chromium never creates its window, and
@@ -2158,31 +2158,79 @@ A surface carries what a replacement needs: `kind`, `title`, `browser`,
 `url` (the address a QR code encodes, or the page's), `anchorRect`,
 `position(_:)` to place a window of yours as Chromium would, and
 `dismiss()`. A panel from the SwiftUI method closes on Esc, on a click
-elsewhere, and when the surface is dismissed. `presentationForChromiumSurface`
-decides per surface as it appears, `chromiumSurfaces` lists those on
-screen, and `onChromiumSurface` hears about each one, custom ones without
-a presenter included.
+elsewhere, and when the surface is dismissed, and gives keyboard focus
+back to the window. `presentationForChromiumSurface` decides per surface
+as it appears, `chromiumSurfaces` lists those presented, and
+`onChromiumSurface` hears about every one, whatever its presentation:
+custom ones without a presenter, hidden ones (already dismissed), and
+those CefChromium has no kind for, as `.other(identifier)`, so that new
+Chromium interface is never invisible to the app.
 
-| Surface | Kind | Native | Custom: what you get | Notes |
-|---|---|---|---|---|
-| Find bar | `.findBar` | Yes | `browser.findSession`: `text`, `isCaseSensitive`, `matchCount`, `activeMatch`, `next()`, `previous()`, `end()` | ⌘G and ⇧⌘G move through the matches. |
-| QR code | `.qrCode` | Yes | `url`, to encode with Core Image's `CIFilter.qrCodeGenerator()` | |
-| Cast | `.cast` | Yes | `url`; `CefMediaRouter.shared` lists `sinks` and `routes` and casts Cast apps and presentation URLs | Mirroring a tab needs Chromium's dialog. |
-| Share | `.share` | No: Chromium's share menu needs its toolbar | `url`, `title` | By default the command opens macOS's share menu at the anchor. |
-| HTTP sign-in | `.signIn` | Yes | No: the credentials go to Chromium's dialog | Only with `authenticationPrompt = .chromium`; by default the delegate answers. Dismissing cancels the sign-in. |
-| Status bubble | `.statusBubble` | Yes | `browser.statusText` | `setStatusBubble(_:)`, or `.hidden` and your own `pageOverlay`. Not anchorable. |
-| Fullscreen notice | `.fullscreenNotice` | Yes | `browser.isFullscreen` | |
-| Downloads | `.downloads` | Yes | `browser.downloads` and the delegate's download decisions | |
-| Permission prompt | `.permissionPrompt` | No | `browser(_:decidePermissionFor:)` | CefSwift answers every request through the delegate. |
-| Translate, save password, bookmark, page info, zoom | `.translate`, `.savePassword`, `.bookmark`, `.pageInfo`, `.zoom` | Recognized if shown | No | CEF 156 does not show these without Chrome's toolbar. |
-| Other bubbles (install app, …) | `.other(title)` | Yes | No | Identifiers are Chromium's. |
-| Autofill and password suggestions | `.other(…)` | Yes | No | Attached to the page; left as Chromium places them. |
+A surface's `state` is `.presented` until it turns `.dismissed(_:)`, once,
+with the reason:
+
+| Dismissal | When |
+|---|---|
+| `.app` | `dismiss()`; for a custom find bar, also `findSession.end()`. |
+| `.chromium` | Chromium ended it: Esc, a click outside or a button of its bubble, the page navigating to another document (custom surfaces follow Chromium's bubbles here), the status text going away. |
+| `.replaced` | A newer surface of the kind took its place: a second ⌘D, QR code or zoom command while a custom one is open. ⌘F with a custom find bar open keeps the bar and its search instead. |
+| `.presentation` | The kind's presentation changed while it was open (native → hidden or custom, custom → native), or it was hidden as it appeared. |
+| `.window` | The window, and with it the browser, closed. Nothing is announced afterwards. |
+
+Changing `chromiumSurfacePolicy` applies at once: Chromium's surface of a
+kind turned `.custom` is hidden and handed to your presenter with the same
+`url`; your interface for a kind turned `.native` is dismissed, and
+Chromium shows the next one. Native surfaces follow their anchor as the
+window moves, resizes, enters full screen or changes screen, and as an
+anchor view moves within the window; `.leading` and `.trailing` follow the
+window's layout direction.
+
+What CefChromium can do differs by kind, and `kind.capabilities` says it:
+every kind is observed (announced, listed, dismissed with a reason);
+`.anchor` moves Chromium's surface, `.hide` keeps it off screen (cancelling
+what it asks), `.dismiss` closes it on request, and `.replace` lets your
+interface take its place, which only makes sense where the app can get
+what the surface shows and do what it offers. `setCustomPresentation(for:_:)`
+does nothing for a kind without `.replace`, and a `.custom` or `.hidden`
+presentation a kind does not allow stays native.
+
+| Surface | Kind | Anchor | Hide | Dismiss | Replace: what your interface uses |
+|---|---|---|---|---|---|
+| Find bar | `.findBar` | Yes (own anchor) | Yes | Yes | `browser.findSession`: `text`, `isCaseSensitive`, `matchCount`, `activeMatch`, `next()`, `previous()`, `end()`; ⌘G and ⇧⌘G move through the matches. |
+| QR code | `.qrCode` | Yes | Yes | Yes | `url`, to encode with Core Image's `CIFilter.qrCodeGenerator()`. |
+| Cast | `.cast` | Yes | Yes | Yes | `url`; `CefMediaRouter.shared` lists `sinks` and `routes` and casts Cast apps and presentation URLs. Mirroring a tab needs Chromium's dialog. |
+| Share | `.share` | Yes | Yes | Yes | `url`, `title`. Chromium's share menu needs its toolbar, so by default the command opens macOS's share menu at the anchor. |
+| Zoom bubble | `.zoom` | Yes | Yes | Yes | `browser.zoomLevel` (Chromium scales by 1.2 to its power). The zoom commands still zoom; hidden, only the bubble goes. |
+| Bookmark added (⌘D) | `.bookmark` | Yes | Yes | Yes | `url`, `title`; `CefBookmarks` adds, edits and removes the bookmark. |
+| Page info | `.pageInfo` | Yes | Yes | Yes | `browser.connectionSecurity` and the profile's `siteSettings`. |
+| Downloads | `.downloads` | Yes | Yes | Yes | `browser.downloads` and the delegate's download decisions. |
+| Status bubble | `.statusBubble` | No | Yes | No | `browser.statusText`: `.custom` presents a surface while it is not empty; `setStatusBubble(_:)` draws it over the page. |
+| Fullscreen notice | `.fullscreenNotice` | Yes | Yes | No | `browser.isFullscreen`. Also shown for keyboard and pointer lock. |
+| HTTP sign-in | `.signIn` | Yes (own anchor) | Yes | Yes | None in Chromium's dialog: with the default `authenticationPrompt = .delegate`, `browser(_:credentialFor:)` answers instead and no dialog shows. Hidden or dismissed, the sign-in is cancelled. |
+| Permission prompt | `.permissionPrompt` | Yes | Yes | Yes | Never shown in CefSwift: every request (camera, microphone, location, notifications, clipboard, MIDI, window management, protocol handlers, multiple downloads, screen capture) goes to `browser(_:decidePermissionFor:)`, so there is no prompt, quiet chip or indicator to hide. |
+| Translate | `.translate` | Yes | Yes | Yes | None: CEF has no translation API. |
+| Save password | `.savePassword` | Yes | Yes | Yes | None: CEF exposes no password store. |
+| Device chooser (USB, serial, HID, Bluetooth) | `.deviceChooser` | Yes | Yes | Yes | None: CEF has no device chooser API. Hidden or dismissed, the page's request fails. |
+| Autofill suggestions | `.autofillSuggestions` | No | Yes | No | None: CEF exposes no autofill data. Placed by Chromium at the field. |
+| Payment sheet | `.paymentRequest` | No | Yes | Yes | None. |
+| Print preview | `.printPreview` | No | Yes | Yes | None; `browser.printToPDF` prints without it. Hidden or dismissed, printing is cancelled and the page takes input again. |
+| Anything else | `.other(title)`, `.other("view:Class")` | Titled ones | Yes | Titled ones | None. Identifiers are Chromium's and change between versions. |
+
+CEF 156 shows the bookmark, translate, page info and save-password
+bubbles neither without Chrome's toolbar nor with it in a `CefWindow`, as
+SelfTest's surface inventory found; CefChromium recognizes them should a
+later CEF show them. `IDC_MANAGE_PASSWORDS_FOR_PAGE` does nothing in
+CefKit: in CEF 156 it ends the browser process.
 
 Other interface Chromium shows lives elsewhere: JavaScript dialogs, the
-`beforeunload` question, HTTP authentication answers and certificate errors
-go through the [delegate](#decisions); tooltips, `<select>` menus, date
+`beforeunload` question, file choosers, HTTP authentication answers,
+client certificates and certificate errors go through the
+[delegate](#decisions); context menus through CefKit's
+[context menu](#context-menu); tooltips, `<select>` menus, date
 pickers and the color panel are AppKit or page popups Chromium places at
-the page element; crash pages and Safe Browsing warnings are pages.
+the page element; picture in picture, the task manager and DevTools are
+windows of their own, not attached to the `CefWindow`; crash pages and Safe
+Browsing warnings are pages.
 ### Tabs Chromium opens itself
 
 Chromium opens some browsers in tabbed windows of its own design, with

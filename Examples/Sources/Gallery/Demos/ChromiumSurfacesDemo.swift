@@ -9,7 +9,7 @@ import SwiftUI
 /// SwiftUI view, hang Chromium's under a control of the app's, or hide it.
 struct ChromiumSurfacesDemo: Demo {
     let title = "Chromium's Interface, Restyled"
-    let summary = "A CefWindow whose find bar (⌘F), link status bubble and QR code bubble are SwiftUI views of the app's own."
+    let summary = "A CefWindow whose find bar (⌘F), link status bubble, QR code and zoom bubbles are SwiftUI views of the app's own."
     let symbol = "rectangle.on.rectangle.angled"
     let category = DemoCategory.windows
 
@@ -68,8 +68,27 @@ private struct ChromiumSurfacesView: View {
         window.setCustomPresentation(for: .qrCode) { surface in
             QRCode(text: surface.url?.absoluteString ?? "")
         }
+        // ⌘+ and ⌘−: the zoom commands still zoom; the level shows here.
+        window.setCustomPresentation(for: .zoom) { surface in
+            ZoomLevel(browser: surface.browser)
+        }
         window.show()
         self.window = window
+    }
+}
+
+/// The page's zoom, as Chromium's zoom bubble shows it: Chromium scales a
+/// page by 1.2 to the power of its zoom level.
+private struct ZoomLevel: View {
+    let browser: CefBrowser
+
+    var body: some View {
+        HStack {
+            Text(pow(1.2, browser.zoomLevel), format: .percent.precision(.fractionLength(0)))
+                .monospacedDigit()
+            Button("Reset") { browser.execute(.resetZoom) }
+        }
+        .padding()
     }
 }
 

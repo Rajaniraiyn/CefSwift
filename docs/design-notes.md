@@ -338,6 +338,74 @@ host engine, which native tab discarding needs too, per-window module
 state, a Chrome-command interceptor, and an overlay slot over the page.
 Without the module, Chromium shows its interface as it draws it.
 
+### What Chromium shows over a Chrome-style window
+
+SelfTest's surface inventory (`SELFTEST_ONLY=nativeUI
+SELFTEST_SURFACE_DUMP=<folder>`) triggers about seventy pieces of
+Chromium's interface in a `CefWindow`, with and without Chrome's toolbar,
+and records each window that appears (class, size, parent, title, Views
+classes, kind) and each delegate call CefKit makes instead. On CEF 156:
+
+- **Attached to the window, as Views widgets** (what CefChromium follows):
+  find bar, status bubble, zoom bubble, QR code, downloads bubble and its
+  start animation, fullscreen notice (also for keyboard lock), HTTP
+  sign-in (with `authenticationPrompt = .chromium`), autofill
+  suggestions, USB and serial choosers, the payment sheet, print preview,
+  and, with Chrome's toolbar, the tab group editor. Before this change
+  the last six were `.other` with a title or a class name, or `.other("")`;
+  they now have kinds (`.autofillSuggestions`, `.deviceChooser`,
+  `.paymentRequest`, `.printPreview`), and what is still unknown (the
+  download animation, the tab group editor) stays `.other`, observable and
+  hideable.
+- **Answered by the delegate, so never Chromium's UI**: every permission
+  request (camera and microphone with fake devices, location,
+  notifications, clipboard, MIDI, window management, protocol handlers,
+  multiple downloads, screen capture), JavaScript dialogs, `beforeunload`,
+  file choosers, downloads' destinations, context menus. There is no
+  permission prompt or quiet chip to hide: the delegate path is the only
+  one.
+- **Windows of their own**, not attached: picture in picture, the task
+  manager, DevTools, the colour panel (a `RenderWidgetPopupWindow`),
+  `<select>` menus (native menus), macOS's share menu; and Chromium's own
+  browser windows for `chrome://` pages it opens (downloads, extensions,
+  settings).
+- **Nothing at all**: send tab to self, the bookmark, translate, page
+  info and save-password bubbles (with or without the toolbar), the app
+  and avatar menus and the omnibox popup through commands, storage access,
+  a popup blocked without a gesture (not even the delegate hears of it),
+  an external protocol without a handler, the date picker, the crash page
+  (a page).
+- **Ends the browser process**: `IDC_MANAGE_PASSWORDS_FOR_PAGE`, with or
+  without the toolbar; CefKit now refuses it.
+
+Bluetooth, HID, screen-capture pickers after a grant, passkey sheets and
+Cast were not triggered: each would reach a macOS prompt (Bluetooth,
+Input Monitoring, Screen Recording, Touch ID, Local Network). The full
+table is the probe's `inventory.md`.
+
+Replacement is offered only where the app can get the surface's content
+and act on it through CefKit (`Kind.capabilities`, the guide's table), not
+uniformly: CEF has no API for translation, saved passwords, autofill,
+device choosers, payments or print preview, so those kinds can be
+observed, hidden and dismissed but not replaced.
+
+### Chrome style and a dark page's canvas
+
+A `color-scheme: dark` page without a background of its own shows the
+browser's `backgroundColor` in Chrome style, where Alloy shows Blink's dark
+canvas. Blink paints that canvas only when the frame's base background is
+opaque; Chrome style leaves it transparent (the page's own frame reads
+transparent) and paints `kColorWebContentsBackground` behind it, which
+CefKit sets to `backgroundColor`. The CEF C API has nothing that sets the
+base background of a Chrome-style page: `cef_browser_settings_t`'s
+`background_color` does not reach it, `cef_view_t.set_background_color`
+colours the view, and the theme colour is what shows through. The DevTools
+protocol's `Emulation.setDefaultBackgroundColorOverride` sets it, which
+should let Blink paint the dark canvas, but it would keep a DevTools
+session on every Chrome-style page, which pages can notice
+([guide](guide.md#features-that-use-the-devtools-protocol)); it was not
+adopted or tried. SelfTest keeps its two limitation skips.
+
 ## Memory settings measured and not used
 
 These were measured on the Minimal example and are not used: they saved

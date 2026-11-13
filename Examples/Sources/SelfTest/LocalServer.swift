@@ -166,6 +166,10 @@ final class LocalServer: Sendable {
         case "/page":
             html("<title>page</title><p>A page on http, which Chrome's QR code generator accepts.</p>"
                  + "<p>Another page, then a third page.</p><p><a id=link href=/page>A link</a></p>")
+        case "/surfaces":
+            html(SelfTest.surfaceInventoryPage)
+        case "/french":
+            html(SelfTest.surfaceInventoryFrenchPage)
         case "/ping-page":
             html("<title>ping-page</title><a id=link ping=/ping href=/page>A link that pings</a>")
         case "/ping":

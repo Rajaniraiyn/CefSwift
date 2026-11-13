@@ -239,6 +239,8 @@ private final class SurfacePanel: NSPanel {
         hosting.sizingOptions = [.intrinsicContentSize]
         contentView = hosting
         setContentSize(hosting.fittingSize)
+        // VoiceOver names the panel as it would Chromium's bubble.
+        if !surface.title.isEmpty { setAccessibilityLabel(surface.title) }
         // A click outside the panel dismisses it, as with Chromium's bubbles.
         clickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
             nonisolated(unsafe) let event = event
@@ -257,12 +259,12 @@ private final class SurfacePanel: NSPanel {
 
     /// Closes the panel once the surface is dismissed.
     private func followDismissal() {
-        guard let surface, surface.isPresented else {
+        guard let surface, surface.state == .presented else {
             closePanel()
             return
         }
         withObservationTracking {
-            _ = surface.isPresented
+            _ = surface.state
         } onChange: { [weak self] in
             Task { @MainActor in self?.followDismissal() }
         }
@@ -271,8 +273,12 @@ private final class SurfacePanel: NSPanel {
     private func closePanel() {
         if let clickMonitor { NSEvent.removeMonitor(clickMonitor) }
         clickMonitor = nil
+        let parent = parent
+        let wasKey = isKeyWindow
         parent?.removeChildWindow(self)
         orderOut(nil)
+        // Keyboard focus goes back to the page, as from Chromium's bubbles.
+        if wasKey, let parent, parent.isVisible { parent.makeKey() }
     }
 }
 

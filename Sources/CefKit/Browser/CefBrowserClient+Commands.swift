@@ -12,6 +12,11 @@ extension CefBrowserClient {
         h.pointee.on_chrome_command = { s, browser, commandID, disposition in
             let command = CefChromeCommand(rawValue: Int(commandID))
             let disposition = CefWindowOpenDisposition(cefValue: disposition)
+            // Handled, so that Chromium does not run it and end the browser process.
+            if CefChromeCommand.endingTheBrowserProcess.contains(command.rawValue) {
+                cefRelease(browser)
+                return 1
+            }
             return CefBrowserClient.run(s, browser, default: 0) { _, b in
                 b.handleChromeCommand(command, disposition: disposition) ? 1 : 0
             }
