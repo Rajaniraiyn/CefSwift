@@ -11,9 +11,6 @@ final class CefPendingOperations<Value: Sendable> {
     private var waiting: [Int: CheckedContinuation<Value, Error>] = [:]
     private var nextID = 0
 
-    /// How many callers are waiting.
-    var count: Int { waiting.count }
-
     /// Suspends until the operation is completed. `start` runs once the
     /// caller is registered, with the identifier to complete it by; it may
     /// complete it at once. A task cancelled before or while it waits
@@ -36,13 +33,11 @@ final class CefPendingOperations<Value: Sendable> {
         }
     }
 
-    /// Completes one caller. Returns `false` when it was completed already.
-    @discardableResult
-    func complete(_ id: Int, _ result: Result<Value, Error>) -> Bool {
-        guard let continuation = waiting.removeValue(forKey: id) else { return false }
+    /// Completes one caller, unless it was completed already.
+    func complete(_ id: Int, _ result: Result<Value, Error>) {
+        guard let continuation = waiting.removeValue(forKey: id) else { return }
         CefCensus.add(.custom("pending operations"), -1)
         continuation.resume(with: result)
-        return true
     }
 
     /// Completes every waiting caller, oldest first.

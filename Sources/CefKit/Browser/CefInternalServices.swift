@@ -138,11 +138,6 @@ final class CefInternalServices {
         try await call(module, function, arguments, timeout: timeout).decode(Result.self)
     }
 
-    /// Starts `module`'s host, if none is running, and builds the module.
-    func prepare(_ module: CefServiceModule) async throws {
-        _ = try await call(module, "async () => true")
-    }
-
     /// Events `module` emits as `emit(name, payload)`, while one of its hosts
     /// runs with the module built. Subscribing starts nothing and keeps
     /// nothing running. `bufferingPolicy` matches the events' meaning:
@@ -270,7 +265,7 @@ final class CefServiceHostBrowser {
         self.host = host
         self.services = services
         self.profile = services.profile
-        delegate.onTerminated = { [weak self] _ in self?.stop() }
+        delegate.onTerminated = { [weak self] in self?.stop() }
         eventBridge.handle("event") { [weak self] (event: ModuleEvent) in
             self?.services?.deliver(module: event.module, name: event.name, payload: event.payload ?? .null)
         }
@@ -419,9 +414,9 @@ final class CefServiceHostBrowser {
 /// Watches a service browser for a dead renderer, whose pending evaluations
 /// would otherwise never finish.
 private final class ServiceBrowserDelegate: CefBrowserDelegate {
-    fileprivate var onTerminated: ((CefBrowser) -> Void)?
+    fileprivate var onTerminated: (() -> Void)?
 
     func browser(_ browser: CefBrowser, renderProcessDidTerminate reason: CefTerminationReason) {
-        onTerminated?(browser)
+        onTerminated?()
     }
 }

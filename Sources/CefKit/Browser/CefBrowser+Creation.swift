@@ -182,13 +182,6 @@ extension CefBrowser {
         handleClosed()
     }
 
-    /// The offscreen host a browser discarded by closing it is created
-    /// again in.
-    var restoringOffscreenHost: CefOffscreenHost? {
-        get { offscreenHostBox.host }
-        set { offscreenHostBox.host = newValue }
-    }
-
     /// Takes over the live `cef_browser_t` once Chromium has created it.
     func adopt(_ raw: CefRef<cef_browser_t>) {
         self.raw = raw

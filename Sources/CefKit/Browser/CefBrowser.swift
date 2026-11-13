@@ -170,7 +170,9 @@ public final class CefBrowser: Identifiable {
 
     @ObservationIgnored var raw: CefRef<cef_browser_t>?
     @ObservationIgnored var client: CefBrowserClient?
-    @ObservationIgnored let offscreenHostBox = WeakOffscreenHost()
+    /// The offscreen host a browser discarded by closing it is created
+    /// again in.
+    @ObservationIgnored weak var restoringOffscreenHost: CefOffscreenHost?
     @ObservationIgnored var initialURL: URL?
     @ObservationIgnored var isBootstrapping = false
     @ObservationIgnored var passkeyAuthenticator: CefPasskeyAuthenticator?
@@ -515,8 +517,4 @@ public struct CefJavaScriptError: Error, Sendable, CustomStringConvertible {
 
 private struct WeakWindow {
     weak var window: NSWindow?
-}
-
-final class WeakOffscreenHost {
-    weak var host: CefOffscreenHost?
 }

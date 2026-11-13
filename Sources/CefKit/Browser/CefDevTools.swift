@@ -224,7 +224,6 @@ public final class CefDevTools {
     // MARK: Internal listeners
 
     /// Registers a synchronous event listener. Returns a token for removal.
-    @discardableResult
     func addListener(for method: String, _ handler: @escaping @MainActor (CefJSON) -> Void) -> UUID {
         let token = UUID()
         listeners[method, default: [:]][token] = handler
@@ -262,18 +261,15 @@ public final class CefDevTools {
 
     // MARK: Observer
 
-    /// Attaches the observer unless it is attached already. Returns whether
-    /// it attached now.
-    @discardableResult
-    private func attachIfNeeded(to browser: CefBrowser) -> Bool {
-        guard registration == nil else { return false }
+    /// Attaches the observer unless it is attached already.
+    private func attachIfNeeded(to browser: CefBrowser) {
+        guard registration == nil else { return }
         let observer = DevToolsObserver(devTools: self).makeObserver()
         // add_dev_tools_message_observer takes over the observer reference;
         // the returned registration keeps it installed until released.
         registration = browser.withHost { host in
             CefRef(adopting: host.pointee.add_dev_tools_message_observer(host, observer))
         } ?? nil
-        return registration != nil
     }
 
     fileprivate func received(result: Data, forMessage id: Int32, succeeded: Bool) {

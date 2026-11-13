@@ -94,16 +94,14 @@ extension CefBrowser {
         frames[index].url = url
     }
 
-    /// Runs `body` with the live frame `id`; returns whether it ran.
-    @discardableResult
-    func withFrame(_ id: CefFrame.ID, _ body: (UnsafeMutablePointer<cef_frame_t>) -> Void) -> Bool {
+    /// Runs `body` with the live frame `id`, if there is one.
+    func withFrame(_ id: CefFrame.ID, _ body: (UnsafeMutablePointer<cef_frame_t>) -> Void) {
         guard let raw = raw?.pointer,
               let frame = CefStringUtil.withCefString(id, { raw.pointee.get_frame_by_identifier(raw, $0) })
-        else { return false }
+        else { return }
         defer { cefRelease(frame) }
-        guard frame.pointee.is_valid(frame) != 0 else { return false }
+        guard frame.pointee.is_valid(frame) != 0 else { return }
         body(frame)
-        return true
     }
 
     /// Evaluates JavaScript in `frame` and returns its value, as
