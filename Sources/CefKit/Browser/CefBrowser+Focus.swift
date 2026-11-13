@@ -83,19 +83,34 @@ extension CefBrowser {
                 new Promise(resolve => document.hasFocus() ? resolve(0)
                     : addEventListener('focus', () => resolve(0), { once: true }))
                 """, timeout: .seconds(2))
-            guard state == .live, let view = hostView, let window = view.window, isFirstResponderInside(view) else { return }
-            if isOffscreen {
-                let modifiers: CefEventModifiers = reverse ? [.shift] : []
-                // VK_TAB, kVK_Tab.
-                for phase in [CefKeyEvent.Phase.rawKeyDown, .character, .keyUp] {
-                    sendKeyEvent(CefKeyEvent(phase: phase, modifiers: modifiers, windowsKeyCode: 0x09, nativeKeyCode: 48,
-                                             character: "\t", unmodifiedCharacter: "\t"))
-                }
-            } else {
-                // A windowed browser takes keys from AppKit, through its
-                // native view; CEF's send_key_event does not reach its page.
-                Self.sendTabKey(to: window, reverse: reverse)
+            // A key can still be dropped by a renderer that is busy taking
+            // focus, so the press is repeated, a few times at most, while
+            // the page has focus and nothing in it does.
+            for _ in 0..<3 {
+                guard state == .live, let view = hostView, let window = view.window, isFirstResponderInside(view) else { return }
+                sendTabKey(in: window, reverse: reverse)
+                try? await Task.sleep(for: .milliseconds(250))
+                let moved = try? await evaluateJavaScript(
+                    "document.activeElement !== null && document.activeElement !== document.body",
+                    timeout: .seconds(2))
+                if moved != .bool(false) { return }
             }
+        }
+    }
+
+    /// Sends the page a Tab (or Shift-Tab) press.
+    private func sendTabKey(in window: NSWindow, reverse: Bool) {
+        if isOffscreen {
+            let modifiers: CefEventModifiers = reverse ? [.shift] : []
+            // VK_TAB, kVK_Tab.
+            for phase in [CefKeyEvent.Phase.rawKeyDown, .character, .keyUp] {
+                sendKeyEvent(CefKeyEvent(phase: phase, modifiers: modifiers, windowsKeyCode: 0x09, nativeKeyCode: 48,
+                                         character: "\t", unmodifiedCharacter: "\t"))
+            }
+        } else {
+            // A windowed browser takes keys from AppKit, through its
+            // native view; CEF's send_key_event does not reach its page.
+            Self.sendTabKey(to: window, reverse: reverse)
         }
     }
 
