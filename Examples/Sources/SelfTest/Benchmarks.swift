@@ -48,9 +48,8 @@ enum Benchmarks {
                 return .setHeaders(["X-Bench": "1"])
             }
             let browser = CefBrowser(url: URL(string: "selftest://bench/page.html?big=/big-\(kind)")!, configuration: configuration)
-            let view = CefWindowedBrowserView()
+            let view = CefWindowedBrowserView(browser: browser)
             view.frame = SelfTest.window.contentView!.bounds
-            SelfTest.window.contentView!.addSubview(view)
             let meter = MainThreadMeter()
             let memory = MemorySampler()
             CefDiagnostics.isEnabled = true
@@ -59,7 +58,7 @@ enum Benchmarks {
             let start = ContinuousClock.now
             meter.start()
             memory.start()
-            view.browser = browser
+            SelfTest.window.contentView!.addSubview(view)
             _ = await SelfTest.waitUntil(timeout: .seconds(120)) { browser.title.hasPrefix("done") }
             let elapsed = ContinuousClock.now - start
             meter.stop()

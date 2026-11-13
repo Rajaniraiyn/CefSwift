@@ -1,6 +1,5 @@
 import AppKit
 @_spi(Testing) import CefKit
-import CefSwiftUI
 
 /// Shows one page in one kind of host with one set of CefSwift features
 /// turned on, for the web-compatibility matrix (`Scripts/compat-matrix.py`).
@@ -85,12 +84,10 @@ enum CompatApp {
             window.title = "Compat"
             let view: NSView
             if offscreen {
-                let offscreenView = CefOffscreenBrowserView()
-                offscreenView.browser = browser
+                let offscreenView = CefOffscreenBrowserView(browser: browser)
                 view = offscreenView
             } else {
-                let windowedView = CefWindowedBrowserView()
-                windowedView.browser = browser
+                let windowedView = CefWindowedBrowserView(browser: browser)
                 view = windowedView
             }
             view.frame = window.contentView!.bounds

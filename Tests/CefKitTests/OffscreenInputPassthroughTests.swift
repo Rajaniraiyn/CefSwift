@@ -2,7 +2,7 @@ import AppKit
 import Foundation
 import Testing
 
-@testable import CefSwiftUI
+@testable import CefKit
 
 /// Drag data leaving an offscreen browser.
 @MainActor

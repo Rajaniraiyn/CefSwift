@@ -1,5 +1,4 @@
 import AppKit
-import CefKit
 import Foundation
 
 // Drag and drop in both directions: drags from other apps are passed to the

@@ -25,7 +25,8 @@ The default build system links the helper-startup library without the
 Address Sanitizer runtime, so that one uses the native build system.
 
 The Command Line Tools are enough; Xcode is not required. `CefKitTests`
-covers CefKit, `CefSwiftUITests` the views, and `CefPluginTests` the
+covers CefKit and its AppKit views, `CefKitAppKitTests` hosts a browser
+through CefKit's public API alone (no SwiftUI), and `CefPluginTests` the
 plugin's signing, distribution and bundle-assembly logic; none of them
 starts Chromium.
 

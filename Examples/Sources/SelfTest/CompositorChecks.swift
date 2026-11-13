@@ -121,7 +121,7 @@ extension Benchmarks {
 @MainActor
 final class CompositorStage {
     let window: NSWindow
-    let view = CefOffscreenBrowserView()
+    let view: CefOffscreenBrowserView
     let browser: CefBrowser
     private var timer: Timer?
     private var observation: NSKeyValueObservation?
@@ -178,10 +178,10 @@ final class CompositorStage {
         var configuration = CefBrowser.Configuration()
         configuration.rendering = .offscreen(frameRate: 120)
         browser = CefBrowser(url: URL(string: "selftest://bench/\(page.rawValue).html")!, configuration: configuration)
+        view = CefOffscreenBrowserView(browser: browser)
         view.frame = window.contentView!.bounds
         view.autoresizingMask = [.width, .height]
         window.contentView!.addSubview(view)
-        view.browser = browser
         window.orderFrontRegardless()
         guard await SelfTest.waitUntil({ browser.title == page.rawValue }) else { return nil }
         observation = view.layer?.sublayers?.first?.observe(\.contents, options: [.new]) { [weak self] _, _ in

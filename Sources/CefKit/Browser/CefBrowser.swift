@@ -86,7 +86,7 @@ public final class CefBrowser: Identifiable {
     /// forward. At -1 or 1 and beyond, releasing navigates. Use it to draw
     /// your own indicator with
     /// ``CefBrowser/Configuration/navigationGestureIndicator`` set to `.hidden`.
-    public package(set) var navigationGestureProgress = 0.0
+    public internal(set) var navigationGestureProgress = 0.0
     /// The latest result of ``find(_:backwards:caseSensitive:)``.
     public internal(set) var findResult: CefBrowser.FindResult?
     /// Whether the page responds to input. Chromium reports a page whose

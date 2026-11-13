@@ -6,10 +6,12 @@ How CefSwift works inside, and why. For how to use it, see the
 ## Modules
 
 ```
-CefSwiftUI   CefSwiftApp, CefWebView, CefWindowedBrowserView, CefOffscreenBrowserView,
+CefSwiftUI   CefSwiftApp, CefWebView (over CefKit's host views), SwiftUI modifiers,
     │        CefBrowserWindow.setToolbar and setTabAccessory
 CefKit       CefRuntime, CefBrowser, CefBrowserWindow, CefBrowserDelegate, CefBridge,
-    │        CefDevTools, CefProfile, configuration and policy types
+    │        CefDevTools, CefProfile, configuration and policy types; the AppKit
+    │        host views CefWindowedBrowserView and CefOffscreenBrowserView
+    │        (with its compositor and accessibility elements), no SwiftUI
 CCef         vendored CEF C headers, the generated bridge, the runtime loader (C)
 
 CefBase      reference counting, strings and process messages, shared by

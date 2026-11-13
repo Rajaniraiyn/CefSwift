@@ -2,31 +2,6 @@ import AppKit
 import CefKit
 import SwiftUI
 
-extension NSView {
-    /// Adds, updates or removes the built-in swipe indicator over this host
-    /// view, following the browser's options, and returns the indicator
-    /// now installed. `isAllowed` is false when the app draws an indicator
-    /// of its own.
-    func updatedGestureIndicator(
-        _ indicator: CefNavigationGestureIndicatorView?, browser: CefBrowser?, isAllowed: Bool
-    ) -> CefNavigationGestureIndicatorView? {
-        guard isAllowed, let browser, browser.configuration.allowsBackForwardNavigationGestures,
-              browser.configuration.navigationGestureIndicator != .hidden
-        else {
-            indicator?.removeFromSuperview()
-            return nil
-        }
-        let view = indicator ?? CefNavigationGestureIndicatorView()
-        view.browser = browser
-        if view.superview !== self {
-            view.frame = bounds
-            view.autoresizingMask = [.width, .height]
-            addSubview(view, positioned: .above, relativeTo: nil)
-        }
-        return view
-    }
-}
-
 extension CefWebView {
     /// Replaces the built-in swipe indicator with a view of your own, laid
     /// over the page. `content` receives

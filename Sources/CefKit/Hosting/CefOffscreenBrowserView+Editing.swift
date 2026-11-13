@@ -1,5 +1,4 @@
 import AppKit
-import CefKit
 import Foundation
 
 // Keyboard shortcuts and the Edit menu.

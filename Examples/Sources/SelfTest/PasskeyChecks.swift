@@ -37,10 +37,9 @@ extension SelfTest {
         var window: CefBrowserWindow?
         var view: CefWindowedBrowserView?
         if style == "Alloy" {
-            let hosted = CefWindowedBrowserView()
+            let hosted = CefWindowedBrowserView(browser: browser)
             hosted.frame = SelfTest.window.contentView!.bounds
             SelfTest.window.contentView!.addSubview(hosted)
-            hosted.browser = browser
             view = hosted
         } else {
             window = CefBrowserWindow(browser: browser)

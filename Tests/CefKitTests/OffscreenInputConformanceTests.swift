@@ -2,7 +2,7 @@ import AppKit
 import Foundation
 import Testing
 
-@testable import CefSwiftUI
+@testable import CefKit
 
 /// Key-equivalent forwarding, modifier flags and extra mouse buttons in the
 /// offscreen browser view.

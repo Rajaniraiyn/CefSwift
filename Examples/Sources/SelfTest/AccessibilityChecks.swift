@@ -249,11 +249,10 @@ extension SelfTest {
             configuration.rendering = .offscreen
             configuration.offscreenAccessibility = mode
             let browser = CefBrowser(url: URL(string: "selftest://ax/large.html")!, configuration: configuration)
-            let view = CefOffscreenBrowserView()
+            let view = CefOffscreenBrowserView(browser: browser)
             view.frame = window.contentView!.bounds
-            window.contentView!.addSubview(view)
             let start = ContinuousClock.now
-            view.browser = browser
+            window.contentView!.addSubview(view)
             _ = await loaded(browser, title: "large", timeout: .seconds(30))
             let loaded = ContinuousClock.now - start
             var treeReady = Duration.zero

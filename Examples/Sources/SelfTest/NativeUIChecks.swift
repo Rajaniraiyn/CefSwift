@@ -387,12 +387,10 @@ extension SelfTest {
             let browser = CefBrowser(url: URL(string: "selftest://app/second.html")!, configuration: configuration)
             let view: NSView
             if rendering == .windowed {
-                let windowed = CefWindowedBrowserView()
-                windowed.browser = browser
+                let windowed = CefWindowedBrowserView(browser: browser)
                 view = windowed
             } else {
-                let offscreen = CefOffscreenBrowserView()
-                offscreen.browser = browser
+                let offscreen = CefOffscreenBrowserView(browser: browser)
                 view = offscreen
             }
             view.frame = window.contentView!.bounds

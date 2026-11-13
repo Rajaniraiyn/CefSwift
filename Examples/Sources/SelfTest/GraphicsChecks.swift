@@ -29,12 +29,10 @@ extension SelfTest {
             let browser = CefBrowser(url: URL(string: "selftest://edge/tab.html")!, configuration: configuration)
             let view: NSView
             if offscreen {
-                let hosting = CefOffscreenBrowserView()
-                hosting.browser = browser
+                let hosting = CefOffscreenBrowserView(browser: browser)
                 view = hosting
             } else {
-                let hosting = CefWindowedBrowserView()
-                hosting.browser = browser
+                let hosting = CefWindowedBrowserView(browser: browser)
                 view = hosting
             }
             view.frame = window.contentView!.bounds

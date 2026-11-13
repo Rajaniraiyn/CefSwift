@@ -66,10 +66,9 @@ extension SelfTest {
         var embeddedOptions = CefBrowser.Configuration()
         embeddedOptions.profile = .incognito()
         let embedded = CefBrowser(url: url, configuration: embeddedOptions, delegate: embeddedRecorder)
-        let view = CefWindowedBrowserView()
+        let view = CefWindowedBrowserView(browser: embedded)
         view.frame = SelfTest.window.contentView!.bounds
         SelfTest.window.contentView!.addSubview(view)
-        view.browser = embedded
         check("authentication (embedded): the delegate answers the challenge",
               await waitUntil { embedded.title == "authorized" } && embeddedRecorder.challenges.count == 1,
               detail: "title '\(embedded.title)', \(embeddedRecorder.loadErrors)")
@@ -100,10 +99,9 @@ extension SelfTest {
         let recorder = Recorder()
         recorder.credential = CefCredential(username: "grace", password: "hopper")
         let browser = CefBrowser(url: URL(string: "about:blank")!, configuration: configuration, delegate: recorder)
-        let view = CefWindowedBrowserView()
+        let view = CefWindowedBrowserView(browser: browser)
         view.frame = SelfTest.window.contentView!.bounds
         SelfTest.window.contentView!.addSubview(view)
-        view.browser = browser
         defer {
             browser.close(force: true)
             view.removeFromSuperview()
@@ -162,10 +160,9 @@ extension SelfTest {
         // Chromium shows its sign-in window on its own.
         let embeddedRecorder = Recorder()
         let embedded = CefBrowser(url: url, delegate: embeddedRecorder)
-        let view = CefWindowedBrowserView()
+        let view = CefWindowedBrowserView(browser: embedded)
         view.frame = SelfTest.window.contentView!.bounds
         SelfTest.window.contentView!.addSubview(view)
-        view.browser = embedded
         let failed = await waitUntil { embeddedRecorder.loadErrors.contains { $0.code == -338 } }
         check("embedded: fails with ERR_INVALID_AUTH_CREDENTIALS, delegate not asked",
               failed && embeddedRecorder.challenges.isEmpty, detail: "\(embeddedRecorder.loadErrors)")

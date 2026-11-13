@@ -20,6 +20,31 @@ extension CefBrowser {
     }
 }
 
+extension NSView {
+    /// Adds, updates or removes the built-in swipe indicator over this host
+    /// view, following the browser's options, and returns the indicator
+    /// now installed. `isAllowed` is false when the app draws an indicator
+    /// of its own.
+    func updatedGestureIndicator(
+        _ indicator: CefNavigationGestureIndicatorView?, browser: CefBrowser?, isAllowed: Bool
+    ) -> CefNavigationGestureIndicatorView? {
+        guard isAllowed, let browser, browser.configuration.allowsBackForwardNavigationGestures,
+              browser.configuration.navigationGestureIndicator != .hidden
+        else {
+            indicator?.removeFromSuperview()
+            return nil
+        }
+        let view = indicator ?? CefNavigationGestureIndicatorView()
+        view.browser = browser
+        if view.superview !== self {
+            view.frame = bounds
+            view.autoresizingMask = [.width, .height]
+            addSubview(view, positioned: .above, relativeTo: nil)
+        }
+        return view
+    }
+}
+
 /// The indicator drawn for ``CefBrowser/NavigationGestureIndicator/automatic``.
 ///
 /// It follows a browser's ``CefBrowser/navigationGestureProgress``: hidden at
@@ -28,22 +53,22 @@ extension CefBrowser {
 /// ±1 on, where releasing navigates. Beyond that it resists, as a
 /// rubber band does. Place it over the page; it never takes events.
 @MainActor
-package final class CefNavigationGestureIndicatorView: NSView {
+final class CefNavigationGestureIndicatorView: NSView {
     /// Diameter of the circle.
     private static let diameter: CGFloat = 44
     /// How far the circle's edge travels from the page edge at progress 1.
     private static let travel: CGFloat = 72
 
-    package weak var browser: CefBrowser? {
+    weak var browser: CefBrowser? {
         didSet { observeProgress() }
     }
 
     /// The progress shown: -1…1 and beyond, as
     /// ``CefBrowser/navigationGestureProgress``.
-    package private(set) var progress = 0.0
+    private(set) var progress = 0.0
 
     /// Whether the indicator is showing, for tests.
-    package var isShowingIndicator: Bool { !circle.isHidden && circle.opacity > 0 }
+    var isShowingIndicator: Bool { !circle.isHidden && circle.opacity > 0 }
 
     private let circle = CALayer()
     private let chevron = CAShapeLayer()
@@ -51,7 +76,7 @@ package final class CefNavigationGestureIndicatorView: NSView {
     /// The direction ``chevron``'s path points, once it has one.
     private var chevronPointsBack: Bool?
 
-    package init() {
+    init() {
         super.init(frame: .zero)
         wantsLayer = true
         layer?.masksToBounds = true
@@ -74,15 +99,15 @@ package final class CefNavigationGestureIndicatorView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { nil }
 
-    package override func hitTest(_ point: NSPoint) -> NSView? { nil }
-    package override var isFlipped: Bool { true }
-    package override var wantsUpdateLayer: Bool { true }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    override var isFlipped: Bool { true }
+    override var wantsUpdateLayer: Bool { true }
 
-    package override func updateLayer() {
+    override func updateLayer() {
         applyColors()
     }
 
-    package override func layout() {
+    override func layout() {
         super.layout()
         update(animated: false)
     }
@@ -98,7 +123,7 @@ package final class CefNavigationGestureIndicatorView: NSView {
     }
 
     /// Shows `value` without a browser, for previews and tests.
-    package func setProgress(_ value: Double) {
+    func setProgress(_ value: Double) {
         let wasShowing = progress != 0
         progress = value
         update(animated: wasShowing && value == 0)
@@ -341,7 +366,7 @@ extension CefBrowser {
     ///
     /// For views that host the browser; Chrome-style browsers swipe
     /// natively.
-    package func beginHistorySwipeIfNeeded(with event: NSEvent) -> Bool {
+    func beginHistorySwipeIfNeeded(with event: NSEvent) -> Bool {
         guard configuration.allowsBackForwardNavigationGestures,
               NSEvent.isSwipeTrackingFromScrollEventsEnabled,
               event.phase == .began,
@@ -364,7 +389,7 @@ extension CefBrowser {
     /// Handles the dedicated navigation swipe (three fingers, or as set in
     /// System Settings). Returns whether it navigated.
     @discardableResult
-    package func handleNavigationSwipe(_ event: NSEvent) -> Bool {
+    func handleNavigationSwipe(_ event: NSEvent) -> Bool {
         guard configuration.allowsBackForwardNavigationGestures else { return false }
         if event.deltaX > 0, canGoBack {
             goBack()

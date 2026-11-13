@@ -17,6 +17,11 @@ PRELUDE declares them, as stubs; it declares no CefSwift API. A sample
 that needs a name it does not have fails, and so does one that uses API
 CefSwift does not have.
 
+A sample that imports `CefKit` and neither `SwiftUI` nor `CefSwiftUI` is
+an AppKit app's: it compiles in a target of its own that depends on the
+`CefKit` product only, with no prelude and no added imports, so it proves
+that what it shows needs no SwiftUI.
+
     Scripts/check-doc-samples.py            # build every sample
     Scripts/check-doc-samples.py --list     # print the samples and how each compiles
 
@@ -137,6 +142,11 @@ def kind(source):
     return "statements"
 
 
+def is_appkit_only(source):
+    imports = {line.strip() for line in source.splitlines() if line.startswith("import ")}
+    return "import CefKit" in imports and not imports & {"import SwiftUI", "import CefSwiftUI"}
+
+
 def render(number, source):
     """The Swift file for a sample, and the imports it hoists."""
     lines = source.splitlines()
@@ -169,14 +179,17 @@ def main():
     found = list(samples())
     if args.list:
         for number, (document, line, source) in enumerate(found, 1):
-            print(f"{number:3} {document.relative_to(ROOT)}:{line} {kind(source)}")
+            appkit = ", AppKit only" if is_appkit_only(source) else ""
+            print(f"{number:3} {document.relative_to(ROOT)}:{line} {kind(source)}{appkit}")
         return 0
 
     package = args.scratch
     sources = package / "Sources" / "DocSamples"
-    if sources.exists():
-        shutil.rmtree(sources)
-    sources.mkdir(parents=True)
+    appkit_sources = package / "Sources" / "AppKitDocSamples"
+    for directory in (sources, appkit_sources):
+        if directory.exists():
+            shutil.rmtree(directory)
+        directory.mkdir(parents=True)
     (package / "Package.swift").write_text(f"""\
 // swift-tools-version: 6.0
 import PackageDescription
@@ -189,17 +202,24 @@ let package = Package(
         .target(name: "DocSamples", dependencies: [
             .product(name: "CefSwiftUI", package: "CefSwift"),
         ]),
+        // Samples for AppKit apps: CefKit only, no SwiftUI.
+        .target(name: "AppKitDocSamples", dependencies: [
+            .product(name: "CefKit", package: "CefSwift"),
+        ]),
     ]
 )
 """)
     (sources / "Prelude.swift").write_text(PRELUDE)
+    # A target needs a source file even when no sample is AppKit only.
+    (appkit_sources / "Empty.swift").write_text("import CefKit\n")
     origins = {}
     for number, (document, line, source) in enumerate(found, 1):
         if kind(source) == "skipped":
             continue
         imports, text = render(number, source)
-        file = sources / f"Sample{number:03}.swift"
-        header = "\n".join(sorted(set(imports) | {"import AppKit", "import CefSwiftUI", "import SwiftUI"}))
+        file = (appkit_sources if is_appkit_only(source) else sources) / f"Sample{number:03}.swift"
+        added = set() if is_appkit_only(source) else {"import AppKit", "import CefSwiftUI", "import SwiftUI"}
+        header = "\n".join(sorted(set(imports) | added))
         file.write_text(f"// {document.relative_to(ROOT)}:{line}\n{header}\n\n{text}")
         origins[file.name] = f"{document.relative_to(ROOT)}:{line}"
 

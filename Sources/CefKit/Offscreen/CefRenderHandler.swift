@@ -107,7 +107,7 @@ public struct CefOffscreenViewInfo: Sendable {
 /// The view that displays an offscreen browser: it supplies geometry and
 /// receives frames, cursor changes, popups, IME ranges, menus and drags.
 ///
-/// CefSwiftUI's offscreen browser view implements this. Every method is
+/// ``CefOffscreenBrowserView`` implements this. Every method is
 /// called on the main thread.
 @MainActor
 public protocol CefOffscreenHost: AnyObject {

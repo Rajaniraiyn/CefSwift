@@ -242,17 +242,15 @@ enum SelfTest {
     /// Shows `browser` in a windowed view that fills the test window, less
     /// `inset` points at the top and bottom.
     static func hostWindowed(_ browser: CefBrowser, inset: CGFloat = 0) -> CefWindowedBrowserView {
-        let view = CefWindowedBrowserView()
+        let view = CefWindowedBrowserView(browser: browser)
         host(view, inset: inset)
-        view.browser = browser
         return view
     }
 
     /// Shows `browser` in an offscreen view, as ``hostWindowed(_:inset:)``.
     static func hostOffscreen(_ browser: CefBrowser, inset: CGFloat = 0) -> CefOffscreenBrowserView {
-        let view = CefOffscreenBrowserView()
+        let view = CefOffscreenBrowserView(browser: browser)
         host(view, inset: inset)
-        view.browser = browser
         return view
     }
 
