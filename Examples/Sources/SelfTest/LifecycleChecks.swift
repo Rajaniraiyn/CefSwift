@@ -8,7 +8,6 @@ import CefSwiftUI
 /// kind of host; and the energy saver's offscreen frame rate.
 extension SelfTest {
     static func lifecycleChecks() async {
-        CefRuntime.shared.registerSchemeHandler(scheme: "selftest", domain: "bench", handler: BenchmarkPages())
         window.orderOut(nil)
         defer { window.orderFront(nil) }
         for host in BenchmarkHost.allCases {
@@ -148,28 +147,28 @@ extension SelfTest {
         _ = await waitUntil { hosted.browser.title == "animated" }
         try? await Task.sleep(for: .milliseconds(500))
         let browser = hosted.browser
-        /// The rate Chromium was told, and the page's animation frames in
-        /// each of three seconds.
-        func sample() async -> String {
+        /// The rate Chromium was told and, where the check reads them, the
+        /// page's animation frames in each of three seconds.
+        func sample(frames: Bool) async -> String {
             try? await Task.sleep(for: .milliseconds(300))
             var rates: [Int] = []
-            for _ in 0..<3 { rates.append(await animationFrameRate(browser)) }
+            if frames { for _ in 0..<3 { rates.append(await animationFrameRate(browser)) } }
             return "\(browser.currentOffscreenFrameRate ?? -1) \(rates)"
         }
-        let normal = await sample()
+        let normal = await sample(frames: false)
         CefRuntime.shared.simulateEnergyConditions(lowPowerMode: true, thermalState: .nominal)
-        let lowPower = await sample()
+        let lowPower = await sample(frames: true)
         hosted.window.contentView?.subviews.first?.isHidden = true
         try? await Task.sleep(for: .milliseconds(300))
         hosted.window.contentView?.subviews.first?.isHidden = false
-        let shownAgain = await sample()
+        let shownAgain = await sample(frames: true)
         CefRuntime.shared.simulateEnergyConditions(lowPowerMode: false, thermalState: .serious)
-        let hot = await sample()
+        let hot = await sample(frames: true)
         CefRuntime.shared.energyPolicy = .disabled
-        let off = await sample()
+        let off = await sample(frames: false)
         CefRuntime.shared.energyPolicy = .automatic
         CefRuntime.shared.stopSimulatingEnergyConditions()
-        let back = await sample()
+        let back = await sample(frames: false)
         // On battery with Low Power Mode on, the Mac itself constrains energy.
         let unsimulated = ProcessInfo.processInfo.isLowPowerModeEnabled
             || [.serious, .critical].contains(ProcessInfo.processInfo.thermalState) ? 30 : 60

@@ -16,10 +16,7 @@ extension SelfTest {
 
     private static func plainBrowserChecks() async {
         let browser = CefBrowser(url: URL(string: "selftest://app/compat.html")!)
-        let view = CefWindowedBrowserView()
-        view.frame = window.contentView!.bounds
-        window.contentView!.addSubview(view)
-        view.browser = browser
+        let view = hostWindowed(browser)
         _ = await waitUntil { browser.title == "compat" && !browser.isLoading }
 
         await expect("compatibility: navigator.webdriver is false") {
@@ -34,9 +31,7 @@ extension SelfTest {
         check("compatibility: a plain browser has no DevTools session",
               browser.devTools.sentMessageCount == 0 && !browser.devTools.isAttached,
               detail: "\(browser.devTools.sentMessageCount) messages")
-        browser.close(force: true)
-        _ = await waitUntil { browser.state == .closed }
-        view.removeFromSuperview()
+        await closeHosted(browser, view)
     }
 
     private static func bridgeAndScriptChecks() async {
@@ -54,10 +49,7 @@ extension SelfTest {
                 injectionTime: .documentEnd, frames: .mainFrame),
         ]
         let browser = CefBrowser(url: URL(string: "selftest://app/compat.html")!, configuration: configuration)
-        let view = CefWindowedBrowserView()
-        view.frame = window.contentView!.bounds
-        window.contentView!.addSubview(view)
-        view.browser = browser
+        let view = hostWindowed(browser)
         _ = await waitUntil { browser.title == "compat" && !browser.isLoading }
 
         await expect("compatibility: user scripts run at document start and end") {
@@ -86,9 +78,7 @@ extension SelfTest {
         check("compatibility: bridges, user scripts and evaluation use no DevTools session",
               browser.devTools.sentMessageCount == 0 && !browser.devTools.isAttached,
               detail: "\(browser.devTools.sentMessageCount) messages")
-        browser.close(force: true)
-        _ = await waitUntil { browser.state == .closed }
-        view.removeFromSuperview()
+        await closeHosted(browser, view)
     }
 
     private static func offscreenGeometryChecks() async {
@@ -99,14 +89,11 @@ extension SelfTest {
         var configuration = CefBrowser.Configuration()
         configuration.rendering = .offscreen
         let browser = CefBrowser(url: URL(string: "selftest://app/compat.html")!, configuration: configuration)
-        let view = CefOffscreenBrowserView()
-        view.frame = window.contentView!.bounds
-        window.contentView!.addSubview(view)
-        view.browser = browser
+        let view = hostOffscreen(browser)
         _ = await waitUntil { browser.title == "compat" && !browser.isLoading }
 
         guard let screen = window.screen else {
-            print("SKIP [environment] compatibility: offscreen geometry — the test window has no screen")
+            skip("compatibility: offscreen geometry", because: "the test window has no screen", .environment)
             return
         }
         let primaryHeight = NSScreen.screens.first?.frame.height ?? screen.frame.maxY
@@ -136,8 +123,6 @@ extension SelfTest {
                 return rate >= 50
             }
         }
-        browser.close(force: true)
-        _ = await waitUntil { browser.state == .closed }
-        view.removeFromSuperview()
+        await closeHosted(browser, view)
     }
 }

@@ -259,11 +259,7 @@ extension SelfTest {
     static func viewDiscardChecks() async {
         let recorder = DiscardRecorder()
         let browser = CefBrowser(url: URL(string: "selftest://edge/heavy.html?view")!, configuration: discardConfiguration(), delegate: recorder)
-        let view = CefWindowedBrowserView()
-        view.frame = window.contentView!.bounds
-        view.autoresizingMask = [.width, .height]
-        window.contentView!.addSubview(view)
-        view.browser = browser
+        let view = hostWindowed(browser)
         _ = await waitUntil { browser.title == "heavy" && !browser.isLoading }
         let renderer = await allocateInRenderer(browser)
         _ = try? await browser.devTools.send("Runtime.enable")
@@ -327,11 +323,7 @@ extension SelfTest {
         let tabWindow = CefBrowserWindow(browser: tab)
         tabWindow.show()
         let viewed = CefBrowser(url: URL(string: "selftest://edge/tab.html?quit-view")!)
-        let view = CefWindowedBrowserView()
-        view.frame = window.contentView!.bounds
-        view.autoresizingMask = [.width, .height]
-        window.contentView!.addSubview(view)
-        view.browser = viewed
+        let view = hostWindowed(viewed)
         _ = await waitUntil { [tab, viewed].allSatisfy { $0.title == "tab" && !$0.isLoading } }
         tabWindow.hide()
         view.isHidden = true

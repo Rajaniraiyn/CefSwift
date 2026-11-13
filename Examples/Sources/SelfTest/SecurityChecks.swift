@@ -8,21 +8,18 @@ import Security
 /// skipped as environment.
 extension SelfTest {
     static func securityChecks() async {
-        CefRuntime.shared.registerSchemeHandler(scheme: "https", domain: "cefswift.test", handler: CapabilityPages())
         let recorder = SecurityRecorder()
         var configuration = CefBrowser.Configuration()
         configuration.clientCertificates = .delegate
         let browser = CefBrowser(url: URL(string: "selftest://app/second.html")!, configuration: configuration)
         browser.delegate = recorder
-        let view = CefWindowedBrowserView()
-        view.frame = window.contentView!.bounds
-        window.contentView!.addSubview(view)
-        view.browser = browser
+        let view = hostWindowed(browser)
 
-        func load(_ url: URL, title: String? = nil) async -> Bool {
+        /// Loads `url` and waits until it finishes or `orUntil` holds.
+        func load(_ url: URL, title: String? = nil, orUntil done: () -> Bool = { false }) async -> Bool {
             browser.load(url)
             return await waitUntil(timeout: .seconds(20)) {
-                browser.url?.host() == url.host() && !browser.isLoading && (title == nil || browser.title == title)
+                done() || browser.url?.host() == url.host() && !browser.isLoading && (title == nil || browser.title == title)
             }
         }
 
@@ -58,7 +55,8 @@ extension SelfTest {
             skip("security: a public HTTPS site", because: "https://example.com did not load (offline?)", .environment)
         }
 
-        if await load(URL(string: "https://expired.badssl.com/")!) || recorder.certificateErrors.count > 0 {
+        // A refused certificate may leave the previous page in place.
+        if await load(URL(string: "https://expired.badssl.com/")!, orUntil: { !recorder.certificateErrors.isEmpty }) {
             let error = recorder.certificateErrors.first
             check("security: a certificate error carries the certificate and its status",
                   error?.status.contains(.dateInvalid) == true && error?.certificate != nil
@@ -68,7 +66,7 @@ extension SelfTest {
             skip("security: a certificate error", because: "expired.badssl.com did not answer (offline?)", .environment)
         }
 
-        _ = await load(URL(string: "https://client.badssl.com/")!)
+        _ = await load(URL(string: "https://client.badssl.com/")!, orUntil: { !recorder.clientCertificateRequests.isEmpty })
         if let request = recorder.clientCertificateRequests.first {
             check("security: a site asking for a client certificate asks the delegate",
                   request.host == "client.badssl.com" && request.port == 443 && !request.isProxy,
@@ -101,9 +99,7 @@ extension SelfTest {
                 return false
             } catch { return true }
         }
-        browser.close(force: true)
-        _ = await waitUntil { browser.state == .closed }
-        view.removeFromSuperview()
+        await closeHosted(browser, view)
     }
 }
 

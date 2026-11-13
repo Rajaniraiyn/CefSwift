@@ -53,10 +53,7 @@ extension SelfTest {
         }
         defer { server.stop() }
         let browser = CefBrowser(url: URL(string: "http://127.0.0.1:\(server.port)/ping-page")!)
-        let view = CefWindowedBrowserView()
-        view.frame = window.contentView!.bounds
-        window.contentView!.addSubview(view)
-        view.browser = browser
+        let view = hostWindowed(browser)
         defer {
             browser.close(force: true)
             view.removeFromSuperview()

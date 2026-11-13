@@ -122,12 +122,7 @@ def browser_once(app, data_dir, url, idle):
             time.sleep(idle)
             samples[f"{idle} s later"] = snapshot(process.pid)
     finally:
-        process.stdin.close()
-        try:
-            process.wait(timeout=30)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait()
+        footprint.quit_app(process)
     return samples
 
 

@@ -9,7 +9,6 @@ import os
 /// `browserClosed`, and pending delegate decisions end with their page.
 extension SelfTest {
     static func operationChecks() async {
-        CefRuntime.shared.registerSchemeHandler(scheme: "selftest", domain: "edge", handler: EdgePages())
         await cancellationChecks()
         await readinessChecks()
         await sharedRendererChecks()
@@ -188,10 +187,7 @@ extension SelfTest {
 
         // The default sheet goes with its browser, in a window that stays.
         let sheetBrowser = CefBrowser(url: URL(string: "selftest://edge/sheet.html")!)
-        let view = CefWindowedBrowserView()
-        view.frame = window.contentView!.bounds
-        window.contentView!.addSubview(view)
-        view.browser = sheetBrowser
+        let view = hostWindowed(sheetBrowser)
         _ = await waitUntil { sheetBrowser.title == "sheet" }
         sheetBrowser.executeJavaScript("alert('sheet')")
         let sheetShown = await waitUntil(timeout: .seconds(5)) { window.attachedSheet != nil }

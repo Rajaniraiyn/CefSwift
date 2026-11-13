@@ -18,18 +18,7 @@ extension SelfTest {
     /// A windowed browser in the test window's content view.
     static func hostedBrowser(_ url: URL, delegate: CefBrowserDelegate? = nil) -> (CefBrowser, CefWindowedBrowserView) {
         let browser = CefBrowser(url: url, delegate: delegate)
-        let view = CefWindowedBrowserView()
-        view.frame = window.contentView!.bounds.insetBy(dx: 0, dy: 40)
-        view.autoresizingMask = [.width, .height]
-        window.contentView!.addSubview(view)
-        view.browser = browser
-        return (browser, view)
-    }
-
-    static func closeHosted(_ browser: CefBrowser, _ view: NSView) async {
-        browser.close(force: true)
-        _ = await waitUntil { browser.state == .closed }
-        view.removeFromSuperview()
+        return (browser, hostWindowed(browser, inset: 40))
     }
 
     // MARK: Frames
@@ -247,10 +236,7 @@ extension SelfTest {
         var configuration = CefBrowser.Configuration()
         configuration.rendering = .offscreen
         let offscreen = CefBrowser(url: URL(string: "selftest://frames/focus.html")!, configuration: configuration)
-        let offscreenView = CefOffscreenBrowserView()
-        offscreenView.frame = window.contentView!.bounds.insetBy(dx: 0, dy: 40)
-        window.contentView!.addSubview(offscreenView)
-        offscreenView.browser = offscreen
+        let offscreenView = hostOffscreen(offscreen, inset: 40)
         before.nextKeyView = offscreenView
         offscreenView.nextKeyView = after
         _ = await waitUntil { offscreen.title == "focus" && !offscreen.isLoading }

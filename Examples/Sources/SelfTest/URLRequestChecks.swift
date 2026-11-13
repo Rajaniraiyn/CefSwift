@@ -1,7 +1,6 @@
 import AppKit
 @_spi(Testing) import CefKit
 import CefSwiftUI
-import Network
 import os
 
 /// Requests the app makes through a profile's network stack
@@ -12,7 +11,7 @@ import os
 /// errors, profile isolation, and that nothing is left alive.
 extension SelfTest {
     static func urlRequestChecks() async {
-        guard let server = try? await RequestServer.start() else {
+        guard let server = try? await LocalServer.start() else {
             skip("urlRequest", because: "could not start a local HTTP server", .environment)
             return
         }
@@ -91,16 +90,14 @@ extension SelfTest {
         // A file body, read by Chromium.
         let file = FileManager.default.temporaryDirectory.appending(path: "selftest-upload-\(UUID().uuidString).bin")
         defer { try? FileManager.default.removeItem(at: file) }
-        do {
+        await expect("urlRequest: a file body is sent") {
             try payload.write(to: file)
             var fileConfiguration = CefProfile.RequestConfiguration()
             fileConfiguration.bodyFile = file
             var put = URLRequest(url: URL(string: "\(base)/echo?file")!)
             put.httpMethod = "PUT"
             let (data, _) = try await profile.data(for: put, configuration: fileConfiguration)
-            check("urlRequest: a file body is sent", data == payload, detail: "\(data.count) bytes back")
-        } catch {
-            check("urlRequest: a file body is sent", false, detail: "\(error)")
+            return (data == payload, "\(data.count) bytes back")
         }
 
         // An HTTP error status is a response.
@@ -126,13 +123,10 @@ extension SelfTest {
         // Into a file.
         let destination = FileManager.default.temporaryDirectory.appending(path: "selftest-download-\(UUID().uuidString).bin")
         defer { try? FileManager.default.removeItem(at: destination) }
-        do {
+        await expect("urlRequest: a download is written to its file") {
             let response = try await profile.download(for: URLRequest(url: URL(string: "\(base)/large?3000000")!), to: destination)
             let size = (try? destination.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-            check("urlRequest: a download is written to its file", response.statusCode == 200 && size == 3_000_000,
-                  detail: "\(size) bytes")
-        } catch {
-            check("urlRequest: a download is written to its file", false, detail: "\(error)")
+            return (response.statusCode == 200 && size == 3_000_000, "\(size) bytes")
         }
     }
 
@@ -142,10 +136,7 @@ extension SelfTest {
         var browserConfiguration = CefBrowser.Configuration()
         browserConfiguration.profile = profile
         let browser = CefBrowser(url: URL(string: "\(base)/page")!, configuration: browserConfiguration)
-        let view = CefWindowedBrowserView()
-        view.frame = window.contentView!.bounds
-        window.contentView!.addSubview(view)
-        view.browser = browser
+        let view = hostWindowed(browser)
         defer {
             browser.close(force: true)
             view.removeFromSuperview()
@@ -199,12 +190,9 @@ extension SelfTest {
             check("urlRequest: stopsAtRedirects returns the redirect", false, detail: "\(error)")
         }
 
-        do {
+        await expect("urlRequest: without a credential the 401 is the response") {
             let (_, response) = try await profile.data(from: URL(string: "\(base)/private")!)
-            check("urlRequest: without a credential the 401 is the response", response.statusCode == 401,
-                  detail: "\(response.statusCode)")
-        } catch {
-            check("urlRequest: without a credential the 401 is the response", false, detail: "\(error)")
+            return (response.statusCode == 401, "\(response.statusCode)")
         }
         do {
             let challenges = ChallengeLog()
@@ -216,7 +204,7 @@ extension SelfTest {
             let (data, response) = try await profile.data(from: URL(string: "\(base)/private?answered")!, configuration: configuration)
             let challenge = challenges.values.first
             check("urlRequest: the credential closure answers a challenge",
-                  response.statusCode == 200 && String(decoding: data, as: UTF8.self) == "authorized"
+                  response.statusCode == 200 && String(decoding: data, as: UTF8.self) == LocalServer.authorized
                       && challenge?.realm == "selftest" && challenge?.isProxy == false && challenge?.host == "127.0.0.1",
                   detail: "\(response.statusCode) \(challenges.values)")
         } catch {
@@ -226,7 +214,7 @@ extension SelfTest {
 
     // MARK: Streaming, cancellation, timeouts
 
-    static func streamingRequestChecks(base: String, profile: CefProfile, server: RequestServer) async {
+    static func streamingRequestChecks(base: String, profile: CefProfile, server: LocalServer) async {
         let size = 64 << 20
         let sampler = MemorySampler()
         sampler.start()
@@ -252,7 +240,7 @@ extension SelfTest {
         }
 
         // A consumer that falls behind past the limit ends the request.
-        do {
+        await expect("urlRequest: a reader past the stream's limit gets ERR_INSUFFICIENT_RESOURCES") {
             var configuration = CefProfile.RequestConfiguration()
             configuration.streamBufferLimit = 256 << 10
             let (body, _) = try await profile.bytes(for: URLRequest(url: URL(string: "\(base)/large?\(32 << 20)")!), configuration: configuration)
@@ -262,10 +250,7 @@ extension SelfTest {
             } catch let error as CefLoadError {
                 outcome = "\(error.code)"
             }
-            check("urlRequest: a reader past the stream's limit gets ERR_INSUFFICIENT_RESOURCES", outcome == "-12",
-                  detail: outcome)
-        } catch {
-            check("urlRequest: a reader past the stream's limit gets ERR_INSUFFICIENT_RESOURCES", false, detail: "\(error)")
+            return (outcome == "-12", outcome)
         }
 
         // Cancelling the task mid-body.
@@ -341,7 +326,7 @@ extension SelfTest {
             check("urlRequest: an unknown host fails with ERR_NAME_NOT_RESOLVED", false, detail: "\(error)")
         }
         // A port nothing listens on any more.
-        let closed = try? await RequestServer.start()
+        let closed = try? await LocalServer.start()
         closed?.stop()
         do {
             _ = try await profile.data(from: URL(string: "http://127.0.0.1:\(closed?.port ?? 1)/")!)
@@ -410,199 +395,4 @@ private final class ChallengeLog: Sendable {
     private let recorded = OSAllocatedUnfairLock(initialState: [CefAuthenticationChallenge]())
     func record(_ challenge: CefAuthenticationChallenge) { recorded.withLock { $0.append(challenge) } }
     var values: [CefAuthenticationChallenge] { recorded.withLock { $0 } }
-}
-
-// MARK: - Server
-
-/// A local HTTP/1.1 server for the request checks. One request per
-/// connection, read whole (headers and `Content-Length` body):
-///
-/// - `/echo`: the request body back, with the method, `Cookie`,
-///   `Content-Type`, `Referer` and `Accept-Language` in `X-Echo-*` headers,
-///   and `X-Multi` twice.
-/// - `/status?<code>`: that status, body `teapot`.
-/// - `/set-cookie`: sets `fromRequest=yes`.
-/// - `/page`: a page titled `page`.
-/// - `/redirect`: 302 to `/echo?redirected`.
-/// - `/private`: wants Basic `ada:lovelace` (realm `selftest`).
-/// - `/large?<bytes>`: that many bytes, sent as the client takes them.
-/// - `/slow`: headers and 1 KB of a 1 MB body, then nothing until the
-///   client closes the connection.
-final class RequestServer: Sendable {
-    private struct Log {
-        var slowRequests: [String] = []
-        var closedSlowConnections = 0
-    }
-
-    private let listener: NWListener
-    let port: UInt16
-    private let log: OSAllocatedUnfairLock<Log>
-
-    private init(listener: NWListener, port: UInt16, log: OSAllocatedUnfairLock<Log>) {
-        self.listener = listener
-        self.port = port
-        self.log = log
-    }
-
-    /// The paths of `/slow` requests received.
-    var slowRequests: [String] { log.withLock { $0.slowRequests } }
-    /// How many `/slow` connections the client has closed.
-    var closedSlowConnections: Int { log.withLock { $0.closedSlowConnections } }
-
-    static func start() async throws -> RequestServer {
-        let parameters = NWParameters.tcp
-        parameters.requiredLocalEndpoint = NWEndpoint.hostPort(host: "127.0.0.1", port: .any)
-        let listener = try NWListener(using: parameters)
-        let log = OSAllocatedUnfairLock(initialState: Log())
-        listener.newConnectionHandler = { connection in
-            connection.start(queue: .global())
-            receive(on: connection, buffer: Data(), log: log)
-        }
-        let port: UInt16 = try await withCheckedThrowingContinuation { continuation in
-            let resumed = OSAllocatedUnfairLock(initialState: false)
-            listener.stateUpdateHandler = { state in
-                let value: Result<UInt16, any Error>?
-                switch state {
-                case .ready: value = .success(listener.port?.rawValue ?? 0)
-                case .failed(let error): value = .failure(error)
-                default: value = nil
-                }
-                guard let value, resumed.withLock({ resumed in defer { resumed = true }; return !resumed }) else { return }
-                continuation.resume(with: value)
-            }
-            listener.start(queue: .global())
-        }
-        return RequestServer(listener: listener, port: port, log: log)
-    }
-
-    func stop() {
-        listener.cancel()
-    }
-
-    private struct Request {
-        var method: String
-        var target: String
-        var headers: [String: String]
-        var body: Data
-
-        var path: String { String(target.prefix { $0 != "?" }) }
-        var query: String { target.firstIndex(of: "?").map { String(target[target.index(after: $0)...]) } ?? "" }
-
-        /// The request in `data`, once all of it has arrived.
-        init?(_ data: Data) {
-            guard let end = data.firstRange(of: Data("\r\n\r\n".utf8)) else { return nil }
-            let head = String(decoding: data[data.startIndex..<end.lowerBound], as: UTF8.self)
-            let lines = head.components(separatedBy: "\r\n")
-            let parts = lines.first?.split(separator: " ") ?? []
-            guard parts.count >= 2 else { return nil }
-            var headers: [String: String] = [:]
-            for line in lines.dropFirst() {
-                guard let colon = line.firstIndex(of: ":") else { continue }
-                headers[line[..<colon].lowercased()] = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
-            }
-            let length = Int(headers["content-length"] ?? "0") ?? 0
-            guard data.count - (end.upperBound - data.startIndex) >= length else { return nil }
-            method = String(parts[0])
-            target = String(parts[1])
-            self.headers = headers
-            body = Data(data[end.upperBound..<(end.upperBound + length)])
-        }
-    }
-
-    private static func receive(on connection: NWConnection, buffer: Data, log: OSAllocatedUnfairLock<Log>) {
-        connection.receive(minimumIncompleteLength: 1, maximumLength: 1 << 20) { data, _, isComplete, error in
-            var buffer = buffer
-            if let data { buffer.append(data) }
-            if let request = Request(buffer) {
-                respond(to: request, on: connection, log: log)
-            } else if isComplete || error != nil {
-                connection.cancel()
-            } else {
-                receive(on: connection, buffer: buffer, log: log)
-            }
-        }
-    }
-
-    private static func respond(to request: Request, on connection: NWConnection, log: OSAllocatedUnfairLock<Log>) {
-        var status = "200 OK"
-        var headers: [(String, String)] = []
-        var body = Data()
-        switch request.path {
-        case "/echo":
-            headers = [
-                ("Content-Type", "application/octet-stream"),
-                ("X-Echo-Method", request.method),
-                ("X-Echo-Cookie", request.headers["cookie"] ?? ""),
-                ("X-Echo-Content-Type", request.headers["content-type"] ?? ""),
-                ("X-Echo-Referer", request.headers["referer"] ?? ""),
-                ("X-Echo-Accept-Language", request.headers["accept-language"] ?? ""),
-                ("X-Multi", "a"), ("X-Multi", "b"),
-            ]
-            body = request.body
-        case "/status":
-            status = "\(request.query) Status"
-            body = Data("teapot".utf8)
-        case "/set-cookie":
-            headers = [("Set-Cookie", "fromRequest=yes; Path=/")]
-            body = Data("set".utf8)
-        case "/page":
-            headers = [("Content-Type", "text/html")]
-            body = Data("<title>page</title><p>A page that shares cookies with the app's requests.</p>".utf8)
-        case "/redirect":
-            status = "302 Found"
-            headers = [("Location", "/echo?redirected")]
-        case "/private":
-            if request.headers["authorization"] == "Basic \(Data("ada:lovelace".utf8).base64EncodedString())" {
-                body = Data("authorized".utf8)
-            } else {
-                status = "401 Unauthorized"
-                headers = [("WWW-Authenticate", "Basic realm=\"selftest\"")]
-                body = Data("denied".utf8)
-            }
-        case "/large":
-            let size = Int(request.query) ?? 0
-            let head = "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: \(size)\r\nConnection: close\r\n\r\n"
-            connection.send(content: Data(head.utf8), completion: .contentProcessed { _ in
-                sendLarge(remaining: size, on: connection)
-            })
-            return
-        case "/slow":
-            log.withLock { $0.slowRequests.append(request.target) }
-            let head = "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: 1048576\r\nConnection: close\r\n\r\n"
-            connection.send(content: Data(head.utf8) + Data(count: 1024), completion: .contentProcessed { _ in })
-            // Counts the client closing the connection.
-            connection.receive(minimumIncompleteLength: 1, maximumLength: 1) { _, _, isComplete, error in
-                if isComplete || error != nil { log.withLock { $0.closedSlowConnections += 1 } }
-                connection.cancel()
-            }
-            DispatchQueue.global().asyncAfter(deadline: .now() + 30) { connection.cancel() }
-            return
-        default:
-            status = "404 Not Found"
-        }
-        var head = "HTTP/1.1 \(status)\r\n"
-        for (name, value) in headers { head += "\(name): \(value)\r\n" }
-        head += "Content-Length: \(body.count)\r\nConnection: close\r\n\r\n"
-        connection.send(content: Data(head.utf8) + body, contentContext: .finalMessage, isComplete: true,
-                        completion: .contentProcessed { _ in
-                            DispatchQueue.global().asyncAfter(deadline: .now() + 5) { connection.cancel() }
-                        })
-    }
-
-    private static let chunk = Data((0..<(256 << 10)).map { UInt8($0 % 251) })
-
-    /// Sends the next part of a `/large` body once the last one has gone.
-    private static func sendLarge(remaining: Int, on connection: NWConnection) {
-        guard remaining > 0 else {
-            connection.send(content: nil, contentContext: .finalMessage, isComplete: true, completion: .contentProcessed { _ in
-                DispatchQueue.global().asyncAfter(deadline: .now() + 5) { connection.cancel() }
-            })
-            return
-        }
-        let part = remaining >= chunk.count ? chunk : chunk.prefix(remaining)
-        connection.send(content: part, completion: .contentProcessed { error in
-            guard error == nil else { return connection.cancel() }
-            sendLarge(remaining: remaining - part.count, on: connection)
-        })
-    }
 }

@@ -9,7 +9,7 @@ import CefSwiftUI
 extension SelfTest {
     static func passkeyChecks() async {
         guard let server = try? await LocalServer.start() else {
-            print("SKIP [environment] passkeys: could not start a local HTTP server")
+            skip("passkeys", because: "could not start a local HTTP server", .environment)
             return
         }
         defer { server.stop() }
@@ -171,10 +171,7 @@ extension SelfTest {
         configuration.passkeys = .app(CefInMemoryPasskeyStore())
         let delegate = StallingDelegate()
         let browser = CefBrowser(url: url, configuration: configuration, delegate: delegate)
-        let view = CefWindowedBrowserView()
-        view.frame = window.contentView!.bounds
-        window.contentView!.addSubview(view)
-        view.browser = browser
+        let view = hostWindowed(browser)
         defer { view.removeFromSuperview() }
         if await waitUntil(timeout: .seconds(20), { browser.title == "passkeys" && !browser.isLoading }) {
             browser.executeJavaScript("register()")

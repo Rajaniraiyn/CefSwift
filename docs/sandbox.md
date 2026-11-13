@@ -22,8 +22,8 @@ hoc signed bundles from `cef bundle`:
 
 - SelfTest passes every check with the sandbox on (491 passed, none
   skipped), and `sandbox_check` reports each helper process sandboxed and
-  the app process not. CI runs SelfTest with `SELFTEST_SANDBOX=1`;
-  `SELFTEST_SANDBOX=0` runs it without the sandbox.
+  the app process not. CI runs SelfTest with the sandbox, the
+  default; `SELFTEST_SANDBOX=0` runs it without.
 - Footprint and launch time, measured with
   [`Scripts/measure-footprint.py`](../Scripts/measure-footprint.py), are in
   [design notes](design-notes.md#sandbox).

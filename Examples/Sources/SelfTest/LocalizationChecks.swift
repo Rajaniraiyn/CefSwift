@@ -71,10 +71,7 @@ extension SelfTest {
             var configuration = CefBrowser.Configuration()
             configuration.profile = profile
             let browser = CefBrowser(url: url, configuration: configuration)
-            let view = CefWindowedBrowserView()
-            view.frame = window.contentView!.bounds
-            window.contentView!.addSubview(view)
-            view.browser = browser
+            let view = hostWindowed(browser)
             defer {
                 browser.close(force: true)
                 view.removeFromSuperview()
@@ -127,10 +124,7 @@ extension SelfTest {
               detail: "'\(newTab ?? "nil")'")
 
         let browser = CefBrowser(url: URL(string: "selftest://edge/tab.html")!)
-        let view = CefWindowedBrowserView()
-        view.frame = window.contentView!.bounds
-        window.contentView!.addSubview(view)
-        view.browser = browser
+        let view = hostWindowed(browser)
         defer {
             browser.close(force: true)
             view.removeFromSuperview()

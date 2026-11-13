@@ -38,12 +38,6 @@ enum SelfTest {
         if let relaunchDirectory {
             configuration.rootCacheDirectory = URL(fileURLWithPath: relaunchDirectory)
         }
-        // protectedMediaChecks() starts this app a second time with Widevine on.
-        let widevineProbeDirectory = ProcessInfo.processInfo.environment[widevineProbeEnvironmentKey]
-        if let widevineProbeDirectory {
-            configuration.rootCacheDirectory = URL(fileURLWithPath: widevineProbeDirectory)
-            configuration.services.protectedMedia = .automatic
-        }
         if let probe {
             configuration.rootCacheDirectory = ProcessInfo.processInfo.environment[probeRootEnvironmentKey]
                 .map { URL(fileURLWithPath: $0) } ?? configuration.rootCacheDirectory
@@ -51,7 +45,7 @@ enum SelfTest {
         }
         // Those second instances report to this one, which counts their
         // lines; they write no results file of their own.
-        if relaunchDirectory != nil || widevineProbeDirectory != nil || probe != nil {
+        if relaunchDirectory != nil || probe != nil {
             unsetenv("SELFTEST_JSON")
             unsetenv("SELFTEST_STRICT")
         }
@@ -75,6 +69,7 @@ enum SelfTest {
         CefRuntime.shared.registerSchemeHandler(scheme: "selftest", domain: "edge", handler: EdgePages())
         CefRuntime.shared.registerSchemeHandler(scheme: "selftest", domain: "bench", handler: BenchmarkPages())
         CefRuntime.shared.registerSchemeHandler(scheme: "selftest", domain: "ax", handler: AccessibilityPages())
+        CefRuntime.shared.registerSchemeHandler(scheme: "https", domain: "cefswift.test", handler: CapabilityPages())
 
         window = NSWindow(
             contentRect: NSRect(x: 80, y: 80, width: 900, height: 600),
@@ -101,8 +96,6 @@ enum SelfTest {
                 await Benchmarks.run(benchmark)
             } else if ServiceBenchmark.isRequested {
                 await ServiceBenchmark.run()
-            } else if widevineProbeDirectory != nil {
-                await widevineProbeChecks()
             } else if let probe {
                 await probes[probe]?()
             } else {
@@ -216,11 +209,48 @@ enum SelfTest {
     }
 
     static func expect(_ name: String, _ body: () async throws -> Bool) async {
+        await expect(name) { (try await body(), "") }
+    }
+
+    /// Checks what `body` returns, with the detail to report if it fails; a
+    /// thrown error fails the check.
+    static func expect(_ name: String, _ body: () async throws -> (passed: Bool, detail: String)) async {
         do {
-            check(name, try await body())
+            let (passed, detail) = try await body()
+            check(name, passed, detail: detail)
         } catch {
             check(name, false, detail: "\(error)")
         }
+    }
+
+    /// Shows `browser` in a windowed view that fills the test window, less
+    /// `inset` points at the top and bottom.
+    static func hostWindowed(_ browser: CefBrowser, inset: CGFloat = 0) -> CefWindowedBrowserView {
+        let view = CefWindowedBrowserView()
+        host(view, inset: inset)
+        view.browser = browser
+        return view
+    }
+
+    /// Shows `browser` in an offscreen view, as ``hostWindowed(_:inset:)``.
+    static func hostOffscreen(_ browser: CefBrowser, inset: CGFloat = 0) -> CefOffscreenBrowserView {
+        let view = CefOffscreenBrowserView()
+        host(view, inset: inset)
+        view.browser = browser
+        return view
+    }
+
+    private static func host(_ view: NSView, inset: CGFloat) {
+        view.frame = window.contentView!.bounds.insetBy(dx: 0, dy: inset)
+        view.autoresizingMask = [.width, .height]
+        window.contentView!.addSubview(view)
+    }
+
+    /// Closes a hosted browser, waits until it has closed and removes its view.
+    static func closeHosted(_ browser: CefBrowser, _ view: NSView) async {
+        browser.close(force: true)
+        _ = await waitUntil { browser.state == .closed }
+        view.removeFromSuperview()
     }
 
     static func waitUntil(timeout: Duration = .seconds(15), _ condition: () -> Bool) async -> Bool {

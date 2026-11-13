@@ -15,7 +15,6 @@ import QuartzCore
 /// - Different numbers at the top and the bottom are a torn frame.
 extension SelfTest {
     static func compositorChecks() async {
-        CefRuntime.shared.registerSchemeHandler(scheme: "selftest", domain: "bench", handler: BenchmarkPages())
         CefRuntime.shared.energyPolicy = .disabled
         defer { CefRuntime.shared.energyPolicy = .automatic }
         guard let stage = await CompositorStage(points: CGSize(width: 640, height: 400)) else {
@@ -68,7 +67,6 @@ extension Benchmarks {
     /// at 1× and 2×; the screen is 2×, so the 1× sizes are views of half
     /// the size).
     static func compositor() async {
-        CefRuntime.shared.registerSchemeHandler(scheme: "selftest", domain: "bench", handler: BenchmarkPages())
         CefRuntime.shared.energyPolicy = .disabled
         defer { CefRuntime.shared.energyPolicy = .automatic }
         SelfTest.window.orderOut(nil)

@@ -18,7 +18,6 @@ import os
 /// - `devtools`: 20 000 DevTools events nobody listens to.
 extension Benchmarks {
     static func transport(_ name: String) async {
-        CefRuntime.shared.registerSchemeHandler(scheme: "selftest", domain: "bench", handler: BenchmarkPages())
         CefDiagnostics.isEnabled = true
         switch name {
         case "bridge": await bridge()
