@@ -172,6 +172,58 @@ pin.
   library code. Doc comments on public API.
 - Keep pull requests focused, and run `swift test` before sending one.
 
+## Naming
+
+Public API follows the [Swift API Design
+Guidelines](https://www.swift.org/documentation/api-design-guidelines/), with
+these conventions on top. Follow them for new API, so that the library keeps
+reading as one.
+
+- **Principal types** carry the `Cef` prefix: `CefRuntime`, `CefBrowser`,
+  `CefBrowserWindow`, `CefProfile`, `CefDevTools`. So do types several owners
+  share, and the values delegate methods take and return (`CefNavigationAction`,
+  `CefDownload`, `CefPermissionRequest`).
+- **Types that belong to one owner nest in it**, without the prefix:
+  `CefBrowser.Configuration`, `CefBrowser.FindResult`,
+  `CefRuntime.ProcessPolicy`, `CefChromiumSurface.Anchor`,
+  `CefPermissionRequest.Kinds`. A runtime-wide option nests in `CefRuntime`,
+  a browser option in `CefBrowser`, a window option in `CefBrowserWindow`.
+- **`Configuration`** is the creation-time value bag of a principal type:
+  `CefRuntime.Configuration`, `CefBrowser.Configuration`,
+  `CefBrowserWindow.Configuration`, `CefSystemBrowser.Configuration`,
+  `CefBrowser.PDFConfiguration` for one operation. Its property is
+  `configuration`, and so is the initializer label. Never `Options`.
+- **Groups** inside a configuration are named for their topic, without a
+  suffix (`services`, `network`, `privacy`, `security`, `credentials`,
+  `chromeToolbar`, `contextMenu`), and an option inside a group nests in the
+  group (`Network.Preloading`, `Services.ProtectedMedia`).
+- **An option's type is named for its property**: `rendering: Rendering`,
+  `localization: Localization`, `userAgent: UserAgent`. When the option
+  chooses who answers or when CefKit acts, the type ends in `Policy`
+  (`passkeys: PasskeyPolicy`, `unresponsivePages: UnresponsivePagePolicy`,
+  `safeStorage: SafeStoragePolicy`); a live runtime knob of that kind is a
+  `…Policy` property too (`CefRuntime.shared.discardPolicy`,
+  `energyPolicy`).
+- **Case names**: `.automatic` leaves a choice to Chromium (or to the user in
+  `chrome://settings`), `.disabled` turns a facility off; not `.default`,
+  `.standard`, `.off` or `.disable`. A shared on-or-off choice is
+  `CefRuntime.Setting`.
+- **Delegates** take the asking object first, `browser(_:…)`. A method that
+  returns a choice is `decide<Thing>For:` and returns a `Cef<Thing>Decision`
+  (`decidePolicyFor:` → `CefNavigationDecision`, `decideWindowOpenFor:` →
+  `CefWindowOpenDecision`, `decidePasskeyFor:` → `CefPasskeyDecision`); an
+  event is `did…`/`…Did…`. A request a native sheet can answer has a
+  `Cef…Presenter`, whose `present` shows that sheet and returns the answer.
+- **Booleans** read as assertions: `isRunning`, `allowsDiscarding`,
+  `showsToolbarButtons`, `usesSafeBrowsing`.
+- **No abbreviations** beyond terms of art (`URL`, `PDF`, `DNS`, `HTTPS`,
+  `JSON`, `CDM`). A property holding a full address is `url`, not `origin`.
+- **One way to do a thing.** Remove a convenience that duplicates another
+  API instead of keeping both, and drop options the host overrides.
+- **Test hooks** are `@_spi(Testing)`, never plain `public`.
+- **Files** are named for the type they declare, `Type+Concern.swift` for an
+  extension; split a file that passes about 600 lines along its concerns.
+
 ## Reporting issues
 
 Open a GitHub issue with your macOS version, Mac architecture, the pinned CEF
