@@ -64,6 +64,11 @@ public struct CefChromeCommand: RawRepresentable, Hashable, Sendable {
 
     /// Whether the command changes the page's zoom level.
     var isZoomCommand: Bool { self == .zoomIn || self == .zoomOut || self == .resetZoom }
+
+    /// Commands that end the browser process when run in CEF 156: managing
+    /// a page's passwords, whose bubble finds nothing to hang from (found
+    /// by SelfTest's surface inventory, with and without Chrome's toolbar).
+    static let endingTheBrowserProcess: Set<Int> = [Int(IDC_MANAGE_PASSWORDS_FOR_PAGE)]
 }
 
 extension CefRuntime.Configuration {

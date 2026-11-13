@@ -9,6 +9,10 @@ import SwiftUI
 /// its indicator. A CEF update that renames those classes fails here.
 extension SelfTest {
     static func nativeUIChecks() async {
+        if let folder = ProcessInfo.processInfo.environment[surfaceDumpEnvironmentKey] {
+            await runSurfaceInventory(to: folder)
+            return
+        }
         CefChromiumTesting.activate()
         let features = CefTesting.runtimeHookFeatures
         check("runtime hooks: every feature's AppKit classes and methods exist",

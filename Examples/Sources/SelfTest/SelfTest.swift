@@ -183,6 +183,7 @@ enum SelfTest {
         // After the history checks: the pages these visit would crowd the
         // probe out of the most-visited tiles.
         ("nativeUI", nativeUIChecks),
+        ("surfaces", surfaceStateChecks),
         ("relaunch", relaunchChecks),
         ("protectedMedia", protectedMediaChecks),
         ("systemEngine", systemEngineChecks),

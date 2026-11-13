@@ -18,6 +18,7 @@ extension SelfTest {
         "chromiumSignIn": chromiumSignInProbeChecks,
         "localization": localizationProbeChecks,
         "policies": policiesProbeChecks,
+        "surfaceInventory": surfaceInventoryProbe,
         "widevine": widevineProbeChecks,
     ]
 
@@ -30,6 +31,8 @@ extension SelfTest {
             configureLocalizationProbe(&configuration)
         case "policies":
             configurePoliciesProbe(&configuration)
+        case "surfaceInventory":
+            configureSurfaceInventoryProbe(&configuration)
         case "widevine":
             configuration.services.protectedMedia = .automatic
         default:
