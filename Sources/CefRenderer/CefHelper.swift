@@ -9,15 +9,10 @@ import MachO
 /// `docs/architecture.md`, "Loading the framework at launch"), so the
 /// framework is in memory before this runs; the CCef trampolines bind to
 /// that copy.
-public enum CefHelper {
-    /// Custom URL schemes must be registered in every process. The browser
-    /// process passes its list as `--cefswift-schemes=name:options,…`
-    /// (`CefCustomScheme.childProcessSwitchName`).
-    static let schemesSwitch = "--cefswift-schemes="
-
+package enum CefHelper {
     /// Runs the subprocess Chromium asked for and returns its exit code.
     @MainActor
-    public static func run() -> Int32 {
+    package static func run() -> Int32 {
         guard let framework = loadedFrameworkPath(), ccef_load_framework(framework) != 0 else {
             print("CefSwift helper: the CEF framework is not loaded: \(String(cString: ccef_loader_error()))")
             return 125
@@ -31,8 +26,8 @@ public enum CefHelper {
         }
 
         let arguments = CommandLine.arguments
-        let schemes = arguments.first { $0.hasPrefix(schemesSwitch) }
-            .map { parseSchemes(String($0.dropFirst(schemesSwitch.count))) } ?? []
+        // Custom URL schemes must be registered in every process.
+        let schemes = CefSchemeList.entries(inArguments: arguments)
         // Only renderers run page code; the other process types get an app
         // that registers the schemes and nothing else.
         let isRenderer = arguments.contains("--type=renderer")
@@ -54,15 +49,5 @@ public enum CefHelper {
             }
         }
         return nil
-    }
-
-    /// Reads `name:options,…`, skipping malformed entries, as
-    /// `CefCustomScheme`'s parser in the browser process does.
-    static func parseSchemes(_ list: String) -> [(name: String, options: Int32)] {
-        list.split(separator: ",").compactMap { entry in
-            let parts = entry.split(separator: ":", omittingEmptySubsequences: false)
-            guard parts.count == 2, !parts[0].isEmpty, let options = Int32(parts[1]) else { return nil }
-            return (String(parts[0]), options)
-        }
     }
 }

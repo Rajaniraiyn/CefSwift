@@ -55,7 +55,7 @@ final class CefAppContext: @unchecked Sendable {
             // pass them along so the helper registers the same list.
             CefCommandLine.borrowing(commandLine) {
                 $0.appendSwitch(
-                    CefCustomScheme.childProcessSwitchName,
+                    CefSchemeList.switchName,
                     value: CefCustomScheme.serialize(owner.customSchemes))
             }
         }
@@ -94,7 +94,7 @@ final class CefAppContext: @unchecked Sendable {
         }
         app.pointee.on_register_custom_schemes = { s, registrar in
             guard let registrar, let owner = cefOwner(CefAppContext.self, s) else { return }
-            CefCustomScheme.register(owner.customSchemes, with: registrar)
+            CefSchemeList.register(owner.customSchemes.map(\.entry), with: registrar)
         }
         app.pointee.on_before_command_line_processing = { s, processType, commandLine in
             defer { cefRelease(commandLine) }

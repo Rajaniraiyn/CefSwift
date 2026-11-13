@@ -69,11 +69,11 @@ final class CefRendererFrame {
 @MainActor
 final class CefRendererProcess {
     private let extensions: [CefRendererExtension]
-    private nonisolated let schemes: [(name: String, options: Int32)]
+    private nonisolated let schemes: [CefSchemeList.Entry]
     /// Set once, before `cef_execute_process`; read from any thread.
     private nonisolated(unsafe) var renderProcessHandler: UnsafeMutablePointer<cef_render_process_handler_t>?
 
-    init(extensions: [CefRendererExtension], schemes: [(name: String, options: Int32)]) {
+    init(extensions: [CefRendererExtension], schemes: [CefSchemeList.Entry]) {
         self.extensions = extensions
         self.schemes = schemes
     }
@@ -147,12 +147,8 @@ final class CefRendererProcess {
             cefRetained(cefOwner(CefRendererProcess.self, s)?.renderProcessHandler)
         }
         app.pointee.on_register_custom_schemes = { s, registrar in
-            // The registrar is not reference-counted and is valid only
-            // during this call.
             guard let registrar, let process = cefOwner(CefRendererProcess.self, s) else { return }
-            for scheme in process.schemes {
-                _ = CefStringUtil.withCefString(scheme.name) { registrar.pointee.add_custom_scheme(registrar, $0, scheme.options) }
-            }
+            CefSchemeList.register(process.schemes, with: registrar)
         }
         return app
     }
