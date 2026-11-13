@@ -359,15 +359,15 @@ public final class CefAccessibilityTree {
     @discardableResult
     func applyDocumentScroll(_ offset: CGPoint) -> CefAccessibilityChanges {
         var changes = CefAccessibilityChanges()
-        guard let mainTreeID, var tree = trees[mainTreeID], let rootID = tree.rootID, var root = tree.nodes[rootID]
+        guard let mainTreeID, let rootID = trees[mainTreeID]?.rootID, let root = trees[mainTreeID]?.nodes[rootID]
         else { return changes }
         let x = offset.x.rounded()
         let y = offset.y.rounded()
         guard root.attributes["scrollX"]?.doubleValue != x || root.attributes["scrollY"]?.doubleValue != y else { return changes }
-        root.attributes["scrollX"] = .number(x)
-        root.attributes["scrollY"] = .number(y)
-        tree.nodes[rootID] = root
-        trees[mainTreeID] = tree
+        // Written in place: a copy of the tree or the node would make the
+        // writes copy its whole dictionary.
+        trees[mainTreeID]?.nodes[rootID]?.attributes["scrollX"] = .number(x)
+        trees[mainTreeID]?.nodes[rootID]?.attributes["scrollY"] = .number(y)
         frameCache = [:]
         changes.layoutDidChange = true
         return changes
@@ -391,7 +391,9 @@ public final class CefAccessibilityTree {
     }
 
     private func apply(update: CefJSON, treeID: String, changes: inout CefAccessibilityChanges) {
-        var tree = trees[treeID] ?? FrameTree()
+        // Taken out while it changes, so writes to it do not copy its nodes;
+        // put back around each `removeTree`, which reads `trees`.
+        var tree = trees.removeValue(forKey: treeID) ?? FrameTree()
         let wasEmpty = tree.nodes.isEmpty
 
         if update["has_tree_data"].boolValue == true || update["tree_data"].objectValue != nil {
@@ -452,7 +454,9 @@ public final class CefAccessibilityTree {
                     pendingAnnouncements.append(node)
                 }
                 if let previousChild = old.childTreeID, previousChild != node.childTreeID {
+                    trees[treeID] = tree
                     removeTree(previousChild, changes: &changes)
+                    tree = trees.removeValue(forKey: treeID) ?? tree
                 }
             } else {
                 changes.insertedNodes.insert(node.id)
@@ -488,7 +492,7 @@ public final class CefAccessibilityTree {
             if let childTree = node.childTreeID, hosts[childTree] == node.id {
                 trees[treeID] = tree
                 removeTree(childTree, changes: &changes)
-                tree = trees[treeID] ?? tree
+                tree = trees.removeValue(forKey: treeID) ?? tree
             }
         }
         trees[treeID] = tree
