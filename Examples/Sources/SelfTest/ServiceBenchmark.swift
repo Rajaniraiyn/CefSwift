@@ -1,4 +1,5 @@
 import AppKit
+import CefChromium
 import CefKit
 
 /// `-benchmarkServices YES`: instead of the checks, calls each internal-page

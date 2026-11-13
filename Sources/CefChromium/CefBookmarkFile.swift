@@ -1,4 +1,3 @@
-import CCef
 import Foundation
 
 /// Chromium's `Bookmarks` file, read as `chrome.bookmarks` would report it.
@@ -8,6 +7,8 @@ import Foundation
 /// version 1) about 2.5 seconds after each change, replacing it atomically.
 /// Reading it needs no renderer. Anything unexpected in it makes the read
 /// fail, and ``CefBookmarks`` asks Chromium's service instead.
+///
+/// The format is Chromium's own and can change with it.
 struct CefBookmarkFile {
     /// The permanent folders, in `chrome.bookmarks.getTree()` order.
     let roots: [CefBookmark]
@@ -24,7 +25,7 @@ struct CefBookmarkFile {
         for (index, (node, folder)) in permanent.enumerated() {
             guard let node else {
                 // Chromium writes all three; a file without the first two
-                // is not one CefKit knows.
+                // is not one CefChromium knows.
                 if folder == .mobile { continue } else { return nil }
             }
             guard var root = Self.bookmark(node, parent: nil, index: index) else { return nil }
@@ -110,7 +111,9 @@ struct CefBookmarkFile {
             children = contents
         }
         // Microseconds since 1601, as Chromium's `base::Time` counts.
-        let dateAdded = node.date_added.flatMap(Int64.init).flatMap { $0 == 0 ? nil : cef_basetime_t(val: $0).date }
+        let dateAdded = node.date_added.flatMap(Int64.init).flatMap { microseconds -> Date? in
+            microseconds == 0 ? nil : Date(timeIntervalSince1970: TimeInterval(microseconds) / 1_000_000 - 11_644_473_600)
+        }
         return CefBookmark(
             id: id, parentID: parent, index: index, title: node.name, url: url, dateAdded: dateAdded,
             permanentFolder: nil, isEditable: true, children: children)

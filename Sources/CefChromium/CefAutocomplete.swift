@@ -1,3 +1,4 @@
+import CefKit
 import Foundation
 
 /// One ranked suggestion for text typed into an address bar.

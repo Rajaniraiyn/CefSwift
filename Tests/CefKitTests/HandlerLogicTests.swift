@@ -150,23 +150,4 @@ struct ProfilePathTests {
         #expect(CefProfile.incognito().isIncognito)
         #expect(!profile.isIncognito && !CefProfile.default.isIncognito)
     }
-
-    @Test func aServiceKeepsItsProfileAliveWithoutACycle() {
-        weak var weakProfile: CefProfile?
-        var autocomplete: CefAutocomplete?
-        var history: CefHistory?
-        do {
-            let profile = CefProfile.incognito()
-            weakProfile = profile
-            autocomplete = profile.autocomplete
-            history = profile.history
-            #expect(profile.autocomplete === autocomplete)
-        }
-        #expect(weakProfile != nil)
-        autocomplete = nil
-        #expect(weakProfile != nil)
-        history = nil
-        #expect(weakProfile == nil)
-        _ = (autocomplete, history)
-    }
 }

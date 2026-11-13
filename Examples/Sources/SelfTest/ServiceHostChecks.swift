@@ -1,4 +1,5 @@
 import AppKit
+@_spi(Testing) import CefChromium
 @_spi(Testing) import CefKit
 
 /// The hosts behind bookmarks, history, most-visited and autocomplete: one

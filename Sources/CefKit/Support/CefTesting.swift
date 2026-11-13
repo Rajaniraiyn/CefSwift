@@ -6,11 +6,11 @@ import AppKit
 @MainActor
 public enum CefTesting {
     /// Each feature built on overrides of Chromium's AppKit classes, with
-    /// the `Class -selector` methods it lacks in this CEF build. A feature
-    /// with an empty list is installed; one with missing methods is not
-    /// installed at all.
+    /// the `Class -selector` methods it lacks in this CEF build: CefKit's,
+    /// and those of modules that have installed theirs (CefChromium's
+    /// surfaces, once it is used). A feature with an empty list is
+    /// installed; one with missing methods is not installed at all.
     public static var runtimeHookFeatures: [(name: String, missing: [String])] {
-        CefSurfaceTracker.install()
         CefHistorySwipeHooks.install()
         return CefObjCHook.features
     }

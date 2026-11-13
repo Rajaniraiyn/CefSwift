@@ -1,4 +1,5 @@
 import AppKit
+import CefChromium
 @_spi(Testing) import CefKit
 import CefSwiftUI
 

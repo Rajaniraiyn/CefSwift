@@ -28,7 +28,8 @@ A tabbed browser (`Sources/Browser`). Each tab is a Chrome-style
   The find bar (⌘F) and the link status bubble are the browser's own
   SwiftUI views; with "Use the browser's QR code and Cast panels" in
   Settings, so are the QR code bubble and the Cast picker
-  (`ChromiumPanels.swift`).
+  (`ChromiumPanels.swift`). These, and the suggestions, bookmarks and
+  history below, use the `CefChromium` library.
 - Two-finger swipes go back and forward, with CefSwift's swipe indicator.
 - A bookmark star (⌘D), Bookmarks and History menus, and a start page at
   `browser://start/` with frequently visited sites and recent bookmarks,

@@ -70,14 +70,15 @@ public final class CefBrowserWindow: Identifiable {
         /// Windows sharing an identifier are grouped as native macOS tabs.
         /// `nil` keeps the window out of tab groups.
         public var tabbingIdentifier: String?
-        /// How Chromium's interface is presented at first:
-        /// ``CefBrowserWindow/chromiumUI`` starts as this, or with every
-        /// surface ``CefChromiumSurface/Presentation/native`` when `nil`.
-        /// A status bubble
-        /// or zoom bubble hidden here is never created, as the browser
-        /// starts with Chromium's own switched off (`cef_browser_settings_t`);
-        /// hiding one later keeps Chromium's window invisible instead.
-        public var chromiumUI: CefBrowserWindow.ChromiumUI?
+        /// Whether the browser starts with Chromium's status bubble and
+        /// zoom bubble (`cef_browser_settings_t`'s `chrome_status_bubble`
+        /// and `chrome_zoom_bubble`). CefChromium's `chromiumUI` sets them.
+        package var showsChromiumStatusBubble = true
+        package var showsChromiumZoomBubble = true
+
+        /// What modules built on CefKit keep in a configuration, by type.
+        /// They apply to the window created with it, not to its popups.
+        package var moduleValues: [ObjectIdentifier: Any] = [:]
 
         public init() {}
     }
@@ -126,13 +127,11 @@ public final class CefBrowserWindow: Identifiable {
         Self.liveCount += 1
         Self.installRuntimeHooks()
 
-        let initialUI = configuration.chromiumUI ?? CefBrowserWindow.ChromiumUI()
-        chromiumUI = initialUI
         let viewDelegate = BrowserViewDelegate(toolbar: configuration.toolbar, window: self)
         browserView = CefRef(adopting: browser.createBrowserView(
             delegate: viewDelegate.makeDelegate(),
-            showsStatusBubble: initialUI[.statusBubble] != .hidden,
-            showsZoomBubble: initialUI[.zoom] != .hidden))
+            showsStatusBubble: configuration.showsChromiumStatusBubble,
+            showsZoomBubble: configuration.showsChromiumZoomBubble))
         createWindow()
     }
 
@@ -141,6 +140,7 @@ public final class CefBrowserWindow: Identifiable {
         self.browser = browser
         var configuration = opener.configuration
         configuration.frame = nil
+        configuration.moduleValues = [:]
         self.configuration = configuration
         self.isPopup = true
         Self.all.append(self)
@@ -152,9 +152,9 @@ public final class CefBrowserWindow: Identifiable {
 
     @ObservationIgnored private var isPopup = false
 
-    /// A hidden window hosting an internal-page service browser
-    /// (``CefProfile/bookmarks`` and friends). Such windows are left out of
-    /// ``all``.
+    /// A hidden window hosting an internal-page service browser (native
+    /// tab discarding, CefChromium's bookmarks and history). Such windows
+    /// are left out of ``all``.
     @ObservationIgnored var isService = false {
         didSet {
             guard isService else { return }
@@ -188,16 +188,60 @@ public final class CefBrowserWindow: Identifiable {
         }
     }
 
-    /// Installs the overrides of Chromium's AppKit classes that surfaces and
-    /// swipe navigation rely on, once.
+    /// Installs the overrides of Chromium's AppKit classes that swipe
+    /// navigation relies on, once.
     private static func installRuntimeHooks() {
-        CefSurfaceTracker.install()
         CefHistorySwipeHooks.install()
     }
 
     /// The open window whose `NSWindow` is `window`.
     package static func owning(_ window: NSWindow) -> CefBrowserWindow? {
         all.first { $0.window === window }
+    }
+
+    /// The window showing `browser`, if it is a browser window.
+    static func hosting(_ browser: CefBrowser) -> CefBrowserWindow? {
+        all.first { $0.browser === browser }
+    }
+
+    // MARK: Module state
+
+    /// What a module built on CefKit keeps for this window: one object per
+    /// type, made by `make` on first use and kept as long as the window.
+    /// Hold the window weakly from it. An object that is a
+    /// ``CefBrowserWindowParticipant`` is told when the window closes.
+    package func moduleState<State: AnyObject>(_ type: State.Type = State.self, make: () -> State) -> State {
+        let key = ObjectIdentifier(type)
+        if let state = moduleStates[key] as? State { return state }
+        let state = make()
+        moduleStates[key] = state
+        return state
+    }
+
+    /// The object of `type` a module keeps for this window, if it made one.
+    package func existingModuleState<State: AnyObject>(_ type: State.Type) -> State? {
+        moduleStates[ObjectIdentifier(type)] as? State
+    }
+
+    @ObservationIgnored private var moduleStates: [ObjectIdentifier: AnyObject] = [:]
+
+    /// Decides Chrome commands before Chromium runs them, for every browser
+    /// window: from Chrome's shortcuts, menus and UI, and from
+    /// ``CefBrowser/execute(_:disposition:)``. An interceptor returns
+    /// whether it handled the command, which Chromium then does not run.
+    /// Interceptors run in the order they were added, after the browser's
+    /// delegate.
+    package static func addChromeCommandInterceptor(
+        _ interceptor: @escaping @MainActor (CefBrowserWindow, CefChromeCommand) -> Bool
+    ) {
+        commandInterceptors.append(interceptor)
+    }
+
+    private static var commandInterceptors: [@MainActor (CefBrowserWindow, CefChromeCommand) -> Bool] = []
+
+    /// Whether an interceptor handled `command`.
+    func intercept(_ command: CefChromeCommand) -> Bool {
+        Self.commandInterceptors.contains { $0(self, command) }
     }
 
     private func createWindow() {
@@ -351,61 +395,6 @@ public final class CefBrowserWindow: Identifiable {
         }
     }
 
-    // MARK: Chromium's interface
-
-    /// How Chromium's own interface is presented in this window: its
-    /// bubbles, dialogs, find bar and status bubble
-    /// (``CefChromiumSurface/Kind``). Each kind is drawn by Chromium where
-    /// Chromium puts it, anchored under your controls, replaced by your own
-    /// interface, or hidden.
-    ///
-    /// ```swift
-    /// window.chromiumUI.anchor = .view(addressField, alignment: .trailing)
-    /// window.chromiumUI[.statusBubble] = .hidden
-    /// window.setCustomPresentation(for: .qrCode) { surface in showMyQRCode(for: surface.url) }
-    /// ```
-    ///
-    /// Surfaces follow their anchor as the window moves or resizes, and when
-    /// Chromium lays them out again. CefSwiftUI's
-    /// `chromiumSurfaceAnchor(_:alignment:)` modifier sets anchors from
-    /// SwiftUI views in your toolbar.
-    public var chromiumUI = CefBrowserWindow.ChromiumUI() {
-        didSet { applyChromiumUI() }
-    }
-
-    /// Decides a surface's presentation as it appears, taking precedence
-    /// over ``chromiumUI``. Return `nil` to use ``chromiumUI``. The surface
-    /// stays hidden while this runs.
-    @ObservationIgnored public var presentationForSurface: ((CefChromiumSurface) -> CefChromiumSurface.Presentation?)?
-
-    /// Chromium's surfaces in this window, oldest first: those Chromium
-    /// draws, and those you present yourself until they are dismissed.
-    public internal(set) var chromiumSurfaces: [CefChromiumSurface] = []
-
-    /// Called as each surface appears: after a native one is placed, and for
-    /// a custom one after its presenter (or instead of one).
-    @ObservationIgnored public var onChromiumSurface: ((CefChromiumSurface) -> Void)?
-
-    /// Presents your own interface for a kind of surface, and sets the
-    /// kind's presentation to ``CefChromiumSurface/Presentation/custom``.
-    /// `present` receives the surface when Chromium would show it — from
-    /// its command (``CefChromeCommand/find``, ``CefChromeCommand/createQRCode``,
-    /// ``CefChromeCommand/castMedia``, ``CefChromeCommand/showSharingHub``),
-    /// its shortcut, its menu item, or anything else — with Chromium's own
-    /// interface kept off screen. Pass `nil` to go back to Chromium's.
-    public func setCustomPresentation(
-        for kind: CefChromiumSurface.Kind, _ present: (@MainActor (CefChromiumSurface) -> Void)?
-    ) {
-        customPresenters[kind] = present
-        chromiumUI[kind] = present == nil ? .native : .custom
-    }
-
-    @ObservationIgnored var customPresenters: [CefChromiumSurface.Kind: @MainActor (CefChromiumSurface) -> Void] = [:]
-    @ObservationIgnored var surfaceObservers: [ObjectIdentifier: [NSObjectProtocol]] = [:]
-    @ObservationIgnored var frameObservers: [NSObjectProtocol] = []
-    @ObservationIgnored var isPlacingSurface = false
-    @ObservationIgnored var pendingSurfaces: [ObjectIdentifier: (window: NSWindow, alpha: CGFloat)] = [:]
-
     // MARK: Over the page
 
     /// A view of your own, laid over the page in place of the built-in
@@ -422,21 +411,13 @@ public final class CefBrowserWindow: Identifiable {
         }
     }
 
-    /// A view of your own, laid over the page in place of Chromium's status
-    /// bubble, the address of a hovered link at the page's lower edge.
-    /// Setting it hides Chromium's (``CefChromiumSurface/Kind/statusBubble``).
-    /// It is sized to the page, never receives events, and stays installed;
-    /// read ``CefBrowser/statusText`` to draw it. CefSwiftUI's
-    /// `setStatusBubble(_:)` sets it from a SwiftUI view.
-    public var statusBubbleView: NSView? {
+    /// A view laid over the page, sized to it and never receiving events,
+    /// beneath the swipe indicator: CefChromium's `statusBubbleView`, an
+    /// app's own status bubble in place of Chromium's.
+    package var statusOverlayView: NSView? {
         didSet {
-            guard statusBubbleView !== oldValue else { return }
+            guard statusOverlayView !== oldValue else { return }
             oldValue?.removeFromSuperview()
-            if statusBubbleView != nil {
-                chromiumUI[.statusBubble] = .hidden
-            } else if case .hidden = chromiumUI[.statusBubble] {
-                chromiumUI.presentations[.statusBubble] = nil
-            }
             updatePageOverlay()
         }
     }
@@ -446,7 +427,7 @@ public final class CefBrowserWindow: Identifiable {
 
     /// Lays the views over the page: the swipe indicator (the app's, or
     /// CefSwift's unless Chromium draws its own or none is wanted) and the
-    /// app's status bubble.
+    /// app's status view.
     private func updatePageOverlay() {
         let configuration = browser.configuration
         let wantsBuiltIn = configuration.allowsBackForwardNavigationGestures
@@ -466,7 +447,7 @@ public final class CefBrowserWindow: Identifiable {
             builtInIndicator = nil
             indicator = nil
         }
-        let views = [statusBubbleView, indicator].compactMap { $0 }
+        let views = [statusOverlayView, indicator].compactMap { $0 }
         guard !views.isEmpty, let contentView = window?.contentView else {
             pageOverlay?.removeFromSuperview()
             pageOverlay = nil
@@ -509,7 +490,6 @@ public final class CefBrowserWindow: Identifiable {
             if let identifier = configuration.tabbingIdentifier {
                 nsWindow.tabbingIdentifier = identifier
             }
-            observeFrame(of: nsWindow)
             updatePageOverlay()
             let waiters = windowWaiters
             windowWaiters = []
@@ -520,10 +500,9 @@ public final class CefBrowserWindow: Identifiable {
     func windowDestroyed() {
         serviceWindowObserver.map(NotificationCenter.default.removeObserver)
         serviceWindowObserver = nil
-        frameObservers.forEach(NotificationCenter.default.removeObserver)
-        frameObservers = []
-        chromiumSurfaces.forEach(stopTracking)
-        chromiumSurfaces = []
+        for state in moduleStates.values {
+            (state as? CefBrowserWindowParticipant)?.browserWindowDidClose(self)
+        }
         accessoryController = nil
         windowWaiters = []
         cefWindow = nil
@@ -534,4 +513,13 @@ public final class CefBrowserWindow: Identifiable {
         onClose?()
         CefRuntime.shared.continueTerminationIfReady()
     }
+}
+
+/// An object a module keeps for a ``CefBrowserWindow``
+/// (``CefBrowserWindow/moduleState(_:make:)``) that has to know when the
+/// window closes.
+@MainActor
+package protocol CefBrowserWindowParticipant: AnyObject {
+    /// The window has been destroyed; drop what it held.
+    func browserWindowDidClose(_ window: CefBrowserWindow)
 }

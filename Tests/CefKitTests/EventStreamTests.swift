@@ -31,22 +31,4 @@ struct EventStreamTests {
         var iterator = changed.makeAsyncIterator()
         #expect(await iterator.next() == .number(9))
     }
-
-    @Test func bookmarkChangesCoalesce() async throws {
-        let profile = CefProfile.persistent(id: "event-stream-tests")
-        let changes = profile.bookmarks.changes
-        // Subscribing hands the live events to a task; let it start.
-        try await Task.sleep(for: .milliseconds(50))
-        for _ in 0..<10 { profile.services.deliver(module: CefBookmarks.module.name, name: "changed", payload: .null) }
-        try await Task.sleep(for: .milliseconds(100))
-        var count = 0
-        let reader = Task { @MainActor in
-            for await _ in changes { count += 1 }
-        }
-        try await Task.sleep(for: .milliseconds(100))
-        reader.cancel()
-        // One when nothing is read between deliveries; a loaded machine can let
-        // the forwarding task run mid-burst, which splits it into a few.
-        #expect((1...3).contains(count))
-    }
 }

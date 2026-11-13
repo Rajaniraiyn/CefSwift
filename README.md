@@ -37,7 +37,12 @@ let package = Package(
 `CefKit` alone: its `CefWindowedBrowserView` and `CefOffscreenBrowserView`
 host a browser without SwiftUI (see [In AppKit](docs/guide.md#in-appkit)).
 Optional features are libraries of their own on top of `CefKit`: add
-`CefPasskeys` for passkeys the app answers.
+`CefPasskeys` for passkeys the app answers, and `CefChromium` for Chromium's
+own browser features: its bookmarks, history and address-bar suggestions,
+and its bubbles, find bar and status bubble in Chrome-style windows, anchored,
+replaced with your own interface or hidden. `CefChromium` is bound to
+Chromium-private interfaces of the pinned CEF, so it is the part most likely
+to need attention when CEF updates.
 
 ### Show a web page
 
@@ -167,7 +172,7 @@ covers identifiers, signing, entitlements, notarization and the bundle layout;
 | Rebranded and restyled `chrome://` pages | `productName`, `stringOverrides`, `CefUserScript.styleSheet(_:matching:includingShadowRoots:)` | [Chromium's own pages](docs/guide.md#customizing-chromiums-own-pages) |
 | Profiles, cookies, Chromium preferences | `CefProfile` | [Profiles](docs/guide.md#profiles) |
 | The app's own requests through Chromium's network stack, sharing a profile's cookies, cache and proxy | `CefProfile.data(for:)`, `bytes(for:)` | [Requests through Chromium's network stack](docs/guide.md#requests-through-chromiums-network-stack) |
-| Bookmarks, history, address-bar suggestions | `CefBookmarks`, `CefHistory`, `CefAutocomplete` | [Bookmarks, history and suggestions](docs/guide.md#bookmarks-history-and-suggestions) |
+| Bookmarks, history, address-bar suggestions (the `CefChromium` library) | `CefBookmarks`, `CefHistory`, `CefAutocomplete` | [Bookmarks, history and suggestions](docs/guide.md#bookmarks-history-and-suggestions) |
 | Discarding hidden browsers to free memory, and restoring them when shown; when to discard is the app's policy | `discard()`, `discardBlockers()`, `lifecycle`, `lifecycleChangedAt` | [Discarding browsers](docs/guide.md#discarding-browsers) |
 | Chrome DevTools Protocol, in-process | `CefDevTools` | [DevTools](docs/guide.md#devtools) |
 | Your own set-up code for every browser of a configuration, before its first page if it must | `CefBrowserAttachment` | [Attachments](docs/guide.md#attachments) |

@@ -12,17 +12,17 @@ import ObjectiveC
 /// hooked. SelfTest checks ``features`` so such an update fails CI instead
 /// of degrading quietly.
 @MainActor
-enum CefObjCHook {
+package enum CefObjCHook {
     /// A method a feature calls or overrides: the instance method
     /// `selector` of the class named `className`, whose type encoding,
     /// compared without offsets (`v32@0:8@16q24` matches `v@:@q`), is
     /// `types`.
-    struct Method {
+    package struct Method {
         let className: String
         let selector: Selector
         let types: String
 
-        init(_ className: String, _ selector: Selector, types: String) {
+        package init(_ className: String, _ selector: Selector, types: String) {
             self.className = className
             self.selector = selector
             self.types = types
@@ -33,10 +33,16 @@ enum CefObjCHook {
 
     /// One override: the method, the block that replaces it, and where to
     /// hand the implementation it calls through to.
-    struct Override {
+    package struct Override {
         let method: Method
         let block: Any
         let original: (IMP) -> Void
+
+        package init(method: Method, block: Any, original: @escaping (IMP) -> Void) {
+            self.method = method
+            self.block = block
+            self.original = original
+        }
     }
 
     /// Each feature's name and the methods it lacks; an empty list means
@@ -52,7 +58,7 @@ enum CefObjCHook {
     /// they and every method in `requires` exist with the expected types.
     /// Returns whether the feature is installed.
     @discardableResult
-    static func installFeature(_ name: String, requires: [Method] = [], overrides: [Override]) -> Bool {
+    package static func installFeature(_ name: String, requires: [Method] = [], overrides: [Override]) -> Bool {
         if let installed = features.first(where: { $0.name == name }) { return installed.missing.isEmpty }
         let missing = (requires + overrides.map(\.method)).filter { resolve($0) == nil }.map(\.key)
         features.append((name, missing))

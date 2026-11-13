@@ -1,4 +1,5 @@
 import AppKit
+@_spi(Testing) import CefChromium
 @_spi(Testing) import CefKit
 import CefSwiftUI
 import SwiftUI
@@ -8,6 +9,7 @@ import SwiftUI
 /// its indicator. A CEF update that renames those classes fails here.
 extension SelfTest {
     static func nativeUIChecks() async {
+        CefChromiumTesting.activate()
         let features = CefTesting.runtimeHookFeatures
         check("runtime hooks: every feature's AppKit classes and methods exist",
               !features.isEmpty && features.allSatisfy(\.missing.isEmpty),

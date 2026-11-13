@@ -478,7 +478,7 @@ files.
 `favicon` is the page's icon as an `NSImage`, downloaded at up to 32 points
 from the address in `faviconURL`. Both are `nil` until the page reports an
 icon, and become `nil` again when a new main-frame document starts loading.
-For pages that are not open, use
+For pages that are not open, CefChromium has
 [`profile.history.favicon(for:size:)`](#bookmarks-history-and-suggestions).
 
 `zoomLevel` is 0 for 100%, and each step of 1 scales the page by 20%. You can
@@ -1754,9 +1754,13 @@ and `showsPageActionIcons`.
 Chromium shows some of its interface over a `CefBrowserWindow` in windows
 of its own: bubbles such as the QR code generator and Cast, the HTTP
 sign-in dialog, the find bar, the status bubble with a hovered link's
-address. These are surfaces, `CefChromiumSurface`, of a `Kind`. Without
-Chrome's toolbar, Chromium hangs the toolbar's bubbles from the top right
-of the page. `window.chromiumUI` decides, per kind, how each is presented:
+address. Without Chrome's toolbar, Chromium hangs the toolbar's bubbles
+from the top right of the page. That is all CefKit does with them.
+
+The optional `CefChromium` library
+(`.product(name: "CefChromium", package: "CefSwift")`) lets the app take
+them over. They are surfaces, `CefChromiumSurface`, of a `Kind`, and
+`window.chromiumUI` decides, per kind, how each is presented:
 
 | Presentation | Effect |
 |---|---|
@@ -1767,10 +1771,24 @@ of the page. `window.chromiumUI` decides, per kind, how each is presented:
 Anchors put Chromium's surfaces under your controls:
 
 ```swift
+import CefChromium
+
 window.chromiumUI.anchor = .view(addressField, alignment: .trailing)  // every toolbar surface
 window.chromiumUI.anchors[.qrCode] = .view(qrButton, alignment: .trailing)
 window.chromiumUI[.statusBubble] = .hidden
 ```
+
+CefChromium recognizes surfaces by overriding methods of Chromium's
+private AppKit classes (`CefNSWindow`, `NativeWidgetMacNSWindow`) and by
+the class names Chromium's views report through accessibility, so it is
+bound to the pinned CEF; SelfTest fails when an update renames them. It
+starts following surfaces, in every browser window, the first time the app
+uses any of its window API (`chromiumUI`, `configuration.chromiumUI`,
+`chromiumSurfaces`, `setCustomPresentation(for:_:)`, `statusBubbleView`,
+`chromiumSurfaceAnchor(_:alignment:)`, …); surfaces already on screen then
+are taken up as they are. Set `chromiumUI` before showing the window, so
+nothing shows before it applies. Until then Chromium's interface shows as
+it does without the library.
 
 A status bubble or zoom bubble hidden in the window's configuration is
 switched off in Chromium when the browser is created
@@ -1982,8 +2000,8 @@ Store `id` to find the profile again. Identifiers map to directory names
 one to one, also on a case-insensitive volume, so `"a/b"`, `"a_b"`,
 `"Work"` and `"work"` are four profiles. `<root>` is
 `CefRuntime.Configuration.resolvedRootCacheDirectory`: `rootCacheDirectory`, or
-the parent of `cacheDirectory` when only that is set. `bookmarks`,
-`history` and `autocomplete` hold their profile, so
+the parent of `cacheDirectory` when only that is set. CefChromium's
+`bookmarks`, `history` and `autocomplete` hold their profile, so
 `CefProfile.incognito().autocomplete` keeps its profile alive while you
 use it; the profile does not hold them back, so neither keeps the other
 alive forever.
@@ -2158,10 +2176,13 @@ func browser(_ browser: CefBrowser, decidePermissionFor request: CefPermissionRe
 
 ### Bookmarks, history and suggestions
 
-A profile gives you the data behind Chrome's bookmarks, history and address
-bar:
+With the optional `CefChromium` library
+(`.product(name: "CefChromium", package: "CefSwift")`), a profile gives you
+the data behind Chrome's bookmarks, history and address bar:
 
 ```swift
+import CefChromium
+
 let bookmark = try await profile.bookmarks.add(url, title: "CefSwift")
 let roots = try await profile.bookmarks.tree()
 let recent = try await profile.bookmarks.recent(limit: 12)
@@ -2196,7 +2217,7 @@ let suggestions = try await profile.autocomplete.suggestions(for: "cef")
   Search-engine suggestions come from the network; filter on `kind` to keep
   only local results.
 
-CEF has no API for any of this. CefKit uses the services Chromium's own
+CEF has no API for any of this. CefChromium uses the services Chromium's own
 pages use — `chrome.bookmarks`, and the Mojo handlers of the history, new
 tab and `chrome://omnibox` pages — from hidden service hosts, one renderer
 process each. A host starts on the first call that needs it, in about a
@@ -2212,10 +2233,11 @@ save while the app shows no page in a visible window; until it has, and
 in a new profile that has no file yet, those reads start the host
 ([architecture](architecture.md#internal-page-services)).
 
-These interfaces are internal to Chromium and more likely than the rest of
-CefKit to change with a Chromium update; `chrome://omnibox` is a debugging
-page, so `autocomplete` is experimental. SelfTest exercises all of them, so
-a CEF update that breaks one fails CI.
+These interfaces are internal to Chromium and more likely than CefKit to
+change with a Chromium update, which is why they live in the optional
+`CefChromium` library, bound to the pinned CEF; `chrome://omnibox` is a
+debugging page, so `autocomplete` is experimental. SelfTest exercises all
+of them, so a CEF update that breaks one fails CI.
 
 What each host costs while it runs, measured with
 [`Scripts/measure-services.py`](../Scripts/measure-services.py) on the
@@ -2318,8 +2340,9 @@ measurement a page can make.
 | `discard()` | `Runtime.evaluate` and `DOMDebugger.getEventListeners`, no domain | Nothing measured; the page is about to be unloaded. |
 | Offscreen accessibility actions | `Accessibility` for the length of one lookup; `DOM.focus`, `DOM.scrollIntoViewIfNeeded`; `Input.insertText` only for a field that takes no input-method text | Nothing measured. Only an assistive app's actions use it. |
 
-CefKit's own services (bookmarks, history, suggestions) run in hidden
-browsers that show Chromium's own pages, and attach no DevTools session.
+CefKit's internal services (tab discarding, and CefChromium's bookmarks,
+history and suggestions) run in hidden browsers that show Chromium's own
+pages, and attach no DevTools session.
 
 ### How the app names itself
 
@@ -2753,12 +2776,14 @@ the switches measured and not used.
   accessibility tree only when Chromium next resends them.
 - Offscreen browsers always use the Alloy style and cannot open native
   popup windows.
-- `CefAutocomplete` is experimental, and `CefBookmarks`, `CefHistory` and
-  `CefAutocomplete` depend on Chromium-internal WebUI hosts, and `CefBookmarks`
-  on the format of Chromium's `Bookmarks` file.
-- `chromiumUI` and swipe navigation in `CefBrowserWindow` depend on
-  Chromium's AppKit classes and the view class names its accessibility
-  reports ([architecture](architecture.md#chromiums-appkit-classes)). If a
+- CefChromium is bound to the pinned CEF. `CefAutocomplete` is
+  experimental, and `CefBookmarks`, `CefHistory` and `CefAutocomplete`
+  depend on Chromium-internal WebUI hosts, and `CefBookmarks` on the format
+  of Chromium's `Bookmarks` file.
+- CefChromium's `chromiumUI` and swipe navigation in `CefBrowserWindow`
+  depend on Chromium's AppKit classes and the view class names its
+  accessibility reports
+  ([architecture](architecture.md#chromiums-appkit-classes)). If a
   CEF update renames them, surfaces show as Chromium draws them, where it
   puts them, with unknown ones reported as `.other`, and browser windows
   swipe as Chrome does, with its arrow, whatever the options say. Commands
