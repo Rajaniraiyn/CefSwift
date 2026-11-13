@@ -99,11 +99,12 @@ final class PageOverlayView: NSView {
 final class BrowserViewDelegate: Sendable {
     let toolbar: CefBrowserWindow.Toolbar
     /// The window whose page may open popups; UI thread only.
-    private weak let window: CefBrowserWindow?
+    private let windowReference: CefWeak<CefBrowserWindow>
+    private var window: CefBrowserWindow? { windowReference.object }
 
     init(toolbar: CefBrowserWindow.Toolbar, window: CefBrowserWindow?) {
         self.toolbar = toolbar
-        self.window = window
+        windowReference = CefWeak(window)
     }
 
     func makeDelegate() -> UnsafeMutablePointer<cef_browser_view_delegate_t> {
@@ -155,11 +156,12 @@ final class BrowserViewDelegate: Sendable {
 
 /// Owner of a `cef_window_delegate_t`. Callbacks arrive on the UI thread.
 final class WindowDelegate: Sendable {
-    private weak let owner: CefBrowserWindow?
+    private let ownerReference: CefWeak<CefBrowserWindow>
+    private var owner: CefBrowserWindow? { ownerReference.object }
 
     @MainActor
     init(owner: CefBrowserWindow) {
-        self.owner = owner
+        ownerReference = CefWeak(owner)
     }
 
     private static func with<S, R: Sendable>(

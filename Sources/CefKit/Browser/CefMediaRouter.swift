@@ -187,11 +187,12 @@ public final class CefMediaRouter {
 
 /// Owner of a `cef_media_observer_t`. Callbacks arrive on the UI thread.
 private final class MediaObserver: Sendable {
-    private weak let router: CefMediaRouter?
+    private let routerReference: CefWeak<CefMediaRouter>
+    private var router: CefMediaRouter? { routerReference.object }
 
     @MainActor
     init(router: CefMediaRouter) {
-        self.router = router
+        routerReference = CefWeak(router)
     }
 
     func makeObserver() -> UnsafeMutablePointer<cef_media_observer_t> {

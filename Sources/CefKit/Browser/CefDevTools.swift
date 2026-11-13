@@ -299,11 +299,12 @@ public final class CefDevTools {
 /// Owner of the `cef_dev_tools_message_observer_t`. Callbacks arrive on the
 /// UI thread; the message buffers are only valid for the duration of a call.
 private final class DevToolsObserver: Sendable {
-    private weak let devTools: CefDevTools?
+    private let devToolsReference: CefWeak<CefDevTools>
+    private var devTools: CefDevTools? { devToolsReference.object }
 
     @MainActor
     init(devTools: CefDevTools) {
-        self.devTools = devTools
+        devToolsReference = CefWeak(devTools)
     }
 
     func makeObserver() -> UnsafeMutablePointer<cef_dev_tools_message_observer_t> {
