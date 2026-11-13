@@ -50,6 +50,18 @@ DEFAULT_PAGE = """<!doctype html>
 """
 
 
+def quit_app(app):
+    """Closes the app's standard input, which makes a `-benchmark YES` app
+    quit, and kills it if it has not quit within 30 s."""
+    app.stdin.close()
+    try:
+        app.wait(timeout=30)
+    except subprocess.TimeoutExpired:
+        app.kill()
+        app.wait()
+        print("warning: the app did not quit within 30 s and was killed", file=sys.stderr)
+
+
 def executable(app: pathlib.Path) -> pathlib.Path:
     with open(app / "Contents/Info.plist", "rb") as file:
         name = plistlib.load(file)["CFBundleExecutable"]
@@ -132,13 +144,7 @@ def run_once(exe, url, data_dir, settle, extra, timeout):
             key=lambda entry: (entry["kind"] != "browser", entry["kind"]))
     finally:
         quit_started = time.time()
-        app.stdin.close()
-        try:
-            app.wait(timeout=30)
-        except subprocess.TimeoutExpired:
-            app.kill()
-            app.wait()
-            print("warning: the app did not quit within 30 s and was killed", file=sys.stderr)
+        quit_app(app)
         quit_seconds = time.time() - quit_started
     return {
         "launch": loaded - started,
