@@ -567,7 +567,7 @@ Other features:
 | Screen sharing (`getDisplayMedia`) | Nothing in the bundle; macOS asks the user for Screen Recording permission. |
 | Notifications | Nothing in the bundle; macOS asks the user. The Alerts helper gets `NSUserNotificationAlertStyle`. |
 | `NSAppTransportSecurity` | Nothing: Chromium does its own networking, which App Transport Security does not cover. |
-| FairPlay in `CefSystemBrowser` (WebKit) | Nothing: no entitlement, capability or team signature. |
+| FairPlay in a `WKWebView` beside Chromium (the Browser example's WebKit tabs) | Nothing: no entitlement, capability or team signature. |
 | Widevine Verified Media Path | Not available with stock CEF: CEF 156 gives the CDM no host binary to verify, so no signature of yours is checked. See [Playing streaming services](guide.md#playing-streaming-services). |
 
 ### App Sandbox

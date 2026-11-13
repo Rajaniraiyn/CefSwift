@@ -93,10 +93,9 @@ struct ProfilePathTests {
     }
 
     @Test func defaultAndIncognitoProfilesHaveNoDirectoryOfTheirOwn() {
-        #expect(CefProfile.storage(for: .global, rootCacheDirectory: root) == .init(chromiumDirectory: nil, webKitStore: .default))
+        #expect(CefProfile.storage(for: .global, rootCacheDirectory: root) == .init(chromiumDirectory: nil))
         // Empty cache_path is what puts a context in in-memory/incognito mode.
-        #expect(CefProfile.storage(for: .incognito, rootCacheDirectory: root)
-            == .init(chromiumDirectory: nil, webKitStore: .nonPersistent))
+        #expect(CefProfile.storage(for: .incognito, rootCacheDirectory: root) == .init(chromiumDirectory: nil))
     }
 
     @Test func persistentProfileDerivesUnderProfiles() {
@@ -112,8 +111,6 @@ struct ProfilePathTests {
         for name in names {
             #expect(!name.contains("/") && !name.contains(":") && name != "." && name != ".." && !name.hasPrefix("."))
         }
-        // Each maps to its own WebKit store too.
-        #expect(Set(ids.map(CefProfile.dataStoreIdentifier)).count == ids.count)
     }
 
     @Test func pathsCannotEscapeTheProfilesDirectory() {
@@ -130,13 +127,12 @@ struct ProfilePathTests {
         #expect(CefProfile.directoryName(for: long) == CefProfile.directoryName(for: long))
     }
 
-    @Test func bothEnginesUseTheRootDerivedFromAnExplicitCacheDirectory() {
+    @Test func profilesUseTheRootDerivedFromAnExplicitCacheDirectory() {
         var configuration = CefRuntime.Configuration()
         configuration.cacheDirectory = URL(fileURLWithPath: "/tmp/app/Data/Default")
         #expect(configuration.resolvedRootCacheDirectory.path == "/tmp/app/Data")
         let storage = CefProfile.storage(for: .persistent(id: "work"), rootCacheDirectory: configuration.resolvedRootCacheDirectory)
         #expect(storage.chromiumDirectory?.path == "/tmp/app/Data/Profiles/work")
-        #expect(storage.webKitStore == .persistent(CefProfile.dataStoreIdentifier("work")))
         configuration.rootCacheDirectory = URL(fileURLWithPath: "/tmp/root")
         #expect(configuration.resolvedRootCacheDirectory.path == "/tmp/root")
     }
@@ -151,6 +147,8 @@ struct ProfilePathTests {
         #expect(CefProfile.persistent(id: "ProfilePathTests-identity/") !== profile)
         #expect(CefProfile.persistent(id: "default") === CefProfile.default)
         #expect(CefProfile.incognito().id != CefProfile.incognito().id)
+        #expect(CefProfile.incognito().isIncognito)
+        #expect(!profile.isIncognito && !CefProfile.default.isIncognito)
     }
 
     @Test func aServiceKeepsItsProfileAliveWithoutACycle() {

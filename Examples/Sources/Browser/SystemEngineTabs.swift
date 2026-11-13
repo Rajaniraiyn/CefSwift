@@ -1,6 +1,6 @@
 import AppKit
 import CefSwiftUI
-import CefSystemEngine
+import SystemEngine
 import SwiftUI
 
 /// Tabs shown by the system's WebKit instead of Chromium: streaming
@@ -12,7 +12,7 @@ import SwiftUI
 /// site that is not a streaming service hands the tab back to Chromium.
 @MainActor
 final class SystemEngineTab {
-    let browser: CefSystemBrowser
+    let browser: SystemBrowser
     let window: NSWindow
     let isPrivate: Bool
 
@@ -24,7 +24,7 @@ final class SystemEngineTab {
     }
 
     init(url: URL, profile: CefProfile, controller: BrowserController) {
-        browser = CefSystemBrowser(configuration: .init(profile: profile))
+        browser = SystemBrowser(configuration: .init(profile: profile))
         isPrivate = profile !== CefProfile.default
         window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1100, height: 760),
@@ -39,7 +39,7 @@ final class SystemEngineTab {
             // A link the user follows out of the streaming site goes back
             // to Chromium; the site's own redirects (sign-in) stay here.
             guard let url = navigation.url, navigation.hasUserGesture, Self.opensStreamingSitesAutomatically,
-                  url.scheme == "https" || url.scheme == "http", !CefSystemBrowser.prefersSystemEngine(for: url),
+                  url.scheme == "https" || url.scheme == "http", !SystemBrowser.prefersSystemEngine(for: url),
                   let controller
             else { return .allow }
             controller.openTab(url: url, isPrivate: profile !== CefProfile.default)
@@ -65,7 +65,7 @@ private struct SystemEngineTabView: View {
     let controller: BrowserController
 
     var body: some View {
-        CefSystemWebView(tab.browser)
+        SystemWebView(tab.browser)
             .clipShape(.rect(cornerRadius: 10))
             .padding([.horizontal, .bottom], 6)
             .toolbar {

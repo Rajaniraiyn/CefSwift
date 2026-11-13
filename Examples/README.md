@@ -47,7 +47,10 @@ A tabbed browser (`Sources/Browser`). Each tab is a Chrome-style
 - Streaming services (Netflix, Disney+ and others) in tabs shown by the
   system's WebKit, which plays FairPlay-protected video, marked with a
   WebKit badge; View › Open in WebKit moves any page there, and the tab's
-  "Open in Chromium" button moves it back.
+  "Open in Chromium" button moves it back. The WebKit side
+  (`Sources/SystemEngine`: `SystemBrowser`, `SystemWebView`) is a small
+  `WKWebView` wrapper on CefKit's public API, for pages that need FairPlay
+  or H.264 and AAC, which Chromium in CefSwift does not have.
 - A single instance: launching the app again while it runs opens a new tab,
   or a tab for each URL or file path passed on the command line.
 

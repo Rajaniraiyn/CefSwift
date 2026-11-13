@@ -426,7 +426,7 @@ enum Doctor {
                 status: .info, title: "protectedMedia: Verified Media Path",
                 detail: "unverified. Stock CEF gives the Widevine CDM no signed host binary to verify, so " +
                     "licence servers see an unverified software (L3) client: services that require VMP, such as " +
-                    "Netflix, refuse Widevine playback here. CefSystemBrowser plays them with WebKit and FairPlay.",
+                    "Netflix, refuse Widevine playback here; WebKit (WKWebView) plays them with FairPlay.",
                 fix: nil))
         }
 

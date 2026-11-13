@@ -192,9 +192,9 @@ reading as one.
   a browser option in `CefBrowser`, a window option in `CefBrowserWindow`.
 - **`Configuration`** is the creation-time value bag of a principal type:
   `CefRuntime.Configuration`, `CefBrowser.Configuration`,
-  `CefBrowserWindow.Configuration`, `CefSystemBrowser.Configuration`,
-  `CefBrowser.PDFConfiguration` for one operation. Its property is
-  `configuration`, and so is the initializer label. Never `Options`.
+  `CefBrowserWindow.Configuration`, `CefBrowser.PDFConfiguration` for one
+  operation. Its property is `configuration`, and so is the initializer
+  label. Never `Options`.
 - **Groups** inside a configuration are named for their topic, without a
   suffix (`services`, `network`, `privacy`, `security`, `credentials`,
   `chromeToolbar`, `contextMenu`), and an option inside a group nests in the
