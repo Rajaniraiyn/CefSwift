@@ -1,10 +1,10 @@
 import CefSwiftUI
 import SwiftUI
 
-/// `browser.downloads` lists a browser's downloads with their progress and
-/// state, and `pauseDownload(_:)`, `resumeDownload(_:)` and
-/// `cancelDownload(_:)` control them. Where each one is saved is the
-/// delegate's decision, here a folder of the app's own.
+/// `browser.downloads` lists a browser's downloads; each ``CefDownload`` is
+/// observable, with its progress and state, and `pause()`, `resume()` and
+/// `cancel()`. Where one is saved follows the profile's `downloadPolicy`
+/// unless the delegate decides, as here: a folder of the app's own.
 struct DownloadsDemo: Demo {
     let title = "Downloads"
     let summary = "Files the page downloads, saved where the app decides, with their progress and controls."
@@ -21,7 +21,7 @@ private struct DownloadsView: View {
         VSplitView {
             CefWebView(model.browser).frame(minHeight: 160)
             List(model.browser.downloads.reversed()) { download in
-                DownloadRow(download: download, browser: model.browser)
+                DownloadRow(download: download)
             }
             .frame(minHeight: 120)
             .overlay { if model.browser.downloads.isEmpty { Text("No downloads").foregroundStyle(.secondary) } }
@@ -38,9 +38,9 @@ private final class DownloadsModel: CefBrowserDelegate {
     let folder = FileManager.default.temporaryDirectory.appending(path: "Gallery Downloads")
     lazy var browser = CefBrowser(url: Self.page.localURL, delegate: self)
 
-    func browser(_ browser: CefBrowser, decideDestinationFor download: CefDownload, suggestedName: String) async -> CefDownloadDecision {
+    func browser(_ browser: CefBrowser, decideDestinationFor download: CefDownload) async -> CefDownloadDecision {
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        return .save(to: folder.appending(path: suggestedName))
+        return .saveInFolder(folder)
     }
 
     static let page = SamplePage("downloads.html", title: "Downloads", body: """
@@ -53,25 +53,24 @@ private final class DownloadsModel: CefBrowserDelegate {
 
 private struct DownloadRow: View {
     let download: CefDownload
-    let browser: CefBrowser
 
     var body: some View {
         HStack {
             VStack(alignment: .leading) {
-                Text(download.destinationURL?.lastPathComponent ?? download.url?.lastPathComponent ?? "Download")
-                ProgressView(value: Double(download.receivedBytes), total: Double(max(1, download.expectedBytes ?? 0)))
+                Text(download.suggestedFilename)
+                ProgressView(value: download.fractionCompleted)
                 Text("\(download.receivedBytes.formatted(.byteCount(style: .file))) · \(String(describing: download.state))")
                     .font(.caption).foregroundStyle(.secondary)
             }
             switch download.state {
             case .inProgress:
-                Button("Pause", systemImage: "pause.fill") { browser.pauseDownload(download.id) }
-                Button("Cancel", systemImage: "xmark") { browser.cancelDownload(download.id) }
+                Button("Pause", systemImage: "pause.fill") { download.pause() }
+                Button("Cancel", systemImage: "xmark") { download.cancel() }
             case .paused, .interrupted:
-                Button("Resume", systemImage: "play.fill") { browser.resumeDownload(download.id) }
+                Button("Resume", systemImage: "play.fill") { download.resume() }
             case .completed:
                 Button("Show in Finder", systemImage: "magnifyingglass") {
-                    download.destinationURL.map { NSWorkspace.shared.activateFileViewerSelecting([$0]) }
+                    download.fileURL.map { NSWorkspace.shared.activateFileViewerSelecting([$0]) }
                 }
             case .cancelled:
                 EmptyView()

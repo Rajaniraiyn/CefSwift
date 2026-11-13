@@ -20,7 +20,7 @@ extension SelfTest {
               detail: "\(String(describing: CefRuntime.shared.preferences.value(named: "browser.confirm_to_quit")))")
     }
 
-    // MARK: Bridge, as the Showcase uses it
+    // MARK: Bridge, as the Gallery uses it
 
     static func bridgeRoundTripChecks() async {
         var total = 0
