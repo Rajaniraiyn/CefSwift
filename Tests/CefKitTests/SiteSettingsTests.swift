@@ -82,6 +82,52 @@ struct SiteSettingsTests {
         #expect(CefPermissionRequest.Kinds.camera.mediaMask(within: UInt32.max) != 0)
     }
 
+    // MARK: Desktop capture is its own permission
+
+    private static let deviceAudio = UInt32(CEF_MEDIA_PERMISSION_DEVICE_AUDIO_CAPTURE.rawValue)
+    private static let deviceVideo = UInt32(CEF_MEDIA_PERMISSION_DEVICE_VIDEO_CAPTURE.rawValue)
+    private static let desktopAudio = UInt32(CEF_MEDIA_PERMISSION_DESKTOP_AUDIO_CAPTURE.rawValue)
+    private static let desktopVideo = UInt32(CEF_MEDIA_PERMISSION_DESKTOP_VIDEO_CAPTURE.rawValue)
+
+    @Test func desktopCaptureMapsToItsOwnKinds() {
+        typealias Kinds = CefPermissionRequest.Kinds
+        #expect(Kinds.fromMediaTypes(Self.desktopVideo) == .screenCapture)
+        #expect(Kinds.fromMediaTypes(Self.desktopAudio) == .systemAudioCapture)
+        #expect(Kinds.fromMediaTypes(Self.desktopVideo | Self.desktopAudio) == [.screenCapture, .systemAudioCapture])
+        #expect(Kinds.fromMediaTypes(Self.deviceVideo | Self.deviceAudio) == [.camera, .microphone])
+        #expect(Kinds.fromRequestTypes(UInt32(CEF_PERMISSION_TYPE_CAMERA_PAN_TILT_ZOOM.rawValue)) == .cameraPanTiltZoom)
+    }
+
+    @Test func aDeviceGrantNeverGrantsDesktopCapture() {
+        let everything = Self.deviceAudio | Self.deviceVideo | Self.desktopAudio | Self.desktopVideo
+        #expect(CefPermissionRequest.Kinds([.camera, .microphone]).mediaMask(within: everything)
+            == Self.deviceAudio | Self.deviceVideo)
+        #expect(CefPermissionRequest.Kinds.camera.mediaMask(within: Self.desktopVideo) == 0)
+        #expect(CefPermissionRequest.Kinds.microphone.mediaMask(within: Self.desktopAudio) == 0)
+        #expect(CefPermissionRequest.Kinds.screenCapture.mediaMask(within: everything) == Self.desktopVideo)
+        #expect(CefPermissionRequest.Kinds.systemAudioCapture.mediaMask(within: everything) == Self.desktopAudio)
+        // Limited to what was asked for.
+        #expect(CefPermissionRequest.Kinds.screenCapture.mediaMask(within: Self.deviceVideo) == 0)
+    }
+
+    @Test func storedCameraAndMicrophoneDoNotAnswerDesktopCapture() {
+        let request = CefPermissionRequest.Kinds.fromMediaTypes(Self.desktopVideo | Self.desktopAudio)
+        let answer = CefStoredPermissionAnswer(kinds: request) { _ in .allow }
+        #expect(answer.allowed.isEmpty)
+        #expect(answer.undecided == [.screenCapture, .systemAudioCapture])
+        #expect(answer.granted(after: nil).mediaMask(within: Self.desktopVideo | Self.desktopAudio) == 0)
+        // A stored block on the camera does not refuse it either: the
+        // delegate decides.
+        #expect(CefStoredPermissionAnswer(kinds: request) { _ in .block }.blocked.isEmpty)
+    }
+
+    @Test func desktopCaptureIsNeverStored() {
+        #expect(CefPermissionRequest.Kinds([.screenCapture, .systemAudioCapture]).sitePermissions.isEmpty)
+        #expect(CefPermissionRequest.Kinds([.camera, .screenCapture]).sitePermissions == [.camera])
+        #expect(CefPermissionRequest.Kinds.cameraPanTiltZoom.sitePermissions == [.cameraPanTiltZoom])
+        #expect(CefPermissionRequest.Kinds.camera.sitePermissions == [.camera])
+    }
+
     @Test func decisionsThatGrant() {
         #expect(CefPermissionDecision.allow.grants && CefPermissionDecision.alwaysAllow.grants)
         #expect(!CefPermissionDecision.deny.grants && !CefPermissionDecision.alwaysDeny.grants)

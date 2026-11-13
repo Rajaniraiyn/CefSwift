@@ -10,6 +10,9 @@ extension CefBrowser {
     func mainFrameDidStartLoading(_ url: URL?) {
         guard !isBootstrapping else { return }
         cancelDecisions { $0 == .page }
+        // The page being left is not the one an unresponsive question,
+        // or the reload it asked for, was about.
+        endUnresponsiveEpisode()
         pageScripting.mainFrameDidStartLoading()
         let wasDiscarded = isDiscarded
         pageDidStartLoading()
@@ -181,40 +184,55 @@ extension CefBrowser {
     /// ends first has its task cancelled (so the default sheets dismiss
     /// themselves) and its answer is never applied; `apply` and what it
     /// holds, such as CEF's callback, are released when the delegate
-    /// returns, which tells CEF the request was not answered.
+    /// returns, which tells CEF the request was not answered. The check
+    /// that the decision is still pending and `apply` run together on the
+    /// main actor, with no suspension between them, so nothing can end the
+    /// decision after it is found valid and before it is applied.
     func decide<Decision: Sendable>(
         _ scope: DecisionScope,
         _ ask: @escaping @MainActor (CefBrowserDelegate) async -> Decision,
         then apply: @escaping @MainActor (Decision) -> Void
     ) {
-        let task = startDecision(scope, ask)
-        Task {
-            if let decision = await task.value { apply(decision) }
-        }
+        startDecision(scope, ask, then: apply)
     }
 
     /// Asks the delegate as ``decide(_:_:then:)`` does and returns the
     /// answer, or `nil` when the decision ended first.
+    ///
+    /// The answer was valid when the decision was consumed, but the caller
+    /// resumes after that, so a caller that applies it through further
+    /// suspensions must check again that what it applies to still exists.
     func decision<Decision: Sendable>(
         _ scope: DecisionScope, _ ask: @escaping @MainActor (CefBrowserDelegate) async -> Decision
     ) async -> Decision? {
-        await startDecision(scope, ask).value
+        await withCheckedContinuation { (continuation: CheckedContinuation<Decision?, Never>) in
+            // Exactly one of the two runs: the asking task always finishes.
+            startDecision(scope, ask, then: { continuation.resume(returning: $0) }, ended: { continuation.resume(returning: nil) })
+        }
     }
 
+    /// Registers the decision, then asks. `ended` runs instead of `apply`
+    /// when the decision ended before the delegate answered.
     private func startDecision<Decision: Sendable>(
-        _ scope: DecisionScope, _ ask: @escaping @MainActor (CefBrowserDelegate) async -> Decision
-    ) -> Task<Decision?, Never> {
+        _ scope: DecisionScope,
+        _ ask: @escaping @MainActor (CefBrowserDelegate) async -> Decision,
+        then apply: @escaping @MainActor (Decision) -> Void,
+        ended: @escaping @MainActor () -> Void = {}
+    ) {
         let delegate = delegate ?? CefDefaultBrowserDelegate.shared
         nextDecisionID += 1
         let id = nextDecisionID
         // Runs after this returns, so the decision is registered first.
-        let task = Task { () -> Decision? in
+        let task = Task { @MainActor in
             let decision = await ask(delegate)
-            guard pendingDecisions.removeValue(forKey: id) != nil else { return nil }
-            return decision
+            // Check-and-consume, then apply, with no suspension between.
+            guard pendingDecisions.removeValue(forKey: id) != nil else {
+                ended()
+                return
+            }
+            apply(decision)
         }
         pendingDecisions[id] = PendingDecision(scope: scope, cancel: task.cancel)
-        return task
     }
 
     /// Ends the pending decisions whose scope matches.
@@ -250,6 +268,7 @@ extension CefBrowser {
         passkeyAuthenticator = nil
         accessibilityDidClose()
         cancelDecisions { _ in true }
+        endUnresponsiveEpisode()
         devTools.invalidate()
         pageScripting.failPendingEvaluations()
         readyWaiters.completeAll(.failure(CefError.browserClosed))

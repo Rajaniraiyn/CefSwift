@@ -181,6 +181,12 @@ public final class CefBrowser: Identifiable {
     /// Delegate decisions waiting for an answer; see ``decide(_:_:then:)``.
     @ObservationIgnored var pendingDecisions: [Int: PendingDecision] = [:]
     @ObservationIgnored var nextDecisionID = 0
+    /// Counts unresponsive-page questions; an answer applies only while
+    /// its question is the current one. See `CefUnresponsivePage.swift`.
+    @ObservationIgnored var unresponsiveEpisode = 0
+    /// Whether the current renderer's ending reloads the page: the answer
+    /// to its unresponsive question was ``CefUnresponsivePageDecision/reload``.
+    @ObservationIgnored var reloadsWhenRendererEnds = false
     @ObservationIgnored var downloadControls: [UInt32: CefRef<cef_download_item_callback_t>] = [:]
     @ObservationIgnored var isChromeStyle = false
     @ObservationIgnored var isEmbeddedView = false

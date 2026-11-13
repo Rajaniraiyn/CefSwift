@@ -63,41 +63,61 @@ public enum CefUnresponsivePagePresenter {
 }
 
 extension CefBrowser {
-    /// Browsers to reload once their renderer has ended.
-    private static var reloadingAfterTermination: Set<ObjectIdentifier> = []
-
     /// `on_render_process_unresponsive`. Returns whether CefSwift handles
     /// it; `false` lets Chromium show its dialog (Chrome style) or wait.
+    ///
+    /// Each notification is a new question that supersedes the one still
+    /// open: CEF has detached the earlier callback, so its decision is
+    /// cancelled (dismissing the default sheet) and a late answer to it does
+    /// nothing. Each decision is answered once.
     func renderProcessBecameUnresponsive(_ callback: CefRef<cef_unresponsive_process_callback_t>) -> Bool {
         isResponsive = false
         if isChromeStyle, configuration.unresponsivePages == .automatic { return false }
+        cancelDecisions { $0 == .unresponsive }
+        reloadsWhenRendererEnds = false
+        unresponsiveEpisode += 1
+        let episode = unresponsiveEpisode
         decide(.unresponsive) { await $0.browserPageIsUnresponsive(self) } then: { [weak self] decision in
+            // Only the current question's answer counts.
+            guard let self, self.unresponsiveEpisode == episode, self.state != .closed else { return }
             switch decision {
             case .wait:
                 callback.pointer.pointee.wait(callback.pointer)
             case .terminate:
                 callback.pointer.pointee.terminate(callback.pointer)
             case .reload:
-                if let self { Self.reloadingAfterTermination.insert(ObjectIdentifier(self)) }
+                // Belongs to this renderer: the termination it causes
+                // reloads, nothing later does.
+                self.reloadsWhenRendererEnds = true
                 callback.pointer.pointee.terminate(callback.pointer)
             }
         }
         return true
     }
 
-    /// `on_render_process_responsive`: a question still open is moot.
+    /// `on_render_process_responsive`: a question still open is moot, and
+    /// so is a reload asked for before.
     func renderProcessBecameResponsive() {
         isResponsive = true
-        cancelDecisions { $0 == .unresponsive }
+        endUnresponsiveEpisode()
     }
 
-    /// The renderer ended; a new one starts responsive.
+    /// The renderer ended; a new one starts responsive. Reloads when the
+    /// answer to this renderer's unresponsive question was
+    /// ``CefUnresponsivePageDecision/reload``.
     func renderProcessEnded() {
         isResponsive = true
+        let reloads = reloadsWhenRendererEnds
+        endUnresponsiveEpisode()
+        if reloads { reload() }
+    }
+
+    /// Ends the current unresponsive question and the reload it asked
+    /// for: on responsiveness, a renderer ending, a navigation or closing.
+    func endUnresponsiveEpisode() {
         cancelDecisions { $0 == .unresponsive }
-        if Self.reloadingAfterTermination.remove(ObjectIdentifier(self)) != nil {
-            reload()
-        }
+        reloadsWhenRendererEnds = false
+        unresponsiveEpisode += 1
     }
 }
 

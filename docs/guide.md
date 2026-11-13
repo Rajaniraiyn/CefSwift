@@ -893,6 +893,10 @@ Set `CefBrowser.Configuration.unresponsivePages` to `.delegate` to have
 Chrome-style browsers ask the delegate too, instead of showing Chromium's
 dialog. A page that responds again before you answer withdraws the
 question: the task is cancelled and the default sheet dismisses itself.
+So do a navigation, closing the browser, and a second notification while
+the first is still open, which replaces it; an answer to a withdrawn
+question is ignored. `.reload` reloads only when the renderer it was asked
+about ends, never a later one.
 
 ## JavaScript
 
@@ -1894,7 +1898,13 @@ answer the delegate gives, `.allow` or `.deny`, for the site as Chrome
 does. Camera and microphone requests reach the delegate before Chromium
 reads the settings, so CefSwift answers them from the settings itself, and
 asks the delegate only about kinds that are still `.ask`. An answer there
-applies to that request; `.alwaysAllow` and `.alwaysDeny` also store it:
+applies to that request; `.alwaysAllow` and `.alwaysDeny` also store it.
+Screen and system-audio capture (`.screenCapture`, `.systemAudioCapture`)
+are kinds of their own, never answered by the camera's or microphone's
+settings and never stored: granting one hands the page the screen without
+Chromium's picker, so the delegate is asked on every request. Camera
+movement (`.cameraPanTiltZoom`) is separate from `.camera` too, stored as
+`CefSitePermission.cameraPanTiltZoom`:
 
 ```swift
 func browser(_ browser: CefBrowser, decidePermissionFor request: CefPermissionRequest) async -> CefPermissionDecision {
