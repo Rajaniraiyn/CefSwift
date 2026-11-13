@@ -1,5 +1,5 @@
 # Builds, tests, audits the C bridge, bundles SelfTest and runs it against the
-# real Chromium. Also the gate for the auto-merged CEF update pull requests,
+# real Chromium, then opens every demo of the Gallery example. Also the gate for the auto-merged CEF update pull requests,
 # which start it with workflow_dispatch (docs/automation.md).
 #
 # Cost notes (keep this cheap):
@@ -171,6 +171,16 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           exit "$status"
+
+      # Opens every demo of the Gallery example in turn; the app prints a
+      # PASS or FAIL line for each and exits with the number of failures.
+      - name: Gallery smoke test
+        run: |
+          swift package --package-path Examples \
+            --allow-writing-to-package-directory \
+            --allow-network-connections all \
+            cef bundle --product Gallery --configuration release --output dist
+          ./Examples/dist/Gallery.app/Contents/MacOS/Gallery -smoke
 
       # On failure: the full log, the results, and any crash reports from
       # this run (Chromium's helpers report under their own names).
