@@ -38,7 +38,7 @@ extension SelfTest {
         let browser = CefBrowser(url: URL(string: "selftest://edge/heavy.html?1")!, configuration: discardConfiguration(), delegate: recorder)
         let browserWindow = CefBrowserWindow(browser: browser)
         browserWindow.show()
-        _ = await waitUntil { browser.title == "heavy" && !browser.isLoading }
+        _ = await loaded(browser, title: "heavy")
         browser.load(URL(string: "selftest://edge/heavy.html?2")!)
         _ = await waitUntil { browser.url?.query == "2" && !browser.isLoading && browser.favicon != nil }
         let renderer = await allocateInRenderer(browser)
@@ -133,7 +133,7 @@ extension SelfTest {
         let pinned = CefBrowserWindow(browser: CefBrowser(url: URL(string: "selftest://edge/tab.html?pinned")!))
         let windows = [audible, leaving, pinned]
         windows.forEach { $0.show() }
-        _ = await waitUntil { windows.allSatisfy { !$0.browser.isLoading && !$0.browser.title.isEmpty } }
+        _ = await allLoaded(windows.map(\.browser))
 
         audible.browser.isAudioMuted = true
         _ = try? await audible.browser.evaluateJavaScript("""
@@ -181,7 +181,7 @@ extension SelfTest {
         let twinURL = URL(string: "selftest://edge/tab.html?twin")!
         let twins = [CefBrowserWindow(browser: CefBrowser(url: twinURL)), CefBrowserWindow(browser: CefBrowser(url: twinURL))]
         twins.forEach { $0.show() }
-        _ = await waitUntil { twins.allSatisfy { !$0.browser.isLoading && $0.browser.title == "tab" } }
+        _ = await allLoaded(twins.map(\.browser), title: "tab")
         twins.forEach { $0.hide() }
         // Kept only for being ambiguous, once both are hidden.
         for twin in twins {
@@ -198,8 +198,7 @@ extension SelfTest {
         check("discard identity: tabs with the same address and title are kept",
               ambiguous && twins.allSatisfy { !$0.browser.isDiscarded }, detail: "\(String(describing: twinError))")
         // One of them navigating apart makes each tab identifiable again.
-        twins[1].browser.load(URL(string: "selftest://edge/tab.html?other")!)
-        _ = await waitUntil { twins[1].browser.url?.query == "other" && !twins[1].browser.isLoading }
+        _ = await load(URL(string: "selftest://edge/tab.html?other")!, in: twins[1].browser)
         await waitUntilDiscardable(twins[0].browser)
         await expect("discard identity: a tab told apart by its address is discarded, and only it") {
             try await twins[0].browser.discard()
@@ -212,7 +211,7 @@ extension SelfTest {
         let browser = CefBrowser(url: URL(string: "selftest://edge/tab.html?revalidate")!, delegate: hook)
         let window = CefBrowserWindow(browser: browser)
         window.show()
-        _ = await waitUntil { !browser.isLoading && browser.title == "tab" }
+        _ = await loaded(browser, title: "tab")
         window.hide()
         await waitUntilDiscardable(browser)
         hook.body = { _ in window.show() }
@@ -240,7 +239,7 @@ extension SelfTest {
         let browser = CefBrowser(url: URL(string: "selftest://edge/tab.html?saver")!)
         let window = CefBrowserWindow(browser: browser)
         window.show()
-        _ = await waitUntil { browser.title == "tab" && !browser.isLoading }
+        _ = await loaded(browser, title: "tab")
         CefRuntime.shared.discardPolicy = .after(.seconds(2), orUnderMemoryPressure: false)
         try? await Task.sleep(for: .seconds(3))
         check("memory saver: a visible tab stays loaded", !browser.isDiscarded)
@@ -260,7 +259,7 @@ extension SelfTest {
         let recorder = DiscardRecorder()
         let browser = CefBrowser(url: URL(string: "selftest://edge/heavy.html?view")!, configuration: discardConfiguration(), delegate: recorder)
         let view = hostWindowed(browser)
-        _ = await waitUntil { browser.title == "heavy" && !browser.isLoading }
+        _ = await loaded(browser, title: "heavy")
         let renderer = await allocateInRenderer(browser)
         _ = try? await browser.devTools.send("Runtime.enable")
         var consoleMessages: [String] = []
@@ -324,7 +323,7 @@ extension SelfTest {
         tabWindow.show()
         let viewed = CefBrowser(url: URL(string: "selftest://edge/tab.html?quit-view")!)
         let view = hostWindowed(viewed)
-        _ = await waitUntil { [tab, viewed].allSatisfy { $0.title == "tab" && !$0.isLoading } }
+        _ = await allLoaded([tab, viewed], title: "tab")
         tabWindow.hide()
         view.isHidden = true
         await waitUntilDiscardable(tab)

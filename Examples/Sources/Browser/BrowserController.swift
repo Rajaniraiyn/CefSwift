@@ -85,8 +85,7 @@ final class BrowserController: CefBrowserDelegate {
 
         var windowConfiguration = CefBrowserWindow.Configuration()
         windowConfiguration.tabbingIdentifier = Self.tabbingIdentifier
-        // Titled by mirrorTabTitle(of:), which names blank tabs "New Tab".
-        windowConfiguration.titleFollowsPage = false
+        windowConfiguration.title = Self.tabTitle(for:)
         windowConfiguration.frame = windows.last?.window?.frame
         let window = CefBrowserWindow(browser: browser, configuration: windowConfiguration)
         window.setToolbar {
@@ -108,7 +107,6 @@ final class BrowserController: CefBrowserDelegate {
             if self?.keyBrowser === browser { self?.keyBrowser = nil }
         }
         windows.append(window)
-        mirrorTabTitle(of: window)
 
         // Join the frontmost browser window's tab group.
         let group = NSApp.keyWindow?.tabbingIdentifier == Self.tabbingIdentifier
@@ -140,19 +138,9 @@ final class BrowserController: CefBrowserDelegate {
         return true
     }
 
-    /// Keeps a tab's title in step with its page. Blank pages — a new tab,
-    /// a link opened with `window.open()` — are titled "New Tab" rather than
-    /// Chromium's "about:blank".
-    private func mirrorTabTitle(of window: CefBrowserWindow) {
-        guard !window.isClosed else { return }
-        let title = withObservationTracking {
-            Self.tabTitle(for: window.browser)
-        } onChange: { [weak self, weak window] in
-            Task { @MainActor in if let window { self?.mirrorTabTitle(of: window) } }
-        }
-        window.window?.title = title
-    }
-
+    /// A tab's title. Blank pages — a new tab, a link opened with
+    /// `window.open()` — are titled "New Tab" rather than Chromium's
+    /// "about:blank".
     static func tabTitle(for browser: CefBrowser) -> String {
         guard let url = browser.url, url.absoluteString != "about:blank" else { return "New Tab" }
         let title = browser.title
@@ -220,18 +208,6 @@ final class BrowserController: CefBrowserDelegate {
         let field = window.toolbar?.items.lazy.compactMap { $0.view?.firstSubview(of: NSTextField.self) }.first
         window.makeKeyAndOrderFront(nil)
         if let field { window.makeFirstResponder(field) }
-    }
-
-    /// Waits until `browser` has loaded its first page.
-    func waitUntilLoaded(_ browser: CefBrowser) async {
-        try? await browser.ready()
-        // The page is created on about:blank and then navigated.
-        for _ in 0..<200 where browser.state == .live {
-            let location = try? await browser.evaluateJavaScript(
-                "document.readyState === 'complete' ? location.href : ''").stringValue
-            if let location, !location.isEmpty, location != "about:blank" { break }
-            try? await Task.sleep(for: .milliseconds(50))
-        }
     }
 
     /// Called whenever a tab's page finishes loading.
@@ -332,7 +308,8 @@ final class BrowserController: CefBrowserDelegate {
         alert.messageText = "Allow \(request.origin) to use \(request.kinds.summary)?"
         alert.addButton(withTitle: "Allow")
         alert.addButton(withTitle: "Don’t Allow")
-        alert.showsSuppressionButton = true
+        // Screen capture is decided per request, never remembered.
+        alert.showsSuppressionButton = request.kinds.isDisjoint(with: [.screenCapture, .systemAudioCapture])
         alert.suppressionButton?.title = "Remember for this website"
         guard let window = browser.hostWindow else { return .deny }
         let allowed = await alert.beginSheetModal(for: window) == .alertFirstButtonReturn
@@ -420,7 +397,9 @@ extension NSView {
 extension CefPermissionRequest.Kinds {
     var summary: String {
         let names: [(CefPermissionRequest.Kinds, String)] = [
-            (.camera, "the camera"), (.microphone, "the microphone"), (.geolocation, "your location"),
+            (.camera, "the camera"), (.microphone, "the microphone"),
+            (.cameraPanTiltZoom, "camera movement"), (.screenCapture, "your screen"),
+            (.systemAudioCapture, "your Mac’s audio"), (.geolocation, "your location"),
             (.notifications, "notifications"), (.clipboard, "the clipboard"),
         ]
         let matched = names.filter { contains($0.0) }.map(\.1)

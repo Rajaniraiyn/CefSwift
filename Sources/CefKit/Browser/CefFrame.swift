@@ -105,20 +105,24 @@ extension CefBrowser {
     }
 
     /// Evaluates JavaScript in `frame` and returns its value, as
-    /// ``evaluateJavaScript(_:userGesture:)`` does in the main frame.
+    /// ``evaluateJavaScript(_:userGesture:timeout:)`` does in the main frame.
     ///
     /// The script runs in the frame's main world through the helper's
     /// renderer code, in whichever renderer process shows the frame;
     /// cross-site frames included. It throws ``CefError/frameDetached``
-    /// when the frame is gone, before or while it runs.
+    /// when the frame is gone, before or while it runs, and
+    /// ``CefError/timedOut`` when `timeout` runs out first, leaving the
+    /// script running.
     @discardableResult
-    public func evaluateJavaScript(_ script: String, in frame: CefFrame) async throws -> CefJSON {
-        try await pageScripting.evaluate(script, as: CefJSON.self, in: frame.id)
+    public func evaluateJavaScript(_ script: String, in frame: CefFrame, timeout: Duration? = nil) async throws -> CefJSON {
+        try await evaluateJavaScript(script, as: CefJSON.self, in: frame, timeout: timeout)
     }
 
     /// Evaluates JavaScript in `frame` and decodes its value as `T`.
-    public func evaluateJavaScript<T: Decodable>(_ script: String, as type: T.Type = T.self, in frame: CefFrame) async throws -> T {
-        try await pageScripting.evaluate(script, as: T.self, in: frame.id)
+    public func evaluateJavaScript<T: Decodable>(
+        _ script: String, as type: T.Type = T.self, in frame: CefFrame, timeout: Duration? = nil
+    ) async throws -> T {
+        try await withOptionalDeadline(timeout) { [self] in try await pageScripting.evaluate(script, as: T.self, in: frame.id) }
     }
 
     /// Runs JavaScript in `frame` without waiting for a result. Does

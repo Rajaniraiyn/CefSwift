@@ -158,7 +158,7 @@ extension SelfTest {
             await closeHosted(browser, view)
             settings.reset(origin: origin)
         }
-        guard await waitUntil({ browser.title == "permissions" && !browser.isLoading }) else {
+        guard await loaded(browser, title: "permissions") else {
             check("permissions: page loads", false, detail: browser.title)
             await finish()
             return
@@ -192,6 +192,30 @@ extension SelfTest {
         check("permissions: Chromium keeps a prompt's allow for the site",
               settings.setting(for: .midiSystemExclusive, origin: origin) == .allow,
               detail: "\(settings.setting(for: .midiSystemExclusive, origin: origin))")
+
+        // Screen capture is not the camera: a site allowed the camera and
+        // microphone is still asked, about screen capture, and the answer
+        // is never stored. Every answer here refuses, so nothing is
+        // captured and macOS asks nothing.
+        settings.set(.allow, for: .camera, origin: origin)
+        settings.set(.allow, for: .microphone, origin: origin)
+        recorder.requests = []
+        recorder.answer = .alwaysDeny
+        func capture() async -> String {
+            (try? await browser.evaluateJavaScript(
+                "navigator.mediaDevices.getDisplayMedia({video: true, audio: true}).then(() => 'granted', e => e.name)",
+                userGesture: true).stringValue) ?? "no answer"
+        }
+        let screen = await capture()
+        let asked = recorder.requests.first?.kinds ?? []
+        check("permissions: a camera grant does not answer screen capture",
+              screen != "granted" && asked.contains(.screenCapture) && asked.isDisjoint(with: [.camera, .microphone]),
+              detail: "\(screen), asked \(recorder.requests)")
+        let screenAgain = await capture()
+        check("permissions: a screen-capture answer is not stored",
+              screenAgain != "granted" && recorder.requests.count == 2
+                  && settings.setting(for: .camera, origin: origin) == .allow,
+              detail: "\(screenAgain), asked \(recorder.requests.count), camera \(settings.setting(for: .camera, origin: origin))")
         await finish()
     }
 }

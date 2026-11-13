@@ -155,8 +155,9 @@ covers identifiers, signing, entitlements, notarization and the bundle layout;
 | Feature | API | Guide |
 |---|---|---|
 | Observable browser model | `CefBrowser` | [Browsers](docs/guide.md#browsers) |
+| Waiting for a navigation to load, with its outcome | `load(_:)` → `CefNavigation`, `waitUntilLoaded(timeout:)` | [Waiting for a load](docs/guide.md#waiting-for-a-load) |
 | SwiftUI and AppKit views, windowed or offscreen | `CefWebView`, `CefWindowedBrowserView`, `CefOffscreenBrowserView` | [Showing a browser](docs/guide.md#showing-a-browser) |
-| JavaScript evaluation, user scripts and style sheets | `evaluateJavaScript(_:)`, `CefUserScript` | [JavaScript](docs/guide.md#javascript) |
+| JavaScript evaluation with timeouts, user scripts and style sheets | `evaluateJavaScript(_:timeout:)`, `CefUserScript` | [JavaScript](docs/guide.md#javascript) |
 | Typed calls between JavaScript and Swift | `CefBridge` | [Bridge](docs/guide.md#bridge) |
 | Asynchronous decisions: permissions, dialogs, downloads, certificate errors | `CefBrowserDelegate` | [Decisions](docs/guide.md#decisions) |
 | Context menu | `CefBrowser.Configuration.ContextMenu` | [Context menu](docs/guide.md#context-menu) |

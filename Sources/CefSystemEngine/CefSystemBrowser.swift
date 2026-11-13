@@ -135,7 +135,7 @@ public final class CefSystemBrowser {
     /// awaiting it if it is a promise. Throws ``CefJavaScriptError`` when
     /// the script throws.
     ///
-    /// As ``CefBrowser/evaluateJavaScript(_:userGesture:)`` does, this runs
+    /// As ``CefBrowser/evaluateJavaScript(_:userGesture:timeout:)`` does, this runs
     /// `script` as a classic script: statements, declarations and `throw`
     /// work, and the value is that of the last statement. Its top-level
     /// `let`, `const` and `class` declarations stay local to the call. On a

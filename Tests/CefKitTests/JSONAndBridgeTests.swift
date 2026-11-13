@@ -115,6 +115,36 @@ import Testing
         #expect(established(allowed, at: "blob:blob:https://example.com/0b1e") == .opaque)
     }
 
+    @Test func localSchemesHaveTheirAddressOriginOnlyInTheMainFrame() {
+        func main(_ claimed: String, _ url: String, local: Set<String> = ["file"]) -> CefBridge.EstablishedOrigin {
+            CefBridge.establishedOrigin(claimed: claimed, url: url, isMainFrame: true, localSchemes: local) { [] }
+        }
+        func sub(_ claimed: String, _ url: String, in ancestors: [String?], local: Set<String> = ["file"]) -> CefBridge.EstablishedOrigin {
+            CefBridge.establishedOrigin(claimed: claimed, url: url, isMainFrame: false, localSchemes: local) { ancestors }
+        }
+        // A top-level file: page.
+        #expect(main("file://", "file:///Users/a/page.html") == .origin("file://"))
+        #expect(main("null", "file:///Users/a/page.html") == .opaque)
+        #expect(main("https://example.com", "file:///Users/a/page.html") == .inconsistent)
+        // A file: subframe may be sandboxed, which CEF does not say.
+        #expect(sub("file://", "file:///Users/a/frame.html", in: ["file:///Users/a/page.html"]) == .opaque)
+        // srcdoc, about:blank and data: inside a file: page.
+        #expect(sub("null", "about:srcdoc", in: ["file:///Users/a/page.html"]) == .opaque)
+        #expect(sub("file://", "about:srcdoc", in: ["file:///Users/a/page.html"]) == .opaque)
+        #expect(sub("file://", "about:blank", in: ["file:///Users/a/frame.html", "file:///Users/a/page.html"]) == .opaque)
+        #expect(sub("file://", "data:text/html,x", in: ["file:///Users/a/page.html"]) == .opaque)
+        #expect(sub("file://", "blob:file:///0b1e", in: ["file:///Users/a/page.html"]) == .opaque)
+        // A custom scheme registered with `.local` follows the same rules.
+        let local: Set<String> = ["file", "myapp"]
+        #expect(main("myapp://start", "myapp://start/index.html", local: local) == .origin("myapp://start"))
+        #expect(sub("myapp://start", "myapp://start/frame.html", in: ["myapp://start/"], local: local) == .opaque)
+        // Without `.local`, a standard custom scheme is like https, frames included.
+        #expect(sub("myapp://start", "myapp://start/frame.html", in: ["myapp://start/"]) == .origin("myapp://start"))
+        // A scheme that is not standard has no host, so it is opaque.
+        #expect(main("null", "plain:/page.html") == .opaque)
+        #expect(main("plain:", "plain:/page.html") == .opaque)
+    }
+
     @Test func originScopedBridgesRejectUnconfirmedOrigins() {
         // The browser-side origin decides: `"null"` never matches `.origins`.
         #expect(CefBridge.EstablishedOrigin.opaque.origin == nil)

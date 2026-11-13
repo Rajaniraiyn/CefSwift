@@ -141,7 +141,7 @@ extension SelfTest {
             browser.close(force: true)
             view.removeFromSuperview()
         }
-        guard await waitUntil({ browser.title == "page" && !browser.isLoading }) else {
+        guard await loaded(browser, title: "page") else {
             check("urlRequest: the cookie page loads", false, detail: "title '\(browser.title)'")
             return
         }
@@ -395,4 +395,77 @@ private final class ChallengeLog: Sendable {
     private let recorded = OSAllocatedUnfairLock(initialState: [CefAuthenticationChallenge]())
     func record(_ challenge: CefAuthenticationChallenge) { recorded.withLock { $0.append(challenge) } }
     var values: [CefAuthenticationChallenge] { recorded.withLock { $0 } }
+}
+
+// MARK: Quitting with requests in flight
+
+extension SelfTest {
+    /// How the requests left running for the quit ended: the error, and
+    /// the runtime's state when their callers heard of it.
+    static var stalledRequestEndings: [String: (error: String, isShutDown: Bool, state: CefRuntime.State)] = [:]
+    static var stalledRequestServer: LocalServer?
+
+    /// Leaves two profile requests running for the quit: one stalled before
+    /// its headers, one in the middle of its body. Quitting must end both
+    /// on the IO thread before Chromium starts shutting down.
+    static func requestsStalledForQuitting() async {
+        SelfTestResults.shared.group = "quit"
+        guard let server = try? await LocalServer.start() else {
+            check("quit: a local server starts for stalled requests", false)
+            return
+        }
+        stalledRequestServer = server
+        let base = "http://127.0.0.1:\(server.port)"
+        let profile = CefProfile.default
+        func record(_ name: String, _ error: any Error) {
+            var isShutDown = false
+            if case .shutDown? = error as? CefError { isShutDown = true }
+            stalledRequestEndings[name] = ("\(error)", isShutDown, CefRuntime.shared.state)
+        }
+        Task { @MainActor in
+            do {
+                _ = try await profile.data(for: URLRequest(url: URL(string: "\(base)/stall?quit")!))
+                record("before headers", CefError.operationFailed("it finished"))
+            } catch { record("before headers", error) }
+        }
+        Task { @MainActor in
+            do {
+                let (body, _) = try await profile.bytes(for: URLRequest(url: URL(string: "\(base)/slow?quit")!))
+                for try await _ in body {}
+                record("mid-stream", CefError.operationFailed("it finished"))
+            } catch { record("mid-stream", error) }
+        }
+        let started = await waitUntil(timeout: .seconds(5)) {
+            server.slowRequests.contains("/stall?quit") && server.slowRequests.contains("/slow?quit")
+        }
+        check("quit: requests stalled before headers and mid-stream are running", started,
+              detail: "\(server.slowRequests)")
+    }
+
+    /// Checks made once Chromium has shut down.
+    static func quitChecksAfterShutdown() {
+        if stalledRequestServer != nil {
+            // Each loader released its CEF references on the IO thread
+            // before shutdown began. A caller may hear of it after (its
+            // resumption can be queued behind the quit); one that heard
+            // before heard shutDown.
+            let endings = stalledRequestEndings
+            let inFlight = CefRuntime.shared.requestsInFlightAtShutdown
+            check("quit: stalled requests are cancelled on the IO thread before shutdown begins",
+                  inFlight == 0 && endings.values.allSatisfy { $0.isShutDown && $0.state == .running },
+                  detail: "\(String(describing: inFlight)) in flight, \(endings)")
+            let census = CefDiagnostics.census().filter { $0.key.localizedCaseInsensitiveContains("urlrequest") }
+            check("quit: no request objects are left after shutdown", census.isEmpty, detail: "\(census)")
+            stalledRequestServer?.stop()
+        }
+        // Without Chromium, observing a preference makes no observer to leak.
+        let observers = { CefDiagnostics.census()["implemented PreferenceObserver"] ?? 0 }
+        let before = observers()
+        for _ in 0..<3 {
+            _ = CefRuntime.shared.preferences.observe(named: "browser.confirm_to_quit")
+            _ = CefProfile.default.preferences.observe(named: "webkit.webprefs.default_font_size")
+        }
+        check("quit: observing a preference after shutdown keeps no observer", observers() == before,
+              detail: "\(before) before, \(observers()) after")
+    }
 }

@@ -22,6 +22,7 @@ extension SelfTest {
         await disabledPasskeyChecks(url: url)
         await passkeyStoreFailureChecks(url: url)
         await passkeyDecisionCancellationChecks(url: url)
+        await popupPasskeyChecks(url: url)
         check("passkeys: Chromium's WebAuthn dialog never appears", !watcher.sawDialog, detail: watcher.titles.joined(separator: ", "))
         watcher.stop()
         await passkeySettingsChecks()
@@ -50,7 +51,7 @@ extension SelfTest {
             window?.close()
             view?.removeFromSuperview()
         }
-        guard await waitUntil(timeout: .seconds(20), { browser.title == "passkeys" && !browser.isLoading }) else {
+        guard await loaded(browser, title: "passkeys", timeout: .seconds(20)) else {
             check("passkeys (\(style)): page loads", false, detail: browser.title)
             return
         }
@@ -146,6 +147,68 @@ extension SelfTest {
         }
     }
 
+    /// A popup a page opens calls `navigator.credentials` from its first
+    /// script. With `.disabled` and `.app`, CefKit's interception answers
+    /// it, not Chromium's authenticator, which would wait at least ten
+    /// seconds (the page asks for three) or show its dialog.
+    private static func popupPasskeyChecks(url: URL) async {
+        for mode in ["disabled", "app"] {
+            let policy = PasskeyPolicy()
+            var configuration = CefBrowser.Configuration()
+            configuration.passkeys = mode == "disabled" ? .disabled : .app(CefInMemoryPasskeyStore())
+            let opener = CefBrowser(url: url, configuration: configuration, delegate: policy)
+            let window = CefBrowserWindow(browser: opener)
+            var popups: [CefBrowserWindow] = []
+            window.onPopup = { popup in
+                popups.append(popup)
+                popup.show()
+            }
+            window.show()
+            let name = "passkeys (\(mode), popup)"
+            defer {
+                popups.forEach { $0.close() }
+                window.close()
+            }
+            guard await waitUntil(timeout: .seconds(20), { opener.title == "passkeys" && !opener.isLoading }) else {
+                check("\(name): opener loads", false, detail: opener.title)
+                continue
+            }
+            let target = url.appending(queryItems: [URLQueryItem(name: "early", value: "1")])
+            let start = ContinuousClock.now
+            let opened = try? await opener.evaluateJavaScript(
+                "window.open('\(target.absoluteString)', 'p', 'width=400,height=300') === null", userGesture: true)
+            guard await waitUntil(timeout: .seconds(10), { popups.first?.browser.title == "passkeys" }),
+                  let popup = popups.first?.browser
+            else {
+                check("\(name): the popup opens", false, detail: "\(popups.count) popups")
+                continue
+            }
+            // The title can arrive before the first script has run.
+            _ = await waitUntilAsync(timeout: .seconds(10)) {
+                (try? await popup.evaluateJavaScript("window.__early !== undefined").boolValue) == true
+            }
+            let early = (try? await popup.evaluateJavaScript("window.__early"))?.stringValue
+            let elapsed = ContinuousClock.now - start
+            let answeredByCefKit = early == "NotAllowedError" && elapsed < .seconds(9)
+            if mode == "disabled" {
+                check("\(name): a first-script request is refused by CefKit",
+                      answeredByCefKit && policy.requests.isEmpty,
+                      detail: "\(early ?? "nil") after \(elapsed), \(policy.requests.count) asked")
+            } else {
+                check("\(name): a first-script request reaches the delegate",
+                      answeredByCefKit && policy.requests.contains { $0.kind == .assertion },
+                      detail: "\(early ?? "nil") after \(elapsed), \(policy.requests.count) asked")
+            }
+            check("\(name): the popup keeps its opener and features, not the page's handle",
+                  popup.opener === opener && popup.popupFeatures?.size == CGSize(width: 400, height: 300)
+                      && opened?.boolValue == true,
+                  detail: "opener \(popup.opener === opener), \(String(describing: popup.popupFeatures)), null \(String(describing: opened))")
+            popups.forEach { $0.close() }
+            window.close()
+            _ = await waitUntil { window.isClosed && popups.allSatisfy(\.isClosed) }
+        }
+    }
+
     private static func disabledPasskeyChecks(url: URL) async {
         let policy = PasskeyPolicy()
         var configuration = CefBrowser.Configuration()
@@ -153,7 +216,7 @@ extension SelfTest {
         let browser = CefBrowser(url: url, configuration: configuration, delegate: policy)
         let window = CefBrowserWindow(browser: browser)
         window.show()
-        _ = await waitUntil(timeout: .seconds(20)) { browser.title == "passkeys" && !browser.isLoading }
+        _ = await loaded(browser, title: "passkeys", timeout: .seconds(20))
         let start = ContinuousClock.now
         let result = await PasskeyCall.run(browser, "register()")
         check("passkeys (disabled): requests are refused without asking",
@@ -173,7 +236,7 @@ extension SelfTest {
         let browser = CefBrowser(url: url, configuration: configuration, delegate: delegate)
         let view = hostWindowed(browser)
         defer { view.removeFromSuperview() }
-        if await waitUntil(timeout: .seconds(20), { browser.title == "passkeys" && !browser.isLoading }) {
+        if await loaded(browser, title: "passkeys", timeout: .seconds(20)) {
             browser.executeJavaScript("register()")
             let asked = await waitUntil(timeout: .seconds(5)) { delegate.started == 1 && browser.pendingDecisionCount == 1 }
             browser.load(URL(string: "selftest://app/second.html")!)
@@ -193,7 +256,7 @@ extension SelfTest {
         // saved passkey, goes when the browser closes.
         let sheetBrowser = CefBrowser(url: url, configuration: configuration)
         view.browser = sheetBrowser
-        guard await waitUntil(timeout: .seconds(20), { sheetBrowser.title == "passkeys" && !sheetBrowser.isLoading }) else {
+        guard await loaded(sheetBrowser, title: "passkeys", timeout: .seconds(20)) else {
             check("passkeys (sheet): page loads", false, detail: sheetBrowser.title)
             return
         }
@@ -234,7 +297,7 @@ extension SelfTest {
         let window = CefBrowserWindow(browser: browser)
         window.show()
         defer { window.close() }
-        guard await waitUntil(timeout: .seconds(20), { browser.title == "passkeys" && !browser.isLoading }) else {
+        guard await loaded(browser, title: "passkeys", timeout: .seconds(20)) else {
             check("passkeys (failing store): page loads", false, detail: browser.title)
             return
         }

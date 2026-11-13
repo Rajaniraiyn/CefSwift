@@ -27,7 +27,7 @@ extension SelfTest {
             browser.close(force: true)
             view.removeFromSuperview()
         }
-        guard await waitUntil(timeout: .seconds(15), { browser.state == .live && !browser.isLoading }) else {
+        guard await loaded(browser) else {
             check("protected media: page loads", false)
             return
         }
@@ -59,7 +59,7 @@ extension SelfTest {
             embedded.close(force: true)
             view.removeFromSuperview()
         }
-        guard await waitUntil(timeout: .seconds(15), { embedded.state == .live && !embedded.isLoading }) else {
+        guard await loaded(embedded) else {
             check("embedded page loads", false)
             return
         }
@@ -93,7 +93,7 @@ extension SelfTest {
         let chrome = CefBrowser(url: URL(string: "selftest://app/eme.html")!)
         let chromeWindow = CefBrowserWindow(browser: chrome)
         chromeWindow.show()
-        if await waitUntil(timeout: .seconds(15), { chrome.state == .live && !chrome.isLoading }) {
+        if await loaded(chrome) {
             await expect("a Chrome-style browser gets com.widevine.alpha") {
                 try await requestKeySystem("com.widevine.alpha", in: chrome) == "OK"
             }

@@ -11,7 +11,7 @@ extension SelfTest {
         browser.delegate = recorder
         let view = hostWindowed(browser)
         defer { view.removeFromSuperview() }
-        guard await waitUntil({ browser.title == "busy" && !browser.isLoading }) else {
+        guard await loaded(browser, title: "busy") else {
             check("processes: page loads", false, detail: browser.title)
             return
         }
@@ -33,7 +33,9 @@ extension SelfTest {
         _ = manager.tasks
         check("processes: reading the tasks keeps them refreshing", manager.isRefreshing)
         check("processes: refreshing stops when nobody reads",
-              await waitUntil(timeout: manager.refreshInterval * 3) { !manager.isRefreshing })
+              // The loop ends at its first wake-up two intervals after the last read;
+              // a busy Mac delays wake-ups, so allow twice that.
+              await waitUntil(timeout: manager.refreshInterval * 6) { !manager.isRefreshing })
 
         // A page that spins: busy, then unresponsive to input.
         browser.executeJavaScript("setTimeout(spin, 100)")

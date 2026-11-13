@@ -23,12 +23,24 @@ extension CefPermissionRequest {
         /// (DRM) licence server. Chromium asks for it only on Android,
         /// ChromeOS and Windows; on macOS, Widevine plays without it.
         public static let protectedMediaIdentifier = CefPermissionRequest.Kinds(rawValue: 1 << 11)
+        /// Moving the camera: pan, tilt and zoom. Separate from ``camera``,
+        /// and stored as ``CefSitePermission/cameraPanTiltZoom``.
+        public static let cameraPanTiltZoom = CefPermissionRequest.Kinds(rawValue: 1 << 12)
+        /// Capturing the screen, a window or a tab (`getDisplayMedia`).
+        /// Granting it hands the page what is on screen without a picker.
+        /// It is never answered from, or stored in, site settings: every
+        /// request asks the delegate, and ``CefPermissionDecision/alwaysAllow``
+        /// and ``CefPermissionDecision/alwaysDeny`` apply to that request only.
+        public static let screenCapture = CefPermissionRequest.Kinds(rawValue: 1 << 13)
+        /// Capturing the sound the Mac plays, along with ``screenCapture``.
+        /// Like it, asked about on every request and never stored.
+        public static let systemAudioCapture = CefPermissionRequest.Kinds(rawValue: 1 << 14)
         /// A permission with no more specific kind.
         public static let other = CefPermissionRequest.Kinds(rawValue: 1 << 31)
 
         private static let requestTypes: [(cef_permission_request_types_t, CefPermissionRequest.Kinds)] = [
             (CEF_PERMISSION_TYPE_CAMERA_STREAM, .camera),
-            (CEF_PERMISSION_TYPE_CAMERA_PAN_TILT_ZOOM, .camera),
+            (CEF_PERMISSION_TYPE_CAMERA_PAN_TILT_ZOOM, .cameraPanTiltZoom),
             (CEF_PERMISSION_TYPE_MIC_STREAM, .microphone),
             (CEF_PERMISSION_TYPE_GEOLOCATION, .geolocation),
             (CEF_PERMISSION_TYPE_NOTIFICATIONS, .notifications),
@@ -62,23 +74,26 @@ extension CefPermissionRequest {
             var kinds: CefPermissionRequest.Kinds = []
             if value & UInt32(CEF_MEDIA_PERMISSION_DEVICE_AUDIO_CAPTURE.rawValue) != 0 { kinds.insert(.microphone) }
             if value & UInt32(CEF_MEDIA_PERMISSION_DEVICE_VIDEO_CAPTURE.rawValue) != 0 { kinds.insert(.camera) }
-            if value & UInt32(CEF_MEDIA_PERMISSION_DESKTOP_AUDIO_CAPTURE.rawValue) != 0 { kinds.insert(.microphone) }
-            if value & UInt32(CEF_MEDIA_PERMISSION_DESKTOP_VIDEO_CAPTURE.rawValue) != 0 { kinds.insert(.camera) }
+            if value & UInt32(CEF_MEDIA_PERMISSION_DESKTOP_AUDIO_CAPTURE.rawValue) != 0 { kinds.insert(.systemAudioCapture) }
+            if value & UInt32(CEF_MEDIA_PERMISSION_DESKTOP_VIDEO_CAPTURE.rawValue) != 0 { kinds.insert(.screenCapture) }
             return kinds
         }
 
+        /// Each media kind and the one `cef_media_access_permission_types_t`
+        /// bit it grants.
+        private static let mediaTypes: [(CefPermissionRequest.Kinds, cef_media_access_permission_types_t)] = [
+            (.microphone, CEF_MEDIA_PERMISSION_DEVICE_AUDIO_CAPTURE),
+            (.camera, CEF_MEDIA_PERMISSION_DEVICE_VIDEO_CAPTURE),
+            (.systemAudioCapture, CEF_MEDIA_PERMISSION_DESKTOP_AUDIO_CAPTURE),
+            (.screenCapture, CEF_MEDIA_PERMISSION_DESKTOP_VIDEO_CAPTURE),
+        ]
+
         /// The media permission mask to grant: these kinds, limited to what was
-        /// requested, as CEF requires.
+        /// requested, as CEF requires. A device kind never grants desktop
+        /// capture, nor the reverse.
         func mediaMask(within requested: UInt32) -> UInt32 {
             var mask: UInt32 = 0
-            if contains(.microphone) {
-                mask |= UInt32(CEF_MEDIA_PERMISSION_DEVICE_AUDIO_CAPTURE.rawValue)
-                mask |= UInt32(CEF_MEDIA_PERMISSION_DESKTOP_AUDIO_CAPTURE.rawValue)
-            }
-            if contains(.camera) {
-                mask |= UInt32(CEF_MEDIA_PERMISSION_DEVICE_VIDEO_CAPTURE.rawValue)
-                mask |= UInt32(CEF_MEDIA_PERMISSION_DESKTOP_VIDEO_CAPTURE.rawValue)
-            }
+            for (kind, type) in Self.mediaTypes where contains(kind) { mask |= UInt32(type.rawValue) }
             return mask & requested
         }
     }
@@ -91,6 +106,8 @@ extension CefPermissionRequest {
 /// origin, as Chrome does, so the site is not asked again. Camera and
 /// microphone answers apply to the one request; ``alwaysAllow`` and
 /// ``alwaysDeny`` store them in the profile's ``CefProfile/siteSettings``.
+/// Screen and system-audio capture are never stored: every such request
+/// asks again.
 public enum CefPermissionDecision: Sendable, Equatable {
     /// Grant the request.
     case allow

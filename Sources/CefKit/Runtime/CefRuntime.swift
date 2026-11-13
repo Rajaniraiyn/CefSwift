@@ -276,6 +276,7 @@ public final class CefRuntime {
             return
         }
         state = .stopping
+        requestsInFlightAtShutdown = URLRequestRegistry.shared.count
         for profile in CefProfile.all { profile.stopServiceHosts() }
         lifecycleCoordinator.stop()
         discardMonitor.policy = .disabled
@@ -355,6 +356,43 @@ public final class CefRuntime {
 
     private var hasNoBrowsers: Bool { browsers.isEmpty && serviceBrowsers.isEmpty }
 
+    /// Whether the profile requests in flight have been cancelled and have
+    /// released their CEF references, the last step before shutdown.
+    @ObservationIgnored private var requestsDrained = false
+    @ObservationIgnored private var requestDrain: Task<Void, Never>?
+
+    /// How many profile requests still held CEF references when shutdown
+    /// began; zero once the drain has done its work. For tests.
+    @ObservationIgnored @_spi(Testing) public private(set) var requestsInFlightAtShutdown: Int?
+
+    /// Cancels the profile requests in flight on the IO thread, then quits
+    /// again. Gives up waiting after a few seconds, so a stuck IO thread
+    /// cannot stop the app from quitting; `shutDownChromium()` then cancels
+    /// what is left without waiting, as before.
+    private func drainRequests() {
+        guard requestDrain == nil else { return }
+        requestDrain = Task {
+            // Whichever ends first: the drain, or the time limit.
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                let once = CefResumeOnce(continuation, fallback: ())
+                Task {
+                    await URLRequestRegistry.shared.drainForShutdown()
+                    once.resume(returning: ())
+                }
+                Task {
+                    try? await Task.sleep(for: .seconds(5))
+                    once.resume(returning: ())
+                }
+            }
+            if URLRequestRegistry.shared.count > 0 {
+                CefLog.error("CefSwift: \(URLRequestRegistry.shared.count) requests had not ended at shutdown")
+            }
+            requestsDrained = true
+            requestDrain = nil
+            NSApp.terminate(nil)
+        }
+    }
+
     /// A page asked to stay open while quitting: the quit is abandoned, so
     /// closing the last window later does not end the app.
     func cancelTermination() {
@@ -413,6 +451,13 @@ public final class CefRuntime {
                 suspendQuitEventIfNeeded()
                 CefBrowserWindow.all.forEach { $0.close() }
                 continueTerminationIfReady()
+                return false
+            }
+            // Requests in flight end on the IO thread first; quitting
+            // carries on once they have.
+            guard requestsDrained else {
+                suspendQuitEventIfNeeded()
+                drainRequests()
                 return false
             }
             replyToQuitEvent(cancelled: false)

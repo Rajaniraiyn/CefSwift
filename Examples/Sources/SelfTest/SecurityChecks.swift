@@ -23,7 +23,7 @@ extension SelfTest {
             }
         }
 
-        _ = await waitUntil { browser.title == "second" && !browser.isLoading }
+        _ = await loaded(browser, title: "second")
         check("security: the app's own scheme is local", browser.connectionSecurity?.level == .local,
               detail: "\(String(describing: browser.connectionSecurity))")
         _ = await load(capabilityOrigin.appending(path: "plain.html"), title: "plain")

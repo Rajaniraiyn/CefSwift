@@ -425,9 +425,9 @@ when it is first shown.
 | Kind | Members |
 |---|---|
 | State | `url`, `title`, `isLoading`, `estimatedProgress`, `canGoBack`, `canGoForward`, `favicon`, `faviconURL`, `zoomLevel`, `isFullscreen`, `statusText`, `downloads`, `findResult`, `state` (`.pending`, `.live`, `.closed`) |
-| Navigation | `load(_:)`, `goBack()`, `goForward()`, `reload(ignoringCache:)`, `stopLoading()` |
+| Navigation | `load(_:)` (returns a `CefNavigation`), `goBack()`, `goForward()`, `reload(ignoringCache:)`, `stopLoading()`, `waitUntilLoaded(timeout:)` ([waiting for a load](#waiting-for-a-load)) |
 | Page | `isAudioMuted`, `find(_:backwards:caseSensitive:)`, `stopFinding(clearingSelection:)`, `findSession` (an observable find-bar model), `print()`, `pdf(configuration:)`, `printToPDF(at:configuration:)` ([PDF](#pdf)), `snapshot()` |
-| JavaScript | `evaluateJavaScript(_:)`, `evaluateJavaScript(_:as:)`, `executeJavaScript(_:)`, `addUserScript(_:)` |
+| JavaScript | `evaluateJavaScript(_:timeout:)`, `evaluateJavaScript(_:as:timeout:)`, `executeJavaScript(_:)`, `addUserScript(_:)` |
 | DevTools | `devTools`, `showDevTools(inspecting:)`, `closeDevTools()`, `isShowingDevTools` |
 | Lifetime | `ready()`, `close(force:)` |
 | Memory | `isDiscarded`, `discard()`, `restore()`, `discardBlockers()`, `allowsDiscarding`, `discardSnapshot` ([discarding](#discarding-browsers)) |
@@ -491,6 +491,53 @@ released at once and the browser falls back to the default decisions.
 A browser you create lives until you call `close()`. Unless you pass
 `force: true`, the page's `beforeunload` handler can ask the user to stay.
 After `state` becomes `.closed`, create a new `CefBrowser` to browse again.
+
+### Waiting for a load
+
+`load(_:)` returns the `CefNavigation` it started. Await it to continue
+once that page has loaded:
+
+```swift
+let result = try await browser.load(url).waitUntilLoaded(timeout: .seconds(30))
+print(result.url as Any, result.httpStatus ?? 0)
+```
+
+`waitUntilLoaded(timeout:)` on the browser waits for whatever it loads
+now, and returns at once when it has loaded already. It suits a browser
+just created, a reload, or a page that navigates by itself:
+
+```swift
+let browser = CefBrowser(url: home)
+// …once a view or window shows it:
+try await browser.waitUntilLoaded(timeout: .seconds(30))
+```
+
+CEF gives navigations no identity of their own. The navigation a
+`CefNavigation` stands for is the first main-frame navigation Chromium
+starts as a direct load after `load(_:)` was called; links, scripts,
+reloads and history steps do not count as it. Each wait ends in exactly
+one of these ways:
+
+| Outcome | What the wait returns or throws |
+|---|---|
+| The document committed and its `load` event ran | `CefLoadResult`: the final `url` after redirects, the `httpStatus` |
+| A server redirect, or a script or `<meta>` refresh navigating before the page finished | Part of the same navigation; `url` is where it ended |
+| Only the fragment differs from the page shown | Finishes as the address changes, with `isSameDocument` set |
+| A network or HTTP-level failure | The `CefLoadError` the delegate's `didFailLoad` gets |
+| No new page: a download, a 204 or 205 response, `stopLoading()`, the delegate cancelling it | `CefLoadError` with `isCancellation` (`ERR_ABORTED`) |
+| Another `load(_:)`, a link, a script, back or forward starts first | `CefError.navigationSuperseded` |
+| The renderer crashed while the document loaded (`chrome://crash` included) | `CefError.renderProcessTerminated(_:)` |
+| The browser closed | `CefError.browserClosed` |
+| `timeout` ran out | `CefError.timedOut`; the navigation goes on |
+| The waiting task was cancelled | `CancellationError`; the navigation goes on |
+
+The browser-wide `waitUntilLoaded(timeout:)` follows a superseded
+navigation to the one that replaced it, so it ends only when the browser
+has settled; when the last navigation failed, it throws that error, even
+if the browser settled earlier. A browser not created yet waits for its
+first page, and a discarded browser is restored first. A load asked of a
+browser that is still being created, setting up or discarded starts once
+it can, and is not superseded by the browser's own set-up.
 
 ### PDF
 
@@ -866,14 +913,18 @@ intervals. When nothing does, it stops, and Chromium stops measuring.
 The figures belong to processes, and several tasks can share one: tabs of
 one site in one renderer, a page and its workers. Tasks of one process
 report the same figures and the same `process`; `processes` groups them,
-and `CefTaskManager.Process.totalMemory(of:)` counts each process once.
-Chromium's API names no process, so CefSwift groups the consecutive
-renderer tasks with identical figures, which is what the tasks of one
-process have.
+and `CefTaskManager.Process.estimatedTotalMemory(of:)` counts each process
+once. Chromium's API names no process, so the grouping is an estimate:
+CefSwift groups the consecutive renderer tasks with identical measured
+figures, which is what the tasks of one process have. Two separate
+renderers that report the same figures side by side are grouped as one,
+which undercounts the total, and tasks not measured yet stay apart. Show
+the grouping; do not decide anything by it.
 
 `browser.rendererTask` is the task of the renderer showing a browser's page,
-and `tasks.browsers(in:)` lists every browser a process serves, so a
-browser's memory is that process's memory shared with those browsers.
+and `taskManager.browsers(in:)` lists the browsers in the same estimated
+process, so a browser's memory is that process's memory shared with those
+browsers.
 
 ### Unresponsive pages
 
@@ -893,6 +944,10 @@ Set `CefBrowser.Configuration.unresponsivePages` to `.delegate` to have
 Chrome-style browsers ask the delegate too, instead of showing Chromium's
 dialog. A page that responds again before you answer withdraws the
 question: the task is cancelled and the default sheet dismisses itself.
+So do a navigation, closing the browser, and a second notification while
+the first is still open, which replaces it; an answer to a withdrawn
+question is ignored. `.reload` reloads only when the renderer it was asked
+about ends, never a later one.
 
 ## JavaScript
 
@@ -907,6 +962,22 @@ form decodes it into any `Decodable` type. An exception thrown by the script
 arrives as `CefJavaScriptError`, and so does a navigation that replaces the
 page before the result is ready. `executeJavaScript(_:)` runs a script
 without waiting for a result.
+
+A script that may never settle takes a `timeout`. When it runs out, the
+call throws `CefError.timedOut`; only the wait ends, and the script, with
+any promise it returned, goes on running in the page:
+
+```swift
+do {
+    let ready = try await browser.evaluateJavaScript("app.whenReady()", as: Bool.self, timeout: .seconds(5))
+    print(ready)
+} catch CefError.timedOut {
+    print("still waiting for the page")
+}
+```
+
+The frame variants, `evaluateJavaScript(_:in:timeout:)` and
+`evaluateJavaScript(_:as:in:timeout:)`, take one too.
 
 Some web APIs need a user gesture: opening a popup, entering fullscreen,
 starting audio, a `beforeunload` prompt. `evaluateJavaScript(_:userGesture:
@@ -1026,7 +1097,7 @@ the global exists:
 | Access | Documents that get the bridge |
 |---|---|
 | `.mainFrame` (default) | Top-level documents. |
-| `.origins(["https://app.example.com"])` | Documents from the listed origins, in any frame, including their `about:blank`, `srcdoc` and `blob:` subframes. Never `data:` or sandboxed documents. |
+| `.origins(["https://app.example.com"])` | Documents from the listed origins, in any frame, including their `about:blank`, `srcdoc` and `blob:` subframes. Never `data:` or sandboxed documents. `"file://"` matches a top-level `file:` page only, not `file:` subframes or frames inside them, since CEF cannot tell a sandboxed one apart; the same holds for custom schemes registered with `.local`. A custom scheme without `.standard` has no origin to list. |
 | `.anyFrame` | Every document. Use it only for browsers that show nothing but your own content. |
 
 A document outside `access` has no global and no way to reach the bridge.
@@ -1208,6 +1279,16 @@ no API for opening a file panel on the app's behalf: use `NSOpenPanel`.
 with a debugger that stops each document as it starts; pages can observe
 both ([Compatibility with bot protection](#compatibility-with-bot-protection)).
 Use them for browsers that show your own or trusted pages.
+
+Chromium creates a native popup and runs its first document before
+DevTools can attach to it, so with `.app` and `.disabled` a popup, tab or
+window the delegate lets Chromium open (`.allowNativePopup`) is opened in a
+browser CefKit creates instead, with the opener's configuration and the
+calls taken over from its first document. It arrives as a native popup
+does (`browser(_:didOpen:)`, then `onPopup` or a window of its own), but
+the page cannot script it: `window.open` returns `null`, the popup has no
+`window.opener`, and a blank popup is refused. A sign-in flow that posts
+its result back to the opener needs `.chromium`.
 
 With `.chromium`, what Chromium can offer depends on how the app is
 signed and configured. The `passkeys` capability of `cef bundle` adds what
@@ -1393,7 +1474,8 @@ and its frame, title, ordering and tabbing are yours.
 | `toolbar` | `.none` (default) shows only the page; `.chrome` shows Chrome's toolbar and omnibox; `.location` shows Chrome's read-only location bar. |
 | `frame` | Initial frame in screen coordinates. `nil` centers a 1200 × 800 window. |
 | `tabbingIdentifier` | Windows that share one are grouped as native tabs. `nil` keeps the window out of tab groups. |
-| `titleFollowsPage` | Keeps the window title in sync with the page title. On by default. |
+| `titleFollowsPage` | Keeps the window title in sync with the page, as `title` makes it. On by default. |
+| `title` | Makes the window title from the browser: by default its page title, or the host while the page has none. Re-run whenever the observable state it reads changes, so `{ $0.title.isEmpty ? "New Tab" : $0.title }` titles blank tabs. |
 | `isFrameless` | Removes the title bar and window buttons. |
 
 `CefRuntime.shared.openChromeWindow(url:frame:configuration:delegate:)` opens a
@@ -1504,7 +1586,9 @@ arrives through `onPopup` as a hidden `CefBrowserWindow` of its own, still
 connected to its opener. `popup.browser.popupFeatures` holds the origin and
 size the page asked for, and `popup.browser.opener` is the opening browser.
 Without `onPopup`, Chromium shows the popup in a window of its own design
-with a location bar.
+with a location bar. With `.app` or `.disabled` passkeys the popup is a
+browser CefKit created, not connected to the opener's page; see
+[Passkeys](#passkeys).
 
 ```swift
 window.onPopup = { [weak window] popup in
@@ -1903,7 +1987,13 @@ answer the delegate gives, `.allow` or `.deny`, for the site as Chrome
 does. Camera and microphone requests reach the delegate before Chromium
 reads the settings, so CefSwift answers them from the settings itself, and
 asks the delegate only about kinds that are still `.ask`. An answer there
-applies to that request; `.alwaysAllow` and `.alwaysDeny` also store it:
+applies to that request; `.alwaysAllow` and `.alwaysDeny` also store it.
+Screen and system-audio capture (`.screenCapture`, `.systemAudioCapture`)
+are kinds of their own, never answered by the camera's or microphone's
+settings and never stored: granting one hands the page the screen without
+Chromium's picker, so the delegate is asked on every request. Camera
+movement (`.cameraPanTiltZoom`) is separate from `.camera` too, stored as
+`CefSitePermission.cameraPanTiltZoom`:
 
 ```swift
 func browser(_ browser: CefBrowser, decidePermissionFor request: CefPermissionRequest) async -> CefPermissionDecision {

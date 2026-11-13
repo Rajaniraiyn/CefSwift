@@ -28,7 +28,13 @@ enum SelfTest {
         configuration.productName = "SelfTestBrowser"
         configuration.preferences["webkit.webprefs.default_font_size"] = 21
         configuration.preferences["browser.confirm_to_quit"] = false
-        configuration.customSchemes = [CefCustomScheme(name: "selftest")]
+        configuration.customSchemes = [
+            CefCustomScheme(name: "selftest"),
+            // For the bridge's origin checks: a scheme that is not standard
+            // (no host, opaque origins) and one with file's security rules.
+            CefCustomScheme(name: "selftest-plain", options: []),
+            CefCustomScheme(name: "selftest-local", options: [.standard, .local]),
+        ]
         if let sandboxOverride { configuration.isSandboxEnabled = sandboxOverride }
         configuration.rootCacheDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("cefswift-selftest-\(ProcessInfo.processInfo.processIdentifier)")
@@ -64,11 +70,14 @@ enum SelfTest {
             exit(1)
         }
         CefRuntime.shared.registerSchemeHandler(scheme: "selftest", handler: StaticPage())
+        CefRuntime.shared.registerSchemeHandler(scheme: "selftest-plain", handler: StaticPage())
+        CefRuntime.shared.registerSchemeHandler(scheme: "selftest-local", handler: StaticPage())
         installBridgeHandlers()
         // Pages several groups load, so that each group also runs by itself.
         CefRuntime.shared.registerSchemeHandler(scheme: "selftest", domain: "edge", handler: EdgePages())
         CefRuntime.shared.registerSchemeHandler(scheme: "selftest", domain: "bench", handler: BenchmarkPages())
         CefRuntime.shared.registerSchemeHandler(scheme: "selftest", domain: "ax", handler: AccessibilityPages())
+        CefRuntime.shared.registerSchemeHandler(scheme: "selftest", domain: "loading", handler: LoadingPages())
         CefRuntime.shared.registerSchemeHandler(scheme: "https", domain: "cefswift.test", handler: CapabilityPages())
 
         window = NSWindow(
@@ -116,6 +125,7 @@ enum SelfTest {
                           restart.contains("cannot be initialized again") && CefRuntime.shared.state == .stopped,
                           detail: restart)
                     check("quit: a job sent to CefIOActor after shutdown runs", jobAfterShutdownRuns())
+                    quitChecksAfterShutdown()
                     exit(Int32(min(SelfTestReport.finish(failures: failures, isolated: false, started: started), 123)))
                 }
             }
@@ -162,6 +172,7 @@ enum SelfTest {
         ("toolbarAndZoom", toolbarAndZoomChecks),
         ("bridgeScope", bridgeScopeChecks),
         ("bridgeWire", bridgeWireChecks),
+        ("bridgeOrigins", bridgeOriginChecks),
         ("compatibility", compatibilityChecks),
         ("internalPages", internalPageDataChecks),
         ("serviceLifetime", serviceLifetimeChecks),
@@ -176,6 +187,7 @@ enum SelfTest {
         ("chromiumTabs", chromiumTabChecks),
         ("chromeWindow", chromeWindowChecks),
         ("operations", operationChecks),
+        ("loading", loadingChecks),
         ("siteSettings", siteSettingsChecks),
         ("processes", processChecks),
         ("pdf", pdfChecks),
@@ -199,6 +211,9 @@ enum SelfTest {
         // After the census: these stay open for the quit.
         if selectedGroups.contains(where: { $0.name == "discard" }) {
             await discardBrowsersForQuitting()
+        }
+        if selectedGroups.contains(where: { $0.name == "urlRequest" }) {
+            await requestsStalledForQuitting()
         }
     }
 
@@ -261,6 +276,29 @@ enum SelfTest {
             try? await Task.sleep(for: .milliseconds(25))
         }
         return condition()
+    }
+
+    /// Whether `browser` finishes loading what it loads within `timeout`
+    /// (``CefBrowser/waitUntilLoaded(timeout:)``), showing `title` when one
+    /// is given.
+    static func loaded(_ browser: CefBrowser, title: String? = nil, timeout: Duration = .seconds(15)) async -> Bool {
+        guard (try? await browser.waitUntilLoaded(timeout: timeout)) != nil else { return false }
+        return title.map { browser.title == $0 } ?? true
+    }
+
+    /// Whether every one of `browsers` finishes loading within `timeout`,
+    /// as ``loaded(_:title:timeout:)``.
+    static func allLoaded(_ browsers: [CefBrowser], title: String? = nil, timeout: Duration = .seconds(15)) async -> Bool {
+        var all = true
+        for browser in browsers where !(await loaded(browser, title: title, timeout: timeout)) { all = false }
+        return all
+    }
+
+    /// Loads `url` in `browser` and returns whether that navigation finishes
+    /// within `timeout`, showing `title` when one is given.
+    static func load(_ url: URL, in browser: CefBrowser, title: String? = nil, timeout: Duration = .seconds(15)) async -> Bool {
+        guard (try? await browser.load(url).waitUntilLoaded(timeout: timeout)) != nil else { return false }
+        return title.map { browser.title == $0 } ?? true
     }
 
     static func waitUntilAsync(timeout: Duration = .seconds(10), _ condition: () async -> Bool) async -> Bool {

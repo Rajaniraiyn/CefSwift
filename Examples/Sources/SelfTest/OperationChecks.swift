@@ -13,6 +13,7 @@ extension SelfTest {
         await readinessChecks()
         await sharedRendererChecks()
         await decisionChecks()
+        await presenterCancellationChecks()
         await observableSettingChecks()
         await domainLeaseChecks()
     }
@@ -56,7 +57,7 @@ extension SelfTest {
         let window = CefBrowserWindow(browser: CefBrowser(url: URL(string: "selftest://edge/one.html")!))
         window.show()
         let browser = window.browser
-        _ = await waitUntil { browser.title == "one" }
+        _ = await loaded(browser, title: "one")
         let evaluationError = await errorAfterCancelling {
             try await browser.evaluateJavaScript("new Promise(() => {})")
         }
@@ -100,7 +101,7 @@ extension SelfTest {
             return !window.browser.isSettingUp
         }
         check("operations: the set-up browser loads its page",
-              await waitUntil { window.browser.title == "ready" }, detail: window.browser.title)
+              await loaded(window.browser, title: "ready"), detail: window.browser.title)
         window.close()
         _ = await waitUntil { window.isClosed }
     }
@@ -116,7 +117,7 @@ extension SelfTest {
             popup.show()
         }
         opener.show()
-        _ = await waitUntil { opener.browser.title == "opener" }
+        _ = await loaded(opener.browser, title: "opener")
         let renderersBefore = rendererProcesses().count
         _ = try? await opener.browser.evaluateJavaScript(
             "window.open('popup.html', 'p', 'width=300,height=200'); 0", userGesture: true)
@@ -143,6 +144,58 @@ extension SelfTest {
         _ = await waitUntil { opener.isClosed && popup.isClosed }
     }
 
+    /// A default presenter with no window shows a modal alert; cancelling
+    /// its task stops that modal session, and a task cancelled before it is
+    /// shown shows nothing. The unresponsive-page, dialog and
+    /// client-certificate presenters share this presentation.
+    static func presenterCancellationChecks() async {
+        // Main-actor jobs wait while a modal session runs, so the task is
+        // cancelled from the modal run loop, as CefKit's own cancellations
+        // arrive (CEF callbacks the message pump delivers there).
+        let browser = CefBrowser()
+        var answer: CefUnresponsivePageDecision?
+        var shown = false
+        let task = Task { @MainActor in
+            answer = await CefUnresponsivePagePresenter.present(for: browser, in: nil)
+        }
+        RunLoop.main.perform(inModes: [.modalPanel]) {
+            MainActor.assumeIsolated {
+                shown = NSApp.modalWindow != nil
+                task.cancel()
+            }
+        }
+        // A last resort, should cancelling not end the session.
+        let rescue = Timer(timeInterval: 5, repeats: false) { _ in
+            MainActor.assumeIsolated { if NSApp.modalWindow != nil { NSApp.abortModal() } }
+        }
+        RunLoop.main.add(rescue, forMode: .modalPanel)
+        let start = ContinuousClock.now
+        await task.value
+        rescue.invalidate()
+        let elapsed = ContinuousClock.now - start
+        check("operations: cancelling dismisses a presenter's modal alert",
+              shown && answer == .wait && NSApp.modalWindow == nil && elapsed < .seconds(4),
+              detail: "shown \(shown), answer \(String(describing: answer)), after \(elapsed)")
+
+        var leaving: Bool?
+        var everShown = false
+        let early = Task { @MainActor in
+            leaving = await CefDialogPresenter.confirmLeaving(isReload: false, in: nil)
+        }
+        early.cancel()
+        let probe = Timer(timeInterval: 2, repeats: false) { _ in
+            MainActor.assumeIsolated {
+                everShown = NSApp.modalWindow != nil
+                if everShown { NSApp.abortModal() }
+            }
+        }
+        RunLoop.main.add(probe, forMode: .modalPanel)
+        await early.value
+        probe.invalidate()
+        check("operations: a presenter cancelled before it shows shows nothing", !everShown && leaving == false,
+              detail: "shown \(everShown), \(String(describing: leaving))")
+    }
+
     /// Delegate decisions end with the page they belong to.
     static func decisionChecks() async {
         let delegate = StallingDelegate()
@@ -150,13 +203,12 @@ extension SelfTest {
             browser: CefBrowser(url: URL(string: "selftest://edge/dialog.html")!, delegate: delegate))
         browserWindow.show()
         let browser = browserWindow.browser
-        _ = await waitUntil { browser.title == "dialog" }
+        _ = await loaded(browser, title: "dialog")
 
         // Permission requests in flight when the page goes: a prompt
         // (geolocation), which Chromium dismisses, and a media request.
         if let server = try? await LocalServer.start() {
-            browser.load(URL(string: "http://127.0.0.1:\(server.port)/page")!)
-            _ = await waitUntil { browser.title == "page" }
+            _ = await load(URL(string: "http://127.0.0.1:\(server.port)/page")!, in: browser, title: "page")
             _ = try? await browser.evaluateJavaScript("""
                 navigator.geolocation.getCurrentPosition(() => {}, () => {});
                 navigator.mediaDevices.getUserMedia({ audio: true }).catch(() => {});
@@ -188,7 +240,7 @@ extension SelfTest {
         // The default sheet goes with its browser, in a window that stays.
         let sheetBrowser = CefBrowser(url: URL(string: "selftest://edge/sheet.html")!)
         let view = hostWindowed(sheetBrowser)
-        _ = await waitUntil { sheetBrowser.title == "sheet" }
+        _ = await loaded(sheetBrowser, title: "sheet")
         sheetBrowser.executeJavaScript("alert('sheet')")
         let sheetShown = await waitUntil(timeout: .seconds(5)) { window.attachedSheet != nil }
         sheetBrowser.close(force: true)
@@ -206,7 +258,7 @@ extension SelfTest {
         let window = CefBrowserWindow(browser: CefBrowser(url: URL(string: "selftest://edge/settings.html")!))
         window.show()
         let browser = window.browser
-        _ = await waitUntil { browser.title == "settings" }
+        _ = await loaded(browser, title: "settings")
 
         let mutedChanged = OSAllocatedUnfairLock(initialState: false)
         withObservationTracking { _ = browser.isAudioMuted } onChange: { mutedChanged.withLock { $0 = true } }
@@ -234,7 +286,7 @@ extension SelfTest {
         let window = CefBrowserWindow(browser: CefBrowser(url: URL(string: "selftest://edge/lease.html")!))
         window.show()
         let browser = window.browser
-        _ = await waitUntil { browser.title == "lease" }
+        _ = await loaded(browser, title: "lease")
         await expect("operations: a domain stays enabled while another user holds it") {
             try await browser.devTools.send("Runtime.enable")  // one user
             try await browser.devTools.send("Runtime.enable")  // another
@@ -250,7 +302,7 @@ extension SelfTest {
     }
 }
 
-private func isBrowserClosed(_ error: Error?) -> Bool {
+func isBrowserClosed(_ error: Error?) -> Bool {
     if case .browserClosed? = error as? CefError { return true }
     return false
 }

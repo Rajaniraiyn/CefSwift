@@ -57,7 +57,8 @@ public struct CefPreferences {
                 // The header says get_preference returns NULL for an unknown
                 // name, but CEF 156 returns a value (SelfTest checks this).
                 guard manager.pointee.has_preference(manager, cefName) != 0 else { return nil }
-                let value = manager.pointee.get_preference(manager, cefName)
+                // A NULL value is absent too, not JSON null.
+                guard let value = manager.pointee.get_preference(manager, cefName) else { return nil }
                 defer { cefRelease(value) }
                 return CefJSON(cefValue: value)
             }
@@ -191,14 +192,13 @@ public struct CefPreferences {
         let (stream, continuation) = AsyncStream<CefJSON?>.makeStream(bufferingPolicy: .bufferingNewest(1))
         continuation.yield(value(named: name))
         let preferences = self
-        let observer = PreferenceObserver { changed in
-            continuation.yield(preferences.value(named: changed))
-        }.makeObserver()
+        // Made only once there is a manager to take it: add consumes the
+        // reference, and without Chromium nothing would release it.
         let registration: UnsafeMutablePointer<cef_registration_t>? = withManager { manager in
-            guard let add = manager.pointee.add_preference_observer else {
-                cefRelease(observer)
-                return nil
-            }
+            guard let add = manager.pointee.add_preference_observer else { return nil }
+            let observer = PreferenceObserver { changed in
+                continuation.yield(preferences.value(named: changed))
+            }.makeObserver()
             return CefStringUtil.withCefString(name) { add(manager, $0, observer) }
         } ?? nil
         guard let token = CefObserverRegistration(adopting: registration) else {

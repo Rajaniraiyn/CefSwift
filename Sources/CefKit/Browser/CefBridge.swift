@@ -222,7 +222,9 @@ public final class CefBridge {
         // The renderer reports the document's origin, but a compromised
         // renderer could report any; the browser process's own record of
         // the frame's address (and its parents') decides.
-        let established = Self.establishedOrigin(claimed: origin, url: url) { Self.ancestorURLs(of: frame.pointer) }
+        let established = Self.establishedOrigin(
+            claimed: origin, url: url, isMainFrame: isMainFrame, localSchemes: Self.localSchemes
+        ) { Self.ancestorURLs(of: frame.pointer) }
         let call = CefBridgeCall(browser: browser, method: method, origin: established.origin ?? "null", isMainFrame: isMainFrame)
         guard established != .inconsistent, isPermitted(call, origin: established) else {
             fail("\(name).\(method): caller is not permitted to use this bridge")
@@ -299,8 +301,19 @@ public final class CefBridge {
     /// addresses carry their origin after the scheme; `about:blank` and
     /// `about:srcdoc` inherit one; `data:`, `javascript:`, other `about:`
     /// pages and addresses without a host are opaque.
-    nonisolated static func addressOrigin(_ text: String?) -> AddressOrigin {
+    ///
+    /// `localSchemes` have `file`'s security rules: `file` itself and
+    /// custom schemes registered with ``CefCustomScheme/Options/local``.
+    /// Chromium gives their documents an opaque origin (`self.origin` is
+    /// `"null"`), so here their origin is their address's (`file://`,
+    /// `myapp://host`) only in the main frame, which an embedding page
+    /// cannot sandbox. In a subframe it is opaque: CEF does not say whether
+    /// the frame is sandboxed, and its document's origin is opaque anyway.
+    nonisolated static func addressOrigin(
+        _ text: String?, isMainFrame: Bool = true, localSchemes: Set<String> = ["file"]
+    ) -> AddressOrigin {
         guard let text, let url = URL(string: text), let scheme = url.scheme?.lowercased() else { return .opaque }
+        if localSchemes.contains(scheme), !isMainFrame { return .opaque }
         switch scheme {
         case "about":
             let page = text.dropFirst("about:".count).prefix { $0 != "?" && $0 != "#" }.lowercased()
@@ -310,7 +323,7 @@ public final class CefBridge {
             // and nested `blob:` are opaque.
             let inner = String(text.dropFirst(scheme.count + 1))
             guard let innerScheme = URL(string: inner)?.scheme?.lowercased(), innerScheme != "blob", innerScheme != "filesystem",
-                  case .tuple(let origin) = addressOrigin(inner)
+                  !localSchemes.contains(innerScheme), case .tuple(let origin) = addressOrigin(inner)
             else { return .opaque }
             return .tuple(origin)
         case "file":
@@ -326,7 +339,8 @@ public final class CefBridge {
 
     /// The calling document's origin, established from the browser
     /// process's own record of its frame's address, `url`, and for an
-    /// inheriting address, of its ancestors' (`ancestors`, nearest first):
+    /// inheriting address, of its ancestors' (`ancestors`, nearest first,
+    /// the main frame last):
     ///
     /// - An address with a host confirms `claimed` only if it is the
     ///   address's origin; `"null"` (a sandboxed document) is opaque, and
@@ -335,18 +349,33 @@ public final class CefBridge {
     /// - `about:blank` and `about:srcdoc` take the nearest ancestor's
     ///   origin. CEF does not expose the frame that created a document,
     ///   so a top-level one (a popup's `about:blank`) is opaque.
+    /// - A `localSchemes` address (`file:`) is its address's origin in the
+    ///   main frame and opaque in a subframe, as ``addressOrigin(_:isMainFrame:localSchemes:)``
+    ///   explains; `about:blank` and `srcdoc` inside it are opaque.
     /// - `data:` and every other address are opaque, whatever the renderer
     ///   claims.
     nonisolated static func establishedOrigin(
-        claimed: String, url: String?, ancestors: () -> [String?]
+        claimed: String, url: String?, isMainFrame: Bool = false, localSchemes: Set<String> = ["file"],
+        ancestors: () -> [String?]
     ) -> EstablishedOrigin {
-        var origin = addressOrigin(url)
+        var origin = addressOrigin(url, isMainFrame: isMainFrame, localSchemes: localSchemes)
         if origin == .inherited {
-            origin = ancestors().lazy.map(addressOrigin).first { $0 != .inherited } ?? .opaque
+            // Inheriting from a local-scheme document is opaque even from
+            // the main frame: Chromium makes such children opaque
+            // (`self.origin` is `"null"`), and a sandboxed one looks the same.
+            origin = ancestors().lazy
+                .map { addressOrigin($0, isMainFrame: false, localSchemes: localSchemes) }
+                .first { $0 != .inherited } ?? .opaque
         }
         guard case .tuple(let expected) = origin else { return .opaque }
         if claimed == expected { return .origin(expected) }
         return claimed == "null" ? .opaque : .inconsistent
+    }
+
+    /// `file` and the custom schemes registered with `.local`.
+    private static var localSchemes: Set<String> {
+        Set(["file"] + (CefRuntime.shared.configuration?.customSchemes ?? [])
+            .filter { $0.options.contains(.local) }.map { $0.name.lowercased() })
     }
 
     /// The addresses of `frame`'s ancestors, nearest first, as the browser
@@ -379,7 +408,9 @@ public struct CefBridgeCall {
     /// The calling document's origin (`"https://example.com"`), as the
     /// browser process establishes it from the frame's address: the
     /// address's origin; for `about:blank` and `about:srcdoc`, the nearest
-    /// parent frame's; for `blob:https://example.com/…`, the one it names.
+    /// parent frame's; for `blob:https://example.com/…`, the one it names;
+    /// `"file://"` for a top-level `file:` page (a `file:` subframe is
+    /// opaque, as is one of a custom scheme registered with `.local`).
     /// `"null"` when the origin is opaque or the address cannot confirm it:
     /// `data:` documents, sandboxed documents, and a top-level
     /// `about:blank` such as a new popup's, whose opener CEF does not say.

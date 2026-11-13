@@ -62,7 +62,7 @@ extension SelfTest {
         }
         let browser = CefBrowser(url: URL(string: "selftest://threads/page.html")!, configuration: configuration)
         let view = hostWindowed(browser)
-        _ = await waitUntil { browser.title == "threads" }
+        _ = await loaded(browser, title: "threads")
 
         let filtered = await Task { @CefIOActor in ioFilteredRequests }.value
         check("threads: a request filter keeps state on CefIOActor without a lock", filtered >= 1, detail: "\(filtered)")

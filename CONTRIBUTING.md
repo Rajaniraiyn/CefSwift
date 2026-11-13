@@ -214,6 +214,11 @@ reading as one.
   `CefWindowOpenDecision`, `decidePasskeyFor:` → `CefPasskeyDecision`); an
   event is `did…`/`…Did…`. A request a native sheet can answer has a
   `Cef…Presenter`, whose `present` shows that sheet and returns the answer.
+  `credentialFor:`, `shouldProceedDespite:`, `selectClientCertificateFor:`
+  and `browserPageIsUnresponsive` are deliberately not `decide…For:`: each
+  supplies a value (a credential, a certificate, whether to proceed, what to
+  do with a hung page) rather than allowing or denying a request, so do not
+  rename them or wrap their answers in new enums for uniformity.
 - **Booleans** read as assertions: `isRunning`, `allowsDiscarding`,
   `showsToolbarButtons`, `usesSafeBrowsing`.
 - **No abbreviations** beyond terms of art (`URL`, `PDF`, `DNS`, `HTTPS`,

@@ -102,8 +102,8 @@ extension SelfTest {
             return (try? Data(contentsOf: file))?.starts(with: Array("%PDF".utf8)) == true
         }
 
-        browser.load(URL(string: "selftest://app/second.html")!)
-        check("navigation: history", await waitUntil { browser.title == "second" && browser.canGoBack })
+        check("navigation: history",
+              await load(URL(string: "selftest://app/second.html")!, in: browser, title: "second") && browser.canGoBack)
         await expect("bridge survives navigation") {
             try await browser.evaluateJavaScript("app.greet({name: 'Bob'})").stringValue == "Hello, Bob from main!"
         }
@@ -119,7 +119,7 @@ extension SelfTest {
         let browser = CefBrowser(url: URL(string: "selftest://app/second.html")!, configuration: configuration)
         let view = hostOffscreen(browser)
 
-        check("offscreen: loads", await waitUntil { browser.title == "second" }, detail: browser.title)
+        check("offscreen: loads", await loaded(browser, title: "second"), detail: browser.title)
         if window.occlusionState.contains(.visible) {
             check("offscreen: paints", await waitUntil { view.layer?.sublayers?.first?.contents != nil })
         } else {
@@ -182,7 +182,7 @@ extension SelfTest {
         let privateWindow = CefBrowserWindow(
             browser: CefBrowser(url: URL(string: "selftest://app/second.html")!, configuration: configuration))
         check("profile: custom scheme serves an incognito profile",
-              await waitUntil { privateWindow.browser.title == "second" }, detail: privateWindow.browser.title)
+              await loaded(privateWindow.browser, title: "second"), detail: privateWindow.browser.title)
         privateWindow.close()
         _ = await waitUntil { privateWindow.isClosed }
     }
@@ -200,7 +200,7 @@ extension SelfTest {
         browserWindow.onPopup = { popups.append($0) }
         browserWindow.show()
 
-        check("browser window: chrome:// page loads", await waitUntil { browser.state == .live && !browser.isLoading && !browser.title.isEmpty }, detail: browser.title)
+        check("browser window: chrome:// page loads", await loaded(browser) && !browser.title.isEmpty, detail: browser.title)
         check("browser window: has NSWindow", browserWindow.window != nil)
         await expect("browser window: product name override") {
             let text = try await browser.evaluateJavaScript("document.body.innerText").stringValue ?? ""
@@ -291,14 +291,12 @@ extension SelfTest {
         // Visit a page in a Chrome-style browser so Chromium records it.
         let visitedURL = URL(string: "selftest://app/history-probe.html")!
         let visitor = CefBrowserWindow(browser: CefBrowser(url: visitedURL))
-        check("history: page visited", await waitUntil { visitor.browser.title == "CefSwift History Probe" })
+        check("history: page visited", await loaded(visitor.browser, title: "CefSwift History Probe"))
         // Most visited has eight places, and earlier checks visit other
         // pages; visit this one more often than any of them.
         for _ in 0..<12 {
-            visitor.browser.load(URL(string: "selftest://app/second.html")!)
-            _ = await waitUntil { visitor.browser.title == "second" && !visitor.browser.isLoading }
-            visitor.browser.load(visitedURL)
-            _ = await waitUntil { visitor.browser.title == "CefSwift History Probe" && !visitor.browser.isLoading }
+            _ = await load(URL(string: "selftest://app/second.html")!, in: visitor.browser)
+            _ = await load(visitedURL, in: visitor.browser)
         }
         visitor.close()
         _ = await waitUntil { visitor.isClosed }
@@ -361,7 +359,7 @@ extension SelfTest {
     static func withVisiblePage<T>(_ body: () async -> T) async -> T {
         let window = CefBrowserWindow(browser: CefBrowser(url: URL(string: "selftest://app/second.html")!))
         window.show()
-        _ = await waitUntil(timeout: .seconds(15)) { window.browser.title == "second" && !window.browser.isLoading }
+        _ = await loaded(window.browser, title: "second")
         let result = await body()
         window.close()
         _ = await waitUntil { window.isClosed && window.browser.state == .closed }
@@ -372,7 +370,7 @@ extension SelfTest {
         var created: [CefBrowser] = []
         CefRuntime.shared.onBrowserCreated = { created.append($0) }
         let browser = CefRuntime.shared.openChromeWindow(url: URL(string: "selftest://app/second.html")!)
-        check("chrome UI window: loads", await waitUntil { browser.title == "second" }, detail: browser.title)
+        check("chrome UI window: loads", await loaded(browser, title: "second"), detail: browser.title)
 
         browser.execute(.newTab)
         check("chrome UI window: new tab is adopted", await waitUntil { !created.isEmpty && CefRuntime.shared.browsers.count == 2 })

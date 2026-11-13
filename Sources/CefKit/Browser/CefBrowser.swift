@@ -51,7 +51,9 @@ public final class CefBrowser: Identifiable {
 
     // MARK: Observable state
 
-    public internal(set) var state: State = .pending
+    public internal(set) var state: State = .pending {
+        didSet { if state == .closed, oldValue != .closed { loads.browserDidClose() } }
+    }
     /// The main frame's URL.
     public internal(set) var url: URL?
     public internal(set) var title = ""
@@ -145,7 +147,7 @@ public final class CefBrowser: Identifiable {
     /// Chromium's identifier for this browser; `-1` until created.
     @ObservationIgnored public internal(set) var identifier: Int32 = -1
     /// The browser that opened this one, for popups.
-    @ObservationIgnored public private(set) weak var opener: CefBrowser?
+    @ObservationIgnored public internal(set) weak var opener: CefBrowser?
     /// For a popup, the window features its page asked for — the size to
     /// give the popup's window, for instance.
     @ObservationIgnored public internal(set) var popupFeatures: CefPopupFeatures?
@@ -176,11 +178,19 @@ public final class CefBrowser: Identifiable {
     @ObservationIgnored var initialURL: URL?
     @ObservationIgnored var isBootstrapping = false
     @ObservationIgnored var passkeyAuthenticator: CefPasskeyAuthenticator?
+    /// The main frame's navigations, for ``waitUntilLoaded(timeout:)``.
+    @ObservationIgnored let loads = CefLoadTracker()
     /// Calls waiting for ``ready()``.
     @ObservationIgnored let readyWaiters = CefPendingOperations<Void>()
     /// Delegate decisions waiting for an answer; see ``decide(_:_:then:)``.
     @ObservationIgnored var pendingDecisions: [Int: PendingDecision] = [:]
     @ObservationIgnored var nextDecisionID = 0
+    /// Counts unresponsive-page questions; an answer applies only while
+    /// its question is the current one. See `CefUnresponsivePage.swift`.
+    @ObservationIgnored var unresponsiveEpisode = 0
+    /// Whether the current renderer's ending reloads the page: the answer
+    /// to its unresponsive question was ``CefUnresponsivePageDecision/reload``.
+    @ObservationIgnored var reloadsWhenRendererEnds = false
     @ObservationIgnored var downloadControls: [UInt32: CefRef<cef_download_item_callback_t>] = [:]
     @ObservationIgnored var isChromeStyle = false
     @ObservationIgnored var isEmbeddedView = false
@@ -270,8 +280,25 @@ public final class CefBrowser: Identifiable {
 
     /// Navigates the main frame. Before creation, sets the page the browser
     /// opens with.
-    public func load(_ url: URL) {
-        guard state != .closed else { return }
+    ///
+    /// Returns the navigation, to wait until it has loaded:
+    ///
+    /// ```swift
+    /// try await browser.load(url).waitUntilLoaded(timeout: .seconds(30))
+    /// ```
+    ///
+    /// For a closed browser the navigation has failed already, with
+    /// ``CefError/browserClosed``.
+    @discardableResult
+    public func load(_ url: URL) -> CefNavigation {
+        guard state != .closed else { return CefNavigation(url: url, failure: CefError.browserClosed) }
+        let navigation = requestNavigation(to: url)
+        startLoad(url)
+        return navigation
+    }
+
+    /// Navigates the main frame without tracking it as a ``CefNavigation``.
+    func startLoad(_ url: URL) {
         guard raw != nil, !isBootstrapping else {
             initialURL = url
             self.url = url
@@ -329,14 +356,25 @@ public final class CefBrowser: Identifiable {
     /// only what the script does. A script that returns a promise is
     /// awaited through the promise's `then`.
     ///
-    /// - Parameter userGesture: Runs the script as if the user had just
-    ///   clicked, as some APIs require (opening popups, entering
-    ///   fullscreen, `beforeunload` prompts). Only the DevTools protocol can
-    ///   grant that, so the call attaches ``devTools`` to the browser,
-    ///   which stays attached; see the guide's "Compatibility with bot
-    ///   protection".
+    /// - Parameters:
+    ///   - userGesture: Runs the script as if the user had just
+    ///     clicked, as some APIs require (opening popups, entering
+    ///     fullscreen, `beforeunload` prompts). Only the DevTools protocol can
+    ///     grant that, so the call attaches ``devTools`` to the browser,
+    ///     which stays attached; see the guide's "Compatibility with bot
+    ///     protection".
+    ///   - timeout: How long to wait for the value; `nil` waits for as long
+    ///     as it takes. When it runs out the call throws
+    ///     ``CefError/timedOut``. Only the wait ends: the script, and a
+    ///     promise it returned, go on running in the page.
     @discardableResult
-    public func evaluateJavaScript(_ script: String, userGesture: Bool = false) async throws -> CefJSON {
+    public func evaluateJavaScript(
+        _ script: String, userGesture: Bool = false, timeout: Duration? = nil
+    ) async throws -> CefJSON {
+        try await withOptionalDeadline(timeout) { [self] in try await evaluateInMainFrame(script, userGesture: userGesture) }
+    }
+
+    private func evaluateInMainFrame(_ script: String, userGesture: Bool) async throws -> CefJSON {
         guard userGesture else { return try await pageScripting.evaluate(script, as: CefJSON.self) }
         let reply = try await devTools.send(
             "Runtime.evaluate",
@@ -347,14 +385,17 @@ public final class CefBrowser: Identifiable {
         return reply["result"]["value"]
     }
 
-    /// Evaluates JavaScript and decodes its value as `T`.
+    /// Evaluates JavaScript and decodes its value as `T`, as
+    /// ``evaluateJavaScript(_:userGesture:timeout:)`` does.
     public func evaluateJavaScript<T: Decodable>(
-        _ script: String, as type: T.Type = T.self, userGesture: Bool = false
+        _ script: String, as type: T.Type = T.self, userGesture: Bool = false, timeout: Duration? = nil
     ) async throws -> T {
-        // Without a gesture the value decodes straight from the renderer's
-        // reply, with no JSON or `CefJSON` in between.
-        guard userGesture else { return try await pageScripting.evaluate(script, as: T.self) }
-        return try await evaluateJavaScript(script, userGesture: true).decode(T.self)
+        try await withOptionalDeadline(timeout) { [self] () async throws -> T in
+            // Without a gesture the value decodes straight from the renderer's
+            // reply, with no JSON or `CefJSON` in between.
+            guard userGesture else { return try await pageScripting.evaluate(script, as: T.self) }
+            return try await evaluateInMainFrame(script, userGesture: true).decode(T.self)
+        }
     }
 
     /// Injects `script` into every document loaded from now on, before the
@@ -378,6 +419,7 @@ public final class CefBrowser: Identifiable {
     /// Closes the browser. Unless `force` is set, a page's `beforeunload`
     /// handler may ask the user to stay.
     public func close(force: Bool = false) {
+        loads.browserWillClose()
         guard raw != nil else {
             // Not created yet, or Chromium is still creating it: it closes
             // now, and a browser Chromium finishes creating after this
@@ -486,7 +528,8 @@ extension CefBrowser {
     /// `try_close_browser`: lets `beforeunload` run, then reports whether the
     /// hosting window may close now.
     func tryClose() -> Bool {
-        withHost { $0.pointee.try_close_browser($0) != 0 } ?? true
+        loads.browserWillClose()
+        return withHost { $0.pointee.try_close_browser($0) != 0 } ?? true
     }
 }
 

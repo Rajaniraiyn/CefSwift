@@ -108,7 +108,7 @@ extension SelfTest {
             browser.close(force: true)
             view.removeFromSuperview()
         }
-        guard await waitUntil({ browser.state == .live && !browser.isLoading }) else {
+        guard await loaded(browser) else {
             check("authentication (proxy): browser starts", false)
             return
         }

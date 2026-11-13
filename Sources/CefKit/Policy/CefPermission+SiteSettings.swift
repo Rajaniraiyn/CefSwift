@@ -3,13 +3,17 @@ import Foundation
 extension CefPermissionRequest.Kinds {
     /// The site permissions these kinds are stored as. ``other`` has none,
     /// and neither has ``protectedMediaIdentifier``: Chromium keeps no such
-    /// setting on macOS.
+    /// setting on macOS. ``screenCapture`` and ``systemAudioCapture`` have
+    /// none either: a grant would hand the page the screen with no picker,
+    /// so they are decided per request and never by a stored setting (and
+    /// never by the camera's or microphone's).
     public var sitePermissions: [CefSitePermission] {
         let mapping: [(CefPermissionRequest.Kinds, CefSitePermission)] = [
             (.camera, .camera), (.microphone, .microphone), (.geolocation, .geolocation),
             (.notifications, .notifications), (.clipboard, .clipboard), (.midi, .midiSystemExclusive),
             (.pointerLock, .pointerLock), (.storageAccess, .storageAccess), (.sensors, .sensors),
             (.windowManagement, .windowManagement), (.multipleDownloads, .automaticDownloads),
+            (.cameraPanTiltZoom, .cameraPanTiltZoom),
         ]
         return mapping.filter { contains($0.0) }.map(\.1)
     }

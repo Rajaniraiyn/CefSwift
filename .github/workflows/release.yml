@@ -4,6 +4,12 @@
 #
 #   git tag v0.1.0 && git push origin v0.1.0
 #
+# Only a commit CI passed is released: the `ci`, `intel` and `macos-14` jobs
+# of the CI workflow must have succeeded on the tagged commit. A commit
+# pushed to main has those runs; for any other, start CI on the tag first
+# (Actions → CI → Run workflow, or `gh workflow run ci.yml --ref <tag>`).
+# The gate waits for runs still in progress, up to 75 minutes.
+#
 name: Release
 
 on:
@@ -16,10 +22,41 @@ permissions: {}
 jobs:
   release:
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 80
     permissions:
       contents: write   # create the release
+      checks: read      # read CI's results for the tagged commit
     steps:
+      - name: CI passed on the tagged commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          REQUIRED: ci intel macos-14
+        run: |
+          deadline=$(( $(date +%s) + 75 * 60 ))
+          while :; do
+            pending=""
+            for job in $REQUIRED; do
+              # The latest run of the job on this commit.
+              run="$(gh api "repos/$GH_REPO/commits/$GITHUB_SHA/check-runs?check_name=$job&filter=latest" \
+                --jq '[.check_runs[] | select(.app.slug == "github-actions")] | max_by(.started_at) // empty
+                      | "\(.status) \(.conclusion)"')"
+              case "$run" in
+                "completed success") ;;
+                "") echo "::error::No '$job' check ran on $GITHUB_SHA. Run CI on this commit, then push the tag again or re-run this workflow."; exit 1 ;;
+                completed*) echo "::error::'$job' ended '${run#completed }' on $GITHUB_SHA; not releasing."; exit 1 ;;
+                *) pending="$pending $job" ;;
+              esac
+            done
+            [ -z "$pending" ] && break
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "::error::Still waiting for$pending on $GITHUB_SHA after 75 minutes."
+              exit 1
+            fi
+            echo "Waiting for$pending…"
+            sleep 30
+          done
+
       # No checkout: gh works from the API, and --verify-tag fails if the tag
       # is not on GitHub.
       - name: Create GitHub Release

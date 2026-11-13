@@ -22,6 +22,7 @@ extension CefBrowserClient {
                 if let id { b.frameDidUpdate(id, url: URL(string: url)) }
                 if isMain {
                     b.applyURL(url)
+                    b.trackMainFrameAddressDidChange(URL(string: url))
                     b.refreshConnectionSecurity()
                 }
             }

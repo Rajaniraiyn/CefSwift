@@ -34,7 +34,7 @@ extension SelfTest {
         let browser = CefBrowser(url: URL(string: "selftest://edge/tab.html")!, configuration: configuration)
         let window = CefBrowserWindow(browser: browser)
         window.show()
-        _ = await waitUntil { browser.title == "tab" }
+        _ = await loaded(browser, title: "tab")
         await expect("bridge: typed round trip in a Chrome-style window") {
             let first = try await browser.evaluateJavaScript("counter.increment(1)").intValue
             let second = try await browser.evaluateJavaScript("counter.increment(10)").intValue
@@ -61,7 +61,7 @@ extension SelfTest {
             popup.show()
         }
         opener.show()
-        _ = await waitUntil { browser.title == "opener" }
+        _ = await loaded(browser, title: "opener")
 
         await expect("popup: requested size is reported") {
             try await browser.evaluateJavaScript("window.__popup = window.open('popup.html', 'p', 'width=420,height=360'); 0", userGesture: true)
@@ -130,7 +130,7 @@ extension SelfTest {
         let browser = CefBrowser(url: URL(string: "selftest://edge/tab.html")!, delegate: recorder)
         let window = CefBrowserWindow(browser: browser)
         window.show()
-        _ = await waitUntil { browser.title == "tab" }
+        _ = await loaded(browser, title: "tab")
 
         browser.load(URL(string: "http://127.0.0.1:\(server.port)/report.txt")!)
         check("download: attachment is saved where the delegate says", await waitUntil {
@@ -155,7 +155,7 @@ extension SelfTest {
         let browser = CefBrowser(url: URL(string: "selftest://edge/leave.html")!, delegate: recorder)
         let window = CefBrowserWindow(browser: browser)
         window.show()
-        _ = await waitUntil { browser.title == "leave" }
+        _ = await loaded(browser, title: "leave")
         // beforeunload needs the page to have seen a user gesture.
         _ = try? await browser.evaluateJavaScript("document.body.click(); 0", userGesture: true)
 
@@ -191,7 +191,7 @@ extension SelfTest {
         let browser = CefBrowser(url: URL(string: "selftest://edge/tab.html")!, delegate: recorder)
         let window = CefBrowserWindow(browser: browser)
         window.show()
-        _ = await waitUntil { browser.title == "tab" }
+        _ = await loaded(browser, title: "tab")
         browser.load(URL(string: "chrome://crash")!)
         check("renderer crash: delegate is told", await waitUntil { !recorder.terminations.isEmpty })
         browser.load(URL(string: "selftest://edge/tab.html?again")!)

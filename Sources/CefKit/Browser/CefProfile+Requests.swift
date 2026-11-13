@@ -97,7 +97,12 @@ extension CefProfile {
     private func makeLoader(for request: URLRequest, configuration: RequestConfiguration, mode: URLRequestLoader.Mode) throws -> URLRequestLoader {
         let plan = try URLRequestPlan(request, configuration: configuration)
         guard let context = requestContext() else { throw CefError.notInitialized }
-        return URLRequestLoader(plan: plan, configuration: configuration, context: context, mode: mode)
+        let loader = URLRequestLoader(plan: plan, configuration: configuration, context: context, mode: mode)
+        // Registered while it holds the context reference, so that quitting
+        // waits for it; a loader refused here releases it at once, while
+        // Chromium still runs.
+        guard URLRequestRegistry.shared.insert(loader) else { throw CefError.shutDown }
+        return loader
     }
 
     /// What a request made with ``CefProfile/data(for:configuration:)`` and

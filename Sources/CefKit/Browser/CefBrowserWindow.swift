@@ -51,8 +51,22 @@ public final class CefBrowserWindow: Identifiable {
         public var frame: CGRect?
         /// Removes the title bar and window buttons.
         public var isFrameless = false
-        /// Keeps the window title in sync with the page title.
+        /// Keeps the window title in sync with the page, as ``title``
+        /// makes it.
         public var titleFollowsPage = true
+        /// The window title for the browser's page while
+        /// ``titleFollowsPage`` is on: by default the page's title, or its
+        /// host while it has none. The window shows the result again
+        /// whenever the observable state the closure reads changes.
+        ///
+        /// ```swift
+        /// windowConfiguration.title = { browser in
+        ///     browser.title.isEmpty ? "New Tab" : browser.title
+        /// }
+        /// ```
+        public var title: @MainActor (CefBrowser) -> String = { browser in
+            browser.title.isEmpty ? (browser.url?.host() ?? "") : browser.title
+        }
         /// Windows sharing an identifier are grouped as native macOS tabs.
         /// `nil` keeps the window out of tab groups.
         public var tabbingIdentifier: String?
@@ -84,6 +98,10 @@ public final class CefBrowserWindow: Identifiable {
     /// it your toolbar, add it to a tab group, and show it.
     ///
     /// When `nil`, Chromium shows popups in a window of its own design.
+    /// With ``CefBrowser/PasskeyPolicy/app(_:)`` or
+    /// ``CefBrowser/PasskeyPolicy/disabled`` passkeys, the popup is one
+    /// CefKit created instead, not connected to its opener's page; see
+    /// ``CefBrowser/PasskeyPolicy``.
     @ObservationIgnored public var onPopup: ((CefBrowserWindow) -> Void)?
 
     public nonisolated var id: ObjectIdentifier { ObjectIdentifier(self) }
@@ -208,11 +226,11 @@ public final class CefBrowserWindow: Identifiable {
     private func mirrorPageTitle() {
         guard !isClosed else { return }
         let title = withObservationTracking {
-            browser.title
+            configuration.title(browser)
         } onChange: { [weak self] in
             Task { @MainActor in self?.mirrorPageTitle() }
         }
-        window?.title = title.isEmpty ? (browser.url?.host() ?? "") : title
+        window?.title = title
     }
 
     // MARK: Window

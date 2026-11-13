@@ -14,6 +14,12 @@ import CefBase
 final class PageScripting: CefRendererExtension {
     let messagePrefix = "cefswift.page."
 
+    /// `file` and the custom schemes registered with
+    /// `CEF_SCHEME_OPTION_LOCAL` (`1 << 1`), from the helper's command line.
+    private static let localSchemes: Set<String> = Set(
+        ["file"] + CefSchemeList.entries(inArguments: CommandLine.arguments)
+            .filter { $0.options & (1 << 1) != 0 }.map { $0.name.lowercased() })
+
     // MARK: Configuration
 
     struct Bridge {
@@ -186,8 +192,17 @@ final class PageScripting: CefRendererExtension {
         // runs. `location.origin` is its address's, which differs for
         // `about:blank` and `srcdoc` documents: theirs is opaque, while the
         // document has its parent's origin.
-        let origin = global["origin"].flatMap { $0.isString ? $0.stringValue : nil }
-            ?? global["location"]?["origin"]?.stringValue ?? ""
+        let locationOrigin = global["location"]?["origin"]?.stringValue ?? ""
+        var origin = global["origin"].flatMap { $0.isString ? $0.stringValue : nil } ?? locationOrigin
+        // Chromium gives `file:` documents (and those of `.local` custom
+        // schemes) an opaque `self.origin` but the address's
+        // `location.origin`. A main frame's is taken as its address's, as
+        // the browser process does; a subframe's stays opaque, since a
+        // sandboxed one looks the same.
+        if origin == "null", isMainFrame, locationOrigin != "null",
+           let scheme = url.split(separator: ":", maxSplits: 1).first?.lowercased(), Self.localSchemes.contains(scheme) {
+            origin = locationOrigin
+        }
         let permitted = configuration.bridges.filter { $0.permits(isMainFrame: isMainFrame, origin: origin, url: url) }
         guard !permitted.isEmpty else { return }
         nextDocumentID += 1

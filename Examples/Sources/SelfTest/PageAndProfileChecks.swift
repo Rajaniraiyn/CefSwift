@@ -53,7 +53,7 @@ extension SelfTest {
         window.setToolbar { TitleProbe(browser: browser, log: renders) }
         window.setTabAccessory { TitleProbe(browser: browser, log: renders) }
         window.show()
-        _ = await waitUntil { browser.title == "second" && !browser.isLoading }
+        _ = await loaded(browser, title: "second")
         check("toolbar: installed in the window",
               window.window?.toolbar?.items.count == 5 && window.window?.tab.accessoryView != nil)
         check("toolbar: its views follow the browser's state", await waitUntil { renders.titles.last == "second" },
@@ -101,14 +101,13 @@ extension SelfTest {
         let browser = CefBrowser(url: URL(string: "selftest://app/second.html")!, configuration: configuration)
         let window = CefBrowserWindow(browser: browser)
         window.show()
-        _ = await waitUntil { browser.title == "second" }
+        _ = await loaded(browser, title: "second")
         await expect("bridge scope: a permitted origin gets the bridge, not its raw binding") {
             try await browser.evaluateJavaScript(
                 "typeof __cefswift_scoped === 'undefined' ? scoped.ping() : 'binding visible'").stringValue == "pong"
         }
         await hostlessFrameChecks(browser, bridge: bridge)
-        browser.load(URL(string: "selftest://edge/tab.html")!)
-        _ = await waitUntil { browser.title == "tab" }
+        _ = await load(URL(string: "selftest://edge/tab.html")!, in: browser, title: "tab")
         await expect("bridge scope: other origins have no global at all") {
             try await browser.evaluateJavaScript(
                 "typeof scoped === 'undefined' && typeof __cefswift_scoped === 'undefined'").boolValue == true
@@ -128,9 +127,8 @@ extension SelfTest {
     /// `srcdoc`, `about:blank` and `blob:` frames of a permitted page reach
     /// its `.origins` bridge, with the origin the browser process
     /// establishes from their parent or address; an opaque `data:` frame
-    /// does not, and its calls carry `"null"`. On an HTTP page: Chromium
-    /// gives `about:blank` and `srcdoc` children of a `selftest://` page an
-    /// opaque origin of their own, which both processes then agree on.
+    /// does not, and its calls carry `"null"`. On an HTTP page;
+    /// ``bridgeOriginChecks()`` covers `file:` and custom schemes.
     private static func hostlessFrameChecks(_ browser: CefBrowser, bridge: CefBridge) async {
         guard let server = try? await LocalServer.start() else {
             skip("bridge scope: hostless frames", because: "could not start a local HTTP server", .environment)
@@ -202,6 +200,120 @@ extension SelfTest {
                 "typeof scoped === 'undefined' ? probe.origin() : 'scoped visible'", in: dataFrame)
             return (result.stringValue == "null", "\(result)")
         }
+    }
+
+    // MARK: Bridge origins by scheme
+
+    /// What a document reports about itself and what the bridge makes of it:
+    /// `self.origin`, `location.origin`, whether an `.origins` bridge listing
+    /// the page's origin is there and answers, and the origin the browser
+    /// process establishes (through an `.anyFrame` bridge).
+    struct OriginReport: Decodable, Equatable, CustomStringConvertible {
+        var selfOrigin: String, locationOrigin: String, scoped: String, established: String
+        var description: String { "self \(selfOrigin), location \(locationOrigin), scoped \(scoped), established \(established)" }
+    }
+
+    /// A frame's report, posted to its parent as `{ name, r }`.
+    static let originReportScript = """
+        (async () => ({
+          selfOrigin: String(self.origin), locationOrigin: String(location.origin),
+          scoped: typeof scoped === 'object' ? await scoped.ping().catch(() => 'rejected') : 'missing',
+          established: typeof probe === 'object' ? await probe.origin().catch(() => 'rejected') : 'missing',
+        }))()
+        """
+
+    /// The reports of a page and of a `srcdoc`, a sandboxed `srcdoc` and a
+    /// `data:` frame in it, and of a frame at `subframe` (a page that posts
+    /// its report as `subframe`) when given.
+    static func originReports(in browser: CefBrowser, subframe: URL? = nil) async throws -> [String: OriginReport] {
+        try await browser.evaluateJavaScript("""
+            (async () => {
+              const report = () => \(originReportScript);
+              const child = name => `<script>${report.toString().slice(6)}.then(r => parent.postMessage({ name: '${name}', r }, '*'));<\\/script>`;
+              const results = { page: await report() };
+              const expected = \(subframe == nil ? 4 : 5);
+              const pending = new Promise(resolve => addEventListener('message', e => {
+                results[e.data.name] = e.data.r;
+                if (Object.keys(results).length === expected) resolve();
+              }));
+              const add = setup => { const f = document.createElement('iframe'); setup(f); document.body.appendChild(f); };
+              add(f => f.srcdoc = child('srcdoc'));
+              add(f => { f.sandbox = 'allow-scripts'; f.srcdoc = child('sandboxed'); });
+              add(f => f.src = 'data:text/html,' + encodeURIComponent(child('data')));
+              \(subframe.map { "add(f => f.src = '\($0.absoluteString)');" } ?? "")
+              await Promise.race([pending, new Promise(r => setTimeout(r, 5000))]);
+              return results;
+            })()
+            """, as: [String: OriginReport].self)
+    }
+
+    static func bridgeOriginChecks() async {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("cefswift-selftest-origins-\(getpid())")
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = directory.appendingPathComponent("page.html")
+        try? Data("<title>file</title><body></body>".utf8).write(to: file)
+        let fileFrame = directory.appendingPathComponent("frame.html")
+        try? Data("""
+            <script>\(originReportScript).then(r => parent.postMessage({ name: 'subframe', r }, '*'));</script>
+            """.utf8).write(to: fileFrame)
+
+        let scoped = CefBridge(name: "scoped")
+        scoped.access = .origins(["file://", "selftest://app", "selftest-local://app", "null"])
+        scoped.handle("ping") { (_: CefJSON) in "pong" }
+        let probe = CefBridge(name: "probe")
+        probe.access = .anyFrame
+        probe.handle("origin") { (_: CefJSON, call: CefBridgeCall) in call.origin }
+        var configuration = CefBrowser.Configuration()
+        configuration.bridges = [scoped, probe]
+        let browser = CefBrowser(url: file, configuration: configuration)
+        let window = CefBrowserWindow(browser: browser)
+        window.show()
+        // The page's origin when it reaches the `.origins` bridge; `nil`
+        // when it must not (an opaque origin, even with "null" listed).
+        let cases: [(page: URL, label: String, origin: String?)] = [
+            (file, "a top-level file: page", "file://"),
+            (URL(string: "selftest://app/second.html")!, "a standard custom scheme page", "selftest://app"),
+            (URL(string: "selftest-local://app/second.html")!, "a .local custom scheme page", "selftest-local://app"),
+            (URL(string: "selftest-plain:/second.html")!, "a non-standard custom scheme page", nil),
+        ]
+        for (page, label, origin) in cases {
+            guard await load(page, in: browser) else {
+                check("bridge origins: \(label) loads", false, detail: browser.title)
+                continue
+            }
+            let reports: [String: OriginReport]
+            do {
+                reports = try await originReports(in: browser, subframe: page.isFileURL ? fileFrame : nil)
+            } catch {
+                check("bridge origins: \(label) reports", false, detail: "\(error)")
+                continue
+            }
+            let report = reports["page"]
+            check("bridge origins: \(label) " + (origin == nil ? "is opaque" : "reaches an .origins bridge as \(origin!)"),
+                  origin.map { report?.scoped == "pong" && report?.established == $0 }
+                    ?? (report?.scoped != "pong" && report?.established == "null"),
+                  detail: report.map(\.description) ?? "no report")
+            // srcdoc children of a standard scheme inherit its origin; every
+            // other child here is opaque.
+            var children = ["sandboxed", "data"]
+            if page.scheme == "selftest" {
+                check("bridge origins: a srcdoc frame of \(label) inherits its origin",
+                      reports["srcdoc"]?.scoped == "pong" && reports["srcdoc"]?.established == origin,
+                      detail: reports["srcdoc"].map(\.description) ?? "no report")
+            } else {
+                children.append("srcdoc")
+            }
+            if page.isFileURL { children.append("subframe") }
+            for name in children {
+                let child = reports[name]
+                check("bridge origins: a \(name) frame of \(label) is opaque",
+                      child != nil && child?.scoped != "pong" && child?.established == "null",
+                      detail: child.map(\.description) ?? "no report")
+            }
+        }
+        window.close()
+        _ = await waitUntil { window.isClosed }
     }
 
     // MARK: Bridge serialization
@@ -290,7 +402,7 @@ extension SelfTest {
             var configuration = CefBrowser.Configuration()
             configuration.profile = profile
             let window = CefBrowserWindow(browser: CefBrowser(url: URL(string: "selftest://app/second.html")!, configuration: configuration))
-            check("service lifetime: incognito tab loads", await waitUntil { window.browser.title == "second" })
+            check("service lifetime: incognito tab loads", await loaded(window.browser, title: "second"))
             // Starts the profile's suggestions host.
             await expect("service lifetime: incognito suggestions answer") {
                 try await !profile.autocomplete.suggestions(for: "cefswift").isEmpty
