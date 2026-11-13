@@ -38,12 +38,6 @@ enum SelfTest {
         if let relaunchDirectory {
             configuration.rootCacheDirectory = URL(fileURLWithPath: relaunchDirectory)
         }
-        // protectedMediaChecks() starts this app a second time with Widevine on.
-        let widevineProbeDirectory = ProcessInfo.processInfo.environment[widevineProbeEnvironmentKey]
-        if let widevineProbeDirectory {
-            configuration.rootCacheDirectory = URL(fileURLWithPath: widevineProbeDirectory)
-            configuration.services.protectedMedia = .automatic
-        }
         if let probe {
             configuration.rootCacheDirectory = ProcessInfo.processInfo.environment[probeRootEnvironmentKey]
                 .map { URL(fileURLWithPath: $0) } ?? configuration.rootCacheDirectory
@@ -51,7 +45,7 @@ enum SelfTest {
         }
         // Those second instances report to this one, which counts their
         // lines; they write no results file of their own.
-        if relaunchDirectory != nil || widevineProbeDirectory != nil || probe != nil {
+        if relaunchDirectory != nil || probe != nil {
             unsetenv("SELFTEST_JSON")
             unsetenv("SELFTEST_STRICT")
         }
@@ -101,8 +95,6 @@ enum SelfTest {
                 await Benchmarks.run(benchmark)
             } else if ServiceBenchmark.isRequested {
                 await ServiceBenchmark.run()
-            } else if widevineProbeDirectory != nil {
-                await widevineProbeChecks()
             } else if let probe {
                 await probes[probe]?()
             } else {

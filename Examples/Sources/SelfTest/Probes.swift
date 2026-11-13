@@ -18,6 +18,7 @@ extension SelfTest {
         "chromiumSignIn": chromiumSignInProbeChecks,
         "localization": localizationProbeChecks,
         "policies": policiesProbeChecks,
+        "widevine": widevineProbeChecks,
     ]
 
     /// Changes the configuration for the probe `name`.
@@ -29,6 +30,8 @@ extension SelfTest {
             configureLocalizationProbe(&configuration)
         case "policies":
             configurePoliciesProbe(&configuration)
+        case "widevine":
+            configuration.services.protectedMedia = .automatic
         default:
             break
         }

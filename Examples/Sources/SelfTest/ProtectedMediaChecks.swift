@@ -5,10 +5,6 @@ import CefSwiftUI
 /// Protected media (Encrypted Media Extensions): Clear Key, and Widevine
 /// with Chromium's component updater on and off.
 extension SelfTest {
-    /// Set in a second SelfTest process that runs with
-    /// `CefRuntime.Configuration.Services.ProtectedMedia.automatic` on a fresh cache directory.
-    static let widevineProbeEnvironmentKey = "CEFSWIFT_SELFTEST_WIDEVINE_ROOT"
-
     /// How long the Widevine probe waits for Chromium to download the CDM
     /// before it skips.
     static let widevineDownloadLimit: Duration = .seconds(20)
@@ -54,42 +50,11 @@ extension SelfTest {
         let capabilities = CefRuntime.shared.capabilities
         check("protected media: the base helper can load Widevine (\(capabilities.signature.rawValue))",
               capabilities.canLoadWidevine || capabilities.teamIdentifier != nil)
-        await widevineProbe()
+        // A second instance with `.automatic` on a fresh cache directory.
+        await runProbe("widevine", label: "widevine", timeout: widevineDownloadLimit + .seconds(25))
     }
 
-    /// Runs this app again with `.automatic` on a fresh cache directory and
-    /// reports what it found.
-    static func widevineProbe() async {
-        let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("cefswift-selftest-widevine-\(ProcessInfo.processInfo.processIdentifier)")
-        let probe = Process()
-        probe.executableURL = URL(fileURLWithPath: CommandLine.arguments[0])
-        var environment = ProcessInfo.processInfo.environment
-        environment[widevineProbeEnvironmentKey] = root.path
-        environment["SELFTEST_ONLY"] = nil
-        probe.environment = environment
-        let output = Pipe()
-        probe.standardOutput = output
-        do {
-            try probe.run()
-        } catch {
-            check("widevine: probe starts", false, detail: "\(error)")
-            return
-        }
-        let finished = await waitUntil(timeout: widevineDownloadLimit + .seconds(25)) { !probe.isRunning }
-        if !finished { probe.terminate() }
-        let lines = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-            .split(separator: "\n").map(String.init)
-        for line in lines where line.hasPrefix("NOTE ") || line.hasPrefix("PASS ") || line.hasPrefix("FAIL ") || line.hasPrefix("SKIP ") {
-            if line.hasPrefix("FAIL ") { failures += 1 }
-            print(line.replacingOccurrences(of: "quit:", with: "widevine: probe quit:"))
-        }
-        check("widevine: probe finishes", finished && probe.terminationStatus == 0,
-              detail: finished ? "status \(probe.terminationStatus)" : "still running")
-        try? FileManager.default.removeItem(at: root)
-    }
-
-    /// The probe process: with `.automatic`, fetch Widevine and ask for it in
+    /// The probe: with `.automatic`, fetch Widevine and ask for it in
     /// an Alloy-style (embedded) and a Chrome-style browser.
     static func widevineProbeChecks() async {
         let embedded = CefBrowser(url: URL(string: "selftest://app/eme.html")!)
@@ -102,15 +67,15 @@ extension SelfTest {
             view.removeFromSuperview()
         }
         guard await waitUntil(timeout: .seconds(15), { embedded.state == .live && !embedded.isLoading }) else {
-            check("widevine: embedded page loads", false)
+            check("embedded page loads", false)
             return
         }
         let before = CefRuntime.shared.widevine
         if case .failed = before {
             // Offline, the component updater gives up at once.
-            skip("widevine: the CDM's first state", because: "the update check failed at once (offline?)", .environment)
+            skip("the CDM's first state", because: "the update check failed at once (offline?)", .environment)
         } else {
-            check("widevine: .automatic reports the CDM missing or arriving on a fresh profile",
+            check(".automatic reports the CDM missing or arriving on a fresh profile",
                   before == .notInstalled || before == .installing, detail: "\(before)")
         }
 
@@ -121,13 +86,14 @@ extension SelfTest {
         Task { result = await CefRuntime.shared.installWidevine() }
         _ = await waitUntil(timeout: widevineDownloadLimit) { result != nil }
         guard let state = result, state.isInstalled else {
-            print("SKIP [environment] widevine: the CDM did not arrive within \(widevineDownloadLimit) (offline, or Google's " +
-                  "update server is slow): \(result.map { "\($0)" } ?? "still \(CefRuntime.shared.widevine)")")
+            skip("the CDM arrives within \(widevineDownloadLimit)",
+                 because: "offline, or Google's update server is slow: " +
+                     (result.map { "\($0)" } ?? "still \(CefRuntime.shared.widevine)"), .environment)
             return
         }
-        print("NOTE widevine: \(state) after \((ContinuousClock.now - started).formatted(.units(allowed: [.seconds], fractionalPart: .show(length: 1))))")
+        print("NOTE \(state) after \((ContinuousClock.now - started).formatted(.units(allowed: [.seconds], fractionalPart: .show(length: 1))))")
 
-        await expect("widevine: an embedded (Alloy) browser gets com.widevine.alpha") {
+        await expect("an embedded (Alloy) browser gets com.widevine.alpha") {
             try await requestKeySystem("com.widevine.alpha", in: embedded) == "OK"
         }
 
@@ -135,11 +101,11 @@ extension SelfTest {
         let chromeWindow = CefBrowserWindow(browser: chrome)
         chromeWindow.show()
         if await waitUntil(timeout: .seconds(15), { chrome.state == .live && !chrome.isLoading }) {
-            await expect("widevine: a Chrome-style browser gets com.widevine.alpha") {
+            await expect("a Chrome-style browser gets com.widevine.alpha") {
                 try await requestKeySystem("com.widevine.alpha", in: chrome) == "OK"
             }
         } else {
-            check("widevine: Chrome-style page loads", false)
+            check("Chrome-style page loads", false)
         }
         chromeWindow.close()
         _ = await waitUntil(timeout: .seconds(5)) { CefRuntime.shared.browsers.count <= 1 }

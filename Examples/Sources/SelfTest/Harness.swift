@@ -252,8 +252,7 @@ extension SelfTest {
     static var isIsolatedParent: Bool {
         let environment = ProcessInfo.processInfo.environment
         return environment["SELFTEST_ISOLATED"] == "1"
-            && environment[relaunchEnvironmentKey] == nil && environment[widevineProbeEnvironmentKey] == nil
-            && environment[probeEnvironmentKey] == nil
+            && environment[relaunchEnvironmentKey] == nil && environment[probeEnvironmentKey] == nil
             && Benchmarks.requested == nil && !ServiceBenchmark.isRequested
     }
 
