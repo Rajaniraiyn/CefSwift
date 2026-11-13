@@ -1,5 +1,6 @@
 import AppKit
 import CefSwiftUI
+import CefSystemEngine
 import SwiftUI
 
 /// Tabs shown by the system's WebKit instead of Chromium: streaming

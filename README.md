@@ -34,7 +34,9 @@ let package = Package(
 ```
 
 `CefSwiftUI` re-exports `CefKit`, the core library. Depend on `CefKit` alone
-only if you host browsers without the views `CefSwiftUI` provides.
+only if you host browsers without the views `CefSwiftUI` provides. Add
+`CefSystemEngine` for pages in the system's WebKit (`CefSystemBrowser`,
+`CefSystemWebView`); it is the only library that links WebKit.
 
 ### Show a web page
 
@@ -165,7 +167,7 @@ covers identifiers, signing, entitlements, notarization and the bundle layout;
 | Bookmarks, history, address-bar suggestions | `CefBookmarks`, `CefHistory`, `CefAutocomplete` | [Bookmarks, history and suggestions](docs/guide.md#bookmarks-history-and-suggestions) |
 | Chrome DevTools Protocol, in-process | `CefDevTools` | [DevTools](docs/guide.md#devtools) |
 | Content served from your own URL scheme | `CefSchemeHandler` | [Serving your own content](docs/guide.md#serving-your-own-content) |
-| Protected media: Widevine in Chromium, FairPlay through the system's WebKit for streaming services | `CefRuntime.Configuration.protectedMedia`, `CefSystemBrowser`, `CefSystemWebView` | [Playing streaming services](docs/guide.md#playing-streaming-services) |
+| Protected media: Widevine in Chromium, FairPlay through the system's WebKit for streaming services | `CefRuntime.Configuration.services.protectedMedia`, `CefSystemBrowser` and `CefSystemWebView` (the `CefSystemEngine` library) | [Playing streaming services](docs/guide.md#playing-streaming-services) |
 
 ## Examples
 

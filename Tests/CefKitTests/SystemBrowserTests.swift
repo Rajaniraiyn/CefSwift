@@ -4,6 +4,7 @@ import os
 import Testing
 
 @testable import CefKit
+@testable import CefSystemEngine
 
 @MainActor
 @Suite struct SystemBrowserTests {

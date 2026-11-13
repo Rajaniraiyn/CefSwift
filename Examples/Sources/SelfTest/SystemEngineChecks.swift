@@ -1,5 +1,6 @@
 import AppKit
 @_spi(Testing) import CefKit
+import CefSystemEngine
 import WebKit
 
 /// CefSystemBrowser: pages in the system's WebKit, with FairPlay.

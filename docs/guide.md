@@ -2282,7 +2282,13 @@ uses, which has FairPlay Streaming through EME. Any app can use it: FairPlay
 in a `WKWebView` needs no entitlement, licence or signing, and the page
 identifies as Safari, so services serve their Safari player.
 
+It lives in its own library, `CefSystemEngine`, so that apps that never use
+it do not link WebKit. Add the `CefSystemEngine` product to your target and
+import it:
+
 ```swift
+import CefSystemEngine
+
 @State private var movie = CefSystemBrowser(url: URL(string: "https://www.netflix.com/")!)
 
 var body: some View {
@@ -2298,10 +2304,10 @@ It has the parts of `CefBrowser`'s surface WebKit offers:
 | `url`, `title`, `isLoading`, `estimatedProgress`, `canGoBack`, `canGoForward`, `hasOnlySecureContent` | Observable, as on `CefBrowser`. |
 | `load(_:)`, `loadHTML(_:baseURL:)`, `goBack()`, `goForward()`, `reload(ignoringCache:)`, `stopLoading()`, `close()` | Navigation. |
 | `evaluateJavaScript(_:)`, `evaluateJavaScript(_:as:)` | Awaits promises; throws `CefJavaScriptError`. |
-| `CefBrowser.Configuration.userScripts` | `CefUserScript`s, with `urlPattern`, `injectionTime` and `frames`, in the page's content world. |
+| `configuration.userScripts` | `CefUserScript`s, with `urlPattern`, `injectionTime` and `frames`, in the page's content world. |
 | `find(_:backwards:caseSensitive:)`, `pageZoom`, `snapshot()` | Find, zoom, a PNG of the page. |
 | `decidePolicy`, `onOpenWindow` | Main-frame navigation decisions and new windows. |
-| `CefBrowser.Configuration.identifiesAsSafari` | On by default: the User-Agent ends `Version/<Safari's version> Safari/605.1.15`. |
+| `configuration.identifiesAsSafari` | On by default: the User-Agent ends `Version/<Safari's version> Safari/605.1.15`. |
 | `nativeView` | The `WKWebView`. |
 
 Chromium's own features (the DevTools protocol, bridges, `chrome://` pages,
@@ -2317,6 +2323,8 @@ edit the set to suit your app). Hand such navigations over from your
 `CefBrowserDelegate`:
 
 ```swift
+import CefSystemEngine
+
 func browser(_ browser: CefBrowser, decidePolicyFor navigation: CefNavigationAction) -> CefNavigationDecision {
     guard let url = navigation.url, CefSystemBrowser.prefersSystemEngine(for: url) else { return .allow }
     let profile = browser.configuration.profile ?? .default

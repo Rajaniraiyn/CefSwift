@@ -15,7 +15,7 @@ extension CefRuntime.Configuration.Services {
     /// Widevine in an embedded Chromium plays content that accepts a
     /// software-only (L3) CDM on an unverified host. Streaming services that
     /// require Verified Media Path (VMP) host signing refuse it; see
-    /// docs/guide.md#playing-streaming-services, and ``CefSystemBrowser`` for
+    /// docs/guide.md#playing-streaming-services, and `CefSystemBrowser` (CefSystemEngine) for
     /// playing those services through the system's WebKit and FairPlay.
     public enum ProtectedMedia: Sendable, Equatable {
         /// CefSwift neither asks for nor installs the CDM, and

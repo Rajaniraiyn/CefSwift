@@ -1,4 +1,5 @@
 import AppKit
+import CefKit
 import CryptoKit
 import Foundation
 import Observation
@@ -349,14 +350,14 @@ extension CefProfile {
     /// The WebKit website data store ``CefSystemBrowser`` uses for this
     /// profile, from the profile's ``storage``.
     var systemWebsiteDataStore: WKWebsiteDataStore {
-        if let store = webKitDataStore { return store }
+        if let store = systemEngineDataStore as? WKWebsiteDataStore { return store }
         let store: WKWebsiteDataStore
         switch storage.webKitStore {
         case .default: store = .default()
         case .nonPersistent: store = .nonPersistent()
         case .persistent(let identifier): store = WKWebsiteDataStore(forIdentifier: identifier)
         }
-        webKitDataStore = store
+        systemEngineDataStore = store
         return store
     }
 }

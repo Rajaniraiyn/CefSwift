@@ -1,5 +1,6 @@
 import AppKit
 import CefSwiftUI
+import CefSystemEngine
 import SwiftUI
 
 /// Owns the browser's tabs. Each tab is one ``CefBrowserWindow``; macOS

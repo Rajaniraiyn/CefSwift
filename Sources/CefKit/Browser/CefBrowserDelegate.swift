@@ -229,6 +229,12 @@ public struct CefNavigationAction: Sendable, Equatable {
     public var isRedirect: Bool
     /// Whether a user gesture (click, key) triggered the navigation.
     public var hasUserGesture: Bool
+
+    package init(url: URL?, isRedirect: Bool, hasUserGesture: Bool) {
+        self.url = url
+        self.isRedirect = isRedirect
+        self.hasUserGesture = hasUserGesture
+    }
 }
 
 /// A certificate error for a main-frame load.

@@ -7,6 +7,7 @@ let package = Package(
     products: [
         .library(name: "CefKit", targets: ["CefKit"]),
         .library(name: "CefSwiftUI", targets: ["CefSwiftUI"]),
+        .library(name: "CefSystemEngine", targets: ["CefSystemEngine"]),
         .plugin(name: "CefPlugin", targets: ["CefPlugin"]),
         // The helper processes' executable and its startup library, which
         // `swift package cef bundle` builds and puts in the app bundle.
@@ -57,6 +58,13 @@ let package = Package(
             name: "CefSwiftUI",
             dependencies: ["CefKit"]
         ),
+        // Pages in the system's WebKit (CefSystemBrowser), for sites that
+        // need Safari's FairPlay. Its own module, so that apps that never
+        // use it do not link WebKit.
+        .target(
+            name: "CefSystemEngine",
+            dependencies: ["CefKit"]
+        ),
         // `swift package cef <download|bundle|info|clean|doctor|notarize>`
         // Also builds the helper products when bundling.
         .plugin(
@@ -74,7 +82,7 @@ let package = Package(
         ),
         .testTarget(
             name: "CefKitTests",
-            dependencies: ["CefKit", "CefBase", "CefRenderer"]
+            dependencies: ["CefKit", "CefBase", "CefRenderer", "CefSystemEngine"]
         ),
         // Compiles the plugin's pure logic (Plugins/CefPlugin/Distribution,
         // linked in as a directory symlink) so it can be unit-tested.

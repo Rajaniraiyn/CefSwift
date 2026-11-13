@@ -4,7 +4,6 @@ import CCef
 import Foundation
 import CefBase
 import CryptoKit
-import WebKit
 
 /// A browsing profile: its own cookies, storage, cache, preferences,
 /// extensions and theme. Browsers sharing a profile share all of it.
@@ -47,8 +46,10 @@ public final class CefProfile {
     /// browser; set it before then. The default profile always uses the
     /// configuration's.
     public var acceptLanguages: [String]?
-    /// The profile's WebKit data store, for ``CefSystemBrowser``.
-    var webKitDataStore: WKWebsiteDataStore?
+    /// The profile's WebKit data store (a `WKWebsiteDataStore`), made and
+    /// kept by the CefSystemEngine module, so that CefKit does not link
+    /// WebKit.
+    package var systemEngineDataStore: AnyObject?
 
     private init(kind: Kind, id: String, displayName: String) {
         self.kind = kind
@@ -413,9 +414,9 @@ public final class CefProfile {
     // MARK: Storage layout
 
     /// Where a profile keeps its data, for both engines.
-    struct Storage: Equatable {
+    package struct Storage: Equatable {
         /// The WebKit website data store a profile maps to.
-        enum WebKitStore: Equatable {
+        package enum WebKitStore: Equatable {
             /// The app's default store.
             case `default`
             /// An in-memory store, discarded with the profile.
@@ -427,8 +428,8 @@ public final class CefProfile {
         /// Chromium's directory for the profile: `nil` for the default
         /// profile, which lives at the configuration's cache directory, and
         /// for an in-memory one.
-        var chromiumDirectory: URL?
-        var webKitStore: WebKitStore
+        package var chromiumDirectory: URL?
+        package var webKitStore: WebKitStore
     }
 
     /// The one storage layout for a profile kind under `rootCacheDirectory`
@@ -481,7 +482,7 @@ public final class CefProfile {
     }
 
     /// This profile's storage under the running configuration's root.
-    var storage: Storage {
+    package var storage: Storage {
         let root = (CefRuntime.shared.configuration ?? CefRuntime.Configuration()).resolvedRootCacheDirectory
         return Self.storage(for: kind, rootCacheDirectory: root)
     }

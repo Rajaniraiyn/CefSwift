@@ -11,7 +11,10 @@ let package = Package(
         // A complete tabbed browser: Chrome-style windows, SwiftUI toolbar.
         .executableTarget(
             name: "Browser",
-            dependencies: [.product(name: "CefSwiftUI", package: "CefSwift")],
+            dependencies: [
+                .product(name: "CefSwiftUI", package: "CefSwift"),
+                .product(name: "CefSystemEngine", package: "CefSwift"),
+            ],
             exclude: ["cefapp.json", "Browser.entitlements", "Browser-Distribution.entitlements"]
         ),
         // Embedding web content in a SwiftUI app.
@@ -37,7 +40,10 @@ let package = Package(
         // End-to-end checks against the real Chromium runtime; CI runs it.
         .executableTarget(
             name: "SelfTest",
-            dependencies: [.product(name: "CefSwiftUI", package: "CefSwift")],
+            dependencies: [
+                .product(name: "CefSwiftUI", package: "CefSwift"),
+                .product(name: "CefSystemEngine", package: "CefSwift"),
+            ],
             exclude: ["cefapp.json"]
         ),
     ]
