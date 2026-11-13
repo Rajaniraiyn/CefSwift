@@ -40,6 +40,7 @@ DEFAULT_INCLUDE = ROOT / "Sources" / "CCef" / "include"
 INTERNAL_HEADERS = [
     "include/cef_api_hash.h",
     "include/cef_version_info.h",
+    "include/cef_color_ids.h",
     "include/cef_command_ids.h",
     "include/cef_id_mappers.h",
     "include/cef_pack_strings.h",

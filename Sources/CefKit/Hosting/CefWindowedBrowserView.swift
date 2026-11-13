@@ -39,6 +39,9 @@ public final class CefWindowedBrowserView: NSView {
     public init(browser: CefBrowser) {
         self.browser = browser
         super.init(frame: .zero)
+        // The canvas until Chromium's view paints, and where a resize
+        // uncovers the view before Chromium's catches up.
+        wantsLayer = true
         browserDidChange(from: nil)
     }
 
@@ -49,6 +52,7 @@ public final class CefWindowedBrowserView: NSView {
         if let previous = oldValue?.nativeView, previous.superview === self {
             previous.removeFromSuperview()
         }
+        layer?.backgroundColor = browser?.hostBackgroundColor
         hostBrowserIfPossible()
         updateSwipeMonitor()
     }

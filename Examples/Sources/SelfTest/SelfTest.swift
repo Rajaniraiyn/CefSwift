@@ -195,6 +195,7 @@ enum SelfTest {
         ("pageIntegration", pageIntegrationChecks),
         ("discard", discardChecks),
         ("contextMenu", contextMenuChecks),
+        ("background", backgroundChecks),
     ]
 
     static func runChecks() async {

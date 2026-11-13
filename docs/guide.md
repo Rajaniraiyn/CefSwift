@@ -25,6 +25,7 @@ The runtime, browser, window and profile APIs are `@MainActor`.
   - [PDF](#pdf)
   - [Attachments](#attachments)
 - [Showing a browser](#showing-a-browser)
+  - [Background](#background)
   - [In AppKit](#in-appkit)
   - [Offscreen rendering](#offscreen-rendering)
   - [Swipe navigation](#swipe-navigation)
@@ -450,7 +451,6 @@ Options are fixed at creation:
 ```swift
 var browserConfiguration = CefBrowser.Configuration()
 browserConfiguration.profile = .persistent(id: "work", displayName: "Work")
-browserConfiguration.backgroundColor = .windowBackgroundColor
 browserConfiguration.requestFilter = { request in
     request.url?.host() == "ads.example" ? .block : .allow
 }
@@ -666,6 +666,38 @@ goes away.
 Views embed browsers in the Alloy runtime style, which has no `chrome://`
 pages, extensions or history. For those, use a
 [`CefWindow`](#chrome-style-windows).
+
+### Background
+
+Where a page paints nothing, as before its first paint, behind a page
+with no background of its own, and in the area a resize uncovers until
+the page repaints, the browser shows its canvas: opaque white, as in
+Chrome and `WKWebView`, whatever the app's or the system's appearance. A
+page that opts into a dark color scheme (`color-scheme: dark`, or
+`light dark` while the app's appearance is dark) gets Chromium's dark
+canvas, as in Chrome. The view behind Chromium's, which shows until its
+first paint, has the same color, so a page opens without a dark flash.
+
+A Chrome-style browser (`CefWindow`) is the exception: Chromium leaves
+its page's canvas transparent and paints the window theme's web-contents
+color behind it, which follows the app's appearance. CefKit sets that
+color to the canvas color, so unstyled pages stay white, but a dark page
+with no background of its own shows the canvas color there too.
+
+`backgroundColor` changes the canvas, in every kind of browser. Chromium
+paints only an opaque canvas, so its alpha is ignored. An offscreen page
+can be see-through instead, showing what is behind the view, with
+`drawsBackground = false`, as `WKWebView`'s; the page's own backgrounds
+still paint:
+
+```swift
+var overlay = CefBrowser.Configuration()
+overlay.rendering = .offscreen
+overlay.drawsBackground = false
+```
+
+Windowed and Chrome-style browsers keep an opaque canvas: CEF lets only a
+browser it renders offscreen paint a transparent one.
 
 ### In AppKit
 

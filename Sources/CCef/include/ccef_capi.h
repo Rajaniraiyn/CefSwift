@@ -7,6 +7,7 @@
 
 #include "include/cef_api_hash.h"
 #include "include/cef_version_info.h"
+#include "include/cef_color_ids.h"
 #include "include/cef_command_ids.h"
 #include "include/cef_id_mappers.h"
 #include "include/cef_pack_strings.h"
