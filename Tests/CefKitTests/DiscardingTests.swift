@@ -107,3 +107,101 @@ import Testing
         #expect(CefTabDiscarder.blockers(fromLookUp: unknown) == [.unknown("Tab is hosting a PDF")])
     }
 }
+
+/// Reading an Alloy-style page's audio and form state from Chromium's
+/// performance-manager graph (`CefPageGraph`).
+@Suite struct DiscardPageGraphTests {
+    private func reply(_ page: [String: CefJSON]) -> CefJSON {
+        ["found": true, "page": ["PageNodeImpl": .object(page)]]
+    }
+
+    private let quiet: [String: CefJSON] = ["is_audible": false, "had_form_interaction": false, "had_user_edits": false]
+
+    @MainActor @Test func frameTokensComeFromCEFFrameIdentifiers() {
+        #expect(CefPageGraph.frameToken(fromFrameIdentifier: "6-7BDA0EC034A043A7C2AEFDA5571BB1B6") == "7BDA0EC034A043A7C2AEFDA5571BB1B6")
+        #expect(CefPageGraph.frameToken(fromFrameIdentifier: "12-7bda0ec034a043a7c2aefda5571bb1b6") == "7BDA0EC034A043A7C2AEFDA5571BB1B6")
+        // The process id is hexadecimal.
+        #expect(CefPageGraph.frameToken(fromFrameIdentifier: "1A-7BDA0EC034A043A7C2AEFDA5571BB1B6") == "7BDA0EC034A043A7C2AEFDA5571BB1B6")
+        for identifier in [nil, "", "7BDA0EC034A043A7C2AEFDA5571BB1B6", "x-7BDA0EC034A043A7C2AEFDA5571BB1B6", "-7BDA0EC034A043A7C2AEFDA5571BB1B6", "6-7BDA",
+                           "6-7BDA0EC034A043A7C2AEFDA5571BB1BZ", "6-1-2"] {
+            #expect(CefPageGraph.frameToken(fromFrameIdentifier: identifier) == nil)
+        }
+    }
+
+    @MainActor @Test func aQuietPageHasNoBlockers() {
+        #expect(CefPageGraph.blockers(fromDescription: reply(quiet)).isEmpty)
+    }
+
+    @MainActor @Test func audioAndFormStateBlock() {
+        var audible = quiet
+        audible["is_audible"] = true
+        audible["audible_change_time"] = "0 hr, 0 min, 4 sec"
+        #expect(CefPageGraph.blockers(fromDescription: reply(audible)) == [.playingAudio])
+        var edited = quiet
+        edited["had_user_edits"] = true
+        #expect(CefPageGraph.blockers(fromDescription: reply(edited)) == [.formInteraction])
+        var interacted = quiet
+        interacted["had_form_interaction"] = true
+        #expect(CefPageGraph.blockers(fromDescription: reply(interacted)) == [.formInteraction])
+    }
+
+    /// Chromium protects a page for a minute after it falls silent.
+    @MainActor @Test func recentAudioBlocks() {
+        var recent = quiet
+        recent["audible_change_time"] = "0 hr, 0 min, 59 sec"
+        #expect(CefPageGraph.blockers(fromDescription: reply(recent)) == [.playingAudio])
+        var old = quiet
+        old["audible_change_time"] = "0 hr, 1 min, 0 sec"
+        #expect(CefPageGraph.blockers(fromDescription: reply(old)).isEmpty)
+        old["audible_change_time"] = "2 hr, 0 min, 0 sec"
+        #expect(CefPageGraph.blockers(fromDescription: reply(old)).isEmpty)
+    }
+
+    /// Anything CefKit cannot read keeps the page: no node, missing
+    /// fields, a time in another format.
+    @MainActor @Test func unreadableDescriptionsBlock() {
+        var oddTime = quiet
+        oddTime["audible_change_time"] = "4 seconds ago"
+        let unreadable: [CefJSON] = [
+            .null, ["found": false], ["found": true, "page": .null],
+            reply(["is_audible": false, "had_form_interaction": false]),
+            reply(["is_audible": "no", "had_form_interaction": false, "had_user_edits": false]),
+            reply(oddTime),
+        ]
+        for description in unreadable {
+            let blockers = CefPageGraph.blockers(fromDescription: description)
+            #expect(blockers.count == 1 && blockers.allSatisfy(isUnknown), "\(description)")
+        }
+    }
+
+    @MainActor @Test func describerTimes() {
+        #expect(CefPageGraph.elapsed(fromDescriberTime: "0 hr, 0 min, 3 sec") == .seconds(3))
+        #expect(CefPageGraph.elapsed(fromDescriberTime: "1 hr, 2 min, 3 sec") == .seconds(3723))
+        #expect(CefPageGraph.elapsed(fromDescriberTime: "3 sec") == nil)
+        #expect(CefPageGraph.elapsed(fromDescriberTime: "0 h, 0 m, 3 s") == nil)
+    }
+
+    /// The store the service host keeps of the graph's frames, run in
+    /// JavaScriptCore on events shaped like `GraphChangeStream`'s.
+    @MainActor @Test func theFrameStoreFollowsTheGraph() throws {
+        let context = try #require(JSContext())
+        context.evaluateScript("var frames = new Map(), apply = \(CefPageGraph.frameStore);")
+        func frame(_ id: Int, page: Int, token: String?) -> String {
+            let description = token.map { #"{\"FrameNodeImpl\":{\"frame_token\":\"\#($0)\"}}"# } ?? "not json"
+            return #"{ id: \#(id), pageId: \#(page), descriptionJson: "\#(description)" }"#
+        }
+        context.evaluateScript("apply(frames, 'created', \(frame(1, page: 3, token: "AA")))")
+        context.evaluateScript("apply(frames, 'created', \(frame(2, page: 4, token: "BB")))")
+        // A change whose description has no token keeps the one it had.
+        context.evaluateScript("apply(frames, 'changed', \(frame(1, page: 3, token: nil)))")
+        #expect(context.evaluateScript("JSON.stringify([...frames])")?.toString()
+            == #"[[1,{"page":3,"token":"AA"}],[2,{"page":4,"token":"BB"}]]"#)
+        context.evaluateScript("apply(frames, 'deleted', 2)")
+        #expect(context.evaluateScript("JSON.stringify([...frames.keys()])")?.toString() == "[1]")
+    }
+
+    private func isUnknown(_ blocker: CefBrowser.DiscardBlocker) -> Bool {
+        if case .unknown = blocker { return true }
+        return false
+    }
+}
