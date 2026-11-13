@@ -39,7 +39,20 @@ enum CefServiceHostRuntime {
           bytes = next;
           view = new DataView(bytes.buffer);
         };
-        const run = (s, at) => utf8.encodeInto(s, bytes.subarray(at)).written;
+        // UTF-8 of `s` at `at`, room reserved. Short ASCII, most keys and
+        // values, is copied unit by unit: cheaper than a TextEncoder call.
+        const run = (s, at) => {
+          if (s.length <= 64) {
+            let i = 0;
+            for (; i < s.length; i++) {
+              const c = s.charCodeAt(i);
+              if (c >= 0x80) break;
+              bytes[at + i] = c;
+            }
+            if (i === s.length) return i;
+          }
+          return utf8.encodeInto(s, bytes.subarray(at)).written;
+        };
         const string = s => {
           reserve(5 + s.length * 3);
           bytes[n] = 5;

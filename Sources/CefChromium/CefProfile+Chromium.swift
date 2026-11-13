@@ -96,6 +96,15 @@ final class ChromiumStores {
     /// When the last change made through ``CefBookmarks`` finished, until
     /// Chromium's `Bookmarks` file is seen saved after it.
     var unsavedBookmarkWrite: Date?
+    /// The `Bookmarks` file as last parsed, with the stamp it had.
+    var bookmarkFile: (stamp: BookmarkFileStamp, file: CefBookmarkFile)?
+}
+
+/// What tells one save of Chromium's `Bookmarks` file from another.
+struct BookmarkFileStamp: Equatable {
+    var modified: Date?
+    var size: Int?
+    var inode: Int?
 }
 
 extension CefServiceHost {

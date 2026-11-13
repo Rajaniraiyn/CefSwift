@@ -60,6 +60,10 @@ import Testing
         #expect(try decode(Int64.self, "1.7e12") == 1_700_000_000_000)
         #expect(try decode(String.self, "'Grüße 😀 — 中文'") == "Grüße 😀 — 中文")
         #expect(try decode(String.self, "''") == "")
+        // ASCII is copied unit by unit until the first other character.
+        #expect(try decode(String.self, "'plain ascii, then é'") == "plain ascii, then é")
+        #expect(try decode(String.self, "'x'.repeat(65) + 'é'") == String(repeating: "x", count: 65) + "é")
+        #expect(try decode([String: Int].self, "({ 'clé': 1, key: 2 })") == ["clé": 1, "key": 2])
         // Not representable in JSON: null, as JSON.stringify writes them.
         #expect(try decode(CefJSON.self, "NaN") == .null)
         #expect(try decode(CefJSON.self, "Infinity") == .null)
