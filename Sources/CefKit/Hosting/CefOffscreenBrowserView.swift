@@ -44,17 +44,6 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
     /// The page's accessibility elements.
     lazy var accessibilityBridge = CefOffscreenAccessibilityBridge(view: self)
 
-    /// Whether the view draws the built-in swipe indicator that
-    /// ``CefBrowser/Configuration/navigationGestureIndicator`` chooses. Turn
-    /// it off to draw an indicator of your own.
-    public var showsBuiltInGestureIndicator = true {
-        didSet {
-            gestureIndicator = updatedGestureIndicator(gestureIndicator, browser: browser, isAllowed: showsBuiltInGestureIndicator)
-        }
-    }
-
-    private var gestureIndicator: CefNavigationGestureIndicatorView?
-
     /// Whether ``tearDown()`` closes the browser. `CefWebView(url:)` sets
     /// this for the browser it owns.
     package var closesBrowserOnTeardown = false
@@ -151,7 +140,6 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
         hostBrowserIfPossible()
         updateVisibility(notifyingBrowser: true)
         accessibilityBridge.browserDidChange()
-        gestureIndicator = updatedGestureIndicator(gestureIndicator, browser: browser, isAllowed: showsBuiltInGestureIndicator)
     }
 
     public override var isFlipped: Bool { true }

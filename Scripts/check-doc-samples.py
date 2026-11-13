@@ -104,7 +104,8 @@ struct ContentView: View { var body: some View { EmptyView() } }
 struct NavigationButtons: View { let browser: CefBrowser; var body: some View { EmptyView() } }
 struct AddressBar: View { let browser: CefBrowser; var body: some View { EmptyView() } }
 struct AddressField: View { let browser: CefBrowser; var body: some View { EmptyView() } }
-struct MyIndicator: View { let progress: Double; var body: some View { EmptyView() } }
+struct MyIndicator: View { let browser: CefBrowser; var body: some View { EmptyView() } }
+struct LinkStatus: View { let browser: CefBrowser; var body: some View { EmptyView() } }
 struct FindBar: View { let session: CefFindSession; var body: some View { EmptyView() } }
 struct TabIcon: View { let browser: CefBrowser; var body: some View { EmptyView() } }
 struct StatusBubble: View { let text: String; var body: some View { EmptyView() } }

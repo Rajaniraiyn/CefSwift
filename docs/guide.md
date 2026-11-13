@@ -754,32 +754,33 @@ handling does the work. It is off by default everywhere.
 
 While a swipe is in progress, `browser.navigationGestureProgress` moves from
 0 toward -1 (back) or 1 (forward); at ±1 and beyond, releasing navigates.
-`CefBrowser.Configuration.navigationGestureIndicator` chooses what is drawn over the page:
-
-| Indicator | Drawing |
-|---|---|
-| `.automatic` (default) | CefSwift's: a chevron in a circle that slides in from the edge, resists past the commit point, and fills with the accent color once releasing navigates. |
-| `.chromium` | Chrome's own arrow, in `CefWindow`; `.automatic` elsewhere. |
-| `.hidden` | Nothing; draw your own from `navigationGestureProgress`. |
-
-To replace the indicator with a SwiftUI view:
+Draw an indicator of your own from it. In a `CefWindow`, Chromium shows its
+own arrow unless `CefBrowser.Configuration.showsChromiumNavigationGestureIndicator`
+is turned off; lay yours over the page with `pageOverlay` (or
+`setPageOverlay(_:)` in SwiftUI). Over a `CefWebView`, an `.overlay` does
+it, in both renderings:
 
 ```swift
 CefWebView(browser)
-    .navigationGestureIndicator { progress in
+    .overlay {
+        let progress = browser.navigationGestureProgress
         Image(systemName: progress < 0 ? "chevron.left" : "chevron.right")
             .padding(12)
             .background(.regularMaterial, in: .circle)
             .frame(maxWidth: .infinity, alignment: progress < 0 ? .leading : .trailing)
             .opacity(min(1, abs(progress)))
+            .allowsHitTesting(false)
     }
 
-window.setNavigationGestureIndicator { progress in MyIndicator(progress: progress) }   // a CefWindow
+browserConfiguration.showsChromiumNavigationGestureIndicator = false   // a CefWindow
+window.setPageOverlay { MyIndicator(browser: window.browser) }
 ```
 
-In AppKit, `CefWindowedBrowserView` and `CefOffscreenBrowserView` turn the
-built-in indicator off with `showsBuiltInGestureIndicator = false`, and
-`CefWindow.navigationGestureIndicatorView` takes a view of your own.
+In AppKit, place a view of your own over `CefWindowedBrowserView` or
+`CefOffscreenBrowserView`, as a sibling above it, and have it return `nil`
+from `hitTest(_:)`. The Browser example's `SwipeIndicator` is a complete
+one: a chevron that slides in from the edge, resists past the commit
+point and fills with the accent color once releasing navigates.
 
 A view claims a swipe as it begins, when there is history in its direction,
 so the page does not also scroll sideways; in a `CefWindow`, Chrome
@@ -1695,6 +1696,23 @@ equivalents and menus behave as in any AppKit window. `contentInsets`
 reserves space around the page for native views; the window background
 shows around a page with insets or rounded corners.
 
+Over the page, `pageOverlay` takes one view of your own (`setPageOverlay(_:)`
+from SwiftUI): a swipe indicator, a status bubble, a banner. It is sized to
+the page, clipped to its corners, and never receives events, so clicks and
+scrolls reach the page. To show several, put them in one view:
+
+```swift
+window.setPageOverlay {
+    ZStack {
+        LinkStatus(browser: window.browser)     // views that read the browser's state in body
+        MyIndicator(browser: window.browser)
+    }
+}
+```
+
+As with the toolbar, the closure runs once: views in it that show browser
+state read it in their own `body`.
+
 ### Tabs
 
 Each `CefWindow` holds one browser. A tabbed browser is one window per
@@ -1784,7 +1802,7 @@ the class names Chromium's views report through accessibility, so it is
 bound to the pinned CEF; SelfTest fails when an update renames them. It
 starts following surfaces, in every `CefWindow`, the first time the app
 uses any of its window API (`chromiumUI`, `configuration.chromiumUI`,
-`chromiumSurfaces`, `setCustomPresentation(for:_:)`, `statusBubbleView`,
+`chromiumSurfaces`, `setCustomPresentation(for:_:)`, `setStatusBubble(_:)`,
 `chromiumSurfaceAnchor(_:alignment:)`, …); surfaces already on screen then
 are taken up as they are. Set `chromiumUI` before showing the window, so
 nothing shows before it applies. Until then Chromium's interface shows as
@@ -1834,7 +1852,7 @@ Chromium's window is hidden before it is seen. In SwiftUI:
 
 ```swift
 window.setFindBar { session in FindBar(session: session) }      // under the toolbar, as in Safari
-window.setStatusBubble { text in StatusBubble(text: text) }      // over the page
+window.setStatusBubble { text in StatusBubble(text: text) }      // over the page, as its pageOverlay
 window.setCustomPresentation(for: .qrCode) { surface in         // in a panel at the kind's anchor
     QRCodeView(url: surface.url).frame(width: 200, height: 200).padding()
 }
@@ -1860,7 +1878,7 @@ a presenter included.
 | Cast | `.cast` | Yes | `url`; `CefMediaRouter.shared` lists `sinks` and `routes` and casts Cast apps and presentation URLs | Mirroring a tab needs Chromium's dialog. |
 | Share | `.share` | No: Chromium's share menu needs its toolbar | `url`, `title` | By default the command opens macOS's share menu at the anchor. |
 | HTTP sign-in | `.signIn` | Yes | No: the credentials go to Chromium's dialog | Only with `authenticationPrompt = .chromium`; by default the delegate answers. Dismissing cancels the sign-in. |
-| Status bubble | `.statusBubble` | Yes | `browser.statusText` | `setStatusBubble(_:)` or `statusBubbleView`. Not anchorable. |
+| Status bubble | `.statusBubble` | Yes | `browser.statusText` | `setStatusBubble(_:)`, or `.hidden` and your own `pageOverlay`. Not anchorable. |
 | Fullscreen notice | `.fullscreenNotice` | Yes | `browser.isFullscreen` | |
 | Downloads | `.downloads` | Yes | `browser.downloads` and the delegate's download decisions | |
 | Permission prompt | `.permissionPrompt` | No | `browser(_:decidePermissionFor:)` | CefSwift answers every request through the delegate. |

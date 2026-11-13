@@ -21,7 +21,6 @@ extension SelfTest {
         await bubbleChecks()
         await statusBubbleOffAtCreationChecks()
         await chromeSwipeChecks()
-        await viewSwipeIndicatorChecks()
     }
 
     // MARK: Chromium's surfaces
@@ -279,7 +278,11 @@ extension SelfTest {
                   detail: "\(browser.statusText) \(window.chromiumSurfaces.map { "\($0.kind)" }), "
                       + "occlusion \(nsWindow.occlusionState.rawValue)")
         }
-        window.statusBubbleView = NSView()
+        // CefChromium's SwiftUI status bubble hides Chromium's and takes the
+        // page overlay.
+        window.setStatusBubble { Text($0) }
+        check("surfaces: an app's status bubble is the page overlay",
+              window.pageOverlay != nil && window.chromiumUI[.statusBubble] == .hidden)
         _ = try? await browser.devTools.send("Input.dispatchMouseEvent", ["type": "mouseMoved", "x": 1, "y": 1])
         try? await Task.sleep(for: .milliseconds(600))
         // Chromium fades its bubble in by raising its window's alpha, so
@@ -296,7 +299,8 @@ extension SelfTest {
         }
         check("surfaces: an app's status bubble keeps Chromium's hidden throughout its fade",
               shown && leaks.isEmpty, detail: "\(browser.statusText) \(leaks.prefix(3))")
-        window.statusBubbleView = nil
+        window.pageOverlay = nil
+        window.chromiumUI.presentations[.statusBubble] = nil
 
         // CefSwiftUI's find bar: a title-bar accessory while the session runs.
         window.setFindBar { _ in Text("Find").padding() }
@@ -320,8 +324,11 @@ extension SelfTest {
     static func chromeSwipeChecks() async {
         var configuration = CefBrowser.Configuration()
         configuration.allowsBackForwardNavigationGestures = true
+        configuration.showsChromiumNavigationGestureIndicator = false
         let browser = CefBrowser(url: URL(string: "selftest://app/second.html")!, configuration: configuration)
         let window = CefWindow(browser: browser)
+        let pageOverlay = NSView()
+        window.pageOverlay = pageOverlay
         window.show()
         _ = await loaded(browser, title: "second")
         guard let contentView = window.window?.contentView,
@@ -332,32 +339,63 @@ extension SelfTest {
             _ = await waitUntil { window.isClosed }
             return
         }
+        let center = contentView.convert(NSPoint(x: contentView.bounds.midX, y: contentView.bounds.midY), to: contentView.superview)
+        let hit = contentView.hitTest(center)
+        check("page overlay: laid over the page, letting events through",
+              pageOverlay.window === window.window && hit.map { !$0.isDescendant(of: pageOverlay) } ?? true,
+              detail: "\(hit.map { NSStringFromClass(type(of: $0)) } ?? "nil")")
         CefTesting.updateChromeSwipe(overlay, amount: 0.4, finished: false)
         check("swipe: Chrome's progress reaches navigationGestureProgress",
               abs(browser.navigationGestureProgress + 0.4) < 0.001, detail: "\(browser.navigationGestureProgress)")
-        check("swipe: built-in indicator shows in a browser window",
-              await waitUntil(timeout: .seconds(2)) { CefTesting.gestureIndicator(in: contentView).isShowing },
-              detail: "\(CefTesting.gestureIndicator(in: contentView))")
+        check("swipe: Chromium's arrow stays hidden when turned off", !showsChromiumArrow(in: contentView))
         CefTesting.updateChromeSwipe(overlay, amount: 0.9, finished: true)
         check("swipe: Chrome's commit point is -1", browser.navigationGestureProgress <= -1,
               detail: "\(browser.navigationGestureProgress)")
         CefTesting.endChromeSwipe(overlay)
         check("swipe: progress returns to 0", browser.navigationGestureProgress == 0)
         check("swipe: Chrome's render widget delegate can be asked", historySwipingAllowed(in: contentView) != nil)
+        window.pageOverlay = nil
+        check("page overlay: removed when cleared", pageOverlay.superview == nil)
         window.close()
         _ = await waitUntil { window.isClosed }
+
+        var chromiumArrow = CefBrowser.Configuration()
+        chromiumArrow.allowsBackForwardNavigationGestures = true
+        let arrowBrowser = CefBrowser(url: URL(string: "selftest://app/second.html")!, configuration: chromiumArrow)
+        let arrowWindow = CefWindow(browser: arrowBrowser)
+        arrowWindow.show()
+        _ = await loaded(arrowBrowser, title: "second")
+        if let contentView = arrowWindow.window?.contentView,
+           let overlay = CefTesting.beginChromeSwipe(in: arrowWindow, forward: false) {
+            CefTesting.updateChromeSwipe(overlay, amount: 0.4, finished: false)
+            check("swipe: Chromium's arrow shows by default", showsChromiumArrow(in: contentView),
+                  detail: "\(abs(arrowBrowser.navigationGestureProgress))")
+            CefTesting.endChromeSwipe(overlay)
+        }
+        arrowWindow.close()
+        _ = await waitUntil { arrowWindow.isClosed }
 
         let plain = CefBrowser(url: URL(string: "selftest://app/second.html")!)
         let plainWindow = CefWindow(browser: plain)
         plainWindow.show()
         _ = await loaded(plain, title: "second")
         if let contentView = plainWindow.window?.contentView {
-            check("swipe: off by default in browser windows",
-                  historySwipingAllowed(in: contentView) == false && !CefTesting.gestureIndicator(in: contentView).isInstalled,
+            check("swipe: off by default in windows",
+                  historySwipingAllowed(in: contentView) == false,
                   detail: "\(String(describing: historySwipingAllowed(in: contentView)))")
         }
         plainWindow.close()
         _ = await waitUntil { plainWindow.isClosed }
+    }
+
+    /// Whether Chrome's history overlay (its swipe arrow) is in `view`'s
+    /// window.
+    @MainActor
+    static func showsChromiumArrow(in view: NSView) -> Bool {
+        func find(_ view: NSView) -> Bool {
+            NSStringFromClass(type(of: view)).contains("HistoryOverlay") || view.subviews.contains(where: find)
+        }
+        return find(view.superview ?? view)
     }
 
     /// What Chrome's render widget delegate answers to
@@ -377,40 +415,5 @@ extension SelfTest {
         guard let imp = class_getMethodImplementation(type(of: delegate), selector) else { return nil }
         typealias Getter = @convention(c) (NSObject, Selector) -> Bool
         return unsafeBitCast(imp, to: Getter.self)(delegate, selector)
-    }
-
-    /// The built-in indicator in views, offscreen and windowed.
-    static func viewSwipeIndicatorChecks() async {
-        for rendering in [CefBrowser.Rendering.windowed, .offscreen] {
-            let name = rendering == .windowed ? "windowed" : "offscreen"
-            var configuration = CefBrowser.Configuration()
-            configuration.rendering = rendering
-            configuration.allowsBackForwardNavigationGestures = true
-            let browser = CefBrowser(url: URL(string: "selftest://app/second.html")!, configuration: configuration)
-            let view: NSView
-            if rendering == .windowed {
-                let windowed = CefWindowedBrowserView(browser: browser)
-                view = windowed
-            } else {
-                let offscreen = CefOffscreenBrowserView(browser: browser)
-                view = offscreen
-            }
-            view.frame = window.contentView!.bounds
-            window.contentView!.addSubview(view)
-            _ = await loaded(browser, title: "second")
-            check("swipe indicator: \(name) view has it", CefTesting.gestureIndicator(in: view) == (true, false))
-            CefTesting.setNavigationGestureProgress(0.6, for: browser)
-            check("swipe indicator: \(name) view shows progress",
-                  await waitUntil(timeout: .seconds(2)) { CefTesting.gestureIndicator(in: view).isShowing })
-            if rendering == .windowed {
-                check("swipe indicator: above Chromium's view",
-                      NSStringFromClass(type(of: view.subviews.last ?? view)).contains("Indicator"),
-                      detail: "\(view.subviews.map { NSStringFromClass(type(of: $0)) })")
-            }
-            CefTesting.setNavigationGestureProgress(0, for: browser)
-            check("swipe indicator: \(name) view hides at rest",
-                  await waitUntil(timeout: .seconds(2)) { !CefTesting.gestureIndicator(in: view).isShowing })
-            await closeHosted(browser, view)
-        }
     }
 }

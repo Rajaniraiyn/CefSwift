@@ -72,26 +72,6 @@ extension CefWindow {
         surfaces.ui[kind] = present == nil ? .native : .custom
     }
 
-    /// A view of your own, laid over the page in place of Chromium's status
-    /// bubble, the address of a hovered link at the page's lower edge.
-    /// Setting it hides Chromium's (``CefChromiumSurface/Kind/statusBubble``).
-    /// It is sized to the page, never receives events, and stays installed;
-    /// read ``CefBrowser/statusText`` to draw it. `setStatusBubble(_:)`
-    /// sets it from a SwiftUI view.
-    public var statusBubbleView: NSView? {
-        get { statusOverlayView }
-        set {
-            guard newValue !== statusOverlayView else { return }
-            let surfaces = surfaces
-            statusOverlayView = newValue
-            if newValue != nil {
-                surfaces.ui[.statusBubble] = .hidden
-            } else if case .hidden = surfaces.ui[.statusBubble] {
-                surfaces.ui.presentations[.statusBubble] = nil
-            }
-        }
-    }
-
     /// The window's surface state, made on first use.
     var surfaces: ChromiumSurfaceController {
         if let surfaces = existingModuleState(ChromiumSurfaceController.self) { return surfaces }

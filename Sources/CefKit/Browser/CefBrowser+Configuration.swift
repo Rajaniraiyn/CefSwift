@@ -46,9 +46,12 @@ extension CefBrowser {
         /// CefSwift's. While a swipe is in progress,
         /// ``CefBrowser/navigationGestureProgress`` follows it.
         public var allowsBackForwardNavigationGestures = false
-        /// How a swipe in progress is shown when
-        /// ``allowsBackForwardNavigationGestures`` is on.
-        public var navigationGestureIndicator = CefBrowser.NavigationGestureIndicator.automatic
+        /// Whether a Chrome-style browser (``CefWindow``) shows Chromium's
+        /// own arrow while a swipe is in progress, as Chrome does. Turn it
+        /// off to draw your own from ``CefBrowser/navigationGestureProgress``,
+        /// in ``CefWindow/pageOverlay`` for instance. Alloy-style browsers in
+        /// views have no indicator of Chromium's: draw one over the view.
+        public var showsChromiumNavigationGestureIndicator = true
         /// (Offscreen only) Forward raw trackpad touches to Chromium instead of
         /// translating gestures natively.
         public var forwardsRawTouchEvents = false

@@ -65,8 +65,8 @@ CefPasskeys or CefChromium, plugs into it at these points:
   keeps in a window configuration, by type, dropped for the window's
   popups; `showsChromiumStatusBubble` and `showsChromiumZoomBubble`
   (package) set the browser's `chrome_status_bubble` and
-  `chrome_zoom_bubble`. `statusOverlayView` (package) is a view laid over
-  the page beneath the swipe indicator.
+  `chrome_zoom_bubble`. CefChromium's status bubble uses the public
+  `pageOverlay`.
 - The internal service hosts (package): `CefInternalServices`
   (`CefProfile.services`), `CefServiceHost` and `CefServiceModule`. A module
   declares its own hosts and modules and calls them
@@ -339,12 +339,14 @@ two-finger swipes into navigation and draws progress with a
 `allowsBackForwardNavigationGestures`, and the controller's
 `-initForMode:`, `-showPanelForView:`, `-setProgress:finished:` and
 `-dismiss`, to report progress to `navigationGestureProgress` and to skip
-Chrome's overlay unless `.chromium` is chosen. Alloy-style browsers have no
+Chrome's overlay unless `showsChromiumNavigationGestureIndicator` is on. Alloy-style browsers have no
 such delegate; views track swipes themselves with
 `NSEvent.trackSwipeEvent`, the offscreen view from its own scroll events
 and the windowed view from a local event monitor, since Chromium's view
-receives the events. The built-in indicator is a layer-backed view over the
-page that never takes events.
+receives the events. CefKit draws no indicator of its own; apps draw one
+from `navigationGestureProgress`, over a `CefWindow`'s page in its
+`pageOverlay`, which is a view laid over the content view, clipped to the
+page and passing every event through.
 
 ## Frame timing
 

@@ -10,7 +10,6 @@ struct AppKitHostingTests {
         let browser = CefBrowser(url: URL(string: "about:blank")!)
         let view = CefWindowedBrowserView(browser: browser)
         #expect(view.browser === browser)
-        #expect(view.showsBuiltInGestureIndicator)
 
         let other = CefBrowser(url: URL(string: "about:blank")!)
         view.browser = other

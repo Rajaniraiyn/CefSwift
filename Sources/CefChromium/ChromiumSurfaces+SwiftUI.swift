@@ -49,9 +49,11 @@ extension CefWindow {
     }
 
     /// Replaces Chromium's status bubble — the address of a hovered link —
-    /// with a SwiftUI view laid over the page (``statusBubbleView``). `content` receives
-    /// ``CefBrowser/statusText`` as it changes, and is shown only while it
-    /// is not empty; align it within the page yourself.
+    /// with a SwiftUI view laid over the page: it hides Chromium's
+    /// (``CefChromiumSurface/Kind/statusBubble``) and sets the window's
+    /// `pageOverlay`. `content` receives ``CefBrowser/statusText`` as it
+    /// changes, and is shown only while it is not empty; align it within
+    /// the page yourself.
     ///
     /// ```swift
     /// window.setStatusBubble { text in
@@ -62,9 +64,14 @@ extension CefWindow {
     ///         .padding(8)
     /// }
     /// ```
+    ///
+    /// The bubble takes the whole page overlay. To show it with other views
+    /// over the page, hide Chromium's with `chromiumUI[.statusBubble] = .hidden`
+    /// and draw ``CefBrowser/statusText`` in an overlay of your own.
     public func setStatusBubble(@ViewBuilder _ content: @escaping (String) -> some View) {
+        chromiumUI[.statusBubble] = .hidden
         let hosting = NSHostingView(rootView: StatusTextReader(browser: browser, content: { AnyView(content($0)) }))
-        statusBubbleView = PassthroughHostingContainer(hosting)
+        pageOverlay = PassthroughHostingContainer(hosting)
     }
 }
 

@@ -50,9 +50,8 @@ final class ContentFrameView: NSView {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
 
-/// Holds views over the page's rectangle — the swipe indicator, the app's
-/// status bubble — clipped to its rounded corners, and lets every event
-/// through.
+/// Holds ``CefWindow/pageOverlay`` over the page's rectangle, clipped to
+/// its rounded corners, and lets every event through.
 final class PageOverlayView: NSView {
     var insets = NSEdgeInsets() { didSet { needsLayout = true } }
     var cornerRadius: CGFloat = 0 { didSet { needsLayout = true } }
@@ -69,15 +68,13 @@ final class PageOverlayView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { nil }
 
-    /// Shows `views`, bottom to top, each filling the page.
-    func setViews(_ views: [NSView]) {
-        guard clip.subviews != views else { return }
+    /// Shows `view`, filling the page.
+    func setView(_ view: NSView) {
+        guard clip.subviews != [view] else { return }
         clip.subviews.forEach { $0.removeFromSuperview() }
-        for view in views {
-            view.frame = clip.bounds
-            view.autoresizingMask = [.width, .height]
-            clip.addSubview(view)
-        }
+        view.frame = clip.bounds
+        view.autoresizingMask = [.width, .height]
+        clip.addSubview(view)
     }
 
     override func layout() {

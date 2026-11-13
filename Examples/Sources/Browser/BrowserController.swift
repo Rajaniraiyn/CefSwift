@@ -70,8 +70,10 @@ final class BrowserController: CefBrowserDelegate {
         }
         configuration.userScripts = Self.internalPageStyles
         configuration.bridges = [library.startPageBridge]
-        // Two-finger swipes go back and forward, with CefSwift's indicator.
+        // Two-finger swipes go back and forward, with the browser's own
+        // indicator (SwipeIndicator) in place of Chromium's arrow.
         configuration.allowsBackForwardNavigationGestures = true
+        configuration.showsChromiumNavigationGestureIndicator = false
         configuration.contextMenu.showsInspectElement = true
         configuration.contextMenu.hiddenCommands = [.viewSource]
         configuration.contextMenu.items = [
@@ -344,6 +346,8 @@ enum PopupPresenter {
         }
         // Popups of popups are layered the same way.
         hostPopups(of: popup)
+        let browser = popup.browser
+        popup.setPageOverlay { SwipeIndicator(browser: browser) }
         panel.tabbingMode = .disallowed
         panel.standardWindowButton(.miniaturizeButton)?.isHidden = true
         panel.standardWindowButton(.zoomButton)?.isHidden = true

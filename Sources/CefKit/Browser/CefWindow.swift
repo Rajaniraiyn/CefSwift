@@ -397,72 +397,41 @@ public final class CefWindow: Identifiable {
 
     // MARK: Over the page
 
-    /// A view of your own, laid over the page in place of the built-in
-    /// swipe indicator (``CefBrowser/Configuration/navigationGestureIndicator``).
-    /// It is sized to the page, never receives events, and stays installed;
-    /// read ``CefBrowser/navigationGestureProgress`` to draw it.
-    /// CefSwiftUI's `setNavigationGestureIndicator(_:)` sets it from a
+    /// A view of your own laid over the page: a swipe indicator drawn from
+    /// ``CefBrowser/navigationGestureProgress``, a status bubble drawn from
+    /// ``CefBrowser/statusText``, a banner. It is sized to the page, inside
+    /// ``contentInsets`` and clipped to ``contentCornerRadius``, and never
+    /// receives events, so the page beneath takes every click and scroll.
+    /// It stays installed until you replace it; to show several views, put
+    /// them in one. CefSwiftUI's `setPageOverlay(_:)` sets it from a
     /// SwiftUI view.
-    public var navigationGestureIndicatorView: NSView? {
+    public var pageOverlay: NSView? {
         didSet {
-            guard navigationGestureIndicatorView !== oldValue else { return }
+            guard pageOverlay !== oldValue else { return }
             oldValue?.removeFromSuperview()
             updatePageOverlay()
         }
     }
 
-    /// A view laid over the page, sized to it and never receiving events,
-    /// beneath the swipe indicator: CefChromium's `statusBubbleView`, an
-    /// app's own status bubble in place of Chromium's.
-    package var statusOverlayView: NSView? {
-        didSet {
-            guard statusOverlayView !== oldValue else { return }
-            oldValue?.removeFromSuperview()
-            updatePageOverlay()
-        }
-    }
+    @ObservationIgnored private var pageOverlayContainer: PageOverlayView?
 
-    @ObservationIgnored private var pageOverlay: PageOverlayView?
-    @ObservationIgnored private var builtInIndicator: CefNavigationGestureIndicatorView?
-
-    /// Lays the views over the page: the swipe indicator (the app's, or
-    /// CefSwift's unless Chromium draws its own or none is wanted) and the
-    /// app's status view.
+    /// Lays ``pageOverlay`` over the page.
     private func updatePageOverlay() {
-        let configuration = browser.configuration
-        let wantsBuiltIn = configuration.allowsBackForwardNavigationGestures
-            && configuration.navigationGestureIndicator == .automatic
-        let indicator: NSView?
-        if let custom = navigationGestureIndicatorView {
-            builtInIndicator?.removeFromSuperview()
-            builtInIndicator = nil
-            indicator = custom
-        } else if wantsBuiltIn {
-            let builtIn = builtInIndicator ?? CefNavigationGestureIndicatorView()
-            builtIn.browser = browser
-            builtInIndicator = builtIn
-            indicator = builtIn
-        } else {
-            builtInIndicator?.removeFromSuperview()
-            builtInIndicator = nil
-            indicator = nil
-        }
-        let views = [statusOverlayView, indicator].compactMap { $0 }
-        guard !views.isEmpty, let contentView = window?.contentView else {
-            pageOverlay?.removeFromSuperview()
-            pageOverlay = nil
+        guard let pageOverlay, let contentView = window?.contentView else {
+            pageOverlayContainer?.removeFromSuperview()
+            pageOverlayContainer = nil
             return
         }
-        let overlay = pageOverlay ?? PageOverlayView()
-        if overlay.superview !== contentView {
-            overlay.frame = contentView.bounds
-            overlay.autoresizingMask = [.width, .height]
-            contentView.addSubview(overlay, positioned: .above, relativeTo: nil)
-            pageOverlay = overlay
+        let container = pageOverlayContainer ?? PageOverlayView()
+        if container.superview !== contentView {
+            container.frame = contentView.bounds
+            container.autoresizingMask = [.width, .height]
+            contentView.addSubview(container, positioned: .above, relativeTo: nil)
+            pageOverlayContainer = container
         }
-        overlay.insets = contentInsets
-        overlay.cornerRadius = contentCornerRadius
-        overlay.setViews(views)
+        container.insets = contentInsets
+        container.cornerRadius = contentCornerRadius
+        container.setView(pageOverlay)
     }
 
     // MARK: Delegate callbacks

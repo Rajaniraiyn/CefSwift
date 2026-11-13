@@ -84,8 +84,9 @@ public final class CefBrowser: Identifiable {
     /// (``CefBrowser/Configuration/allowsBackForwardNavigationGestures``): 0 at
     /// rest, moving toward -1 while swiping back and toward 1 while swiping
     /// forward. At -1 or 1 and beyond, releasing navigates. Use it to draw
-    /// your own indicator with
-    /// ``CefBrowser/Configuration/navigationGestureIndicator`` set to `.hidden`.
+    /// an indicator of your own over the page; in a ``CefWindow``, turn off
+    /// ``CefBrowser/Configuration/showsChromiumNavigationGestureIndicator``
+    /// and draw it in ``CefWindow/pageOverlay``.
     public internal(set) var navigationGestureProgress = 0.0
     /// The latest result of ``find(_:backwards:caseSensitive:)``.
     public internal(set) var findResult: CefBrowser.FindResult?
