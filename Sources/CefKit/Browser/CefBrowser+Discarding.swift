@@ -1,5 +1,6 @@
 import AppKit
 import CCef
+import CefBase
 import Foundation
 
 extension CefBrowser {
@@ -7,9 +8,8 @@ extension CefBrowser {
     ///
     /// Each one is a fact Chromium or CefKit knows without reading the page.
     /// Chrome-style browsers can report all of them; browsers in a
-    /// `CefWebView` only ``visible``, ``notLoaded``, ``capturingMedia``,
-    /// ``beforeUnloadHandler``, ``devToolsOpen``, ``downloading`` and
-    /// ``unknown(_:)``.
+    /// `CefWebView` all but ``exempt``, ``pictureInPicture`` and
+    /// ``connectedToDevice``.
     public enum DiscardBlocker: Sendable, Hashable, CustomStringConvertible {
         /// The browser is on screen: the selected tab of a visible window, or
         /// a view in one.
@@ -19,8 +19,7 @@ extension CefBrowser {
         case exempt
         /// The browser is not open, is still loading, or shows DevTools.
         case notLoaded
-        /// The page is playing sound, or did so in the last minute
-        /// (Chrome style only).
+        /// The page is playing sound, or did so in the last minute.
         case playingAudio
         /// The page uses the camera, microphone or screen capture, or is being
         /// cast.
@@ -31,7 +30,7 @@ extension CefBrowser {
         /// only).
         case connectedToDevice
         /// Chromium saw the user type into the page or change its form
-        /// fields (Chrome style only).
+        /// fields.
         case formInteraction
         /// The page has a `beforeunload` handler: it may ask before it is left.
         case beforeUnloadHandler
@@ -196,31 +195,53 @@ extension CefBrowser {
     /// ``discard()`` would discard it.
     ///
     /// Every blocker is a fact known natively, never read from the page's
-    /// content: the browser's own state (on screen, loading, DevTools, a
-    /// download, media capture), whether the page's window has a
-    /// `beforeunload` listener (asked of the DevTools Protocol), and for
-    /// Chrome-style browsers Chromium's own discard rules (audio, picture in
-    /// picture, devices, form input and the rest). A check that cannot be
-    /// made counts as a blocker, ``CefBrowser/DiscardBlocker/unknown(_:)``.
+    /// content. A check that cannot be made counts as a blocker,
+    /// ``CefBrowser/DiscardBlocker/unknown(_:)``. Where each comes from:
     ///
-    /// For a browser in a `CefWebView` Chromium keeps no such rules, so an
-    /// empty set does not mean the page is idle: it may be playing sound
-    /// or hold form input the user has not submitted. An app that knows
-    /// more about its pages decides for itself before calling
-    /// ``discard()``.
+    /// - ``CefBrowser/DiscardBlocker/visible``, ``CefBrowser/DiscardBlocker/notLoaded``,
+    ///   ``CefBrowser/DiscardBlocker/devToolsOpen``, ``CefBrowser/DiscardBlocker/downloading``
+    ///   and ``CefBrowser/DiscardBlocker/capturingMedia``: the browser's own
+    ///   state in CefKit (its view or window, CEF's load and DevTools state,
+    ///   its downloads, `on_media_access_change`), for both runtime styles.
+    /// - ``CefBrowser/DiscardBlocker/beforeUnloadHandler``: the page's
+    ///   window listeners, asked of the DevTools Protocol
+    ///   (`DOMDebugger.getEventListeners`), for both styles.
+    /// - Chrome style, everything else: Chromium's own discard rules for the
+    ///   tab, from `chrome://discards` (`GetTabDiscardsInfo`): audio,
+    ///   picture in picture, devices, form input, exemptions.
+    /// - In a `CefWebView` (Alloy style), ``CefBrowser/DiscardBlocker/playingAudio``
+    ///   and ``CefBrowser/DiscardBlocker/formInteraction``: Chromium's
+    ///   performance-manager graph, from the Graph view of
+    ///   `chrome://discards` (`discards.mojom.GraphDump`), for the page
+    ///   whose main frame is this browser's. Audio counts in any frame,
+    ///   from media elements and Web Audio alike, and for a minute after
+    ///   it stops; a muted element does not, a browser muted with
+    ///   ``isAudioMuted`` still does, as in Chrome. Form input is any frame's
+    ///   form interaction or user edit Blink reported. Picture in picture,
+    ///   devices and exemptions are not reported for these browsers.
+    ///
+    /// Both `chrome://discards` interfaces are Chromium-private; when one
+    /// changes, the check becomes ``CefBrowser/DiscardBlocker/unknown(_:)``
+    /// rather than reporting a page safe to discard. A call takes a few
+    /// milliseconds while the `chrome://discards` service host runs; the
+    /// first starts it (0.2 to 1.5 s measured), and it closes again after
+    /// 30 seconds without calls.
     public func discardBlockers() async -> Set<CefBrowser.DiscardBlocker> {
         guard !isDiscarded else { return [] }
         var blockers = stateBlockers()
         if discardPhase != .none { blockers.insert(.notLoaded) }
         guard !blockers.contains(.notLoaded) else { return blockers }
-        switch await hasBeforeUnloadHandler() {
+        async let beforeUnload = hasBeforeUnloadHandler()
+        // Chromium's rules for a tab; for an Alloy browser, its page's
+        // audio and form state in the performance-manager graph.
+        async let chromium = isChromeStyle
+            ? CefRuntime.shared.tabDiscarder.blockers(for: self) : CefPageGraph.blockers(for: self)
+        switch await beforeUnload {
         case true?: blockers.insert(.beforeUnloadHandler)
         case false?: break
         case nil: blockers.insert(.unknown("Could not read the page's beforeunload listeners."))
         }
-        if isChromeStyle {
-            blockers.formUnion(await CefRuntime.shared.tabDiscarder.blockers(for: self))
-        }
+        blockers.formUnion(await chromium)
         return blockers
     }
 
@@ -274,6 +295,13 @@ extension CefBrowser {
         discardPhase = .discarded
         isDiscarded = true
         isLoading = false
+    }
+
+    /// CEF's identifier of the main frame, `"<render process id in hexadecimal>-<frame token>"`.
+    var mainFrameIdentifier: String? {
+        var identifier: String?
+        withMainFrame { identifier = CefStringUtil.takingUserFree($0.pointee.get_identifier($0)) }
+        return identifier
     }
 
     /// The frames CEF knows of in the browser.

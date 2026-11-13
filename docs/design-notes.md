@@ -55,13 +55,95 @@ moved to the Browser example (`TabDiscarding.swift`), built from
 `lifecycle`, `lifecycleChangedAt`, `discard()` and Dispatch's memory
 pressure source.
 
-`discardBlockers()` used to read a `CefWebView` browser's main frame by
-script (`<audio>`/`<video>` playing, `<input>`/`<textarea>` edited) to
-guess at audio and form input, since Chromium keeps no discard rules for
-Alloy browsers. That missed frames, Web Audio and editable elements, and
-reading the page is not something the library does. The blocker set now
-holds only what is known natively, and for Alloy browsers says nothing
-about audio or form input; the app decides for pages it knows.
+### Audio and form input for Alloy browsers
+
+Chromium's tab rules on `chrome://discards` were taken to cover only
+Chrome-style tabs, so the first version read a `CefWebView` browser's
+main frame by script (`<audio>`/`<video>` playing, `<input>`/`<textarea>`
+edited). That missed other frames, Web Audio and `contenteditable`, and
+read the page; it was removed, and for a while Alloy browsers reported
+neither blocker. Page scraping is a last resort, so the native routes
+were tried first, each against the official CEF 156.0.28 (Chromium
+156.0.8078.88) with SelfTest probes:
+
+- **Performance-manager graph: used, for both facts.** Chromium's
+  performance manager (`components/performance_manager`) has a `PageNode`
+  for every `WebContents`, and the probe found CEF's Alloy-style ones
+  among them (`PageNodeImpl` type `kTab`). A page node carries what
+  `DiscardEligibilityPolicy` decides with: `IsAudible()` (from
+  `WebContentsObserver::OnAudioStateChanged`, the `AudioStreamMonitor`),
+  the time it last changed, and `HadFormInteraction()` and
+  `HadUserEdits()`, aggregated over frames from what Blink reports through
+  `DocumentCoordinationUnit`. `chrome://discards` exposes the graph as
+  `discards.mojom.GraphDump` (`DiscardsGraphDumpImpl`):
+  `SubscribeToChanges(GraphChangeStream)` streams `FrameCreated`,
+  `PageCreated`, the `…Changed` events and `NodeDeleted`, each with JSON
+  from the node data describers (`PageNodeImplDescriber`,
+  `FrameNodeImplDescriber`), and `RequestNodeDescriptions(ids)` describes
+  nodes as they are now. A `FrameNodeImpl` description has `frame_token`,
+  the second half of CEF's frame identifier, whose first half is the
+  render process id in hexadecimal (`"6-7BDA0EC0…"` and
+  `"7BDA0EC0…"`), so a browser's page is found exactly from its main
+  frame. In the probe an audio element, Web Audio and a page muted with
+  `set_audio_muted` were all `is_audible: true` (muting the browser does not
+  make the page silent, as in Chrome); a playing `<video muted>`, and a page
+  whose `play()` was refused for want of a gesture, `false`; a page paused
+  a second earlier `false`, with `audible_change_time: "0 hr, 0 min, 1 sec"`;
+  a text field typed into with `Input.insertText` had both
+  `had_form_interaction` and `had_user_edits`. A description request took
+  0.3 to 2 ms in the host's renderer. `CefPageGraph` reads it.
+- **`chrome://discards` tab list: works, not used.** `GetTabDiscardsInfo`
+  lists Alloy pages too, contrary to what the first version assumed, with
+  "Tab is playing audio", "Tab has recently played audio", "Tab has form
+  interactions" and "The user has edited the tab's content" where they
+  apply. Its entries carry only address, title and a per-call `id`, so two
+  views on one page could not be told apart; the graph's frame token tells
+  them apart, so the tab list stays for Chrome-style tabs, where its `id`
+  is what `DiscardById` takes.
+- **`chrome://media-internals`, `chrome://process-internals`: not
+  suitable,** and not probed further once the graph worked. Media
+  internals reports players and audio streams per render frame through
+  WebUI messages (`chrome.send`) rather than Mojo, identifies them only by
+  process and frame routing ids, and has nothing on forms. Process internals
+  (`process_internals.mojom`) describes frame trees and site isolation;
+  the probe could not import its bindings from `strings.m.js` and it was
+  not pursued, since it has neither fact.
+- **CEF C API and AppKit: no signal.** `cef_browser_host_t` has
+  `set_audio_muted`/`is_audio_muted` (the mute switch, not whether sound
+  plays); `cef_display_handler_t::on_media_access_change` is capture,
+  which `.capturingMedia` already uses; `cef_audio_handler_t` reports
+  streams only by taking the audio output over, which a check must not
+  do. Nothing in `cef_frame_t`, `cef_browser_t` or the context menu
+  parameters reports form state. Chromium's `NSView` does not use
+  `NSUndoManager` for web editing (`undoManager.canUndo` stayed `false`
+  after typing) and leaves `NSWindow.isDocumentEdited` unset. The
+  offscreen accessibility tree has field values but not whether the user
+  changed them, and nothing on audio; reading it would be reading the
+  page.
+- **DevTools Protocol: partial.** `Media.playerPropertiesChanged` reports
+  media element players (codec, tracks, frame URL) when `Media.enable`
+  precedes playback, but no audible state, nothing for Web Audio (the
+  `WebAudio` domain gives a context's state, not its output) and it needs
+  a session from page load on. No domain reports form interaction
+  without reading the DOM.
+- **`CefRenderer`: no route.** CEF's renderer API reaches V8 contexts
+  and process messages, not Blink's media or editing state; what it could
+  learn it would learn by running in the page, the scraping this avoids.
+- **Script scan: not needed.** It stays the last resort should a CEF
+  update remove `GraphDump`; until then such a change reports `.unknown`.
+
+The graph is Chromium-private: its JSON is unversioned, and
+`chrome://discards` could drop the interface. A missing node or field,
+or an unreadable time, is `.unknown(reason)`, never a page safe to
+discard, and SelfTest's `discard blockers (view)` checks (a quiet page
+reports nothing, an audible one exactly `.playingAudio`) fail on the
+first CEF update that changes it. The cost is the `chrome://discards`
+host's renderer, shared with tab discarding, while checks are made, the
+graph's change stream into it meanwhile, and about a millisecond per
+check (0.2 to 1.5 s for the first, which starts the host); the host closes after
+the usual idle timeout. The graph also has `has_nonempty_beforeunload`,
+which could replace the DevTools Protocol `beforeunload` check for Alloy
+browsers; that is neither done nor measured.
 
 ## Passkeys: a module on an attachment, not a CefKit option
 

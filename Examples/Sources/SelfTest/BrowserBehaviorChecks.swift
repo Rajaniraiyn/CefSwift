@@ -392,6 +392,8 @@ struct EdgePages: CefSchemeHandler {
             return Self.page("<title>slow</title>")
         case "/icon.png":
             return CefSchemeResponse(mimeType: "image/png", body: Self.iconPNG)
+        case "/tone.wav":
+            return CefSchemeResponse(mimeType: "audio/wav", body: Self.toneWAV)
         case "/favicon.html":
             return Self.page("<title>favicon</title><link rel=icon href=icon.png><p>favicon</p>")
         case "/heavy.html":
@@ -418,6 +420,24 @@ struct EdgePages: CefSchemeHandler {
             hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
         for x in 0..<32 { for y in 0..<32 { bitmap.setColor(NSColor(deviceRed: 1, green: 0, blue: 0, alpha: 1), atX: x, y: y) } }
         return bitmap.representation(using: .png, properties: [:])!
+    }()
+
+    /// One second of a quiet 440 Hz tone: 16-bit mono PCM at 22.05 kHz.
+    static let toneWAV: Data = {
+        let rate = 22_050
+        var samples = Data(capacity: rate * 2)
+        for index in 0..<rate {
+            let value = Int16(sin(2 * Double.pi * 440 * Double(index) / Double(rate)) * 3000)
+            withUnsafeBytes(of: value.littleEndian) { samples.append(contentsOf: $0) }
+        }
+        var wav = Data()
+        func append<T: FixedWidthInteger>(_ value: T) { withUnsafeBytes(of: value.littleEndian) { wav.append(contentsOf: $0) } }
+        wav.append(contentsOf: Array("RIFF".utf8)); append(UInt32(36 + samples.count))
+        wav.append(contentsOf: Array("WAVEfmt ".utf8)); append(UInt32(16)); append(UInt16(1)); append(UInt16(1))
+        append(UInt32(rate)); append(UInt32(rate * 2)); append(UInt16(2)); append(UInt16(16))
+        wav.append(contentsOf: Array("data".utf8)); append(UInt32(samples.count))
+        wav.append(samples)
+        return wav
     }()
 
     private static func page(_ html: String) -> CefSchemeResponse {

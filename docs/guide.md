@@ -907,7 +907,7 @@ same set:
 | `.notLoaded` | The browser is not open yet, is loading, or shows DevTools itself. |
 | `.playingAudio` | The page plays sound, or did in the last minute. |
 | `.capturingMedia` | The page uses the camera, microphone or screen capture, or is cast. |
-| `.formInteraction` | The user typed into the page. |
+| `.formInteraction` | The user typed into the page or changed its form fields. |
 | `.beforeUnloadHandler` | The page has a `beforeunload` handler. |
 | `.devToolsOpen` | The browser's DevTools window is open. |
 | `.downloading` | A download it started is in progress. |
@@ -920,12 +920,17 @@ discarded stays loaded, and `discard()` throws.
 Every blocker is something Chromium or CefKit knows natively; CefKit does
 not read the page's content to find more. Chrome-style browsers get
 Chromium's own discard rules, which cover audio, form input, picture in
-picture and devices in every frame. A `CefWebView` browser has no such
-rules in Chromium, so its set holds only `.visible`, `.notLoaded`,
-`.capturingMedia`, `.beforeUnloadHandler`, `.devToolsOpen`, `.downloading`
-and `.unknown`: an empty set does not mean the page is silent or has no
-unsent form input. An app that knows more about its pages decides itself
-before calling `discard()`.
+picture and devices in every frame. A `CefWebView` browser gets audio and
+form input from where Chromium's rules read them, its performance
+manager: sound from any frame, media element or Web Audio (a muted
+element does not count) now or in the last minute, and form fields the
+user changed or text they typed. It never reports `.exempt`,
+`.pictureInPicture` or `.connectedToDevice`. The facts come from
+Chromium's internal `chrome://discards` page in a hidden service host,
+which starts on the first check (0.2 to 1.5 s) and closes 30
+seconds after the last; while it runs a check takes about a millisecond.
+If a CEF update changes that page's interface, the check reports
+`.unknown` and the browser stays loaded.
 
 `restore()` loads a discarded page at once, even while it is hidden. The
 delegate hears `browserWillDiscard(_:)`, while the page can still be read,

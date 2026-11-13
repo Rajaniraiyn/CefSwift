@@ -910,7 +910,7 @@ Chromium locks a WebUI renderer to its host, and neither
 | `chrome://history` | `history.mojom.PageHandler`, `chrome://favicon2` | `CefHistory.search`, `remove` |
 | `chrome://new-tab-page-third-party` | `most_visited.mojom.MostVisitedPageHandlerFactory` | `CefHistory.topSites` |
 | `chrome://omnibox` | `mojom.OmniboxPageHandler` | `CefAutocomplete` |
-| `chrome://discards` | `discards.mojom.DetailsProvider` | Discarding |
+| `chrome://discards` | `discards.mojom.DetailsProvider`, `discards.mojom.GraphDump` | Discarding: Chrome-style tabs, and audio and form input of Alloy-style pages |
 
 `chrome://new-tab-page` binds most-visited and the search box's
 `searchbox.mojom.PageHandlerFactory` too, and the search box answers
@@ -1115,13 +1115,34 @@ page. Closing a browser
 never ends a renderer process another browser shares; Chromium keeps the
 process until its last frame goes.
 
-An Alloy browser's blockers are only what CefKit knows natively: its own
-state (on screen, loading, DevTools, downloads, media capture from
-`on_media_access_change`) and the `beforeunload` listener the DevTools
-Protocol reports. CEF exposes no audible state without diverting the
-audio, and nothing about form input, and CefKit does not read the page's
-DOM to guess, so neither is a blocker for Alloy browsers; the app decides
-whether such a page may be discarded.
+An Alloy browser's blockers come from its own state (on screen, loading,
+DevTools, downloads, media capture from `on_media_access_change`), the
+`beforeunload` listener the DevTools Protocol reports, and, for audio and
+form input, Chromium's performance-manager graph. CEF's API has no
+audible state short of an audio handler, which takes the audio over, and
+nothing about form input. The performance manager keeps a `PageNode` for
+every `WebContents`, Alloy-style ones included, with the facts Chromium's
+own discard rules (`DiscardEligibilityPolicy`) use: `IsAudible` (from the
+`WebContents`' audio stream monitor, so any frame, media element or Web
+Audio, but not a muted element), when audibility last changed, and
+`HadFormInteraction` and `HadUserEdits`, which Blink reports per document.
+`CefPageGraph` reads them through `discards.mojom.GraphDump`, the
+interface behind the Graph view of `chrome://discards`, on the same
+service host as tab discarding. Its module subscribes once per host
+document (`SubscribeToChanges`) and keeps each frame node's page id and
+frame token from the `FrameInfo` descriptions. CEF's frame identifier is
+`"<render process id in hexadecimal>-<frame token>"`, so a browser's page is the page of
+the frame node whose token is its main frame's, with no address or title
+matching. Each check asks for that page's current description
+(`RequestNodeDescriptions`) and reads `PageNodeImpl`'s `is_audible`,
+`audible_change_time` (sound within the last minute counts, Chromium's
+`kTabAudioProtectionTime`), `had_form_interaction` and `had_user_edits`.
+A missing node, a missing field or an unreadable time is `.unknown`, so a
+Chromium change keeps pages loaded instead of losing them, and SelfTest's
+`discard blockers (view)` checks fail. With the host running a check takes
+about a millisecond; the first starts the host (0.2 to 1.5 s measured), which
+closes after the service hosts' idle timeout as for any call. Picture in
+picture, devices and exemptions are not reported for Alloy browsers.
 
 The library has the capability, not a policy: nothing in CefKit discards a
 browser unasked. The lifecycle coordinator restores a discarded browser

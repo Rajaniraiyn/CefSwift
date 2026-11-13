@@ -10,6 +10,7 @@ extension SelfTest {
     static func discardChecks() async {
         await windowDiscardChecks()
         await discardBlockerChecks()
+        await viewDiscardBlockerChecks()
         await viewDiscardChecks()
     }
 
@@ -227,6 +228,97 @@ extension SelfTest {
               movedError != nil && !browser.isDiscarded, detail: "\(String(describing: movedError))")
         window.close()
         _ = await waitUntil { window.isClosed }
+    }
+
+    // MARK: View blockers
+
+    /// Audio and form input for browsers in views, which Chromium's tab
+    /// rules do not cover, read from its performance-manager graph on
+    /// `chrome://discards`. The graph is Chromium-private: when a CEF
+    /// update changes it, these fail (a quiet page reports `.unknown`).
+    static func viewDiscardBlockerChecks() async {
+        func page(_ name: String, _ script: String? = nil, hidden: Bool = true) async -> (CefBrowser, NSView) {
+            let browser = CefBrowser(url: URL(string: "selftest://edge/tab.html?\(name)")!)
+            let view = hostWindowed(browser)
+            _ = await loaded(browser, title: "tab")
+            if let script {
+                // Playback starts only after a user gesture.
+                let reply = try? await browser.evaluateJavaScript(script, userGesture: true)
+                if reply?.stringValue != "ok" { print("     \(name): \(reply?.text ?? "script failed")") }
+            }
+            view.isHidden = hidden
+            return (browser, view)
+        }
+        let play = "window.player = %@; player.loop = true; player.play().then(() => 'ok', e => String(e))"
+        // The first look-up starts the discards host; pages opened after it
+        // reach its graph subscription as they are created.
+        let (silent, silentView) = await page("view-silent")
+        var silentBlockers: Set<CefBrowser.DiscardBlocker> = []
+        let coldCall = await ContinuousClock().measure { silentBlockers = await silent.discardBlockers() }
+
+        let (element, elementView) = await page("view-audio", play.replacingOccurrences(of: "%@", with: "new Audio('tone.wav')"))
+        let (webAudio, webAudioView) = await page("view-webaudio", """
+            const context = new AudioContext(), tone = context.createOscillator(), gain = context.createGain();
+            gain.gain.value = 0.05;
+            tone.connect(gain).connect(context.destination);
+            tone.start();
+            context.state === 'running' ? 'ok' : context.state
+            """)
+        // Kept on screen: Chromium pauses a muted video in a hidden page.
+        let (muted, mutedView) = await page("view-muted", """
+            document.body.innerHTML = '<video muted src=tone.wav></video>';
+            \(play.replacingOccurrences(of: "%@", with: "document.querySelector('video')"))
+            """, hidden: false)
+        let (typed, typedView) = await page("view-typed", "document.body.innerHTML = '<input>'; document.querySelector('input').focus(); 'ok'")
+        typedView.isHidden = false
+        _ = try? await typed.devTools.send("Input.insertText", ["text": "unsent"])
+        typedView.isHidden = true
+
+        check("discard blockers (view): Chromium's page graph describes a quiet page, and it is not blocked",
+              silentBlockers.isEmpty, detail: "\(silentBlockers)")
+        var blockers: Set<CefBrowser.DiscardBlocker> = []
+        check("discard blockers (view): a page playing an audio element is kept",
+              await waitUntilAsync(timeout: .seconds(5)) {
+                  blockers = await element.discardBlockers()
+                  return blockers == [.playingAudio]
+              }, detail: "\(blockers)")
+        check("discard blockers (view): a page playing Web Audio is kept",
+              await waitUntilAsync(timeout: .seconds(5)) {
+                  blockers = await webAudio.discardBlockers()
+                  return blockers == [.playingAudio]
+              }, detail: "\(blockers)")
+        check("discard blockers (view): a page with an edited text field is kept",
+              await waitUntilAsync(timeout: .seconds(5)) {
+                  blockers = await typed.discardBlockers()
+                  return blockers == [.formInteraction]
+              }, detail: "\(blockers)")
+        // Checked after the audible pages had time to be reported.
+        let mutedBlockers = await muted.discardBlockers()
+        let mutedPlaying = (try? await muted.evaluateJavaScript("!player.paused && player.currentTime > 0").boolValue) ?? false
+        check("discard blockers (view): a playing muted video is not audio", mutedPlaying && mutedBlockers == [.visible],
+              detail: "playing \(mutedPlaying), \(mutedBlockers)")
+        let quiet = await silent.discardBlockers()
+        check("discard blockers (view): a silent, untouched page reports neither", quiet.isEmpty, detail: "\(quiet)")
+
+        _ = try? await element.evaluateJavaScript("player.pause(); 'ok'")
+        try? await Task.sleep(for: .milliseconds(500))
+        let recent = await element.discardBlockers()
+        check("discard blockers (view): a page that fell silent is kept for a minute", recent == [.playingAudio],
+              detail: "\(recent)")
+        var refusal: CefBrowser.DiscardError?
+        do { try await webAudio.discard() } catch { refusal = error }
+        check("discard blockers (view): discard() refuses a page playing audio",
+              refusal == .blocked([.playingAudio]) && !webAudio.isDiscarded, detail: "\(String(describing: refusal))")
+
+        let warmCall = await ContinuousClock().measure { _ = await silent.discardBlockers() }
+        print("INFO discard blockers (view): first call \(coldCall) (starts the discards host unless it runs), then \(warmCall)")
+        check("discard blockers (view): a look-up with the host running is quick", warmCall < .milliseconds(500),
+              detail: "\(warmCall)")
+
+        for (browser, view) in [(silent, silentView), (element, elementView), (webAudio, webAudioView),
+                                (muted, mutedView), (typed, typedView)] {
+            await closeHosted(browser, view)
+        }
     }
 
     // MARK: Views
