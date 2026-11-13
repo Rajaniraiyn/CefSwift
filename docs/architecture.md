@@ -1152,7 +1152,7 @@ Chromium has not loaded by itself). When to discard is the app's:
 `CefBrowser.lifecycle` and `lifecycleChangedAt` tell how long a browser
 has been hidden, and `DispatchSource.makeMemoryPressureSource` reports
 memory pressure. The Browser example's Memory Saver
-(`Examples/Sources/Browser/TabDiscarding.swift`) builds the usual policy
+(`Examples/Sources/Browser/Features/TabDiscarding`) builds the usual policy
 from those.
 
 ## Lifecycle

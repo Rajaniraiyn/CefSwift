@@ -13,59 +13,91 @@ open Examples/dist/Browser.app
 
 ## Browser
 
-A tabbed browser (`Sources/Browser`). Each tab is a Chrome-style
-`CefWindow`, and the tabs are grouped as native macOS tabs.
+A tabbed browser (`Sources/Browser`), composed of features on a small
+core. Each feature is a folder of `Features/` written against CefSwift's
+public API; CefSwift itself has no notion of a browser.
 
-- A SwiftUI toolbar in three parts. The address field shows the site and its
-  security, edits the full address, and offers Chromium-ranked suggestions
-  as you type: ↑ and ↓ choose, Return opens, Esc closes. The top
-  suggestion completes the address inline, selected after the caret:
-  typing on keeps what still matches, Delete removes the completion,
-  Return opens it and Esc goes back to what you typed.
-- Chromium's interface, arranged around the toolbar: the QR code bubble
-  hangs from its button, the Share button opens macOS's share menu, and
-  Cast and Chromium's other toolbar bubbles hang from the address field.
-  The find bar (⌘F) and the link status bubble are the browser's own
-  SwiftUI views; with "Use the browser's QR code and Cast panels" in
-  Settings, so are the QR code bubble and the Cast picker
-  (`ChromiumPanels.swift`). These, and the suggestions, bookmarks and
-  history below, use the `CefChromium` library.
-- Two-finger swipes go back and forward, with the browser's own swipe
-  indicator (`SwipeIndicator.swift`) laid over the page in the window's
-  `pageOverlay`, in place of Chromium's arrow.
-- A bookmark star (⌘D), Bookmarks and History menus, and a start page at
-  `browser://start/` with frequently visited sites and recent bookmarks,
-  whose data comes through a `CefBridge`.
-- Site icons on tabs, on "Switch to Tab" suggestions and on the start
-  page's tiles; the page as an inset card; and popups as panels layered over
-  the window that opened them.
-- Private tabs, downloads, and a customized context menu.
-- Passkeys answered by Chromium or by the browser itself (a
-  `CefPasskeyController` from the `CefPasskeys` library), chosen in
-  Settings, which also lists and removes the browser's saved passkeys.
-- `chrome://settings` without what does nothing in an embedded Chromium
-  (sign-in, default browser, and the Appearance options for Chrome's own
-  toolbar, tab strip and bookmarks bar), and an About page of its own in
-  place of Chromium's.
-- Tabs that Chromium opens itself, shown as the app's own tabs.
-- Streaming services (Netflix, Disney+ and others) in tabs shown by the
-  system's WebKit, which plays FairPlay-protected video, marked with a
-  WebKit badge; View › Open in WebKit moves any page there, and the tab's
-  "Open in Chromium" button moves it back. The WebKit side
-  (`Sources/SystemEngine`: `SystemBrowser`, `SystemWebView`) is a small
-  `WKWebView` wrapper on CefKit's public API, for pages that need FairPlay
-  or H.264 and AAC, which Chromium in CefSwift does not have.
-- Memory Saver (Settings › Put tabs to sleep): tabs hidden for 15 minutes
-  or an hour, or every hidden tab when macOS reports memory pressure, are
-  discarded with `CefBrowser.discard()` and dimmed in the toolbar
-  (`TabDiscarding.swift`). The timing and selection are the browser's own
-  policy, unit-tested by `swift test --package-path Examples`.
-- A single instance: launching the app again while it runs opens a new tab,
-  or a tab for each URL or file path passed on the command line.
+**The core** (`Core/`) is what every feature relies on:
 
-`browser://playground/` has popups, a download, a page that asks before
-leaving, an unreachable site, a Widevine-protected test stream that plays in
-Chromium, and a link to a FairPlay test player to open in WebKit.
+- `BrowserController`: the tabs, each a Chrome-style `CefWindow` grouped
+  with the others as native macOS tabs. It opens tabs (in a private
+  profile, or the profile of the tab that opened them), puts each window
+  together from the features, shows popups as panels over their opener
+  (`PopupPresenter`), and is every tab's `CefBrowserDelegate`, handing
+  navigation and permission decisions to the features.
+- `BrowserFeature`: the points a feature plugs into, each with a default
+  that does nothing.
+- `BrowserScene`: the Settings window and the menu bar, filled with the
+  features' rows and commands; `CefRuntime.Configuration.browser`.
+- Back and forward and the New Tab button, the tab's icon, File › New Tab
+  and the View menu's reload, zoom and Developer Tools; what typed text
+  means (`TypedAddress`: an address, or a search); the `browser://` scheme
+  features serve their pages from (`BrowserPages`); and the launch
+  arguments (`LaunchOptions`).
+
+**The features**, listed one per line in `BrowserApp.swift`:
+
+| Feature | What it adds | Built on |
+|---|---|---|
+| `AddressBar` | The address field: the site, load progress, editing with ranked suggestions (↑ ↓ choose, Return opens, Esc closes) and inline completion; File › Open Location | `CefAutocomplete` |
+| `PrivateTabs` | File › New Private Tab, and the field's "Private" badge | `CefProfile.incognito()` |
+| `PageInfo` | The field's security badge and page info (connection, certificate, site permissions); the sheet asking whether a site may use the camera, location and the like | `CefSiteSettings`, `CefConnectionSecurity` |
+| `Bookmarks` | The star in the field (⌘D) and the Bookmarks menu | `CefBookmarks` |
+| `History` | The History menu: back, forward and the latest pages | `CefHistory` |
+| `StartPage` | `browser://start/`, which new tabs open: frequently visited sites and recent bookmarks | `CefSchemeHandler`, `CefBridge`, `topSites()` |
+| `FindBar` | Edit › Find, a Safari-style bar under the toolbar | `setFindBar`, `CefFindSession` |
+| `StatusBubble` | The hovered link's address over the page | `statusText`, `pageOverlay` |
+| `SwipeIndicator` | The browser's own back and forward swipe indicator | `navigationGestureProgress`, `pageOverlay` |
+| `Appearance` | Settings › Appearance, for the windows and the pages | `CefProfile.setColorScheme` |
+| `Downloads` | A toolbar button listing downloads | `CefBrowser.downloads` |
+| `TabDiscarding` | Memory Saver: hidden tabs put to sleep after a while or under memory pressure; Settings › Put tabs to sleep; a button that wakes them | `discard()`, `lifecycle` |
+| `ChromiumPanels` | QR code and Share buttons, View › Cast, and optionally the browser's own QR code and Cast panels | `CefChromiumSurface`, `CefMediaRouter` |
+| `ChromiumPages` | `chrome://settings` without what does nothing in an embedded Chromium, an About page of the browser's own, and a Browser menu of Chromium's pages | `CefUserScript.styleSheet`, navigation policy |
+| `Playground` | `browser://playground/` (Help › Playground): popups, a download, a page that asks before leaving, an unreachable site, Widevine and FairPlay test streams | `CefSchemeHandler` |
+| `WebKitTabs` | Streaming services (Netflix, Disney+ and others) in tabs shown by the system's WebKit, which plays FairPlay; View › Open in WebKit, and "Open in Chromium" back | `Sources/SystemEngine` |
+| `Passkeys` | Passkeys answered by Chromium or by the browser itself, and the saved passkeys, in Settings | `CefPasskeyController` |
+| `TaskManager` | Window › Task Manager | `CefTaskManager` |
+| `ChromeTabs` | Tabs Chromium opens itself, shown as the browser's own | `CefRuntime.onChromeTab` |
+| `SingleInstance` | Launching the app again opens a tab, or one for each URL or file passed | `CefRuntime.onRelaunch` |
+
+`Sources/SystemEngine` (`SystemBrowser`, `SystemWebView`) is a small
+`WKWebView` wrapper on CefKit's public API, for pages that need FairPlay or
+H.264 and AAC, which Chromium in CefSwift does not have.
+
+### Adding or removing a feature
+
+A feature is a type conforming to `BrowserFeature` that implements only
+the points it uses (`Core/BrowserFeature.swift`): `start(_:)` once
+Chromium runs; `configure(_:)` for each new tab's
+`CefBrowser.Configuration`; `windowDidOpen(_:)` for each tab and popup
+window; `decidePolicy(for:in:)` and `decidePermission(for:in:)`, which
+return `nil` to leave the decision to the features after it; and views and
+commands: `commands(for:)`, `settings`, `toolbarItems(_:for:)` and
+`pageOverlay(for:)`. `FindBar` is a whole feature:
+
+```swift
+struct FindBar: BrowserFeature {
+    func windowDidOpen(_ window: CefWindow) {
+        window.setFindBar { session in Bar(session: session) }
+    }
+
+    func commands(for controller: BrowserController) -> some Commands {
+        CommandGroup(after: .textEditing) {
+            Button("Find…") { controller.current?.execute(.find) }.keyboardShortcut("f")
+        }
+    }
+
+    private struct Bar: View { … }
+}
+```
+
+Add a folder for it under `Features/` and a line to `BrowserApp.features`;
+the order of the lines is the order of the toolbar items, menu commands and
+settings. Toolbar and overlay views can read the `BrowserController` from
+the environment. To remove a feature, delete its line and its folder (and
+its tests, for `TabDiscarding`). The address field shows the other
+features' `.addressField…` items, so without `AddressBar` they have
+nowhere to appear; without `StartPage`, new tabs open `about:blank`.
 
 ## Showcase
 

@@ -8,7 +8,8 @@ let package = Package(
         .package(name: "CefSwift", path: ".."),
     ],
     targets: [
-        // A complete tabbed browser: Chrome-style windows, SwiftUI toolbar.
+        // A complete tabbed browser: Chrome-style windows, SwiftUI toolbar,
+        // composed of features (Sources/Browser/Features) on a small core.
         .executableTarget(
             name: "Browser",
             dependencies: [

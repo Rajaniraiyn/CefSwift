@@ -256,7 +256,7 @@ extension SelfTest {
 
     // MARK: Chromium's settings
 
-    /// Mirrors part of `BrowserController.internalPageStyles` in the
+    /// Mirrors part of `ChromiumPages.settingsStyle` in the
     /// Browser example. The appearance page's rows live in a component that
     /// sets its own `adoptedStyleSheets` after attaching its shadow root.
     static let settingsStyles = """

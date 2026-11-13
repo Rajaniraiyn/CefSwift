@@ -3,50 +3,40 @@ import CefSwiftUI
 import SystemEngine
 import SwiftUI
 
-/// Tabs shown by the system's WebKit instead of Chromium: streaming
-/// services whose players need FairPlay, opened automatically (Settings:
-/// "Play streaming services with WebKit") or with View > Open in WebKit.
-///
-/// Each is a window of its own in the same native tab group as the
-/// Chromium tabs, with a small toolbar of its own. Following a link to a
-/// site that is not a streaming service hands the tab back to Chromium.
+/// A tab shown by the system's WebKit: a window of its own, with a small
+/// toolbar of its own, that the browser shows in its tab group
+/// (`BrowserController.showTab`). Following a link to a site that is not a
+/// streaming service hands the page back to Chromium.
 @MainActor
-final class SystemEngineTab {
+final class WebKitTab {
     let browser: SystemBrowser
     let window: NSWindow
     let isPrivate: Bool
 
-    static let automaticKey = "streamingInSystemEngine"
-
-    /// Whether streaming services open in WebKit by themselves.
-    static var opensStreamingSitesAutomatically: Bool {
-        UserDefaults.standard.object(forKey: automaticKey) as? Bool ?? true
-    }
-
-    init(url: URL, profile: CefProfile, controller: BrowserController) {
+    init(profile: CefProfile, tabs: WebKitTabs) {
         browser = SystemBrowser(configuration: .init(profile: profile))
-        isPrivate = profile !== CefProfile.default
+        let isPrivate = profile !== CefProfile.default
+        self.isPrivate = isPrivate
         window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1100, height: 760),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered, defer: false)
-        window.tabbingIdentifier = BrowserController.tabbingIdentifier
         window.titleVisibility = .hidden
         window.isReleasedWhenClosed = false
         window.contentMinSize = NSSize(width: 560, height: 320)
-        window.contentView = NSHostingView(rootView: SystemEngineTabView(tab: self, controller: controller))
-        browser.decidePolicy = { [weak controller] browser, navigation in
+        window.contentView = NSHostingView(rootView: WebKitTabView(tab: self, tabs: tabs))
+        browser.decidePolicy = { [weak tabs] browser, navigation in
             // A link the user follows out of the streaming site goes back
             // to Chromium; the site's own redirects (sign-in) stay here.
-            guard let url = navigation.url, navigation.hasUserGesture, Self.opensStreamingSitesAutomatically,
+            guard let url = navigation.url, navigation.hasUserGesture, WebKitTabs.opensStreamingSitesAutomatically,
                   url.scheme == "https" || url.scheme == "http", !SystemBrowser.prefersSystemEngine(for: url),
-                  let controller
+                  let tabs
             else { return .allow }
-            controller.openTab(url: url, isPrivate: profile !== CefProfile.default)
+            tabs.openInChromium(followedLinkTo: url, isPrivate: isPrivate)
             return .cancel
         }
-        browser.onOpenWindow = { [weak controller] _, url in
-            controller?.openSystemTab(url: url, profile: profile)
+        browser.onOpenWindow = { [weak tabs] _, url in
+            tabs?.open(url, profile: profile)
         }
         mirrorTitle()
     }
@@ -60,9 +50,9 @@ final class SystemEngineTab {
     }
 }
 
-private struct SystemEngineTabView: View {
-    let tab: SystemEngineTab
-    let controller: BrowserController
+private struct WebKitTabView: View {
+    let tab: WebKitTab
+    let tabs: WebKitTabs
 
     var body: some View {
         SystemWebView(tab.browser)
@@ -79,12 +69,12 @@ private struct SystemEngineTabView: View {
                     .buttonStyle(ToolbarIconButtonStyle())
                 }
                 ToolbarItem(placement: .principal) {
-                    SystemEngineAddressBar(tab: tab)
+                    WebKitAddressBar(tab: tab)
                 }
                 ToolbarItem(placement: .primaryAction) {
                     Button("Open in Chromium", systemImage: "arrow.uturn.backward.circle") {
                         if let url = tab.browser.url {
-                            controller.openTabInChromium(url: url, isPrivate: tab.isPrivate)
+                            tabs.openInChromium(url, isPrivate: tab.isPrivate)
                             tab.window.close()
                         }
                     }
@@ -96,8 +86,8 @@ private struct SystemEngineTabView: View {
 }
 
 /// The site, with a badge saying the page is shown by WebKit.
-private struct SystemEngineAddressBar: View {
-    let tab: SystemEngineTab
+private struct WebKitAddressBar: View {
+    let tab: WebKitTab
     @State private var text = ""
     @FocusState private var isFocused: Bool
 
