@@ -32,7 +32,9 @@ extension CefBrowser {
         /// Chromium saw the user type into the page or change its form
         /// fields.
         case formInteraction
-        /// The page has a `beforeunload` handler: it may ask before it is left.
+        /// A frame of the page, the main one or any `iframe`, has a
+        /// `beforeunload` listener or `onbeforeunload` handler: it may ask
+        /// before it is left.
         case beforeUnloadHandler
         /// The browser's DevTools window is open.
         case devToolsOpen
@@ -203,9 +205,14 @@ extension CefBrowser {
     ///   and ``CefBrowser/DiscardBlocker/capturingMedia``: the browser's own
     ///   state in CefKit (its view or window, CEF's load and DevTools state,
     ///   its downloads, `on_media_access_change`), for both runtime styles.
-    /// - ``CefBrowser/DiscardBlocker/beforeUnloadHandler``: the page's
-    ///   window listeners, asked of the DevTools Protocol
-    ///   (`DOMDebugger.getEventListeners`), for both styles.
+    /// - ``CefBrowser/DiscardBlocker/beforeUnloadHandler``: the window
+    ///   listeners of every frame, `onbeforeunload` included, asked of the
+    ///   DevTools Protocol (`DOMDebugger.getEventListeners`), for both
+    ///   styles; a cross-site frame is asked in a session attached to it
+    ///   for the call and detached again. This attaches the browser's
+    ///   DevTools session (``CefBrowser/devTools``) if nothing had; no
+    ///   domain is enabled. Chromium's page graph would have it without
+    ///   DevTools (`has_nonempty_beforeunload`), but Blink never sets it.
     /// - Chrome style, everything else: Chromium's own discard rules for the
     ///   tab, from `chrome://discards` (`GetTabDiscardsInfo`): audio,
     ///   picture in picture, devices, form input, exemptions.
@@ -404,22 +411,11 @@ extension CefBrowser {
 
     // MARK: Page checks
 
-    /// Whether the page's window has a `beforeunload` listener, read with
-    /// the DevTools Protocol; `nil` if it could not be read.
+    /// Whether a frame of the page has a `beforeunload` listener, read with
+    /// the DevTools Protocol (``CefBeforeUnloadListeners``); `nil` if it
+    /// could not be read.
     private func hasBeforeUnloadHandler() async -> Bool? {
-        let group: CefJSON = "cefswift-discard"
-        defer { Task { _ = try? await devTools.send("Runtime.releaseObjectGroup", ["objectGroup": group]) } }
-        let listeners = await withTimeout(.seconds(3)) { () async throws -> [String] in
-            let window = try await self.devTools.send(
-                "Runtime.evaluate", ["expression": "window", "silent": true, "objectGroup": group])
-            let reply = try await self.devTools.send(
-                "DOMDebugger.getEventListeners", ["objectId": window["result"]["objectId"]])
-            guard let listeners = reply["listeners"].arrayValue else {
-                throw CefError.operationFailed("DOMDebugger.getEventListeners returned no listeners")
-            }
-            return listeners.compactMap { $0["type"].stringValue }
-        }
-        return listeners?.contains("beforeunload")
+        await withTimeout(.seconds(3)) { try await CefBeforeUnloadListeners.present(in: self) }
     }
 }
 

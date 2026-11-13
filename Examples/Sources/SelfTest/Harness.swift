@@ -212,7 +212,7 @@ extension SelfTest {
         "serviceHosts": .seconds(90),
         "protectedMedia": .seconds(120),
         "systemEngine": .seconds(90),
-        "discard": .seconds(90),
+        "discard": .seconds(120),
         "processes": .seconds(120),
         "security": .seconds(120),
     ]

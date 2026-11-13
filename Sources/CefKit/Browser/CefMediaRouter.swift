@@ -40,6 +40,12 @@ extension CefMediaRouter {
 /// A failure to start a route.
 public struct CefMediaRouteError: Error, Sendable, CustomStringConvertible {
     public let message: String
+
+    /// Creates a value of your own, for previews and tests.
+    public init(message: String) {
+        self.message = message
+    }
+
     public var description: String { message }
 }
 

@@ -28,6 +28,25 @@ public struct CefCertificate: Sendable, Hashable {
         public var locality: String
         public var stateOrProvince: String
         public var country: String
+
+        /// Creates a value of your own, for previews and tests.
+        public init(
+            displayName: String,
+            commonName: String = "",
+            organizations: [String] = [],
+            organizationalUnits: [String] = [],
+            locality: String = "",
+            stateOrProvince: String = "",
+            country: String = ""
+        ) {
+            self.displayName = displayName
+            self.commonName = commonName
+            self.organizations = organizations
+            self.organizationalUnits = organizationalUnits
+            self.locality = locality
+            self.stateOrProvince = stateOrProvince
+            self.country = country
+        }
     }
 
     public var subject: Principal
@@ -40,6 +59,25 @@ public struct CefCertificate: Sendable, Hashable {
     public var derRepresentation: Data
     /// The issuers' certificates, the direct issuer first, in DER encoding.
     public var issuerChain: [Data]
+
+    /// Creates a value of your own, for previews and tests.
+    public init(
+        subject: Principal,
+        issuer: Principal,
+        serialNumber: Data,
+        validFrom: Date,
+        validUntil: Date,
+        derRepresentation: Data,
+        issuerChain: [Data] = []
+    ) {
+        self.subject = subject
+        self.issuer = issuer
+        self.serialNumber = serialNumber
+        self.validFrom = validFrom
+        self.validUntil = validUntil
+        self.derRepresentation = derRepresentation
+        self.issuerChain = issuerChain
+    }
 
     /// The certificate's SHA-256 fingerprint.
     public var sha256Fingerprint: Data { Data(SHA256.hash(data: derRepresentation)) }

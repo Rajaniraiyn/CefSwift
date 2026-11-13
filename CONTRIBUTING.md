@@ -268,6 +268,11 @@ reading as one.
 - **One way to do a thing.** Remove a convenience that duplicates another
   API instead of keeping both, and drop options the host overrides.
 - **Test hooks** are `@_spi(Testing)`, never plain `public`.
+- **Plain values the library hands out** (a history entry, a load error,
+  a task manager row) have a public memberwise initializer, documented
+  "for previews and tests", labelled as their properties. A value that
+  means something only coming from CEF (a request bound to a callback, a
+  browser reference, a Chromium node's identifier) has none.
 - **Files** are named for the type they declare, `Type+Concern.swift` for an
   extension; split a file that passes about 600 lines along its concerns.
 

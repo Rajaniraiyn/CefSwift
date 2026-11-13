@@ -669,7 +669,7 @@ protection"). These use it:
 | `evaluateJavaScript(_:userGesture: true)` | `Runtime.evaluate` with `userGesture`, the only way to grant a user activation. |
 | `snapshot()` | `Page.captureScreenshot`, for windowed browsers; an offscreen browser's snapshot is the frame its view shows. |
 | CefPasskeys' `CefPasskeyController` | `WebAuthn`, `Debugger`, `Page` and `Runtime` enabled for the browser's lifetime; see [Passkeys](#passkeys). |
-| `discard()` | `Runtime.evaluate` and `DOMDebugger.getEventListeners` on the page's window, to find a `beforeunload` listener, which JavaScript cannot list. |
+| `discard()`, `discardBlockers()` | `DOMDebugger.getEventListeners` on every frame's window, to find a `beforeunload` listener, which JavaScript cannot list: the main frame's window from `Runtime.evaluate`, a same-process subframe's from `Page.getFrameTree`, `DOM.getFrameOwner`, `DOM.describeNode`, `DOM.resolveNode` and `Runtime.callFunctionOn` (`defaultView`), a cross-site frame's the same way in a session of its own (`Target.getTargets`, `Target.attachToTarget` with `flatten`, `Target.detachFromTarget`). No domain is enabled. |
 | Offscreen accessibility actions | `Accessibility.enable` for the length of one lookup, then `DOM.focus`, `DOM.scrollIntoViewIfNeeded`; `Input.insertText` only for a field that takes no input-method text. |
 
 A browser created again after a discard enables the domains its session
@@ -1117,8 +1117,9 @@ process until its last frame goes.
 
 An Alloy browser's blockers come from its own state (on screen, loading,
 DevTools, downloads, media capture from `on_media_access_change`), the
-`beforeunload` listener the DevTools Protocol reports, and, for audio and
-form input, Chromium's performance-manager graph. CEF's API has no
+`beforeunload` listeners the DevTools Protocol reports for every frame
+(`CefBeforeUnloadListeners`, as for Chrome-style browsers), and, for audio
+and form input, Chromium's performance-manager graph. CEF's API has no
 audible state short of an audio handler, which takes the audio over, and
 nothing about form input. The performance manager keeps a `PageNode` for
 every `WebContents`, Alloy-style ones included, with the facts Chromium's
@@ -1143,6 +1144,18 @@ Chromium change keeps pages loaded instead of losing them, and SelfTest's
 about a millisecond; the first starts the host (0.2 to 1.5 s measured), which
 closes after the service hosts' idle timeout as for any call. Picture in
 picture, devices and exemptions are not reported for Alloy browsers.
+
+The graph also describes `has_nonempty_beforeunload` on frame and page
+nodes, but nothing in Blink sets it: it stayed `false` with listeners in
+the main frame and in subframes, in both runtime styles. So
+`beforeunload` stays with the DevTools Protocol. `getEventListeners`
+lists only the listeners of the context its object belongs to, so each
+frame's window is reached in that frame's main world; a cross-site
+frame lives in another renderer and is reached in a flat session
+attached for the check. CEF's typed DevTools callbacks do not handle
+messages carrying a `sessionId`, so `CefDevTools` takes them in
+`on_dev_tools_message`: a reply completes its call, an event is dropped
+rather than delivered as the browser's own session's.
 
 The library has the capability, not a policy: nothing in CefKit discards a
 browser unasked. The lifecycle coordinator restores a discarded browser

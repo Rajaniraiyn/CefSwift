@@ -205,3 +205,74 @@ import Testing
         return false
     }
 }
+
+/// The DevTools Protocol replies the `beforeunload` check reads, as
+/// CEF 156.0.28 sends them.
+@Suite struct BeforeUnloadListenerTests {
+    @MainActor @Test func onlyBeforeUnloadListenersCount() throws {
+        let some: CefJSON = ["listeners": [
+            ["type": "click", "useCapture": false], ["type": "beforeunload", "useCapture": false, "scriptId": "3"],
+        ]]
+        #expect(try CefBeforeUnloadListeners.hasBeforeUnload(listeners: some))
+        #expect(try !CefBeforeUnloadListeners.hasBeforeUnload(listeners: ["listeners": [["type": "unload"]]]))
+        #expect(try !CefBeforeUnloadListeners.hasBeforeUnload(listeners: ["listeners": []]))
+        #expect(throws: (any Error).self) { try CefBeforeUnloadListeners.hasBeforeUnload(listeners: [:]) }
+    }
+
+    @MainActor @Test func subframesAreEveryFrameBelowTheMainOne() throws {
+        let tree: CefJSON = ["frameTree": [
+            "frame": ["id": "MAIN"],
+            "childFrames": [
+                ["frame": ["id": "A", "parentId": "MAIN"], "childFrames": [["frame": ["id": "A1", "parentId": "A"]]]],
+                ["frame": ["id": "B", "parentId": "MAIN"]],
+            ],
+        ]]
+        #expect(try CefBeforeUnloadListeners.subframes(inFrameTree: tree) == ["A", "A1", "B"])
+        #expect(try CefBeforeUnloadListeners.subframes(inFrameTree: ["frameTree": ["frame": ["id": "MAIN"]]]).isEmpty)
+        #expect(throws: (any Error).self) { try CefBeforeUnloadListeners.subframes(inFrameTree: [:]) }
+        #expect(throws: (any Error).self) {
+            try CefBeforeUnloadListeners.subframes(inFrameTree: ["frameTree": [
+                "frame": ["id": "MAIN"], "childFrames": [["frame": ["url": "about:blank"]]],
+            ]])
+        }
+    }
+
+    /// `Target.getTargets` lists the page and its out-of-process frames,
+    /// and may list other targets; only frames whose parents lead to the
+    /// page are its own.
+    @MainActor @Test func outOfProcessFramesAreThePagesOwn() throws {
+        let targets: CefJSON = ["targetInfos": [
+            ["targetId": "PAGE", "type": "page", "attached": true],
+            ["targetId": "X", "type": "iframe", "parentId": "PAGE", "parentFrameId": "PAGE", "attached": false],
+            ["targetId": "X1", "type": "iframe", "parentId": "X", "parentFrameId": "LOCAL-IN-X"],
+            ["targetId": "OTHER", "type": "page"],
+            ["targetId": "Y", "type": "iframe", "parentId": "OTHER"],
+            ["targetId": "W", "type": "worker", "parentId": "PAGE"],
+            ["targetId": "LOOP", "type": "iframe", "parentId": "LOOP"],
+        ]]
+        #expect(try CefBeforeUnloadListeners.outOfProcessFrames(of: "PAGE", in: targets) == ["X", "X1"])
+        #expect(try CefBeforeUnloadListeners.outOfProcessFrames(of: "OTHER", in: targets) == ["Y"])
+        #expect(throws: (any Error).self) { try CefBeforeUnloadListeners.outOfProcessFrames(of: "PAGE", in: [:]) }
+    }
+
+    /// Messages of an attached frame's session carry a top-level
+    /// `sessionId`, which CEF's typed callbacks do not know: they are
+    /// taken before them, and their events never reach this session's
+    /// listeners.
+    @MainActor @Test func childSessionMessagesAreTakenApart() {
+        let browser = CefBrowser()
+        var heard = 0
+        _ = browser.devTools.addListener(for: "Runtime.consoleAPICalled") { _ in heard += 1 }
+        let childEvent = Data(#"{"method":"Runtime.consoleAPICalled","params":{},"sessionId":"S"}"#.utf8)
+        let childReply = Data(#"{"id":7,"result":{},"sessionId":"S"}"#.utf8)
+        // This session's messages, one mentioning a session in its parameters.
+        let attached = Data(#"{"method":"Target.attachedToTarget","params":{"sessionId":"S"}}"#.utf8)
+        let reply = Data(#"{"id":8,"result":{"sessionId":"S"}}"#.utf8)
+        #expect(browser.devTools.receivedChildSessionMessage(childEvent))
+        #expect(browser.devTools.receivedChildSessionMessage(childReply))
+        #expect(!browser.devTools.receivedChildSessionMessage(attached))
+        #expect(!browser.devTools.receivedChildSessionMessage(reply))
+        #expect(!browser.devTools.receivedChildSessionMessage(Data(#"{"id":9,"result":{}}"#.utf8)))
+        #expect(heard == 0)
+    }
+}

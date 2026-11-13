@@ -908,7 +908,7 @@ same set:
 | `.playingAudio` | The page plays sound, or did in the last minute. |
 | `.capturingMedia` | The page uses the camera, microphone or screen capture, or is cast. |
 | `.formInteraction` | The user typed into the page or changed its form fields. |
-| `.beforeUnloadHandler` | The page has a `beforeunload` handler. |
+| `.beforeUnloadHandler` | A frame of the page, the main one or an `iframe`, has a `beforeunload` listener or `onbeforeunload` handler. |
 | `.devToolsOpen` | The browser's DevTools window is open. |
 | `.downloading` | A download it started is in progress. |
 | `.pictureInPicture`, `.connectedToDevice` | Picture in picture; a Bluetooth or USB device. |
@@ -931,6 +931,14 @@ which starts on the first check (0.2 to 1.5 s) and closes 30
 seconds after the last; while it runs a check takes about a millisecond.
 If a CEF update changes that page's interface, the check reports
 `.unknown` and the browser stays loaded.
+
+`.beforeUnloadHandler` is asked of the DevTools Protocol in both runtime
+styles, for every frame, since Chromium runs `beforeunload` in each: a
+listener added or removed after load, `window.onbeforeunload`, and
+handlers in same-site and cross-site `iframe`s all count. Asking attaches
+the browser's DevTools session if nothing else had (see
+[Compatibility with bot protection](#compatibility-with-bot-protection));
+it enables no domain and takes a few milliseconds.
 
 `restore()` loads a discarded page at once, even while it is hidden. The
 delegate hears `browserWillDiscard(_:)`, while the page can still be read,
@@ -2486,7 +2494,7 @@ measurement a page can make.
 | CefPasskeys' `CefPasskeyController` | `WebAuthn`, `Debugger`, `Page` and `Runtime`, for the browser's lifetime | Each `debugger` statement takes about 10 ms (the controller resumes at once), and `console` calls serialize their arguments as above. Leave passkeys to Chromium (no controller) for browsers that show sites you do not control. |
 | `evaluateJavaScript(_:userGesture: true)` | `Runtime.evaluate`, no domain | The gesture itself. |
 | `snapshot()` of a windowed browser | `Page.captureScreenshot`, no domain | Nothing measured. An offscreen browser's snapshot is the frame its view shows, with an open `<select>` list or date picker drawn in, and uses no protocol. |
-| `discard()` | `Runtime.evaluate` and `DOMDebugger.getEventListeners`, no domain | Nothing measured; the page is about to be unloaded. |
+| `discard()`, `discardBlockers()` | `DOMDebugger.getEventListeners` on every frame's window, reached with `Runtime.evaluate`, `Page.getFrameTree` and `DOM` look-ups, and for a cross-site frame a session attached with `Target.attachToTarget` and detached again; no domain | Nothing measured; the page is about to be unloaded. |
 | Offscreen accessibility actions | `Accessibility` for the length of one lookup; `DOM.focus`, `DOM.scrollIntoViewIfNeeded`; `Input.insertText` only for a field that takes no input-method text | Nothing measured. Only an assistive app's actions use it. |
 
 CefKit's internal services (tab discarding, and CefChromium's bookmarks,

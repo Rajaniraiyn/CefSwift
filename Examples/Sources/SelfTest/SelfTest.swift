@@ -75,6 +75,8 @@ enum SelfTest {
         installBridgeHandlers()
         // Pages several groups load, so that each group also runs by itself.
         CefRuntime.shared.registerSchemeHandler(scheme: "selftest", domain: "edge", handler: EdgePages())
+        // A second site, for cross-site (out-of-process) iframes.
+        CefRuntime.shared.registerSchemeHandler(scheme: "selftest", domain: "edge-frame", handler: EdgePages())
         CefRuntime.shared.registerSchemeHandler(scheme: "selftest", domain: "bench", handler: BenchmarkPages())
         CefRuntime.shared.registerSchemeHandler(scheme: "selftest", domain: "ax", handler: AccessibilityPages())
         CefRuntime.shared.registerSchemeHandler(scheme: "selftest", domain: "loading", handler: LoadingPages())

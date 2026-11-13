@@ -11,6 +11,12 @@ extension CefHistory {
         public struct ID: Sendable, Hashable {
             public var url: URL
             public var lastVisitDate: Date
+
+            /// Creates a value of your own, for previews and tests.
+            public init(url: URL, lastVisitDate: Date) {
+                self.url = url
+                self.lastVisitDate = lastVisitDate
+            }
         }
 
         public var id: ID { ID(url: url, lastVisitDate: lastVisitDate) }
@@ -25,6 +31,16 @@ extension CefHistory {
 
         /// Chromium's own visit times, needed to remove exactly these visits.
         let visitTimes: [Double]
+
+        /// Creates a value of your own, for previews and tests.
+        public init(url: URL, title: String, lastVisitDate: Date, visitDates: [Date], isBookmarked: Bool = false) {
+            self.url = url
+            self.title = title
+            self.lastVisitDate = lastVisitDate
+            self.visitDates = visitDates
+            self.isBookmarked = isBookmarked
+            visitTimes = visitDates.map { $0.timeIntervalSince1970 * 1000 }
+        }
     }
 }
 
@@ -35,6 +51,12 @@ extension CefHistory {
         public var id: URL { url }
         public var url: URL
         public var title: String
+
+        /// Creates a value of your own, for previews and tests.
+        public init(url: URL, title: String) {
+            self.url = url
+            self.title = title
+        }
     }
 }
 

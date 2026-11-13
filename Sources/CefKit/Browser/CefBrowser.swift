@@ -12,6 +12,13 @@ extension CefBrowser {
         public var activeMatchIndex: Int
         /// Whether the search has finished counting.
         public var isFinal: Bool
+
+        /// Creates a value of your own, for previews and tests.
+        public init(matchCount: Int, activeMatchIndex: Int, isFinal: Bool = true) {
+            self.matchCount = matchCount
+            self.activeMatchIndex = activeMatchIndex
+            self.isFinal = isFinal
+        }
     }
 }
 
@@ -551,7 +558,8 @@ public struct CefJavaScriptError: Error, Sendable, CustomStringConvertible {
     public var line: Int
     public var column: Int
 
-    package init(message: String, line: Int, column: Int) {
+    /// Creates a value of your own, for previews and tests.
+    public init(message: String, line: Int = 0, column: Int = 0) {
         self.message = message
         self.line = line
         self.column = column

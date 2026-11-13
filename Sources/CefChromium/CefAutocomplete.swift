@@ -45,6 +45,31 @@ extension CefAutocomplete {
         public var isBookmarked: Bool
         /// Whether choosing it runs a search rather than opening a page.
         public var isSearch: Bool
+
+        /// Creates a value of your own, for previews and tests.
+        public init(
+            kind: Kind,
+            text: String,
+            detail: String = "",
+            url: URL?,
+            replacementText: String,
+            inlineCompletion: String = "",
+            relevance: Int,
+            canBeDefault: Bool = false,
+            isBookmarked: Bool = false,
+            isSearch: Bool = false
+        ) {
+            self.kind = kind
+            self.text = text
+            self.detail = detail
+            self.url = url
+            self.replacementText = replacementText
+            self.inlineCompletion = inlineCompletion
+            self.relevance = relevance
+            self.canBeDefault = canBeDefault
+            self.isBookmarked = isBookmarked
+            self.isSearch = isSearch
+        }
     }
 }
 
