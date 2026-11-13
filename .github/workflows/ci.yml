@@ -97,6 +97,10 @@ jobs:
           CEF_FRAMEWORK_PATH: ${{ steps.cef.outputs.framework }}
         run: swift test
 
+      # The examples' own unit tests (the Browser example's policies).
+      - name: Test the examples
+        run: swift test --package-path Examples
+
       # The unit tests again under Thread Sanitizer and Address Sanitizer.
       # They never start Chromium; the loader tests skip without the
       # framework's path.

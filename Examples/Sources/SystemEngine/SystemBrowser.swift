@@ -1,46 +1,46 @@
 import AppKit
 import CefKit
+import CryptoKit
 import Foundation
 import Observation
 import WebKit
 
 /// A page shown by the system's web engine — WebKit, as in Safari — rather
-/// than by Chromium.
+/// than by Chromium. The Browser example uses it for streaming services;
+/// it is example code built on `WKWebView` and CefKit's public API, not
+/// part of the library.
 ///
 /// Chromium in CefSwift plays protected media with Widevine, which
 /// streaming services such as Netflix refuse without Verified Media Path
 /// host signing, and Chromium has no FairPlay. WebKit on macOS has
 /// FairPlay Streaming through Encrypted Media Extensions, needs no
 /// entitlement or licence, and identifies as Safari, so services that
-/// look for Safari serve it their Safari player. The guide lists which
-/// services were verified. Use a system browser for such sites and
-/// Chromium (``CefBrowser``) for everything else:
+/// look for Safari serve it their Safari player. Use a system browser for
+/// such sites and Chromium (`CefBrowser`) for everything else:
 ///
 /// ```swift
 /// func browser(_ browser: CefBrowser, decidePolicyFor navigation: CefNavigationAction) -> CefNavigationDecision {
-///     guard let url = navigation.url, CefSystemBrowser.prefersSystemEngine(for: url) else { return .allow }
-///     openSystemTab(CefSystemBrowser(url: url, configuration: .init(profile: browser.configuration.profile)))
+///     guard let url = navigation.url, SystemBrowser.prefersSystemEngine(for: url) else { return .allow }
+///     openSystemTab(SystemBrowser(url: url, configuration: .init(profile: browser.configuration.profile)))
 ///     return .cancel
 /// }
 /// ```
 ///
-/// It has the parts of ``CefBrowser``'s surface WebKit offers: navigation
+/// It has the parts of `CefBrowser`'s surface WebKit offers: navigation
 /// and its observable state, JavaScript, user scripts, find, zoom and
-/// snapshots. Chromium's own features — DevTools protocol, bridges,
-/// `chrome://` pages, extensions, passkey modes, downloads, discarding —
-/// are not part of it. Show it with ``CefSystemWebView`` or by
-/// adding ``nativeView`` to a view hierarchy.
+/// snapshots. Show it with ``SystemWebView`` or by adding ``nativeView``
+/// to a view hierarchy.
 @MainActor
 @Observable
-public final class CefSystemBrowser {
+public final class SystemBrowser {
     /// How a system browser is set up. Fixed when it is created.
     public struct Configuration {
         /// Whose website data (cookies, storage, cache) the page uses. Each
-        /// ``CefProfile`` has a WebKit data store of its own, separate from
+        /// `CefProfile` has a WebKit data store of its own, separate from
         /// Chromium's: the default profile uses the app's default store, a
-        /// ``CefProfile/persistent(id:displayName:)`` profile a persistent
-        /// store derived from its identifier, and an ``CefProfile/incognito()`` profile an
-        /// in-memory store discarded with it. `nil` is the default profile.
+        /// persistent profile a persistent store derived from its
+        /// identifier, and an incognito profile an in-memory store
+        /// discarded with it. `nil` is the default profile.
         public var profile: CefProfile?
         /// Whether the User-Agent ends `Version/<Safari's version>
         /// Safari/605.1.15`, as Safari's does, so sites serve their Safari
@@ -72,14 +72,21 @@ public final class CefSystemBrowser {
     /// The settings the browser was made with.
     @ObservationIgnored public let configuration: Configuration
 
+    /// A main-frame navigation awaiting ``decidePolicy``.
+    public struct Navigation {
+        public var url: URL?
+        /// Whether the user followed a link or submitted a form.
+        public var hasUserGesture: Bool
+    }
+
     /// Decides each main-frame navigation; `nil` allows all. Return
-    /// ``CefNavigationDecision/cancel`` to send a URL elsewhere, such as
-    /// back to a Chromium browser when the user leaves a streaming site.
-    @ObservationIgnored public var decidePolicy: ((CefSystemBrowser, CefNavigationAction) -> CefNavigationDecision)?
+    /// `.cancel` to send a URL elsewhere, such as back to a Chromium
+    /// browser when the user leaves a streaming site.
+    @ObservationIgnored public var decidePolicy: ((SystemBrowser, Navigation) -> CefNavigationDecision)?
 
     /// Called when the page opens a new window (`target="_blank"`,
     /// `window.open`). `nil` loads the URL in this browser.
-    @ObservationIgnored public var onOpenWindow: ((CefSystemBrowser, URL) -> Void)?
+    @ObservationIgnored public var onOpenWindow: ((SystemBrowser, URL) -> Void)?
 
     /// The `WKWebView` showing the page.
     @ObservationIgnored public let nativeView: WKWebView
@@ -90,7 +97,7 @@ public final class CefSystemBrowser {
     public init(url: URL? = nil, configuration: Configuration = .init()) {
         self.configuration = configuration
         let webViewConfiguration = WKWebViewConfiguration()
-        webViewConfiguration.websiteDataStore = (configuration.profile ?? .default).systemWebsiteDataStore
+        webViewConfiguration.websiteDataStore = Self.dataStore(for: configuration.profile ?? .default)
         webViewConfiguration.preferences.isElementFullscreenEnabled = true
         webViewConfiguration.mediaTypesRequiringUserActionForPlayback = []
         webViewConfiguration.allowsAirPlayForMediaPlayback = true
@@ -132,10 +139,10 @@ public final class CefSystemBrowser {
     // MARK: JavaScript
 
     /// Evaluates `script` in the page and returns its value as JSON,
-    /// awaiting it if it is a promise. Throws ``CefJavaScriptError`` when
+    /// awaiting it if it is a promise. Throws ``JavaScriptError`` when
     /// the script throws.
     ///
-    /// As ``CefBrowser/evaluateJavaScript(_:userGesture:timeout:)`` does, this runs
+    /// As `CefBrowser.evaluateJavaScript` does, this runs
     /// `script` as a classic script: statements, declarations and `throw`
     /// work, and the value is that of the last statement. Its top-level
     /// `let`, `const` and `class` declarations stay local to the call. On a
@@ -168,11 +175,21 @@ public final class CefSystemBrowser {
         return message.hasPrefix("EvalError") && message.contains("unsafe-eval")
     }
 
-    private static func javaScriptError(_ error: NSError) -> CefJavaScriptError {
+    /// A JavaScript exception thrown by code passed to
+    /// ``evaluateJavaScript(_:)``.
+    public struct JavaScriptError: Error, CustomStringConvertible {
+        public var message: String
+        public var line: Int
+        public var column: Int
+
+        public var description: String { message }
+    }
+
+    private static func javaScriptError(_ error: NSError) -> JavaScriptError {
         let message = error.userInfo["WKJavaScriptExceptionMessage"] as? String ?? error.localizedDescription
         let line = error.userInfo["WKJavaScriptExceptionLineNumber"] as? Int ?? 0
         let column = error.userInfo["WKJavaScriptExceptionColumnNumber"] as? Int ?? 0
-        return CefJavaScriptError(message: message, line: line, column: column)
+        return JavaScriptError(message: message, line: line, column: column)
     }
 
     /// Evaluates `script` and decodes its value as `T`.
@@ -211,9 +228,12 @@ public final class CefSystemBrowser {
         let image = try await nativeView.takeSnapshot(configuration: nil)
         guard let tiff = image.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff),
               let png = bitmap.representation(using: .png, properties: [:])
-        else { throw CefError.operationFailed("could not encode the snapshot") }
+        else { throw SnapshotError() }
         return png
     }
+
+    /// The snapshot could not be encoded as PNG.
+    public struct SnapshotError: Error {}
 
     /// Stops the page and its media.
     public func close() {
@@ -241,7 +261,7 @@ public final class CefSystemBrowser {
     /// `cookie` as WebKit should store it. A host-only cookie, whose domain
     /// Chromium gives without a leading dot, is passed by origin so that
     /// WebKit does not widen it to the host's subdomains.
-    static func webKitCookie(_ cookie: HTTPCookie) -> HTTPCookie {
+    package static func webKitCookie(_ cookie: HTTPCookie) -> HTTPCookie {
         guard !cookie.domain.hasPrefix("."), var properties = cookie.properties,
               let origin = URL(string: "\(cookie.isSecure ? "https" : "http")://\(cookie.domain)/")
         else { return cookie }
@@ -271,14 +291,14 @@ public final class CefSystemBrowser {
 
     /// `Version/<major.minor> Safari/605.1.15`, with the installed Safari's
     /// version (Safari ships with macOS and shares its WebKit).
-    static let safariApplicationName: String = {
+    package static let safariApplicationName: String = {
         let info = NSDictionary(contentsOfFile: "/Applications/Safari.app/Contents/Info.plist")
         let version = (info?["CFBundleShortVersionString"] as? String)
             ?? "\(ProcessInfo.processInfo.operatingSystemVersion.majorVersion).0"
         return "Version/\(version) Safari/605.1.15"
     }()
 
-    static func webKitScript(for script: CefUserScript) -> WKUserScript {
+    package static func webKitScript(for script: CefUserScript) -> WKUserScript {
         var source = script.source
         if let pattern = script.urlPattern {
             let regex = "^" + pattern.split(separator: "*", omittingEmptySubsequences: false)
@@ -320,14 +340,14 @@ public final class CefSystemBrowser {
     }
 
     private final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
-        weak var browser: CefSystemBrowser?
+        weak var browser: SystemBrowser?
 
         func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction) async -> WKNavigationActionPolicy {
             guard action.targetFrame?.isMainFrame ?? true, let browser, let decide = browser.decidePolicy else {
                 return .allow
             }
-            let navigation = CefNavigationAction(
-                url: action.request.url, isRedirect: false,
+            let navigation = Navigation(
+                url: action.request.url,
                 hasUserGesture: action.navigationType == .linkActivated || action.navigationType == .formSubmitted)
             return decide(browser, navigation) == .allow ? .allow : .cancel
         }
@@ -345,18 +365,36 @@ public final class CefSystemBrowser {
     }
 }
 
-extension CefProfile {
-    /// The WebKit website data store ``CefSystemBrowser`` uses for this
-    /// profile, from the profile's ``storage``.
-    var systemWebsiteDataStore: WKWebsiteDataStore {
-        if let store = systemEngineDataStore as? WKWebsiteDataStore { return store }
+// MARK: Website data stores
+
+extension SystemBrowser {
+    /// The stores made so far, one per profile, kept while the profile is.
+    private static let dataStores = NSMapTable<CefProfile, WKWebsiteDataStore>.weakToStrongObjects()
+
+    /// The WebKit website data store for `profile`: the default store for
+    /// the default profile, an in-memory one for an incognito profile, and
+    /// a persistent one named by ``dataStoreIdentifier(_:)`` otherwise.
+    static func dataStore(for profile: CefProfile) -> WKWebsiteDataStore {
+        if let store = dataStores.object(forKey: profile) { return store }
         let store: WKWebsiteDataStore
-        switch storage.webKitStore {
-        case .default: store = .default()
-        case .nonPersistent: store = .nonPersistent()
-        case .persistent(let identifier): store = WKWebsiteDataStore(forIdentifier: identifier)
+        if profile === CefProfile.default {
+            store = .default()
+        } else if profile.isIncognito {
+            store = .nonPersistent()
+        } else {
+            store = WKWebsiteDataStore(forIdentifier: dataStoreIdentifier(profile.id))
         }
-        systemEngineDataStore = store
+        dataStores.setObject(store, forKey: profile)
         return store
+    }
+
+    /// The persistent WebKit store's identifier for a profile identifier:
+    /// a UUID derived from it, the same on every launch.
+    package static func dataStoreIdentifier(_ id: String) -> UUID {
+        var bytes = Array(SHA256.hash(data: Data("CefSwift profile \(id)".utf8)).prefix(16))
+        bytes[6] = (bytes[6] & 0x0F) | 0x50  // name-based UUID (version 5 layout)
+        bytes[8] = (bytes[8] & 0x3F) | 0x80  // RFC 4122 variant
+        return UUID(uuid: (bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+                           bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]))
     }
 }

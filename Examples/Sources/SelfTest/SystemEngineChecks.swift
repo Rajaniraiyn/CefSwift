@@ -1,14 +1,17 @@
 import AppKit
 @_spi(Testing) import CefKit
-import CefSystemEngine
+import Observation
+import os
+import SystemEngine
 import WebKit
 
-/// CefSystemBrowser: pages in the system's WebKit, with FairPlay.
+/// SystemBrowser (the Browser example's WebKit tabs): pages in the
+/// system's WebKit, with FairPlay.
 extension SelfTest {
     static func systemEngineChecks() async {
-        var configuration = CefSystemBrowser.Configuration()
+        var configuration = SystemBrowser.Configuration()
         configuration.userScripts = [CefUserScript(source: "window.__injected = 42;")]
-        let browser = CefSystemBrowser(configuration: configuration)
+        let browser = SystemBrowser(configuration: configuration)
         browser.nativeView.frame = window.contentView!.bounds
         window.contentView!.addSubview(browser.nativeView)
         defer {
@@ -26,7 +29,7 @@ extension SelfTest {
             do {
                 try await browser.evaluateJavaScript("(() => { throw new Error('boom') })()")
                 return false
-            } catch let error as CefJavaScriptError {
+            } catch let error as SystemBrowser.JavaScriptError {
                 return error.message.contains("boom")
             }
         }
@@ -50,7 +53,7 @@ extension SelfTest {
             do {
                 try await browser.evaluateJavaScript("throw new Error('boom')")
                 return false
-            } catch let error as CefJavaScriptError {
+            } catch let error as SystemBrowser.JavaScriptError {
                 return error.message.contains("boom")
             }
         }
@@ -58,7 +61,7 @@ extension SelfTest {
             do {
                 try await browser.evaluateJavaScript("Promise.reject(new Error('later boom'))")
                 return false
-            } catch let error as CefJavaScriptError {
+            } catch let error as SystemBrowser.JavaScriptError {
                 return error.message.contains("later boom")
             }
         }
@@ -95,10 +98,14 @@ extension SelfTest {
         }
 
         check("system engine: streaming sites prefer the system engine",
-              CefSystemBrowser.prefersSystemEngine(for: URL(string: "https://www.netflix.com/browse")!)
-                  && CefSystemBrowser.prefersSystemEngine(for: URL(string: "https://tv.apple.com/")!)
-                  && !CefSystemBrowser.prefersSystemEngine(for: URL(string: "https://example.com/")!)
-                  && !CefSystemBrowser.prefersSystemEngine(for: URL(string: "https://notnetflix.com/")!))
+              SystemBrowser.prefersSystemEngine(for: URL(string: "https://www.netflix.com/browse")!)
+                  && SystemBrowser.prefersSystemEngine(for: URL(string: "https://tv.apple.com/")!)
+                  && !SystemBrowser.prefersSystemEngine(for: URL(string: "https://example.com/")!)
+                  && !SystemBrowser.prefersSystemEngine(for: URL(string: "https://notnetflix.com/")!)
+                  && SystemBrowser.prefersSystemEngine(for: URL(string: "https://disneyplus.com/")!)
+                  && !SystemBrowser.prefersSystemEngine(for: URL(string: "https://netflix.com.example.org/")!)
+                  && !SystemBrowser.prefersSystemEngine(for: URL(string: "file:///netflix.com")!))
+        systemEngineHelperChecks()
 
         let cookieSite = URL(string: "https://cookies.selftest.invalid/")!
         CefProfile.default.setCookie(HTTPCookie(properties: [
@@ -113,23 +120,57 @@ extension SelfTest {
         await browser.nativeView.configuration.websiteDataStore.removeData(
             ofTypes: [WKWebsiteDataTypeCookies], modifiedSince: .distantPast)
 
-        let privateBrowser = CefSystemBrowser(configuration: .init(profile: .incognito()))
-        let namedBrowser = CefSystemBrowser(configuration: .init(profile: .persistent(id: "selftest-system", displayName: "SelfTest System")))
+        let privateBrowser = SystemBrowser(configuration: .init(profile: .incognito()))
+        let namedBrowser = SystemBrowser(configuration: .init(profile: .persistent(id: "selftest-system", displayName: "SelfTest System")))
         check("system engine: profiles map to WebKit data stores",
               !privateBrowser.nativeView.configuration.websiteDataStore.isPersistent
                   && namedBrowser.nativeView.configuration.websiteDataStore.isPersistent
                   && namedBrowser.nativeView.configuration.websiteDataStore.identifier
-                      == CefSystemBrowser(configuration: .init(profile: .persistent(id: "selftest-system", displayName: "SelfTest System")))
+                      == SystemBrowser(configuration: .init(profile: .persistent(id: "selftest-system", displayName: "SelfTest System")))
                           .nativeView.configuration.websiteDataStore.identifier
                   && browser.nativeView.configuration.websiteDataStore === WKWebsiteDataStore.default())
 
         await fairPlayPlaybackCheck(in: browser)
     }
 
+    /// SystemBrowser's pure helpers, which need no page.
+    static func systemEngineHelperChecks() {
+        let hostOnly = HTTPCookie(properties: [
+            .name: "a", .value: "1", .domain: "www.example.com", .path: "/", .secure: "TRUE",
+        ])!
+        let converted = SystemBrowser.webKitCookie(hostOnly)
+        let domain = HTTPCookie(properties: [.name: "b", .value: "2", .domain: ".example.com", .path: "/"])!
+        check("system engine: host-only cookies stay host-only",
+              converted.domain == "www.example.com" && converted.isSecure
+                  && SystemBrowser.webKitCookie(domain).domain == ".example.com",
+              detail: "\(converted.domain)")
+
+        let ids = ["Work", "work", "Home", "a/b", "a_b", "..", "é", "e\u{301}"]
+        check("system engine: data store identifiers are stable and distinct",
+              SystemBrowser.dataStoreIdentifier("Work") == SystemBrowser.dataStoreIdentifier("Work")
+                  && Set(ids.map(SystemBrowser.dataStoreIdentifier)).count == ids.count)
+
+        let script = SystemBrowser.webKitScript(for: CefUserScript(source: "x()", matching: "https://*.example.com/*"))
+        check("system engine: scoped user scripts check the URL",
+              script.source.hasPrefix("if (new RegExp(") && script.source.contains(".*") && script.source.contains("x()"))
+
+        let zoomed = SystemBrowser()
+        let changed = OSAllocatedUnfairLock(initialState: false)
+        withObservationTracking { _ = zoomed.pageZoom } onChange: { changed.withLock { $0 = true } }
+        zoomed.pageZoom = 1.5
+        check("system engine: pageZoom is observable",
+              changed.withLock { $0 } && zoomed.pageZoom == 1.5 && zoomed.nativeView.pageZoom == 1.5)
+
+        check("system engine: Safari application name",
+              SystemBrowser.safariApplicationName.hasPrefix("Version/")
+                  && SystemBrowser.safariApplicationName.hasSuffix(" Safari/605.1.15"),
+              detail: SystemBrowser.safariApplicationName)
+    }
+
     /// Plays Axinom's public FairPlay test stream with Shaka Player: the
     /// licence server must answer and the video must advance. Skips when
     /// the network or the test service is unavailable.
-    static func fairPlayPlaybackCheck(in browser: CefSystemBrowser) async {
+    static func fairPlayPlaybackCheck(in browser: SystemBrowser) async {
         browser.load(URL(string: "https://example.com/")!)
         guard await waitUntil(timeout: .seconds(10), { browser.url?.host == "example.com" && !browser.isLoading }) else {
             skip("system engine: FairPlay playback", because: "example.com did not load (offline?)", .environment)

@@ -47,7 +47,10 @@ A tabbed browser (`Sources/Browser`). Each tab is a Chrome-style
 - Streaming services (Netflix, Disney+ and others) in tabs shown by the
   system's WebKit, which plays FairPlay-protected video, marked with a
   WebKit badge; View › Open in WebKit moves any page there, and the tab's
-  "Open in Chromium" button moves it back.
+  "Open in Chromium" button moves it back. The WebKit side
+  (`Sources/SystemEngine`: `SystemBrowser`, `SystemWebView`) is a small
+  `WKWebView` wrapper on CefKit's public API, for pages that need FairPlay
+  or H.264 and AAC, which Chromium in CefSwift does not have.
 - Memory Saver (Settings › Put tabs to sleep): tabs hidden for 15 minutes
   or an hour, or every hidden tab when macOS reports memory pressure, are
   discarded with `CefBrowser.discard()` and dimmed in the toolbar

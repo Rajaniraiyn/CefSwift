@@ -2,8 +2,8 @@
 """Compiles the Swift samples in README.md and docs/*.md against CefSwift.
 
 Each fenced ```swift block becomes a file of a scratch package that depends
-on this checkout's CefSwiftUI and CefSystemEngine, and the package is
-built for macOS 14, the oldest system CefSwift supports. A block compiles as one of:
+on this checkout's CefSwiftUI, and the package is built for macOS 14, the
+oldest system CefSwift supports. A block compiles as one of:
 
 - declarations (types, `@main` apps): inside an enum of its own, with
   `@main` removed, so that blocks can reuse names;
@@ -42,7 +42,6 @@ DOCUMENTS = [ROOT / "README.md", *sorted((ROOT / "docs").glob("*.md"))]
 PRELUDE = """\
 import AppKit
 import CefSwiftUI
-import CefSystemEngine
 import SwiftUI
 
 // Names the samples use that an app defines. Stubs only: no CefSwift API.
@@ -85,7 +84,6 @@ struct MediaLibrary: Sendable { func file(for url: URL?) -> URL? { nil } }
 
 @MainActor func openTab(_ url: URL?) {}
 @MainActor func openTab(_ url: URL?, inBackground: Bool) {}
-@MainActor func showInNewTab(_ browser: CefSystemBrowser) {}
 @MainActor func search(_ text: String) {}
 @MainActor func askUser(about kinds: CefPermissionRequest.Kinds, from origin: String?) async -> Bool { true }
 @MainActor func askUserRemembering(about kinds: CefPermissionRequest.Kinds, from origin: String?) async -> (Bool, Bool) { (true, false) }
@@ -103,6 +101,7 @@ struct MyIndicator: View { let progress: Double; var body: some View { EmptyView
 struct FindBar: View { let session: CefFindSession; var body: some View { EmptyView() } }
 struct TabIcon: View { let browser: CefBrowser; var body: some View { EmptyView() } }
 struct StatusBubble: View { let text: String; var body: some View { EmptyView() } }
+struct QRCodeView: View { let url: URL?; var body: some View { EmptyView() } }
 """
 
 DECLARATION = re.compile(r"^(@main|@MainActor|@objc|struct |final class |class |enum |actor |extension |protocol )")
@@ -189,7 +188,6 @@ let package = Package(
     targets: [
         .target(name: "DocSamples", dependencies: [
             .product(name: "CefSwiftUI", package: "CefSwift"),
-            .product(name: "CefSystemEngine", package: "CefSwift"),
         ]),
     ]
 )

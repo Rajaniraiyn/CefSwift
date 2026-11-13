@@ -246,8 +246,10 @@ extension CefJSON {
 extension CefJSON {
     /// Converts Foundation values: the output of `JSONSerialization`, or
     /// what WebKit returns from JavaScript (NSNumber, NSString, NSArray,
-    /// NSDictionary, NSNull, NSDate or nil).
-    package init(foundationValue value: Any?) {
+    /// NSDictionary, NSNull, NSDate or nil). A date becomes its
+    /// milliseconds since 1970, as JavaScript's `Date` counts; any other
+    /// value its description.
+    public init(foundationValue value: Any?) {
         switch value {
         case nil, is NSNull:
             self = .null

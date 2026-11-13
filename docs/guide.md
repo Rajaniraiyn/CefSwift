@@ -1712,9 +1712,13 @@ Chromium's window is hidden before it is seen. In SwiftUI:
 window.setFindBar { session in FindBar(session: session) }      // under the toolbar, as in Safari
 window.setStatusBubble { text in StatusBubble(text: text) }      // over the page
 window.setCustomPresentation(for: .qrCode) { surface in         // in a panel at the kind's anchor
-    CefQRCodeView(url: surface.url).frame(width: 200, height: 200).padding()
+    QRCodeView(url: surface.url).frame(width: 200, height: 200).padding()
 }
 ```
+
+`FindBar`, `StatusBubble` and `QRCodeView` are views of your own; the
+Browser example has all three (`QRCodeView` draws the code with Core
+Image's `CIFilter.qrCodeGenerator()`).
 
 A surface carries what a replacement needs: `kind`, `title`, `browser`,
 `url` (the address a QR code encodes, or the page's), `anchorRect`,
@@ -1728,7 +1732,7 @@ a presenter included.
 | Surface | Kind | Native | Custom: what you get | Notes |
 |---|---|---|---|---|
 | Find bar | `.findBar` | Yes | `browser.findSession`: `text`, `isCaseSensitive`, `matchCount`, `activeMatch`, `next()`, `previous()`, `end()` | ⌘G and ⇧⌘G move through the matches. |
-| QR code | `.qrCode` | Yes | `url`; draw it with `CefQRCodeView` or `CefQRCode.image(for:size:)` | |
+| QR code | `.qrCode` | Yes | `url`, to encode with Core Image's `CIFilter.qrCodeGenerator()` | |
 | Cast | `.cast` | Yes | `url`; `CefMediaRouter.shared` lists `sinks` and `routes` and casts Cast apps and presentation URLs | Mirroring a tab needs Chromium's dialog. |
 | Share | `.share` | No: Chromium's share menu needs its toolbar | `url`, `title` | By default the command opens macOS's share menu at the anchor. |
 | HTTP sign-in | `.signIn` | Yes | No: the credentials go to Chromium's dialog | Only with `authenticationPrompt = .chromium`; by default the delegate answers. Dismissing cancels the sign-in. |
@@ -1853,7 +1857,7 @@ theme. Browsers that share a profile share all of it.
 |---|---|
 | `CefProfile.default` | `cacheDirectory`, used when `CefBrowser.Configuration.profile` is `nil`. |
 | `CefProfile.persistent(id:displayName:)` | `<root>/Profiles/<id>`, with characters other than lowercase letters, digits, `-` and `_` percent-encoded. The same identifier returns the same profile. |
-| `CefProfile.incognito()` | In memory only; discarded with the profile. |
+| `CefProfile.incognito()` | In memory only; discarded with the profile. Its `isIncognito` is true. |
 
 ```swift
 let profile = CefProfile.persistent(id: "work", displayName: "Work")
@@ -2376,10 +2380,11 @@ answers ranges itself.
 ## Playing streaming services
 
 Streaming services protect their video with DRM, which browsers expose
-through Encrypted Media Extensions (EME). A CefSwift app has two engines for
-it:
+through Encrypted Media Extensions (EME). Chromium in CefSwift has Widevine;
+the system's WebKit, which an app can show beside it in a `WKWebView`, has
+FairPlay:
 
-| | Chromium (`CefBrowser`) | WebKit (`CefSystemBrowser`) |
+| | Chromium (`CefBrowser`) | WebKit (`WKWebView`) |
 |---|---|---|
 | DRM | Widevine, downloaded from Google at run time; Clear Key | FairPlay Streaming; Clear Key |
 | Widevine level | Software (L3), host not verified (no VMP) | — |
@@ -2388,10 +2393,11 @@ it:
 | Needs | Nothing for test streams and services that accept L3 | Nothing: no entitlement, licence or signing |
 | Plays Netflix-class services | No: they require VMP | Yes, as Safari does (see [Services](#services)) |
 
-The short version: services that play in Safari play in a
-`CefSystemBrowser`, and Chromium plays Widevine content that does not
-require a verified host. Show streaming sites in WebKit and everything else
-in Chromium.
+The short version: services that play in Safari play in a `WKWebView`,
+and Chromium plays Widevine content that does not require a verified host.
+An app that needs both shows streaming sites in WebKit and everything else
+in Chromium, as the Browser example does ([WebKit and
+FairPlay](#webkit-and-fairplay)).
 
 ### Widevine in Chromium
 
@@ -2479,74 +2485,29 @@ ad hoc signing do not affect Widevine.
 
 ### WebKit and FairPlay
 
-`CefSystemBrowser` shows a page with the system's WebKit, the engine Safari
-uses, which has FairPlay Streaming through EME. Any app can use it: FairPlay
-in a `WKWebView` needs no entitlement, licence or signing, and the page
-identifies as Safari, so services serve their Safari player.
+FairPlay Streaming exists only in Apple's WebKit, the engine Safari uses.
+CefSwift does not wrap it, but an app can show the pages that need it in a
+`WKWebView` beside its Chromium browsers: FairPlay in a `WKWebView` needs no
+entitlement, licence or signing, and a page that identifies as Safari
+(`applicationNameForUserAgent` ending `Version/<Safari's version>
+Safari/605.1.15`) gets the service's Safari player. The same goes for
+content in H.264 or AAC, which Chromium in CefSwift cannot decode.
 
-It lives in its own library, `CefSystemEngine`, so that apps that never use
-it do not link WebKit. Add the `CefSystemEngine` product to your target and
-import it:
+The Browser example does this. Its `SystemEngine` target
+([`Examples/Sources/SystemEngine`](../Examples/Sources/SystemEngine)) is a
+small `WKWebView` wrapper written against CefKit's public API:
 
-```swift
-import CefSystemEngine
-
-@State private var movie = CefSystemBrowser(url: URL(string: "https://www.netflix.com/")!)
-
-var body: some View {
-    CefSystemWebView(movie)
-        .navigationTitle(movie.title)
-}
-```
-
-It has the parts of `CefBrowser`'s surface WebKit offers:
-
-| `CefSystemBrowser` | |
-|---|---|
-| `url`, `title`, `isLoading`, `estimatedProgress`, `canGoBack`, `canGoForward`, `hasOnlySecureContent` | Observable, as on `CefBrowser`. |
-| `load(_:)`, `loadHTML(_:baseURL:)`, `goBack()`, `goForward()`, `reload(ignoringCache:)`, `stopLoading()`, `close()` | Navigation. |
-| `evaluateJavaScript(_:)`, `evaluateJavaScript(_:as:)` | Awaits promises; throws `CefJavaScriptError`. |
-| `configuration.userScripts` | `CefUserScript`s, with `urlPattern`, `injectionTime` and `frames`, in the page's content world. |
-| `find(_:backwards:caseSensitive:)`, `pageZoom`, `snapshot()` | Find, zoom, a PNG of the page. |
-| `decidePolicy`, `onOpenWindow` | Main-frame navigation decisions and new windows. |
-| `configuration.identifiesAsSafari` | On by default: the User-Agent ends `Version/<Safari's version> Safari/605.1.15`. |
-| `nativeView` | The `WKWebView`. |
-
-Chromium's own features (the DevTools protocol, bridges, `chrome://` pages,
-extensions, passkey modes, downloads, discarding) belong to `CefBrowser`
-only. Element full screen is on and AirPlay is allowed; pages are not
-offered picture in picture (`webkitSupportsPresentationMode('picture-in-picture')`
-is false in a `WKWebView`).
-
-**Choosing the engine.** `CefSystemBrowser.prefersSystemEngine(for:)` is true
-for the hosts in `CefSystemBrowser.protectedStreamingHosts` (Netflix,
-Disney+, Prime Video, Max, Hulu, Apple TV, Peacock, Paramount+ and others;
-edit the set to suit your app). Hand such navigations over from your
-`CefBrowserDelegate`:
-
-```swift
-import CefSystemEngine
-
-func browser(_ browser: CefBrowser, decidePolicyFor navigation: CefNavigationAction) -> CefNavigationDecision {
-    guard let url = navigation.url, CefSystemBrowser.prefersSystemEngine(for: url) else { return .allow }
-    let profile = browser.configuration.profile ?? .default
-    let movie = CefSystemBrowser(configuration: .init(profile: profile))
-    Task {
-        await movie.importCookies(from: profile, for: url)   // optional: carry a sign-in over
-        movie.load(url)
-    }
-    showInNewTab(movie)
-    return .cancel
-}
-```
-
-**Website data.** WebKit keeps its own cookies and storage, separate from
-Chromium's. Each `CefProfile` maps to a WebKit data store: the default
-profile to the app's default store, `.persistent(id:displayName:)` to a
-persistent store derived from its identifier, and `.incognito()` to an in-memory store discarded with
-the profile. `importCookies(from:for:)` copies the Chromium profile's
-cookies for one site into the WebKit store, when you call it and not
-otherwise.
+- `SystemBrowser.prefersSystemEngine(for:)` names the streaming hosts to
+  hand over; the example's `browser(_:decidePolicyFor:)` cancels such a
+  navigation and opens the URL in a WebKit tab instead.
+- Each `CefProfile` maps to a WebKit data store of its own (the default
+  store for `.default`, an in-memory one when `isIncognito`, a persistent
+  one derived from the profile's `id` otherwise), so WebKit keeps cookies
+  and storage apart from Chromium's.
+- `importCookies(from:for:)` copies the cookies `CefProfile.cookies(for:)`
+  returns for one site into the WebKit store, carrying a sign-in over.
+- `evaluateJavaScript` runs classic scripts and awaits promises, as
+  `CefBrowser`'s does, and `CefUserScript`s become `WKUserScript`s.
 
 The Browser example opens streaming services in WebKit tabs by itself
 (Settings: "Play streaming services with WebKit"), marks them with a WebKit
@@ -2723,7 +2684,5 @@ the switches measured and not used.
   Mac App Store ([bundling](bundling.md#app-sandbox)).
 - Chromium plays Widevine only as an unverified software (L3) client and
   has no H.264, HEVC or AAC, so Netflix-class services do not play in it;
-  `CefSystemBrowser` plays them with WebKit and FairPlay
+  WebKit plays them with FairPlay, beside Chromium in the Browser example
   ([Playing streaming services](#playing-streaming-services)).
-- `CefSystemBrowser` keeps website data apart from Chromium's; only
-  `importCookies(from:for:)` carries cookies across.

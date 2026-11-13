@@ -1,6 +1,6 @@
 import AppKit
 import CefSwiftUI
-import CefSystemEngine
+import SystemEngine
 import SwiftUI
 
 /// Owns the browser's tabs. Each tab is one ``CefBrowserWindow``; macOS
@@ -222,7 +222,7 @@ final class BrowserController: CefBrowserDelegate {
     func browser(_ browser: CefBrowser, decidePolicyFor navigation: CefNavigationAction) -> CefNavigationDecision {
         // Streaming services play in WebKit, which has FairPlay.
         if let url = navigation.url, SystemEngineTab.opensStreamingSitesAutomatically,
-           !keptInChromium.contains(ObjectIdentifier(browser)), CefSystemBrowser.prefersSystemEngine(for: url) {
+           !keptInChromium.contains(ObjectIdentifier(browser)), SystemBrowser.prefersSystemEngine(for: url) {
             openSystemTab(url: url, profile: browser.configuration.profile ?? .default, replacing: browser)
             return .cancel
         }

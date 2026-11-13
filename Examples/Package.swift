@@ -13,9 +13,17 @@ let package = Package(
             name: "Browser",
             dependencies: [
                 .product(name: "CefSwiftUI", package: "CefSwift"),
-                .product(name: "CefSystemEngine", package: "CefSwift"),
+                "SystemEngine",
             ],
             exclude: ["cefapp.json", "Browser.entitlements", "Browser-Distribution.entitlements"]
+        ),
+        // The Browser example's WebKit tabs (SystemBrowser, SystemWebView):
+        // pages in the system's WKWebView, which plays H.264/AAC and
+        // FairPlay content Chromium in CefSwift does not. Not CEF; shows
+        // how an app puts WebKit beside CefKit with its public API.
+        .target(
+            name: "SystemEngine",
+            dependencies: [.product(name: "CefKit", package: "CefSwift")]
         ),
         // Embedding web content in a SwiftUI app.
         .executableTarget(
@@ -42,7 +50,7 @@ let package = Package(
             name: "SelfTest",
             dependencies: [
                 .product(name: "CefSwiftUI", package: "CefSwift"),
-                .product(name: "CefSystemEngine", package: "CefSwift"),
+                "SystemEngine",
             ],
             exclude: ["cefapp.json"]
         ),

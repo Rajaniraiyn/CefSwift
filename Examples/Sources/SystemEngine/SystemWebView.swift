@@ -3,23 +3,23 @@ import CefKit
 import SwiftUI
 import WebKit
 
-/// A view that displays a ``CefSystemBrowser``: a page in the system's
+/// A view that displays a ``SystemBrowser``: a page in the system's
 /// WebKit, for sites such as streaming services that need Safari's
 /// FairPlay.
 ///
 /// ```swift
-/// @State private var movie = CefSystemBrowser(url: URL(string: "https://www.netflix.com/")!)
+/// @State private var movie = SystemBrowser(url: URL(string: "https://www.netflix.com/")!)
 ///
-/// CefSystemWebView(movie)
+/// SystemWebView(movie)
 ///     .navigationTitle(movie.title)
 /// ```
 ///
-/// The view never closes the browser; call ``CefSystemBrowser/close()``
+/// The view never closes the browser; call ``SystemBrowser/close()``
 /// when you are done with it.
-public struct CefSystemWebView: NSViewRepresentable {
-    private let browser: CefSystemBrowser
+public struct SystemWebView: NSViewRepresentable {
+    private let browser: SystemBrowser
 
-    public init(_ browser: CefSystemBrowser) {
+    public init(_ browser: SystemBrowser) {
         self.browser = browser
     }
 

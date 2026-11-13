@@ -8,8 +8,6 @@ How CefSwift works inside, and why. For how to use it, see the
 ```
 CefSwiftUI   CefSwiftApp, CefWebView, CefWindowedBrowserView, CefOffscreenBrowserView,
     │        CefBrowserWindow.setToolbar and setTabAccessory
-    │  CefSystemEngine  CefSystemBrowser, CefSystemWebView: pages in the system's
-    │   │               WebKit; the only module that links WebKit
 CefKit       CefRuntime, CefBrowser, CefBrowserWindow, CefBrowserDelegate, CefBridge,
     │        CefDevTools, CefProfile, configuration and policy types
 CCef         vendored CEF C headers, the generated bridge, the runtime loader (C)

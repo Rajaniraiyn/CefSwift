@@ -46,10 +46,9 @@ public final class CefProfile {
     /// browser; set it before then. The default profile always uses the
     /// configuration's.
     public var acceptLanguages: [String]?
-    /// The profile's WebKit data store (a `WKWebsiteDataStore`), made and
-    /// kept by the CefSystemEngine module, so that CefKit does not link
-    /// WebKit.
-    package var systemEngineDataStore: AnyObject?
+
+    /// Whether the profile is in memory only, made by ``incognito()``.
+    public var isIncognito: Bool { kind == .incognito }
 
     private init(kind: Kind, id: String, displayName: String) {
         self.kind = kind
@@ -379,39 +378,25 @@ public final class CefProfile {
 
     // MARK: Storage layout
 
-    /// Where a profile keeps its data, for both engines.
+    /// Where a profile keeps its data.
     package struct Storage: Equatable {
-        /// The WebKit website data store a profile maps to.
-        package enum WebKitStore: Equatable {
-            /// The app's default store.
-            case `default`
-            /// An in-memory store, discarded with the profile.
-            case nonPersistent
-            /// The persistent store with this identifier.
-            case persistent(UUID)
-        }
-
         /// Chromium's directory for the profile: `nil` for the default
         /// profile, which lives at the configuration's cache directory, and
         /// for an in-memory one.
         package var chromiumDirectory: URL?
-        package var webKitStore: WebKitStore
     }
 
     /// The one storage layout for a profile kind under `rootCacheDirectory`
     /// (``CefRuntime/Configuration/resolvedRootCacheDirectory``).
     static func storage(for kind: Kind, rootCacheDirectory: URL) -> Storage {
         switch kind {
-        case .global:
-            return Storage(chromiumDirectory: nil, webKitStore: .default)
-        case .incognito:
-            return Storage(chromiumDirectory: nil, webKitStore: .nonPersistent)
+        case .global, .incognito:
+            return Storage(chromiumDirectory: nil)
         case .persistent(let id):
             return Storage(
                 chromiumDirectory: rootCacheDirectory
                     .appendingPathComponent("Profiles", isDirectory: true)
-                    .appendingPathComponent(directoryName(for: id), isDirectory: true),
-                webKitStore: .persistent(dataStoreIdentifier(id)))
+                    .appendingPathComponent(directoryName(for: id), isDirectory: true))
         }
     }
 
@@ -435,16 +420,6 @@ public final class CefProfile {
         guard name.count > 200 else { return name }
         let digest = SHA256.hash(data: Data(id.utf8)).map { String(format: "%02x", $0) }.joined()
         return String(name.prefix(130)) + "~" + digest
-    }
-
-    /// The persistent WebKit store's identifier for a profile identifier:
-    /// a UUID derived from it, the same on every launch.
-    static func dataStoreIdentifier(_ id: String) -> UUID {
-        var bytes = Array(SHA256.hash(data: Data("CefSwift profile \(id)".utf8)).prefix(16))
-        bytes[6] = (bytes[6] & 0x0F) | 0x50  // name-based UUID (version 5 layout)
-        bytes[8] = (bytes[8] & 0x3F) | 0x80  // RFC 4122 variant
-        return UUID(uuid: (bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
-                           bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]))
     }
 
     /// This profile's storage under the running configuration's root.
