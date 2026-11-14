@@ -92,6 +92,46 @@ import CefBase
         #expect(download.browser === first)
     }
 
+    /// Removal takes finished downloads out of both lists, and keeps one
+    /// that can still go on.
+    @Test func removingDownloadsKeepsThoseThatCanGoOn() {
+        let profile = CefProfile.incognito()
+        let browser = CefBrowser(configuration: Self.configuration(profile: profile))
+        let control = CefRef(adopting: cefAllocate(cef_download_item_callback_t.self, owner: NSObject()))
+        browser.applyDownload(CefDownload.Snapshot(id: 1, suggestedFilename: "done.zip", state: .completed), control: nil)
+        browser.applyDownload(CefDownload.Snapshot(id: 2, suggestedFilename: "going.zip"), control: control)
+        browser.applyDownload(CefDownload.Snapshot(id: 3, suggestedFilename: "paused.zip", state: .paused), control: control)
+        browser.applyDownload(CefDownload.Snapshot(id: 4, suggestedFilename: "stuck.zip", state: .interrupted(.networkFailed)),
+                              control: nil)
+        browser.applyDownload(CefDownload.Snapshot(id: 5, suggestedFilename: "gone.zip", state: .cancelled), control: nil)
+
+        profile.removeDownloads { $0.state == .cancelled || $0.state == .inProgress }
+        #expect(profile.downloads.map(\.suggestedFilename) == ["done.zip", "going.zip", "paused.zip", "stuck.zip"])
+        #expect(browser.downloads.map(\.suggestedFilename) == profile.downloads.map(\.suggestedFilename))
+
+        profile.removeFinishedDownloads()
+        #expect(profile.downloads.map(\.suggestedFilename) == ["going.zip", "paused.zip"])
+        #expect(browser.downloads.map(\.suggestedFilename) == ["going.zip", "paused.zip"])
+
+        // A later report of a removed download makes it anew.
+        browser.applyDownload(CefDownload.Snapshot(id: 1, suggestedFilename: "done.zip", state: .completed), control: nil)
+        #expect(profile.downloads.count == 3 && browser.downloads.count == 3)
+    }
+
+    @Test func downloadsCarryTheirOriginAndDates() {
+        let browser = CefBrowser(configuration: Self.configuration(profile: .incognito()))
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        browser.applyDownload(CefDownload.Snapshot(
+            id: 9, url: URL(string: "https://cdn.example/f.zip"), originalURL: URL(string: "https://example.com/get"),
+            startDate: start), control: nil)
+        let download = try! #require(browser.downloads.first)
+        #expect(download.originalURL?.host() == "example.com" && download.startDate == start && download.endDate == nil)
+        browser.applyDownload(CefDownload.Snapshot(
+            id: 9, url: URL(string: "https://cdn.example/f.zip"), startDate: start, endDate: start + 5, state: .completed),
+            control: nil)
+        #expect(download.originalURL?.host() == "example.com" && download.endDate == start + 5)
+    }
+
     static func configuration(profile: CefProfile) -> CefBrowser.Configuration {
         var configuration = CefBrowser.Configuration()
         configuration.profile = profile

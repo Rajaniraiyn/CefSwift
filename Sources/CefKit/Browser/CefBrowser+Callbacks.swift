@@ -14,7 +14,11 @@ extension CefBrowser {
         // or the reload it asked for, was about.
         endUnresponsiveEpisode()
         pageScripting.mainFrameDidStartLoading()
+        hideTooltip()
         let wasDiscarded = isDiscarded
+        // The document has committed, so a level set before the browser
+        // existed applies to its site.
+        applyPendingZoomLevel(for: url)
         pageDidStartLoading()
         // The new document reports its own icon. A restored page keeps the
         // one it had until then, so its tab does not flash empty.
@@ -146,7 +150,6 @@ extension CefBrowser {
         download.apply(snapshot)
         // Kept while the download can go on, paused or interrupted included.
         download.control = download.state.isFinished ? nil : control
-        delegate?.browser(self, downloadDidUpdate: download)
     }
 
     /// Routes a window-open request. Returns `true` when CEF must not create
@@ -305,6 +308,7 @@ extension CefBrowser {
 
     func handleClosed() {
         guard state != .closed else { return }
+        hideTooltip()
         if discardPhase == .closing {
             browserDidCloseForDiscard()
             return

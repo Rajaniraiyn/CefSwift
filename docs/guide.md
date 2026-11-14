@@ -30,6 +30,7 @@ The runtime, browser, window and profile APIs are `@MainActor`.
   - [Background](#background)
   - [In AppKit](#in-appkit)
   - [Offscreen rendering](#offscreen-rendering)
+  - [Tooltips](#tooltips)
   - [Swipe navigation](#swipe-navigation)
   - [Offscreen accessibility](#offscreen-accessibility)
   - [Keyboard focus](#keyboard-focus)
@@ -44,6 +45,8 @@ The runtime, browser, window and profile APIs are `@MainActor`.
   - [Built-in sheets](#built-in-sheets)
   - [HTTP authentication](#http-authentication)
   - [Navigation and new windows](#navigation-and-new-windows)
+  - [Back and forward](#back-and-forward)
+  - [Links to other apps](#links-to-other-apps)
   - [Downloads](#downloads)
   - [File choosers](#file-choosers)
   - [Passkeys](#passkeys)
@@ -148,7 +151,7 @@ Start from a preset and change what you need:
 
 | Preset | Use |
 |---|---|
-| `CefRuntime.Configuration.embedded` | Showing your own or trusted web content. Turns off background networking, component updates, Widevine, sync, translation, preloading, hyperlink auditing, password saving and autofill, first-run and default-browser prompts, and starts renderer processes only when a page needs one. |
+| `CefRuntime.Configuration.embedded` | Showing your own or trusted web content. Turns off background networking, component updates, Widevine, sync, translation, preloading, hyperlink auditing, password saving and autofill, first-run and default-browser prompts, and starts renderer processes only when a page needs one. With component updates off, CRLSets and the Certificate Transparency log list go stale, so an app that shows arbitrary sites should turn `services.componentUpdates` back on. |
 | `CefRuntime.Configuration.chrome` | Arbitrary sites with Chrome's services. Keeps session cookies across launches and skips first-run and default-browser prompts; everything else is as Chromium has it and as users set it in `chrome://settings`, Widevine included. |
 | `CefRuntime.Configuration()` | Chromium's defaults. |
 
@@ -398,12 +401,13 @@ if !capabilities.webAuthnAuthenticators.contains(.iCloudKeychain) {
 
 | Property | Value |
 |---|---|
-| `signature` | `.unsigned`, `.adHoc`, `.development`, `.developerID`, `.appStore` or `.other` (a certificate without an Apple team). |
+| `signature` | `.unsigned`, `.adHoc`, `.development`, `.developerID`, `.appStore` or `.other` (a certificate without an Apple team). `.appStore` is diagnostic only, like `isAppSandboxed`. |
 | `teamIdentifier` | The team of an Apple certificate, else nil. |
-| `isHardenedRuntime`, `isAppSandboxed` | From the signature's flags and entitlements. |
+| `isHardenedRuntime` | From the signature's flags. |
+| `isAppSandboxed` | From the entitlements. Diagnostic only: the App Sandbox is not supported with official CEF builds and bundling refuses it, so a bundled app never reports `true` ([App Sandbox](bundling.md#app-sandbox)). |
 | `entitlements`, `keychainAccessGroups` | The entitlements the signature grants. |
 | `usageDescriptions` | The `NS…UsageDescription` keys in the Info.plist. |
-| `webAuthnAuthenticators` | `.securityKey`, `.hybrid`, `.touchID`, `.iCloudKeychain`: Chromium's native WebAuthn authenticators the app has. |
+| `webAuthnAuthenticators` | `.securityKey`, `.hybrid`, `.iCloudKeychain`: Chromium's native WebAuthn authenticators the app's signature and configuration make it eligible for. Not proof that one is attached or that the user will authorize it. |
 | `canLoadWidevine` | Whether the base helper can load Google's Widevine CDM: false for a team-signed hardened helper without `disable-library-validation` (the `protectedMedia` capability). |
 | `resolvedSafeStorage(_:)` | The safe-storage policy Chromium gets for a configured one. |
 
@@ -492,8 +496,8 @@ when it is first shown.
 | Kind | Members |
 |---|---|
 | State | `url`, `title`, `isLoading`, `estimatedProgress`, `canGoBack`, `canGoForward`, `favicon`, `faviconURL`, `zoomLevel`, `isFullscreen`, `statusText`, `downloads`, `findResult`, `state` (`.pending`, `.live`, `.closed`) |
-| Navigation | `load(_:)` (returns a `CefNavigation`), `goBack()`, `goForward()`, `reload(ignoringCache:)`, `stopLoading()`, `waitUntilLoaded(timeout:)` ([waiting for a load](#waiting-for-a-load)) |
-| Page | `isAudioMuted`, `find(_:backwards:caseSensitive:)`, `stopFinding(clearingSelection:)`, `findSession` (an observable find-bar model), `print()`, `pdf(configuration:)`, `printToPDF(at:configuration:)` ([PDF](#pdf)), `snapshot()` |
+| Navigation | `load(_:)` (returns a `CefNavigation`), `goBack()`, `goForward()`, `backForwardList`, `go(to:)` ([back/forward list](#back-and-forward)), `reload(ignoringCache:)`, `stopLoading()`, `waitUntilLoaded(timeout:)` ([waiting for a load](#waiting-for-a-load)) |
+| Page | `isAudioMuted`, `zoom(_:)`, `canZoom(_:)`, `defaultZoomLevel`, `exitFullscreen()`, `replaceMisspelling(with:)`, `learnSpelling(_:)`, `text(of:)`, `source(of:)`, `find(_:backwards:caseSensitive:)` (its `findResult` has the match's `selectionRect`), `stopFinding(clearingSelection:)`, `findSession` (an observable find-bar model), `print()` (Chromium's printing, which in Chrome style is Chrome's print preview, not the system dialog), `pdf(configuration:)`, `printToPDF(at:configuration:)` ([PDF](#pdf)), `snapshot()` |
 | JavaScript | `evaluateJavaScript(_:timeout:)`, `evaluateJavaScript(_:as:timeout:)`, `executeJavaScript(_:)`, `addUserScript(_:)` |
 | DevTools | `devTools`, `showDevTools(inspecting:)`, `closeDevTools()`, `isShowingDevTools` |
 | Lifetime | `ready()`, `close(force:)` |
@@ -547,7 +551,25 @@ each site, restored as the browser moves between sites, and Chrome's zoom
 commands. CEF does not report zoom changes, so CefKit reads the level back
 after navigations, zoom commands and changes made through `zoomLevel`; other
 changes show up at the next navigation. In a windowed browser, pinching
-magnifies the page without changing `zoomLevel`.
+magnifies the page without changing `zoomLevel`. A level set before the
+browser exists applies to its first page, as `isAudioMuted` set early
+applies once it exists.
+
+`zoom(.zoomIn)`, `zoom(.zoomOut)` and `zoom(.reset)` step through Chrome's
+preset factors (90%, 100%, 110%, 125%, …) as the View menu does, and
+`canZoom(_:)` says whether a step can be taken, for enabling menu items.
+`defaultZoomLevel` is the level a page opens at with no site-specific one.
+The level stays CEF's logarithmic one; a factor is `pow(1.2, zoomLevel)`.
+
+`exitFullscreen()` takes the page out of fullscreen, for an app's own
+command: a Chrome-style browser leaves on Escape and the window's green
+button by itself, an Alloy-style one needs the app to ask.
+
+`CefRuntime.shared.securityDisplayString(for:)` formats a URL as Chromium
+shows a site to people deciding whether to trust it: scheme and host
+only, no default port, and an internationalized domain in Unicode only
+where that is safe from look-alikes (otherwise Punycode). Use it for an
+address bar's security view or a permission prompt, never to parse.
 
 A browser holds its `delegate` weakly, as `WKWebView` does. Keep a strong
 reference to the delegate for as long as the browser lives; a delegate
@@ -789,9 +811,18 @@ final class BrowserWindowController: NSWindowController {
 Chromium creates the browser once its view is in a window. A view never
 closes its browser: call `close(force:)` when you are done with it.
 Assigning another browser to `browser` shows that one instead, and moving a
-live browser to another view keeps its page. To draw frames or host a
-windowed browser in a view of your own, see
+live browser to another view keeps its page. A browser shows in one view at
+a time: the view it leaves sets its own `browser` to nil, and no longer
+hosts it, resizes it, forwards input or answers accessibility for it. To
+draw frames or host a windowed browser in a view of your own, see
 [Offscreen rendering](#offscreen-rendering) and `browser.host(windowedIn:)`.
+
+`browser.stopHosting(in: host)` withdraws a browser from a host without
+closing it: a creation waiting for the profile to load is dropped, a
+windowed browser's native view leaves the host, and an offscreen browser
+stops painting. It does nothing unless `host` is the browser's current
+host, so a host that has been replaced cannot take the browser from the
+newer one. Host it again to show it.
 
 ### Offscreen rendering
 
@@ -838,6 +869,58 @@ In return the host drives the browser as AppKit drives a view:
   `draggingUpdated(at:modifiers:allowedOperations:)`, `draggingExited()`,
   `performDrop(at:modifiers:)` and `draggingSessionEnded(at:operation:)`,
   which mirror `NSDraggingDestination` and `NSDraggingSource`.
+
+The page's tooltips (a `title` under the mouse) reach the host through
+`offscreenDidChangeToolTip(_:)`; `CefOffscreenBrowserView` shows them as
+its own `toolTip`, as AppKit does for any view (see [Tooltips](#tooltips)).
+
+### Tooltips
+
+`browser.tooltip` is the page's tooltip while one shows: its `text` (a
+`title` attribute's, which can run over several lines) and the pointer's
+`location` in the host view (top-left origin; Chromium gives no anchor of
+its own). It is observable, and goes when the pointer moves off, the page
+navigates, the browser closes or is discarded, and, in an offscreen
+browser, when the user scrolls or types or the view loses key status.
+
+`browser.tooltipPolicy` says who shows it:
+
+| Policy | Offscreen (`CefOffscreenBrowserView`) | Windowed and Chrome style |
+|---|---|---|
+| `.automatic` (default) | The view's own `toolTip`, with AppKit's look, delay and placement. | Chromium's own tooltip. |
+| `.custom` | Nothing: the app shows `browser.tooltip`. | Nothing: `on_tooltip` answers that the app shows it. |
+
+With `.custom`, draw the tooltip yourself, for example over an offscreen
+`CefWebView`, where SwiftUI content can sit above the page; keep it out of
+hit testing so the page still gets the pointer:
+
+```swift
+CefWebView(browser)
+    .overlay(alignment: .topLeading) {
+        if let tooltip = browser.tooltip {
+            Text(tooltip.text)
+                .font(.callout)
+                .padding(6)
+                .background(.regularMaterial, in: .rect(cornerRadius: 6))
+                .offset(x: tooltip.location.x, y: tooltip.location.y + 18)
+                .allowsHitTesting(false)
+        }
+    }
+    .onAppear { browser.tooltipPolicy = .custom }
+```
+
+Only `title` text comes this way. A page's own tooltips (a `popover`, an
+`interestfor` target, CSS) are page content and already show in the page;
+the tooltips of Chromium's own interface, such as a `CefWindow`'s toolbar
+buttons, are Chromium's. A windowed browser's native view sits above
+SwiftUI content, so a custom tooltip for one needs a view or window of
+your own above it. SelfTest measures the offscreen cases; the windowed
+and Chrome-style ones need the real pointer, which an unattended run does
+not move.
+
+When the browser moves to another host, or `stopHosting(in:)` withdraws it,
+the host hears `offscreenDidStopHosting(_:)`: stop calling the browser
+from then on. The new host gets the whole page painted again.
 
 `CefOffscreenBrowserView` is the reference implementation.
 
@@ -1008,8 +1091,9 @@ same set:
 A browser that is shown, starts loading or navigates while it is being
 discarded stays loaded, and `discard()` throws.
 
-Every blocker is something Chromium or CefKit knows natively; CefKit does
-not read the page's content to find more. Chrome-style browsers get
+Every blocker but `.beforeUnloadHandler` is something Chromium or CefKit
+knows natively; that one reads the page's listeners through the DevTools
+Protocol, and no check reads the page's content. Chrome-style browsers get
 Chromium's own discard rules, which cover audio, form input, picture in
 picture and devices in every frame. A `CefWebView` browser gets audio and
 form input from where Chromium's rules read them, its performance
@@ -1026,10 +1110,22 @@ If a CEF update changes that page's interface, the check reports
 `.beforeUnloadHandler` is asked of the DevTools Protocol in both runtime
 styles, for every frame, since Chromium runs `beforeunload` in each: a
 listener added or removed after load, `window.onbeforeunload`, and
-handlers in same-site and cross-site `iframe`s all count. Asking attaches
-the browser's DevTools session if nothing else had (see
+handlers in same-site and cross-site `iframe`s all count. It is asked
+last, only when no other blocker applies, so a browser that is visible,
+playing audio or holding form input is never asked, and a set with
+another blocker may lack `.beforeUnloadHandler`. Asking attaches the
+browser's DevTools session if nothing else had (see
 [Compatibility with bot protection](#compatibility-with-bot-protection));
-it enables no domain and takes a few milliseconds.
+it enables no domain and takes a few milliseconds. CEF keeps a session
+attached until the browser closes, or is discarded by closing it, and has
+no call to detach it, so a policy that polls hidden tabs leaves attached
+only those that got that far.
+
+`discard()` itself could find `beforeunload` natively in a `CefWebView`,
+by closing the Chromium browser without forcing it and answering "stay"
+when the page asks, but that runs the page's `beforeunload` handlers while
+it is hidden, which Chrome's own discarding never does and a page can
+observe; so it uses the same checks as `discardBlockers()`.
 
 `restore()` loads a discarded page at once, even while it is hidden. The
 delegate hears `browserWillDiscard(_:)`, while the page can still be read,
@@ -1227,6 +1323,28 @@ one frame, cross-site frames in other renderer processes included, as the
 main-frame versions do. An evaluation in a frame that is gone, or that
 goes while the script runs, throws `CefError.frameDetached`.
 
+`text(of:)` and `source(of:)` read a frame's text (as `innerText` renders
+it) and its HTML (the document as it is now, serialized) natively from
+the renderer, without running script in the page; with no frame, the main
+frame's:
+
+```swift
+let words = try await browser.text().split(whereSeparator: \.isWhitespace).count
+```
+
+`load(_:)` also takes a `URLRequest`, to send a method, headers and a
+body (`httpBody`), as a form posting would. CEF allows it only from a
+page of the request's own origin (otherwise Chromium ends the renderer),
+so the navigation fails at once, sending nothing, unless the main frame
+is already on that origin:
+
+```swift
+var request = URLRequest(url: URL(string: "https://example.com/search")!)
+request.httpMethod = "POST"
+request.httpBody = Data("q=chromium".utf8)
+try await browser.load(request).waitUntilLoaded()
+```
+
 ### User scripts and style sheets
 
 User scripts run in every document the browser loads, before the page's own
@@ -1359,6 +1477,7 @@ final class Policy: CefBrowserDelegate {
 | `browser(_:decideDestinationFor:) async` | `CefDownloadDecision.default(for:)`: the profile's `downloadPolicy`, the Downloads folder unless set. See [Downloads](#downloads) |
 | `browser(_:decidePolicyFor:)` | `.allow` |
 | `browser(_:decideWindowOpenFor:)` | `CefWindowOpenDecision.default(for:)` |
+| `browser(_:decideExternalProtocolFor:) async` | Native sheet (`CefExternalProtocolPresenter`); `.deny` when no app handles the scheme. See [Links to other apps](#links-to-other-apps) |
 | `browser(_:handleKeyEvent:isBeforePage:)` | `false` |
 | `browser(_:runContextMenu:for:) async` | Native menu at the click (`CefContextMenuPresenter`); see [Context menu](#context-menu) |
 | `browser(_:handleChromeCommand:disposition:)` | `false`: Chrome runs the command |
@@ -1372,9 +1491,10 @@ sheets dismiss themselves.
 Events: `browserDidCreate(_:)`, `browserDidClose(_:)`, `browser(_:didOpen:)`
 (a popup or DevTools browser opened on this browser's behalf, which inherits
 the delegate), `browser(_:didFinishLoadWithStatus:)`,
-`browser(_:didFailLoad:)`, `browser(_:didLog:)`,
-`browser(_:renderProcessDidTerminate:)` and
-`browser(_:downloadDidUpdate:)`.
+`browser(_:didFailLoad:)`, `browser(_:didLog:)` and
+`browser(_:renderProcessDidTerminate:)`. Downloads have no event: each
+`CefDownload` is observable, and the profile and browser list them
+([Downloads](#downloads)).
 
 `CefDialogPresenter` provides the native sheets behind the defaults, so your
 delegate can keep them for some cases.
@@ -1394,6 +1514,8 @@ for some cases by calling its presenter:
 | Unresponsive page | `browserPageIsUnresponsive(_:)` | `CefUnresponsivePagePresenter` |
 | File chooser | `browser(_:runFileDialog:)` | `CefFileDialogPresenter` |
 | Download save panel | `browser(_:decideDestinationFor:)` | `CefDownloadPresenter` |
+| Opening another app (`mailto:`, `zoommtg:`) | `browser(_:decideExternalProtocolFor:)` | `CefExternalProtocolPresenter` |
+| Page tooltip (not a sheet) | `browser.tooltipPolicy = .custom`, then show `browser.tooltip` | The offscreen view's `toolTip`; Chromium's own elsewhere. See [Tooltips](#tooltips) |
 | Context menu | `browser(_:runContextMenu:for:)` | `CefContextMenuPresenter` |
 | Passkeys | `CefPasskeyDelegate.browser(_:decidePasskeyFor:)` | `CefPasskeyPresenter` |
 
@@ -1486,9 +1608,10 @@ Return one of:
 | `.deny` | Ignores the request. |
 
 `CefWindowOpenDecision.default(for:)`, the default, chooses
-`.allowNativePopup` for Chrome-style browsers; for other browsers it loads
-the URL in place, and allows a blank popup only when the browser is not
-offscreen. Return it for requests you do not handle:
+`.allowNativePopup` for Chrome-style browsers; for other browsers it denies
+a request without a user gesture, loads the URL in place, and allows a
+blank popup only when the browser is not offscreen. Return it for requests
+you do not handle:
 
 ```swift
 func browser(_ browser: CefBrowser, decideWindowOpenFor request: CefWindowOpenRequest) -> CefWindowOpenDecision {
@@ -1497,6 +1620,72 @@ func browser(_ browser: CefBrowser, decideWindowOpenFor request: CefWindowOpenRe
     return .handled
 }
 ```
+
+Chromium's popup blocker runs before the delegate in both runtime styles:
+a `window.open` without a user gesture never reaches
+`decideWindowOpenFor`, unless the site's `.popups` setting allows popups
+(the default blocks them). An app that wants to see such popups, to offer
+"Show blocked popup" or to open them itself, allows the setting and decides
+in the delegate, where `hasUserGesture` is `false`:
+
+```swift
+profile.siteSettings.set(.allow, for: .popups, origin: URL(string: "https://example.com")!)
+```
+
+`default(for:)` then still denies them in an Alloy-style browser, where
+loading in place would let a script navigate the page away; a Chrome-style
+browser opens them.
+
+### Back and forward
+
+`browser.backForwardList` is a snapshot of Chromium's navigation entries,
+shaped like `WKBackForwardList`: `items` oldest first, `currentIndex`,
+`currentItem`, `backItem`, `forwardItem`, `backList`, `forwardList` and
+`item(at:)`. Each item has its `url`, `displayURL`, `originalURL` (before
+redirects), `title`, `httpStatusCode`, `completionDate`, `hasPostData` and
+`transition` (its `source`, such as `.link`, `.explicit`, `.formSubmit` or
+`.reload`, and whether it `isBackForward`, `isRedirect`, `isDirectLoad`).
+Reading the list in a SwiftUI view updates the view as the browser
+navigates, so a back button's menu is a `ForEach` over `backList`:
+
+```swift
+Menu("Back") {
+    ForEach(browser.backForwardList.backList.reversed()) { item in
+        Button(item.title.isEmpty ? item.url?.absoluteString ?? "" : item.title) { browser.go(to: item) }
+    }
+} primaryAction: {
+    browser.goBack()
+}
+```
+
+`go(to:)` goes to an item however many steps away in one navigation:
+Chromium counts each step from the one still pending, so the pages in
+between are never loaded. It returns `false` and does nothing when the
+list has changed since the item was read.
+
+### Links to other apps
+
+A URL whose scheme Chromium does not load itself, such as `mailto:`,
+`zoommtg:` or `slack:`, reaches
+`browser(_:decideExternalProtocolFor:)` with a
+`CefExternalProtocolRequest`: the `url`, the `frameURL` that asked, and
+whether it `isMainFrame`. Return `.allow` to open it with the app macOS
+has for the scheme (`request.applicationURL`), or `.deny`. In both runtime
+styles Chromium never opens another app itself. The default asks with
+`CefExternalProtocolPresenter`'s sheet ("Open “Zoom”?", naming the site),
+and denies without asking when no app handles the scheme:
+
+```swift
+func browser(_ browser: CefBrowser, decideExternalProtocolFor request: CefExternalProtocolRequest) async
+    -> CefExternalProtocolDecision
+{
+    if request.url.scheme == "mailto" { return .allow }
+    return await CefExternalProtocolPresenter.present(request, in: browser.hostWindow)
+}
+```
+
+The question is cancelled, and its sheet dismissed, when the page
+navigates away.
 
 ### Downloads
 
@@ -1541,7 +1730,8 @@ the suggested name, numbered when taken, `.ask` shows the save panel and
 is the stock panel, for a delegate that keeps it for some downloads.
 
 Each download is one observable `CefDownload` for its whole life, updated
-as it goes: `url`, `suggestedFilename`, `mimeType`, `fileURL` (the file
+as it goes: `url` (after redirects; `originalURL` before), `startDate`,
+`endDate` (once completed or cancelled), `suggestedFilename`, `mimeType`, `fileURL` (the file
 being written, then the finished file), `receivedBytes`, `expectedBytes`
 (`nil` when the server gives no size), `fractionCompleted`,
 `bytesPerSecond`, `estimatedTimeRemaining`, the `browser` that started it,
@@ -1575,9 +1765,16 @@ struct DownloadsList: View {
 
 The lists last as long as the app runs, an incognito profile's as long as
 the profile. CefSwift keeps no download history across launches; an app
-that wants one saves what it needs from `profile.downloads`. The delegate's
-`browser(_:downloadDidUpdate:)` reports each change too, for code that
-does not observe.
+that wants one saves what it needs from `profile.downloads`.
+`profile.removeDownloads(where:)` takes entries out of the profile's list
+and their browsers', and `profile.removeFinishedDownloads()` takes out
+every one that cannot go on any more, as a download manager's Clear does;
+a download that can still go on (in progress, or paused or interrupted
+while its browser is open) stays, and no file is deleted.
+
+Code that does not use SwiftUI follows a download with Observation's
+`withObservationTracking(_:onChange:)`, or by reading the lists when it
+needs them; there is no delegate event for download progress.
 
 ### File choosers
 
@@ -1821,7 +2018,8 @@ browserConfiguration.contextMenu.customize { menu, _ in
   `sourceURL` and `mediaType` (image, video, audio, canvas…), `mediaState`,
   `pageURL`, `frameURL` (in a subframe), `titleText`, `selectedText`,
   `isEditable`, `editing` (what the field allows), `misspelledWord` and
-  `spellingSuggestions`.
+  `spellingSuggestions`. A menu of your own acts on them with
+  `browser.replaceMisspelling(with:)` and `browser.learnSpelling(_:)`.
 - `showsInspectElement` adds Inspect where Chromium has none (Alloy
   style). `isEnabled = false` shows no menu.
 
@@ -2209,7 +2407,7 @@ presentation a kind does not allow stays native.
 |---|---|---|---|---|---|
 | Find bar | `.findBar` | Yes (own anchor) | Yes | Yes | `browser.findSession`: `text`, `isCaseSensitive`, `matchCount`, `activeMatch`, `next()`, `previous()`, `end()`; ⌘G and ⇧⌘G move through the matches. |
 | QR code | `.qrCode` | Yes | Yes | Yes | `url`, to encode with Core Image's `CIFilter.qrCodeGenerator()`. |
-| Cast | `.cast` | Yes | Yes | Yes | `url`; `CefMediaRouter.shared` lists `sinks` and `routes` and casts Cast apps and presentation URLs. Mirroring a tab needs Chromium's dialog. |
+| Cast | `.cast` | Yes | Yes | Yes | `url`; the profile's `mediaRouter` (each profile has its own) lists `sinks` and `routes` and casts Cast apps and presentation URLs. Mirroring a tab needs Chromium's dialog. |
 | Share | `.share` | Yes | Yes | Yes | `url`, `title`. Chromium's share menu needs its toolbar, so by default the command opens macOS's share menu at the anchor. |
 | Zoom bubble | `.zoom` | Yes | Yes | Yes | `browser.zoomLevel` (Chromium scales by 1.2 to its power). The zoom commands still zoom; hidden, only the bubble goes. |
 | Bookmark added (⌘D) | `.bookmark` | Yes | Yes | Yes | `url`, `title`; `CefBookmarks` adds, edits and removes the bookmark. |
@@ -2362,9 +2560,9 @@ try profile.preferences.set(false, for: .savesPasswords)
 let fontSize = profile.preferences[.defaultFontSize]
 profile.setColorScheme(.dark, accentColor: .systemIndigo)
 
-let cookies = await profile.cookies(for: url)
-profile.setCookie(cookie)                        // an HTTPCookie
-profile.deleteCookies(for: url, named: "session")
+let cookies = try await profile.cookies(for: url)   // [CefProfile.Cookie]
+try await profile.setCookie(CefProfile.Cookie(name: "theme", value: "dark", domain: "example.com", sameSite: .lax))
+try await profile.deleteCookies(for: url, named: "session")
 ```
 
 A profile's `id` is its identity and names its storage in both engines;
@@ -2377,6 +2575,30 @@ in `<root>` itself (`Default`, `Local State`, `Profile 1`). CefChromium's
 `CefProfile.incognito().autocomplete` keeps its profile alive while you
 use it; the profile does not hold them back, so neither keeps the other
 alive forever.
+
+A `CefProfile.Cookie` carries everything CEF stores: `name`, `value`,
+`domain` (a leading dot for a domain cookie), `path`, `isSecure`,
+`isHTTPOnly`, `expirationDate` (nil for a session cookie), `sameSite`,
+`priority`, and Chromium's `creationDate` and `lastAccessDate`. CEF 156
+reports no partition key, so a partitioned (CHIPS) cookie is listed
+without the site it is keyed to. Every cookie call returns once Chromium
+has finished:
+
+| Call | Returns |
+|---|---|
+| `cookies(for:)` | The cookies a request to the URL carries, HTTP-only included; all of them with `nil`. |
+| `enumerateCookies(for:using:)` | Hands them over one at a time, on the main actor, until the closure sets `stop`. |
+| `setCookie(_:for:)` | Nothing; throws `CefError.operationFailed` when Chromium refuses the cookie (a domain that does not match the URL, characters a cookie cannot hold, `SameSite=None` without `isSecure`). Without a URL, the cookie's domain and path make one. |
+| `deleteCookies(for:named:)` | How many Chromium deleted: the named one, every host cookie of the URL, or with both `nil` every cookie. |
+| `deleteCookies(for:where:)` | How many the predicate picked. |
+| `flushCookies()` | Nothing, once the store is on disk. |
+
+A cancelled task stops waiting at once and throws `CancellationError`;
+Chromium finishes what it had started, and its answer is dropped. The
+same holds for the network maintenance calls below, `resolveHost(_:)`,
+`printToPDF(at:configuration:)`, `cast(_:to:)` (a route Chromium creates
+after the caller stopped waiting is ended) and
+`CefRuntime.shared.installWidevine()`.
 
 `preferences.allValues(includingDefaults:)` returns every preference as one JSON
 object. `setColorScheme(_:accentColor:)` themes Chrome-style UI and sets the
@@ -2392,7 +2614,7 @@ and what does not:
 | Called while the profile loads | What happens |
 |---|---|
 | Browsers, in every host (`CefWebView`, the AppKit views, `CefWindow`, `openChromeWindow`) and their popups | Wait, and are created once it is loaded. The browser stays `.pending`, and `load(_:)`, `ready()` and `waitUntilLoaded(timeout:)` work as for any browser being created. A `CefWindow` opens at once and gets its page when the browser comes. A view given another browser, or none, meanwhile does not get this one later. Quitting closes the browsers still waiting: their `ready()` throws `CefError.browserClosed`, and the profile's `ready()` throws `CefError.shutDown`. |
-| `cookies(for:)`, `setCookie(_:)`, `deleteCookies(for:named:)` | Chromium queues them until the profile is loaded. |
+| `cookies(for:)`, `enumerateCookies(for:using:)`, `setCookie(_:for:)`, the `deleteCookies` calls, `flushCookies()` | Chromium queues them until the profile is loaded. |
 | `data(for:)`, `bytes(for:)`, `download(for:to:)`, `resolveHost(_:)`, the `clear…` calls | Wait for the profile. |
 | `siteSettings.set(…)`, `setDefaultSetting(_:for:)`, `setColorScheme(_:accentColor:)` | Apply once it is loaded. |
 | `preferences`, and `siteSettings` reads | Have nothing yet: reads return `nil` or `.default`, and `preferences.set` throws. Await `profile.ready()` first. |
@@ -2429,13 +2651,13 @@ early at the next launch, before `CefRuntime.initialize`.
 ### Network maintenance
 
 A profile clears what Chromium keeps for its connections, each `async`
-and done when it returns:
+and done when it returns; each throws only `CancellationError`:
 
 ```swift
-await profile.clearHTTPCache()                       // cookies and site data stay
-await profile.clearCertificateExceptions()           // certificate errors the user accepted
-await profile.clearHTTPAuthenticationCredentials()
-await profile.closeAllConnections()
+try await profile.clearHTTPCache()                   // cookies and site data stay
+try await profile.clearCertificateExceptions()       // certificate errors the user accepted
+try await profile.clearHTTPAuthenticationCredentials()
+try await profile.closeAllConnections()
 let addresses = try await profile.resolveHost("example.com")   // ["93.184.215.14", …]
 ```
 
@@ -3256,7 +3478,7 @@ var configuration = CefRuntime.Configuration.embedded
 configuration.services.protectedMedia = .automatic
 
 // Later, for example before showing a player:
-switch await CefRuntime.shared.installWidevine() {
+switch try await CefRuntime.shared.installWidevine() {
 case .installed(let version): print("Widevine \(version)")
 case .failed: print("Could not fetch Widevine; offline?")
 default: break
@@ -3391,7 +3613,7 @@ network processes and some tens of milliseconds at launch
 |---|---|---|---|
 | `CefWebView` with `.embedded` (the Minimal example) | 5 | 88 MB | 306 ms |
 | The same with `processPolicy = .minimal` | 4 | 82 MB | 284 ms |
-| Browser example, one tab, `.browser` | 7 | 166 MB | 551 ms |
+| Browser example, one tab (`.chrome` with its own name and scheme) | 7 | 166 MB | 551 ms |
 | For comparison: a `WKWebView` app | 4 | 60 MB | 284 ms |
 | For comparison: Chrome 157, empty profile, one tab | 12 | 286 MB | – |
 
@@ -3472,10 +3694,15 @@ the switches measured and not used.
 - Chromium's own Memory Saver never discards a CefKit browser, since each
   is the active tab of its own Chromium window; call `discard()` from your
   own policy instead. A `CefWebView` browser loses its back/forward list
-  when discarded, does not report playing audio or form input as blockers, and Chromium tells tabs apart only by
+  when discarded, never reports `.exempt`, `.pictureInPicture` or
+  `.connectedToDevice`, and Chromium tells tabs apart only by
   address and title, so Chrome-style tabs showing the same page under the
   same title cannot be discarded (`.unknown`) until one of them moves on.
 - DevTools opens in a window of its own; there is no docked DevTools.
+  Measured with CEF 156.0.28: `show_dev_tools` given a parent view (which
+  makes the DevTools browser Alloy style) logs `Alloy style is not
+  supported for this browser` (`browser_host_create.cc`) and opens
+  nothing, so DevTools cannot be embedded in an app's view.
 - In offscreen browsers, assistive apps can focus elements inside frames
   only by clicking text fields, and press them only while they are in
   view; elements of the main frame have no such limit. The scroll
@@ -3518,8 +3745,9 @@ the switches measured and not used.
   `.org.chromium.Chromium.webauthn`, with an empty team identifier, and
   macOS lets a signed app claim only groups its provisioning profile
   authorizes, which start with the team identifier.
-- The App Sandbox is not supported, so CefSwift apps do not ship in the
-  Mac App Store ([bundling](bundling.md#app-sandbox)).
+- The App Sandbox is not supported with official CEF builds, so CefSwift
+  apps do not ship in the Mac App Store: Chromium registers a Mach service
+  the App Sandbox refuses ([bundling](bundling.md#app-sandbox)).
 - Chromium plays Widevine only as an unverified software (L3) client and
   has no H.264, HEVC or AAC, so Netflix-class services do not play in it;
   WebKit plays them with FairPlay, beside Chromium in the Browser example

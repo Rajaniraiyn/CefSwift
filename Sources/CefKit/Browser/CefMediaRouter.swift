@@ -49,12 +49,25 @@ public struct CefMediaRouteError: Error, Sendable, CustomStringConvertible {
     public var description: String { message }
 }
 
-/// Chromium's media router: the Cast and DIAL devices on the network, and
-/// the routes to them. For a cast picker of your own in place of
-/// Chromium's (CefChromium's `CefChromiumSurface.Kind.cast`).
+extension CefProfile {
+    /// The profile's media router: the Cast and DIAL devices its pages can
+    /// cast to, and its routes. Each profile has its own, as in Chrome,
+    /// so an incognito profile's casting stays apart from the default's.
+    public var mediaRouter: CefMediaRouter {
+        if let mediaRouterStorage { return mediaRouterStorage }
+        let router = CefMediaRouter(profile: self)
+        mediaRouterStorage = router
+        return router
+    }
+}
+
+/// A profile's media router (``CefProfile/mediaRouter``): the Cast and
+/// DIAL devices on the network, and the routes to them, from the
+/// profile's `cef_request_context_t`. For a cast picker of your own in
+/// place of Chromium's (CefChromium's `CefChromiumSurface.Kind.cast`).
 ///
 /// ```swift
-/// let router = CefMediaRouter.shared
+/// let router = profile.mediaRouter
 /// router.startDiscovery()
 /// // router.sinks fills in as devices are found.
 /// let route = try await router.cast("cast:CC1AD845", to: router.sinks[0])
@@ -67,8 +80,8 @@ public struct CefMediaRouteError: Error, Sendable, CustomStringConvertible {
 @MainActor
 @Observable
 public final class CefMediaRouter: CefShutdownParticipant {
-    /// The router for every profile.
-    public static let shared = CefMediaRouter()
+    /// The profile whose request context the router is.
+    private unowned let profile: CefProfile
 
     /// The devices found, in the order Chromium reports them. Empty until
     /// ``startDiscovery()``.
@@ -83,7 +96,8 @@ public final class CefMediaRouter: CefShutdownParticipant {
     @ObservationIgnored private var sinkObjects: [String: CefRef<cef_media_sink_t>] = [:]
     @ObservationIgnored private var routeObjects: [String: CefRef<cef_media_route_t>] = [:]
 
-    private init() {
+    init(profile: CefProfile) {
+        self.profile = profile
         CefRuntime.shared.addShutdownParticipant(self)
     }
 
@@ -95,12 +109,15 @@ public final class CefMediaRouter: CefShutdownParticipant {
     }
 
     /// Starts looking for devices; ``sinks`` and ``routes`` follow from
-    /// then on. Does nothing when the router is not ``isAvailable``.
+    /// then on. Does nothing when the router is not ``isAvailable``. On a
+    /// profile Chromium is still loading, discovery starts once it has.
     public func startDiscovery() {
-        guard !isDiscovering, isAvailable,
-              let router = router ?? CefRef(adopting: cef_media_router_get_global(nil))
-        else { return }
-        self.router = router
+        guard !isDiscovering, isAvailable else { return }
+        if router == nil {
+            guard let context = profile.loadedRequestContext(orWhenLoaded: { $0.mediaRouter.startDiscovery() }) else { return }
+            router = CefRef(adopting: context.pointer.pointee.get_media_router(context.pointer, nil))
+        }
+        guard let router else { return }
         isDiscovering = true
         // add_observer takes over the observer reference.
         let observer = MediaObserver(router: self).makeObserver()
@@ -137,8 +154,10 @@ public final class CefMediaRouter: CefShutdownParticipant {
         guard let router, let sinkObject = sinkObjects[sink.id],
               let sourceObject = mediaSource(source, router: router)
         else { throw CefMediaRouteError(message: "No such device or source") }
-        let (result, error, route) = await withCheckedContinuation { continuation in
-            let callback = RouteCreated(continuation).makeCallback()
+        let (result, error, route) = try await CefResumeOnce<RouteCreated.Outcome>.cancellable(
+            fallback: (CEF_MRCR_UNKNOWN_ERROR, "", nil)
+        ) { once in
+            let callback = RouteCreated(once).makeCallback()
             router.pointer.pointee.create_route(router.pointer, sourceObject.retainedPointer(), sinkObject.retainedPointer(), callback)
         }
         guard let route, result == CEF_MRCR_OK else {
@@ -245,15 +264,18 @@ private final class RouteCreated: Sendable {
     typealias Outcome = (cef_media_route_create_result_t, String, CefRef<cef_media_route_t>?)
     private let continuation: CefResumeOnce<Outcome>
 
-    init(_ continuation: CheckedContinuation<Outcome, Never>) {
-        self.continuation = CefResumeOnce(continuation, fallback: (CEF_MRCR_UNKNOWN_ERROR, "", nil))
+    init(_ continuation: CefResumeOnce<Outcome>) {
+        self.continuation = continuation
     }
 
     func makeCallback() -> UnsafeMutablePointer<cef_media_route_create_callback_t> {
         let c = cefAllocate(cef_media_route_create_callback_t.self, owner: self)
         c.pointee.on_media_route_create_finished = { s, result, error, route in
             let outcome = (result, CefStringUtil.string(from: error), CefRef(adopting: route))
-            cefOwner(RouteCreated.self, s)?.continuation.resume(returning: outcome)
+            // A route made for a caller that stopped waiting is ended.
+            if cefOwner(RouteCreated.self, s)?.continuation.resume(returning: outcome) != true, let route = outcome.2 {
+                route.pointer.pointee.terminate(route.pointer)
+            }
         }
         return c
     }

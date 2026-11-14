@@ -294,6 +294,21 @@ private func profile(
         #expect(plan.warnings.contains { $0.contains("does not authorize") })
     }
 
+    @Test func theAppSandboxIsRefusedForEverySignature() {
+        let appStore = SigningIdentity(
+            name: "Apple Distribution: Example Corp (\(team))", kind: .appStore, teamIdentifier: team)
+        for identity in [SigningIdentity.adHoc, development, developerID, appStore] {
+            var settings = DistributionSettings(bundleIdentifier: "com.example.browser", identity: identity)
+            settings.appEntitlementsFile = ("App.entitlements", ["com.apple.security.app-sandbox": .bool(true)])
+            #expect {
+                try settings.plan()
+            } throws: {
+                "\($0)".contains("not supported with official CEF builds")
+                    && "\($0)".contains("MachPortRendezvousServer")
+            }
+        }
+    }
+
     @Test func developmentSigningAllowsDebugging() throws {
         let plan = try DistributionSettings(bundleIdentifier: "b", identity: development).plan()
         #expect(plan.appEntitlements["com.apple.security.get-task-allow"] == .bool(true))

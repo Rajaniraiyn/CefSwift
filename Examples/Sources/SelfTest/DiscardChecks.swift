@@ -1,4 +1,5 @@
 import AppKit
+@_spi(Testing) import CefKit
 import CefSwiftUI
 import Darwin
 
@@ -300,6 +301,18 @@ extension SelfTest {
               detail: "playing \(mutedPlaying), \(mutedBlockers)")
         let quiet = await silent.discardBlockers()
         check("discard blockers (view): a silent, untouched page reports neither", quiet.isEmpty, detail: "\(quiet)")
+        // The DevTools scan runs only when nothing native keeps the page,
+        // so a policy polling visible pages never attaches them. (The
+        // audible pages above were set up with a user gesture, which is
+        // itself sent through DevTools.)
+        let (shown, shownView) = await page("view-shown", hidden: false)
+        let shownBlockers = await shown.discardBlockers()
+        check("discard blockers (view): a visible page is not asked of DevTools",
+              shownBlockers == [.visible] && !shown.devTools.isAttached,
+              detail: "\(shownBlockers), attached \(shown.devTools.isAttached)")
+        await closeHosted(shown, shownView)
+        check("discard blockers (view): a page nothing native keeps is asked of DevTools, which stays attached",
+              silent.devTools.isAttached)
 
         _ = try? await element.evaluateJavaScript("player.pause(); 'ok'")
         try? await Task.sleep(for: .milliseconds(500))

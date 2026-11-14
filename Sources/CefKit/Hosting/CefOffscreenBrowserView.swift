@@ -35,6 +35,11 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
     /// live moves it here from wherever it was shown before; assigning `nil`
     /// stops showing it. The browser assigned before, if still waiting for
     /// its profile or discarded, is not created here later.
+    ///
+    /// It becomes nil when the browser moves to another host or is
+    /// withdrawn from this one (``CefOffscreenHost/offscreenDidStopHosting(_:)``):
+    /// the view then sends it no input, geometry or accessibility
+    /// requests, and does not host it again when it returns to a window.
     public var browser: CefBrowser? {
         didSet {
             guard browser !== oldValue else { return }
@@ -134,12 +139,22 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
     required init?(coder: NSCoder) { nil }
 
     private func browserDidChange(from oldValue: CefBrowser?) {
-        if let oldValue, oldValue.hostView === self {
-            oldValue.hostViewDidHide()
+        // It stops painting here, and one still waiting for its profile,
+        // or discarded, is not created here later.
+        oldValue?.stopHosting(in: self)
+        if oldValue != nil {
+            // Nothing of the last page stays up, and the next browser's
+            // first frame is copied whole.
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            contentLayer.contents = nil
+            popupLayer.contents = nil
+            popupLayer.isHidden = true
+            CATransaction.commit()
+            contentCompositor.reset()
+            popupCompositor.reset()
+            toolTip = nil
         }
-        // One still waiting for its profile, or discarded, is not created
-        // here later.
-        oldValue?.hostDidRelease(self)
         if let browser { layer?.backgroundColor = browser.hostBackgroundColor }
         hostBrowserIfPossible()
         updateVisibility(notifyingBrowser: true)
@@ -301,6 +316,10 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
     }
 
     private func windowKeyStateDidChange(isKey: Bool) {
+        // A drag or selection in progress loses its pointer with the window.
+        if !isKey, NSEvent.pressedMouseButtons != 0, let browser, browser.hostView === self {
+            browser.sendCaptureLostEvent()
+        }
         guard window?.firstResponder === self else { return }
         if isKey { browser?.hostViewDidBecomeKey() } else { browser?.hostViewDidResignKey() }
     }
@@ -461,6 +480,18 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
 
     public func offscreenDidChangeSelection(_ selectedText: String, selectedRange: NSRange) {
         currentSelectedTextRange = selectedRange
+    }
+
+    /// AppKit shows the page's tooltip as the view's own, where the mouse
+    /// rests.
+    public func offscreenDidChangeToolTip(_ toolTip: String?) {
+        guard self.toolTip != toolTip else { return }
+        self.toolTip = toolTip
+    }
+
+    public func offscreenDidStopHosting(_ browser: CefBrowser) {
+        guard self.browser === browser else { return }
+        self.browser = nil
     }
 
     /// An event's location in view coordinates, which are Chromium's: the

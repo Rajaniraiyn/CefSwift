@@ -114,4 +114,12 @@ import CefBase
         let subject = "Jane", issuer = "Example CA"
         #expect(String(localized: "\(subject) (\(issuer))", bundle: .cefKit) == "Jane (Example CA)")
     }
+
+    /// The external-protocol sheet's strings are in the table, formats
+    /// included.
+    @Test func externalProtocolSheetStrings() {
+        for key in ["Open “%@”?", "%@ wants to open this app.", "A page wants to open this app.", "Open"] {
+            #expect(Bundle.cefKit.localizedString(forKey: key, value: "missing", table: nil) == key)
+        }
+    }
 }

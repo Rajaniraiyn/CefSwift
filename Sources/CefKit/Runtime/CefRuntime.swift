@@ -329,7 +329,7 @@ public final class CefRuntime {
         // minute after launch.
         if !hasRequestedWidevine, let configuration, configuration.services.protectedMedia != .disabled {
             hasRequestedWidevine = true
-            if !widevine.isInstalled { Task { await installWidevine() } }
+            if !widevine.isInstalled { Task { _ = try? await installWidevine() } }
         }
     }
 

@@ -47,6 +47,18 @@ import Testing
         #expect(!selfSigned.webAuthnAuthenticators.contains(.iCloudKeychain))
     }
 
+    /// Chromium's profile passkeys need a keychain group no profile can
+    /// authorize, so no signature makes the app eligible for them.
+    @Test func chromiumsKeychainGroupAddsNothing() {
+        let entitled = CefAppCapabilities(
+            signingInformation: signing(flags: 0x10000, team: "A1B2C3D4E5", entitlements: [
+                "keychain-access-groups": [".org.chromium.Chromium.webauthn"],
+            ]),
+            infoDictionary: [:])
+        #expect(entitled.webAuthnAuthenticators == [.securityKey])
+        #expect(CefAppCapabilities.WebAuthnAuthenticator.allCases.count == 3)
+    }
+
     @Test func theTestRunnerOffersSecurityKeys() {
         #expect(CefAppCapabilities.current.webAuthnAuthenticators.contains(.securityKey))
     }

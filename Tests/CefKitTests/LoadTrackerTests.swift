@@ -36,6 +36,21 @@ struct LoadTrackerTests {
         #expect(try await navigation.waitUntilLoaded() == result)
     }
 
+    /// `load_request` is not a direct load: its navigation is known by its
+    /// address, and a link elsewhere is not taken for it.
+    @Test func aLoadRequestIsRecognizedByItsAddress() async throws {
+        let tracker = CefLoadTracker()
+        let navigation = tracker.request(a, shownURL: a, isLoadRequest: true)
+        tracker.navigationWillStart(url: b, transition: link, isRedirect: false, isCancelled: false)
+        tracker.mainFrameDidCommit(url: b, transition: link)
+        tracker.mainFrameDidFinish(url: b, httpStatus: 200)
+        #expect(navigation.outcome == nil)
+        tracker.navigationWillStart(url: a, transition: link, isRedirect: false, isCancelled: false)
+        tracker.mainFrameDidCommit(url: a, transition: link)
+        tracker.mainFrameDidFinish(url: a, httpStatus: 201)
+        #expect(try await navigation.waitUntilLoaded().httpStatus == 201)
+    }
+
     @Test func anEarlierDocumentDoesNotFinishIt() async throws {
         let tracker = CefLoadTracker()
         let navigation = tracker.request(b, shownURL: a)

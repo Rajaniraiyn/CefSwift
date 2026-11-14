@@ -1,7 +1,7 @@
 import CefSwiftUI
 import SwiftUI
 
-/// `CefMediaRouter.shared` is Chromium's media router: the Cast and DIAL
+/// `CefProfile.mediaRouter` is a profile's media router: the Cast and DIAL
 /// devices on the network, as `sinks`, and the routes in use. It runs
 /// under the `.chrome` preset; `.embedded` turns it off. Looking for
 /// devices goes to the local network, so macOS may ask for permission the
@@ -16,7 +16,7 @@ struct MediaRouterDemo: Demo {
 }
 
 private struct MediaRouterView: View {
-    private let router = CefMediaRouter.shared
+    private let router = CefProfile.default.mediaRouter
     @Environment(\.demoReadiness) private var readiness
 
     var body: some View {

@@ -49,6 +49,8 @@ public final class CefProfile {
 
     /// The download policy and the downloads; see `CefProfile+Downloads.swift`.
     let downloadStore = CefDownloadStore()
+    /// The profile's media router, made on first use; see `CefMediaRouter.swift`.
+    var mediaRouterStorage: CefMediaRouter?
 
     /// Whether the profile is in memory only, made by ``incognito()``.
     public var isIncognito: Bool { kind == .incognito }
@@ -196,67 +198,6 @@ public final class CefProfile {
             }
         context.pointer.pointee.set_chrome_color_scheme(
             context.pointer, variant, accentColor.map { cefColor($0.cgColor) } ?? 0)
-    }
-
-    // MARK: Cookies
-
-    /// Cookies visible to `url` (including HTTP-only ones), or every cookie
-    /// in the profile when `url` is nil.
-    public func cookies(for url: URL? = nil) async -> [HTTPCookie] {
-        guard let manager = cookieManager() else { return [] }
-        return await withCheckedContinuation { continuation in
-            let visitor = CookieCollector(continuation: continuation).makeVisitor()
-            // The collector reports when CEF drops the visitor, which also
-            // covers "no cookies" and "could not start".
-            if let url {
-                CefStringUtil.withCefString(url.absoluteString) {
-                    _ = manager.pointer.pointee.visit_url_cookies(manager.pointer, $0, 1, visitor)
-                }
-            } else {
-                _ = manager.pointer.pointee.visit_all_cookies(manager.pointer, visitor)
-            }
-        }
-    }
-
-    /// Stores `cookie`. Returns whether Chromium accepted it.
-    @discardableResult
-    public func setCookie(_ cookie: HTTPCookie) -> Bool {
-        guard let manager = cookieManager() else { return false }
-        var raw = cef_cookie_t()
-        raw.size = MemoryLayout<cef_cookie_t>.stride
-        CefStringUtil.set(cookie.name, into: &raw.name)
-        CefStringUtil.set(cookie.value, into: &raw.value)
-        CefStringUtil.set(cookie.domain, into: &raw.domain)
-        CefStringUtil.set(cookie.path, into: &raw.path)
-        defer {
-            ccef_string_clear(&raw.name)
-            ccef_string_clear(&raw.value)
-            ccef_string_clear(&raw.domain)
-            ccef_string_clear(&raw.path)
-        }
-        raw.secure = cookie.isSecure ? 1 : 0
-        raw.httponly = cookie.isHTTPOnly ? 1 : 0
-        if let expires = cookie.expiresDate {
-            raw.has_expires = 1
-            raw.expires = cef_basetime_t(date: expires)
-        }
-        let scheme = cookie.isSecure ? "https" : "http"
-        let host = cookie.domain.hasPrefix(".") ? String(cookie.domain.dropFirst()) : cookie.domain
-        return CefStringUtil.withCefString("\(scheme)://\(host)\(cookie.path)") {
-            manager.pointer.pointee.set_cookie(manager.pointer, $0, &raw, nil) != 0
-        }
-    }
-
-    /// Deletes cookies: the one called `name` for `url`, all cookies for
-    /// `url`, or — with both nil — every cookie in the profile.
-    public func deleteCookies(for url: URL? = nil, named name: String? = nil) {
-        guard let manager = cookieManager() else { return }
-        CefStringUtil.withCefString(url?.absoluteString ?? "") { cefURL in
-            CefStringUtil.withCefString(name ?? "") { cefName in
-                _ = manager.pointer.pointee.delete_cookies(
-                    manager.pointer, url == nil ? nil : cefURL, name == nil ? nil : cefName, nil)
-            }
-        }
     }
 
     // MARK: Request context
@@ -493,11 +434,6 @@ public final class CefProfile {
 
     /// The cookie manager, which Chromium has queue calls until the profile
     /// is loaded.
-    private func cookieManager() -> CefRef<cef_cookie_manager_t>? {
-        guard let context = requestContext() else { return nil }
-        return CefRef(adopting: context.pointer.pointee.get_cookie_manager(context.pointer, nil))
-    }
-
     /// `cef_request_context_t` extends `cef_preference_manager_t`, so the
     /// context pointer is also the profile's preference manager. `nil`
     /// until the profile is ready: Chromium has no preferences for a
@@ -614,51 +550,6 @@ private final class ContextHandler: Sendable {
             MainActor.assumeIsolated { owner.onInitialized(path) }
         }
         return handler
-    }
-}
-
-// MARK: - Cookie plumbing
-
-/// Collects visited cookies and delivers them when CEF releases the visitor.
-private final class CookieCollector: Sendable {
-    private let continuation: CheckedContinuation<[HTTPCookie], Never>
-    // CEF visits on the UI thread, one cookie at a time.
-    private let cookies = OSAllocatedUnfairLock(uncheckedState: [HTTPCookie]())
-
-    init(continuation: CheckedContinuation<[HTTPCookie], Never>) {
-        self.continuation = continuation
-    }
-
-    deinit {
-        continuation.resume(returning: cookies.withLockUnchecked { $0 })
-    }
-
-    /// The returned +1 reference is consumed by the `visit_*_cookies` call.
-    func makeVisitor() -> UnsafeMutablePointer<cef_cookie_visitor_t> {
-        let visitor = cefAllocate(cef_cookie_visitor_t.self, owner: self)
-        visitor.pointee.visit = { s, cookie, _, _, _ in
-            guard let cookie, let owner = cefOwner(CookieCollector.self, s) else { return 0 }
-            if let converted = HTTPCookie(cefCookie: cookie.pointee) {
-                owner.cookies.withLockUnchecked { $0.append(converted) }
-            }
-            return 1
-        }
-        return visitor
-    }
-}
-
-extension HTTPCookie {
-    fileprivate convenience init?(cefCookie cookie: cef_cookie_t) {
-        var properties: [HTTPCookiePropertyKey: Any] = [
-            .name: CefStringUtil.string(from: cookie.name),
-            .value: CefStringUtil.string(from: cookie.value),
-            .domain: CefStringUtil.string(from: cookie.domain),
-            .path: CefStringUtil.string(from: cookie.path),
-        ]
-        if cookie.secure != 0 { properties[.secure] = "TRUE" }
-        if cookie.httponly != 0 { properties[HTTPCookiePropertyKey("HttpOnly")] = "TRUE" }
-        if cookie.has_expires != 0 { properties[.expires] = cookie.expires.date }
-        self.init(properties: properties)
     }
 }
 

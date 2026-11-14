@@ -4,7 +4,7 @@ CefSwift embeds Chromium in any macOS app written in Swift, through the
 [Chromium Embedded Framework](https://github.com/chromiumembedded/cef) (CEF).
 It exposes what CEF and Chromium can do as Swift types: browsers in SwiftUI
 and AppKit views, windowed or offscreen; Chrome-style windows with Chrome's
-own pages, settings and extensions; profiles, requests, DevTools, custom
+own pages and settings; profiles, requests, DevTools, custom
 schemes and a JavaScript bridge. Optional libraries add passkeys the app
 answers and Chromium's bookmark, history and suggestion stores. That is
 enough for a full web browser; the Browser example below is one.
@@ -64,8 +64,8 @@ sources.
    package: File › Add Package Dependencies…, enter
    `https://github.com/Rajaniraiyn/CefSwift`, and add `CefSwiftUI` to the
    app target.
-2. In the target's Signing & Capabilities, remove App Sandbox: Chromium
-   cannot run in it ([why](docs/bundling.md#app-sandbox)).
+2. In the target's Signing & Capabilities, remove App Sandbox: it is not
+   supported with official CEF builds ([why](docs/bundling.md#app-sandbox)).
 3. Copy [`Examples/Xcode/CefSwift.xcconfig`](Examples/Xcode/CefSwift.xcconfig)
    into the project and choose it as the target's configuration file
    (Project › Info › Configurations). For a local package, set its
@@ -203,7 +203,9 @@ browser's state in their `body` and update when it changes.
 
 The rule: the library holds what an app cannot write against its public
 API, because it calls the CEF C API, hooks Chromium or works around a CEF
-or Chromium limit. Everything else belongs to the app.
+or Chromium limit, plus the defaults an embedder cannot ship without: the
+built-in sheets and presenters that answer a delegate method nobody
+implemented, each replaceable. Everything else belongs to the app.
 
 ## Features
 
@@ -217,11 +219,14 @@ or Chromium limit. Everything else belongs to the app.
 | Asynchronous decisions: permissions, dialogs, downloads, certificate errors | `CefBrowserDelegate` | [Decisions](docs/guide.md#decisions) |
 | Native default sheets, localizable and each replaceable | `CefDialogPresenter`, `CefDownloadPresenter`, … | [Built-in sheets](docs/guide.md#built-in-sheets) |
 | Downloads: a profile policy, a save panel, observable downloads for a download manager | `CefProfile.downloadPolicy`, `CefProfile.downloads`, `CefDownload` | [Downloads](docs/guide.md#downloads) |
+| The back/forward list, and going to any entry in one navigation | `backForwardList`, `go(to:)` | [Back and forward](docs/guide.md#back-and-forward) |
+| Links to other apps (`mailto:`, `zoommtg:`), decided by the app | `browser(_:decideExternalProtocolFor:)`, `CefExternalProtocolPresenter` | [Links to other apps](docs/guide.md#links-to-other-apps) |
+| Page tooltips, observable and replaceable | `tooltip`, `tooltipPolicy` | [Tooltips](docs/guide.md#tooltips) |
 | Context menu | `CefBrowser.Configuration.ContextMenu` | [Context menu](docs/guide.md#context-menu) |
 | Chrome-style windows (CEF Views), SwiftUI toolbars, a view over the page, popups, native tabs | `CefWindow`, `pageOverlay` | [Chrome-style windows](docs/guide.md#chrome-style-windows) |
 | Chrome commands and Chrome UI trimming | `CefChromeCommand`, `CefRuntime.Configuration.ChromeToolbar` | [Chrome commands](docs/guide.md#chrome-commands) |
 | Rebranded and restyled `chrome://` pages | `productName`, `stringOverrides`, `CefUserScript.styleSheet(_:matching:includingShadowRoots:)` | [Chromium's own pages](docs/guide.md#customizing-chromiums-own-pages) |
-| Profiles, cookies, Chromium preferences | `CefProfile` | [Profiles](docs/guide.md#profiles) |
+| Profiles, typed cookies, Chromium preferences, per-profile casting | `CefProfile`, `CefProfile.Cookie`, `mediaRouter` | [Profiles](docs/guide.md#profiles) |
 | The app's own requests through Chromium's network stack, sharing a profile's cookies, cache and proxy | `CefProfile.data(for:)`, `bytes(for:)` | [Requests through Chromium's network stack](docs/guide.md#requests-through-chromiums-network-stack) |
 | Chromium's bookmarks, history and omnibox suggestions (the optional `CefChromium` library) | `CefBookmarks`, `CefHistory`, `CefAutocomplete` | [Bookmarks, history and suggestions](docs/guide.md#bookmarks-history-and-suggestions) |
 | Chromium's own tabs, windows and tab groups, mirrored and driven, for a tab interface of your own (`CefChromium`) | `CefTabStrip` | [Chromium's tab strip](docs/guide.md#chromiums-tab-strip) |

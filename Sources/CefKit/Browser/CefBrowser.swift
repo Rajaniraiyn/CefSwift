@@ -12,12 +12,16 @@ extension CefBrowser {
         public var activeMatchIndex: Int
         /// Whether the search has finished counting.
         public var isFinal: Bool
+        /// Where the highlighted match is, in the page's view points
+        /// (top-left origin); nil when Chromium did not say.
+        public var selectionRect: CGRect?
 
         /// Creates a value of your own, for previews and tests.
-        public init(matchCount: Int, activeMatchIndex: Int, isFinal: Bool = true) {
+        public init(matchCount: Int, activeMatchIndex: Int, isFinal: Bool = true, selectionRect: CGRect? = nil) {
             self.matchCount = matchCount
             self.activeMatchIndex = activeMatchIndex
             self.isFinal = isFinal
+            self.selectionRect = selectionRect
         }
     }
 }
@@ -197,7 +201,7 @@ public final class CefBrowser: Identifiable {
     /// The creation to run once the browser's profile is loaded, and the
     /// host it creates the browser in; see `profileAllowsCreation(for:_:)`.
     /// It is the token the profile's loading checks: a host that lets go of
-    /// the browser (`hostDidRelease(_:)`), a close or a quit clears it, and
+    /// the browser (``stopHosting(in:)``), a close or a quit clears it, and
     /// nothing is created then.
     @ObservationIgnored var creationAwaitingProfile: DeferredCreation?
 
@@ -291,6 +295,27 @@ public final class CefBrowser: Identifiable {
     var observedZoomLevel = 0.0
 
     var observedAudioMuted = false
+
+    /// A zoom level set while the browser had nothing in Chromium, applied
+    /// when its first page starts loading (Chromium keeps zoom per site).
+    @ObservationIgnored var pendingZoomLevel: Double?
+    /// A mute set while the browser had nothing in Chromium, applied when
+    /// Chromium creates it.
+    @ObservationIgnored var pendingAudioMuted: Bool?
+
+    /// The page's tooltip while one shows; nil otherwise. Observable. It
+    /// goes when the pointer moves off, and when the user scrolls or types
+    /// in an offscreen browser, the page navigates, the browser loses
+    /// focus, closes or is discarded. See ``TooltipPolicy``.
+    public internal(set) var tooltip: Tooltip?
+
+    /// Who shows ``tooltip``: ``TooltipPolicy/automatic`` (the default)
+    /// leaves it to Chromium or the offscreen view, ``TooltipPolicy/custom``
+    /// to the app. Takes effect with the next tooltip.
+    @ObservationIgnored public var tooltipPolicy = TooltipPolicy.automatic
+
+    /// The last point sent to an offscreen browser, for its tooltip.
+    @ObservationIgnored var lastPointerLocation = CGPoint.zero
 
     @ObservationIgnored var lastFindText: String?
 
@@ -551,7 +576,7 @@ public final class CefBrowser: Identifiable {
     }
 
     /// Whether this browser renders offscreen.
-    public var isOffscreen: Bool { client?.offscreenHost != nil }
+    public var isOffscreen: Bool { client?.isOffscreen ?? false }
 }
 
 // MARK: - Host / frame access

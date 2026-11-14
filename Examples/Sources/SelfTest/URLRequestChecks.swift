@@ -478,8 +478,8 @@ extension SelfTest {
             check("urlRequest: another incognito profile sends none of the first one's cookies", cookies.isEmpty,
                   detail: "Cookie: '\(cookies)'")
             _ = try await other.data(from: URL(string: "\(base)/set-cookie?other")!)
-            let otherCookies = await other.cookies(for: URL(string: base)!)
-            let defaultCookies = await CefProfile.default.cookies(for: URL(string: base)!)
+            let otherCookies = try await other.cookies(for: URL(string: base)!)
+            let defaultCookies = try await CefProfile.default.cookies(for: URL(string: base)!)
             check("urlRequest: a cookie a request received stays in its profile",
                   otherCookies.contains { $0.name == "fromRequest" } && !defaultCookies.contains { $0.name == "fromRequest" },
                   detail: "other \(otherCookies.map(\.name)), default \(defaultCookies.map(\.name))")

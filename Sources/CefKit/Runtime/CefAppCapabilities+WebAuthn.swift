@@ -5,6 +5,12 @@ extension CefAppCapabilities {
     /// offer a page that asks for a passkey or security key when Chromium
     /// answers the request itself. Which ones the app has depends on how it
     /// is signed and what it is entitled to.
+    ///
+    /// Chromium's own profile passkeys, verified with Touch ID, are not
+    /// among them: CEF 156 looks for a keychain access group without a
+    /// team prefix, which no provisioning profile can authorize, so stock
+    /// CEF never offers them (docs/bundling.md). CefPasskeys'
+    /// `CefPasskeyController` verifies the user with Touch ID instead.
     public enum WebAuthnAuthenticator: String, Sendable, Hashable, CaseIterable {
         /// USB and NFC security keys. Always available.
         case securityKey
@@ -12,22 +18,19 @@ extension CefAppCapabilities {
         /// `NSBluetoothAlwaysUsageDescription` (and, under the hardened
         /// runtime, `com.apple.security.device.bluetooth`).
         case hybrid
-        /// Chromium's own profile passkeys, verified with Touch ID. Needs
-        /// the keychain group CEF compiles in, which a provisioning profile
-        /// cannot authorize (see docs/bundling.md), so stock CEF builds do
-        /// not offer it.
-        case touchID
         /// iCloud Keychain passkeys, through AuthenticationServices. Needs
         /// `com.apple.developer.web-browser.public-key-credential`.
         case iCloudKeychain
     }
 
-    /// The keychain access group Chromium's Touch ID authenticator checks
-    /// for in CEF 156, without a team prefix.
-    static let chromiumWebAuthnKeychainGroup = ".org.chromium.Chromium.webauthn"
-
     /// The native WebAuthn authenticators Chromium can offer this app's
     /// pages when it answers a request itself.
+    ///
+    /// The set says what the app's signature, entitlements and Info.plist
+    /// make it eligible for, not that an authenticator is there: no
+    /// security key may be plugged in, Bluetooth may be off, the user may
+    /// have no iCloud Keychain passkey for the site or may refuse to
+    /// authorize the app, and any authentication can still fail.
     public var webAuthnAuthenticators: Set<WebAuthnAuthenticator> {
         var authenticators: Set<WebAuthnAuthenticator> = [.securityKey]
         if usageDescriptions.contains("NSBluetoothAlwaysUsageDescription"),
@@ -36,9 +39,6 @@ extension CefAppCapabilities {
         }
         // macOS refuses to launch an app whose restricted entitlements no
         // profile authorizes, so a running app's entitlements are real.
-        if teamIdentifier != nil, keychainAccessGroups.contains(Self.chromiumWebAuthnKeychainGroup) {
-            authenticators.insert(.touchID)
-        }
         if teamIdentifier != nil, entitlements.contains("com.apple.developer.web-browser.public-key-credential") {
             authenticators.insert(.iCloudKeychain)
         }
@@ -51,7 +51,6 @@ extension CefAppCapabilities.WebAuthnAuthenticator: CustomStringConvertible {
         switch self {
         case .securityKey: return "security keys"
         case .hybrid: return "phones"
-        case .touchID: return "Touch ID"
         case .iCloudKeychain: return "iCloud Keychain"
         }
     }

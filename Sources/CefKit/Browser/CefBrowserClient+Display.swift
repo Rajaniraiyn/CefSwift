@@ -64,6 +64,17 @@ extension CefBrowserClient {
             CefBrowserClient.run(s, browser, default: ()) { client, _ in client.offscreenHost?.offscreenDidChangeCursor(cursor) }
             return 0
         }
+        // Windowed and Chrome-style browsers show their tooltips unless this
+        // returns 1; offscreen ones leave them to the host, and CEF ignores
+        // the return value.
+        h.pointee.on_tooltip = { s, browser, text in
+            let tip = text.map { CefStringUtil.string(from: $0.pointee) } ?? ""
+            return CefBrowserClient.run(s, browser, default: Int32(0)) { client, b in
+                let custom = b.tooltipDidChange(tip)
+                client.offscreenHost?.offscreenDidChangeToolTip(custom || tip.isEmpty ? nil : tip)
+                return custom ? 1 : 0
+            }
+        }
         return h
     }
 }
@@ -96,9 +107,10 @@ extension CefBrowserClient {
 
     func makeFindHandler() -> UnsafeMutablePointer<cef_find_handler_t> {
         let h = cefAllocate(cef_find_handler_t.self, owner: self)
-        h.pointee.on_find_result = { s, browser, _, count, _, activeMatch, finalUpdate in
+        h.pointee.on_find_result = { s, browser, _, count, selection, activeMatch, finalUpdate in
+            let rect = selection.map { CGRect($0.pointee) }.flatMap { $0.isEmpty ? nil : $0 }
             let result = CefBrowser.FindResult(
-                matchCount: Int(count), activeMatchIndex: Int(activeMatch), isFinal: finalUpdate != 0)
+                matchCount: Int(count), activeMatchIndex: Int(activeMatch), isFinal: finalUpdate != 0, selectionRect: rect)
             CefBrowserClient.run(s, browser, default: ()) { _, b in b.applyFindResult(result) }
         }
         return h

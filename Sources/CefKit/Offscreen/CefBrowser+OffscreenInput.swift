@@ -102,6 +102,7 @@ extension CefBrowser {
 
     /// Forwards a mouse move.
     public func sendMouseMove(to point: CGPoint, modifiers: CefEventModifiers = []) {
+        lastPointerLocation = point
         withHost { host in
             var event = cef_mouse_event_t(point, modifiers: modifiers)
             host.pointee.send_mouse_move_event(host, &event, 0)
@@ -110,6 +111,7 @@ extension CefBrowser {
 
     /// Forwards the mouse leaving the view at `point`.
     public func sendMouseExit(at point: CGPoint, modifiers: CefEventModifiers = []) {
+        hideTooltip()
         withHost { host in
             var event = cef_mouse_event_t(point, modifiers: modifiers)
             host.pointee.send_mouse_move_event(host, &event, 1)
@@ -135,6 +137,7 @@ extension CefBrowser {
     /// Forwards a scroll at `point`. `delta` is in points, positive toward
     /// the top and left of the page, as `NSEvent.scrollingDeltaX/Y` report.
     public func sendScrollWheel(at point: CGPoint, delta: CGVector, modifiers: CefEventModifiers = []) {
+        hideTooltip()
         withHost { host in
             var event = cef_mouse_event_t(point, modifiers: modifiers)
             host.pointee.send_mouse_wheel_event(host, &event, Int32(saturating: delta.dx), Int32(saturating: delta.dy))
@@ -145,6 +148,7 @@ extension CefBrowser {
 
     /// Forwards a key event.
     public func sendKeyEvent(_ event: CefKeyEvent) {
+        hideTooltip()
         withHost { host in
             var event = event.cefValue
             host.pointee.send_key_event(host, &event)
@@ -169,6 +173,7 @@ extension CefBrowser {
 
     /// Tells Chromium the host view stopped being the key view.
     public func hostViewDidResignKey() {
+        hideTooltip()
         withHost { $0.pointee.set_focus($0, 0) }
     }
 

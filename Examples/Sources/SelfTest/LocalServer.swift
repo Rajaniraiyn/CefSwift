@@ -157,6 +157,10 @@ final class LocalServer: Sendable {
                 ("X-Multi", "a"), ("X-Multi", "b"),
             ]
             body = request.body
+        case "/echo-page":
+            // The method, a header and the body, as a page's title.
+            let sent = String(decoding: request.body, as: UTF8.self)
+            html("<title>\(request.method) \(request.headers["x-selftest"] ?? "-") \(sent)</title>echo")
         case "/status":
             status = "\(request.query) Status"
             body = Data("teapot".utf8)

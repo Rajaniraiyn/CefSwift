@@ -4,7 +4,8 @@ import SwiftUI
 
 /// A Downloads button in the toolbar once a tab has downloaded something
 /// (`CefBrowser.downloads`): its popover lists them, with their progress,
-/// and cancels, resumes or shows each in the Finder.
+/// and cancels, resumes or shows each in the Finder; Clear takes the
+/// finished ones out of the list (`CefProfile.removeDownloads(where:)`).
 struct Downloads: BrowserFeature {
     @ViewBuilder func toolbarItems(_ placement: ToolbarPlacement, for browser: CefBrowser) -> some View {
         if placement == .trailing { DownloadsButton(browser: browser) }
@@ -22,7 +23,14 @@ private struct DownloadsButton: View {
             Button("Downloads", systemImage: isActive ? "arrow.down.circle.dotted" : "arrow.down.circle") { isPresented.toggle() }
                 .popover(isPresented: $isPresented, arrowEdge: .bottom) {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("Downloads").font(.headline)
+                        HStack {
+                            Text("Downloads").font(.headline)
+                            Spacer()
+                            Button("Clear") {
+                                (browser.configuration.profile ?? .default).removeDownloads { $0.browser === browser }
+                            }
+                            .buttonStyle(.link)
+                        }
                         ForEach(browser.downloads.reversed()) { download in
                             DownloadRow(download: download)
                         }

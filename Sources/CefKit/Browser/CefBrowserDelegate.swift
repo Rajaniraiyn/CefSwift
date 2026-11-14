@@ -85,6 +85,15 @@ public protocol CefBrowserDelegate: AnyObject {
     /// `nil` to cancel. The default shows an `NSOpenPanel` or `NSSavePanel`
     /// (``CefFileDialogPresenter``) as a sheet.
     func browser(_ browser: CefBrowser, runFileDialog dialog: CefFileDialog) async -> [URL]?
+    /// Decide whether another app opens a URL of a scheme Chromium does
+    /// not load itself (`mailto:`, `zoommtg:`), which a page navigated to
+    /// or a link opened. The default asks with
+    /// ``CefExternalProtocolPresenter``, or denies when no app handles the
+    /// scheme. Chromium never opens another app itself; on
+    /// ``CefExternalProtocolDecision/allow`` CefKit opens the URL with
+    /// `NSWorkspace`. Cancelled when the page navigates away.
+    func browser(_ browser: CefBrowser, decideExternalProtocolFor request: CefExternalProtocolRequest) async
+        -> CefExternalProtocolDecision
     /// Resolve a permission request. The default denies.
     func browser(_ browser: CefBrowser, decidePermissionFor request: CefPermissionRequest) async -> CefPermissionDecision
     /// Supply credentials for HTTP/proxy authentication, or `nil` to cancel.
@@ -108,13 +117,6 @@ public protocol CefBrowserDelegate: AnyObject {
     /// ``CefProfile/downloadPolicy``: the Downloads folder unless the app
     /// set another.
     func browser(_ browser: CefBrowser, decideDestinationFor download: CefDownload) async -> CefDownloadDecision
-
-    // MARK: Downloads
-
-    /// A download's progress or state changed. The ``CefDownload`` itself
-    /// is observable, and ``CefBrowser/downloads`` and
-    /// ``CefProfile/downloads`` list it.
-    func browser(_ browser: CefBrowser, downloadDidUpdate download: CefDownload)
 }
 
 extension CefBrowserDelegate {
@@ -157,6 +159,11 @@ extension CefBrowserDelegate {
     public func browser(_ browser: CefBrowser, runFileDialog dialog: CefFileDialog) async -> [URL]? {
         await CefFileDialogPresenter.present(dialog, in: browser.hostWindow)
     }
+    public func browser(_ browser: CefBrowser, decideExternalProtocolFor request: CefExternalProtocolRequest) async
+        -> CefExternalProtocolDecision
+    {
+        await CefExternalProtocolPresenter.present(request, in: browser.hostWindow)
+    }
     public func browser(_ browser: CefBrowser, decidePermissionFor request: CefPermissionRequest) async -> CefPermissionDecision {
         .deny
     }
@@ -171,7 +178,6 @@ extension CefBrowserDelegate {
         .default(for: download)
     }
 
-    public func browser(_ browser: CefBrowser, downloadDidUpdate download: CefDownload) {}
 }
 
 /// Stands in when a browser has no delegate, so every decision still gets

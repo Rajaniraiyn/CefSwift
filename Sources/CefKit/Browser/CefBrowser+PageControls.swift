@@ -23,11 +23,18 @@ extension CefBrowser {
     ///
     /// In a windowed browser, pinching magnifies the page without changing
     /// its zoom level; `CefOffscreenBrowserView` turns pinches into
-    /// zoom-level changes. Setting the level before the browser is live
-    /// has no effect.
+    /// zoom-level changes. A level set before Chromium creates the
+    /// browser, or while it is discarded by closing it, applies when its
+    /// page starts loading, for that page's site.
     public var zoomLevel: Double {
         get { observedZoomLevel }
         set {
+            guard raw != nil else {
+                pendingZoomLevel = newValue
+                observedZoomLevel = newValue
+                return
+            }
+            pendingZoomLevel = nil
             withHost { $0.pointee.set_zoom_level($0, newValue) }
             // Chromium applies the level per site, so other browsers on the
             // same site follow.
@@ -35,8 +42,19 @@ extension CefBrowser {
         }
     }
 
-    /// Reads the zoom level back from Chromium.
+    /// Applies a zoom level set before the browser existed, once its page
+    /// has started loading and has a site.
+    func applyPendingZoomLevel(for url: URL?) {
+        guard let level = pendingZoomLevel, raw != nil, let url, url.scheme != "about" else { return }
+        pendingZoomLevel = nil
+        withHost { $0.pointee.set_zoom_level($0, level) }
+        CefBrowser.refreshZoomLevels()
+    }
+
+    /// Reads the zoom level back from Chromium; a level still waiting to be
+    /// applied stays.
     func refreshZoomLevel() {
+        guard pendingZoomLevel == nil else { return }
         let level = withHost { $0.pointee.get_zoom_level($0) } ?? observedZoomLevel
         if level != observedZoomLevel { observedZoomLevel = level }
     }
@@ -65,14 +83,27 @@ extension CefBrowser {
     /// The value is observable. CEF reports no mute changes, so CefKit
     /// reads the state back after setting it, when the browser is created
     /// and at each loading-state change; a change made elsewhere, such as
-    /// with the speaker icon of a Chrome-style tab, shows up then.
-    /// Setting it before the browser is live has no effect.
+    /// with the speaker icon of a Chrome-style tab, shows up then. Set
+    /// before Chromium creates the browser, or while it is discarded by
+    /// closing it, it applies when Chromium creates it.
     public var isAudioMuted: Bool {
         get { observedAudioMuted }
         set {
+            guard raw != nil else {
+                pendingAudioMuted = newValue
+                observedAudioMuted = newValue
+                return
+            }
             withHost { $0.pointee.set_audio_muted($0, newValue ? 1 : 0) }
             refreshAudioMuted()
         }
+    }
+
+    /// Applies a mute set before the browser existed.
+    func applyPendingAudioMuted() {
+        guard let muted = pendingAudioMuted, raw != nil else { return }
+        pendingAudioMuted = nil
+        withHost { $0.pointee.set_audio_muted($0, muted ? 1 : 0) }
     }
 
     /// Reads the mute state back from Chromium.
@@ -105,7 +136,12 @@ extension CefBrowser {
         withHost { $0.pointee.stop_finding($0, clearingSelection ? 1 : 0) }
     }
 
-    /// Opens the system print dialog for the page.
+    /// Prints the page with Chromium's own printing interface, as the
+    /// page's `window.print()` does: in a Chrome-style browser, Chrome's
+    /// print preview (CefChromium's `.printPreview` surface), not the
+    /// system print dialog. To print through the system dialog under the
+    /// app's control, render the page with ``pdf(configuration:)`` and
+    /// print the PDF with PDFKit.
     public func print() {
         guard !isDiscarded else {
             whenRestored { [weak self] in self?.print() }

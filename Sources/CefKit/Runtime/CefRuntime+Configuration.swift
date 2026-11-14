@@ -235,8 +235,12 @@ extension CefRuntime {
         ///   app chooses needs neither the CDM nor the data files the updater
         ///   keeps current (certificate revocation and Certificate Transparency
         ///   lists, Safe Browsing lists, origin trials), and with the updater
-        ///   off none of them, Widevine included, is downloaded. An app that
-        ///   shows arbitrary sites should turn it back on.
+        ///   off none of them, Widevine included, is downloaded. They go
+        ///   stale: certificates revoked through CRLSets stay trusted, and
+        ///   the Certificate Transparency log list stays the one the CEF
+        ///   build shipped, which Chromium stops enforcing once it is old
+        ///   enough. An app that shows arbitrary sites should turn it back
+        ///   on.
         /// - ``Services/translation``, ``Network/preloading``,
         ///   ``Privacy/hyperlinkAuditing``, ``Credentials/passwordSaving`` and
         ///   ``Credentials/autofill``: ``CefRuntime/Setting/disabled``.

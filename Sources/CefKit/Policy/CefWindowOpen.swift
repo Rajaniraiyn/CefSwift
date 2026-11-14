@@ -171,13 +171,22 @@ public enum CefWindowOpenDecision: Sendable, Equatable {
 
     /// The action taken when the delegate does not implement
     /// ``CefBrowserDelegate/browser(_:decideWindowOpenFor:)``: Chrome-style
-    /// browsers open tabs and windows natively; other browsers load the URL
-    /// in place, and allow a blank popup only when not offscreen. Return it
-    /// from your own implementation for requests you don't handle.
+    /// browsers open tabs and windows natively; other browsers deny a
+    /// request without a user gesture, load the URL in place, and allow a
+    /// blank popup only when not offscreen. Return it from your own
+    /// implementation for requests you don't handle.
+    ///
+    /// Chromium's popup blocker stops a Chrome-style browser's popups
+    /// without a gesture before the delegate is asked, unless the
+    /// ``CefSitePermission/popups`` site setting allows them; Alloy-style
+    /// browsers have no popup blocker, so the delegate sees every request,
+    /// and this default keeps a script's `window.open` from navigating the
+    /// page away.
     public static func `default`(for request: CefWindowOpenRequest) -> CefWindowOpenDecision {
         if request.isSourceChromeStyle {
             return .allowNativePopup
         }
+        guard request.hasUserGesture else { return .deny }
         if request.targetURL != nil {
             return .openInCurrentBrowser
         }

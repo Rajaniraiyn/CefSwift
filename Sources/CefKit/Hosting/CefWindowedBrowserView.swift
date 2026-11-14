@@ -23,6 +23,13 @@ public final class CefWindowedBrowserView: NSView {
     /// live moves its native view here; assigning `nil` removes it. The
     /// browser assigned before, if still waiting for its profile, is not
     /// created here later.
+    ///
+    /// It becomes nil when the browser moves to another host
+    /// (``CefBrowser/host(windowedIn:)``, another view's `browser`) or is
+    /// withdrawn from this one (``CefBrowser/stopHosting(in:)``): a
+    /// browser shows in one place at a time, and this view no longer
+    /// claims its swipes, takes focus for it or hosts it again when it
+    /// returns to a window.
     public var browser: CefBrowser? {
         didSet {
             guard browser !== oldValue else { return }
@@ -51,11 +58,9 @@ public final class CefWindowedBrowserView: NSView {
     required init?(coder: NSCoder) { nil }
 
     private func browserDidChange(from oldValue: CefBrowser?) {
-        if let previous = oldValue?.nativeView, previous.superview === self {
-            previous.removeFromSuperview()
-        }
-        // One still waiting for its profile is not created here later.
-        oldValue?.hostDidRelease(self)
+        // Its native view leaves, and one still waiting for its profile is
+        // not created here later.
+        oldValue?.stopHosting(in: self)
         layer?.backgroundColor = browser?.hostBackgroundColor
         hostBrowserIfPossible()
         updateSwipeMonitor()
@@ -102,6 +107,12 @@ public final class CefWindowedBrowserView: NSView {
     public override func viewDidUnhide() {
         super.viewDidUnhide()
         hostBrowserIfPossible()
+    }
+
+    /// `browser` now shows elsewhere, or was withdrawn from this view.
+    func browserDidStopHosting(_ browser: CefBrowser) {
+        guard self.browser === browser else { return }
+        self.browser = nil
     }
 
     /// Chromium can only create a windowed browser inside a window, so

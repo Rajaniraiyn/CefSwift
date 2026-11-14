@@ -249,11 +249,11 @@ public final class SystemBrowser {
     /// returns how many were copied. Nothing is copied unless you call it:
     /// the two engines otherwise keep separate cookies.
     @discardableResult
-    public func importCookies(from profile: CefProfile, for url: URL) async -> Int {
-        let cookies = await profile.cookies(for: url)
+    public func importCookies(from profile: CefProfile, for url: URL) async throws -> Int {
+        let cookies = try await profile.cookies(for: url).compactMap(Self.webKitCookie)
         let store = nativeView.configuration.websiteDataStore.httpCookieStore
         for cookie in cookies {
-            await store.setCookie(Self.webKitCookie(cookie))
+            await store.setCookie(cookie)
         }
         return cookies.count
     }
@@ -261,13 +261,24 @@ public final class SystemBrowser {
     /// `cookie` as WebKit should store it. A host-only cookie, whose domain
     /// Chromium gives without a leading dot, is passed by origin so that
     /// WebKit does not widen it to the host's subdomains.
-    package static func webKitCookie(_ cookie: HTTPCookie) -> HTTPCookie {
-        guard !cookie.domain.hasPrefix("."), var properties = cookie.properties,
-              let origin = URL(string: "\(cookie.isSecure ? "https" : "http")://\(cookie.domain)/")
-        else { return cookie }
-        properties[.domain] = nil
-        properties[.originURL] = origin
-        return HTTPCookie(properties: properties) ?? cookie
+    package static func webKitCookie(_ cookie: CefProfile.Cookie) -> HTTPCookie? {
+        var properties: [HTTPCookiePropertyKey: Any] = [
+            .name: cookie.name, .value: cookie.value, .path: cookie.path.isEmpty ? "/" : cookie.path,
+        ]
+        if cookie.domain.hasPrefix(".") {
+            properties[.domain] = cookie.domain
+        } else if let origin = URL(string: "\(cookie.isSecure ? "https" : "http")://\(cookie.domain)/") {
+            properties[.originURL] = origin
+        }
+        if cookie.isSecure { properties[.secure] = "TRUE" }
+        if cookie.isHTTPOnly { properties[HTTPCookiePropertyKey("HttpOnly")] = "TRUE" }
+        if let expires = cookie.expirationDate { properties[.expires] = expires }
+        switch cookie.sameSite {
+        case .lax: properties[.sameSitePolicy] = HTTPCookieStringPolicy.sameSiteLax
+        case .strict: properties[.sameSitePolicy] = HTTPCookieStringPolicy.sameSiteStrict
+        case .none, .unspecified: break
+        }
+        return HTTPCookie(properties: properties)
     }
 
     // MARK: Choosing an engine

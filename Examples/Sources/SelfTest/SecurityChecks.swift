@@ -79,14 +79,14 @@ extension SelfTest {
 
         // The profile's network maintenance.
         let profile = CefProfile.default
-        let maintenance: [(String, @MainActor () async -> Void)] = [
+        let maintenance: [(String, @MainActor () async throws -> Void)] = [
             ("clearHTTPCache", profile.clearHTTPCache),
             ("clearCertificateExceptions", profile.clearCertificateExceptions),
             ("clearHTTPAuthenticationCredentials", profile.clearHTTPAuthenticationCredentials),
             ("closeAllConnections", profile.closeAllConnections),
         ]
         for (name, run) in maintenance {
-            let finished = await withTimeout(.seconds(10)) { await run(); return true }
+            let finished = await withTimeout(.seconds(10)) { try await run(); return true }
             check("security: \(name) completes", finished == true)
         }
         await expect("security: resolveHost resolves localhost") {
