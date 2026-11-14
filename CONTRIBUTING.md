@@ -124,6 +124,30 @@ seen. CI runs it on every pull request. Add a check in
 - `SELFTEST_JSON=<path>` writes every result, each group's time and the
   skip counts as JSON.
 
+## Measure idle footprint
+
+A small footprint is one of the project's goals, so measure before merging
+anything that runs at launch or while idle: a new host view or layer, an
+observer, a timer, a profile, a helper process or a page Chromium keeps
+alive. Bundle the Minimal and Browser examples from your branch and from
+the branch you merge into, and measure them one after the other on the
+same Mac:
+
+```sh
+swift package --package-path Examples --allow-writing-to-package-directory \
+  --allow-network-connections all cef bundle --product Minimal --output dist
+Scripts/measure-footprint.py Examples/dist/Minimal.app --runs 5
+```
+
+The script prints the median of each kind of run and the footprint of
+each process kind. Numbers drift by a few MiB within minutes on the same
+Mac (the GPU process most), and by more between sessions, so compare
+builds measured in alternation, not with a figure from another day; and
+compare per process, since a change usually shows in one process. Note
+the power source and the machine's load. CI's Footprint step measures
+both examples on its virtual machine, writes the numbers to the run
+summary, and fails only above wide bounds that a gross regression crosses.
+
 ## Measure threads, lifecycle and frames
 
 `SelfTest -benchmark <name>` runs one measurement instead of the checks
