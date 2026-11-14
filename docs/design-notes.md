@@ -714,3 +714,105 @@ a location client of the app's, with no authorization request; nobody
 browsed for Bonjour services, so Local Network was not asked for; there
 was no Bluetooth request. The keychain is the mock keychain in ad hoc
 builds.
+
+## Building with SwiftPM and with Xcode: one tool, two front ends
+
+Measured and decided on 2026-11-14 with Xcode 27.2 and Swift 6.4, by
+setting up a new app each way from scratch (an `swift package init` app,
+and a SwiftUI app project as Xcode 27's template makes it, both depending
+on a local CefSwift).
+
+**What each track needed before.** SwiftPM: seven steps (init, platforms
+and dependency in Package.swift, the app, `cef bundle` with its two
+`--allow-…` options, open, `.gitignore`), one surprise (`swift run` cannot
+start Chromium) and one wrong hint (the bundle's "check it with" line left
+out the options `cef doctor` needs). Xcode: the build succeeded and the app
+stopped at launch with `CefError.frameworkNotFound`, whose fix named
+`swift package cef bundle`. Nothing described the Xcode track beyond "build
+the same two products with the same link order"; making it work by hand
+meant downloading and converting CEF, linking the helper as the plugin
+does, writing five helper apps and their Info.plists, signing inside out,
+and finding out, one launch at a time, that:
+
+- Xcode's template turns on App Sandbox, in which Chromium stops at launch
+  (`bootstrap_check_in …MachPortRendezvousServer…: Permission denied`;
+  [bundling](bundling.md#app-sandbox));
+- the template's User Script Sandboxing keeps a Run Script phase from
+  reading anything it did not declare or writing into the app;
+- Release builds are universal by default, and a CEF distribution has one
+  architecture;
+- Xcode turns the hardened runtime off for ad hoc Debug builds but keeps
+  it for Release, where library validation refuses an ad hoc framework (and
+  Xcode's own `.debug.dylib`, had the Debug build kept it);
+- Xcode signs the app last, so the parts inside must be signed before, in
+  a phase after Xcode's own; and Xcode's resource bundles
+  (`CefSwift_CefKit.bundle`, with an Info.plist and no code) are sealed by
+  the app's signature, not signed on their own.
+
+What worked without help: Xcode builds the package, copies its resource
+bundles to `Contents/Resources`, where `Bundle.module` finds them, and the
+Debug build's `.debug.dylib` and `__preview.dylib` do not disturb the
+helpers, whose names derive from `EXECUTABLE_NAME`.
+
+**Where the shared logic lives.** It was Swift in the command plugin, which
+only SwiftPM can run. The options:
+
+| Option | For | Against | Chosen |
+|---|---|---|---|
+| An executable tool target that the plugin and an Xcode Run Script phase both run | One implementation; the convention of SwiftLint, swift-format and DocC (a plugin over a tool); testable as a library target | The Xcode phase builds the tool with SwiftPM once per derived-data folder (about a minute) | Yes: `CefBundling` (library) and `cefswift` (tool) |
+| A SwiftPM build tool plugin on the app target | Xcode runs it with no script | A build tool plugin writes only into its own work directory; its outputs become sources or resources (`Contents/Resources`), never `Contents/Frameworks`, and it runs before the app is linked and signed. It cannot add helper apps to the app or sign them, in Xcode 27 as before | No |
+| An Xcode command plugin (XcodeProjectPlugin) | Runs from Xcode's menu | Manual, not part of a build | No |
+| Helper apps as Xcode targets | Xcode signs and embeds them | Five targets, Info.plists and Copy Files phases in every app project; helper names follow the app's, so they cannot come with the package | No |
+| Prebuilt helpers shipped in a framework or XCFramework | Xcode embeds them | Chromium finds helpers as `<executable> Helper (…)` in the app's `Contents/Frameworks`, their bundle identifiers follow the app's, and they must carry the app's signature for library validation, while Embed & Sign signs the framework, not the apps inside it | No |
+| CEF as an XCFramework binary target (pull request #27) | Xcode embeds, signs and links the framework itself; universal builds | Needs a release asset per CEF version; does not cover the helpers | The seam: `CEF_EMBED_FRAMEWORK = NO` |
+
+The phase's script builds the tool and runs `cefswift embed`, which reads
+Xcode's build settings from its environment, as Xcode's own tools do; the
+plugin runs `cefswift bundle` with the facts only it has (the product's
+build products, from the package graph). Both then use `CefEmbedder` for
+the framework, startup library and helpers, `DistributionPlan` for
+Info.plists and entitlements, the same signer, and `cef doctor`'s checks;
+the phase reports those as `error:` and `warning:` lines, with
+`file:line:` for a `cefapp.json` key, which Xcode puts in its Issue
+navigator.
+
+**Settings: each track's own place.** Xcode has a build setting for most of
+what `cefapp.json` holds (bundle identifier, version, signing, hardened
+runtime, entitlements, usage descriptions); the phase reads those, and adds
+`CEF_…` settings, each named after the `cefapp.json` key it matches, for
+what only CefSwift has (locale packs, SwiftShader, capabilities, helper
+entitlements, the CEF cache). The app's entitlements stay Xcode's: the
+phase derives the helpers' from them (get-task-allow, camera, microphone)
+rather than asking for them twice, and stops the build, naming the
+setting, when one the plan needs is missing. A project built both ways
+points `CEF_APP_CONFIG` at its `cefapp.json`.
+
+**Conventions followed.** Apple's guidance for nested code: sign inside out,
+each item before what contains it, never with `--deep`; nested helpers in
+`Contents/Frameworks` (as Chrome's are) with their own bundle identifiers
+and `LSUIElement`; the app's signature last, by Xcode in Xcode. Sparkle
+ships its helpers (Autoupdate, its XPC services) generic and signed inside
+its framework; Chromium's cannot be generic, since their names, identifiers
+and entitlements follow the app's. Electron's and
+swift-bundler's packagers assemble the bundle outside Xcode, as `cef
+bundle` does for SwiftPM. Helpers of an App Sandbox app would take
+`com.apple.security.inherit`; Chromium does not run in the App Sandbox, so
+both tracks refuse it instead.
+
+**Previews.** Xcode's previews run the app's code in a process of Xcode's;
+Chromium cannot start its helpers there. `CefSwiftApp` skips Chromium when
+`XCODE_RUNNING_FOR_PREVIEWS` is 1, and `CefWebView` shows a placeholder
+while the runtime has not started, so a view with a web view previews
+without crashing. Checked by launching the Debug build of the Xcode example
+with that variable set: it stays up with its window and no helper
+processes. Xcode's preview canvas itself was not exercised: it has no
+command-line entry point.
+
+**Cost.** The Xcode example (`Scripts/check-xcode-example.sh`: Debug and
+Release builds, archive, export, three smoke launches, `cef doctor`) took
+156 to 159 s in three runs from clean derived data on an M3, including Xcode's own
+build of CefSwift twice (build and archive); an incremental build of the
+example takes 3.7 s, of which the phase is 2.0 s, most of it `cef doctor`'s
+checks: it skips SwiftPM when the tool and helper are newer than their
+sources, since SwiftPM's own checks (three builds, each with its own linker flags,
+and their `--show-bin-path`) took 15.7 s to find nothing to do.

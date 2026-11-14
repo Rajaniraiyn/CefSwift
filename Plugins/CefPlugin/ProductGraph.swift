@@ -20,7 +20,7 @@ struct LocatedProduct {
         guard let package = packages.first(where: { $0.products.contains { $0.name == name } }),
               let product = package.products.first(where: { $0.name == name }) else {
             let names = packages.flatMap { $0.products.compactMap { $0 as? ExecutableProduct }.map(\.name) }
-            throw CefPluginError(
+            throw PluginError(
                 "No product named '\(name)' in \(root.displayName) or its dependencies. Executable products: " +
                 (names.isEmpty ? "none" : names.sorted().joined(separator: ", ")) + ".")
         }

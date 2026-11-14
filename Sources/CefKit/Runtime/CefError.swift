@@ -53,7 +53,8 @@ extension CefError: CustomStringConvertible {
         case .frameworkNotFound(let detail):
             return """
             Chromium Embedded Framework not found. \(detail)
-            Fix: bundle the framework via `swift package cef bundle`, set \
+            Fix: run the app from its bundle: build it with `swift package cef bundle`, \
+            or, in Xcode, with the CefSwift build phase (docs/bundling.md#xcode). Or set \
             CefRuntime.Configuration.frameworkDirectory, or export CEF_FRAMEWORK_PATH \
             to the framework binary for unbundled dev/CI runs.
             """
@@ -63,16 +64,16 @@ extension CefError: CustomStringConvertible {
             return """
             CEF API hash mismatch (expected \(expected), got \(actual)). The \
             framework binary on disk is not ABI-compatible with the CEF \
-            headers this package was built against. Re-run `swift package \
-            cef download` so the bundled framework matches the pinned CEF \
-            version.
+            headers this package was built against. Bundle the app again with \
+            the CEF version CEF_VERSION.json pins (`swift package cef bundle`, \
+            or the Xcode build phase).
             """
         case .initializationFailed(let exitCode):
             return """
             cef_initialize failed (exit code \(exitCode)). Common causes: the \
             helper bundles are missing or misnamed, the app is not running \
-            from a bundle assembled by `swift package cef bundle`, or another \
-            instance is using the same root_cache_path.
+            from a bundle assembled by `swift package cef bundle` or the Xcode \
+            build phase, or another instance is using the same root_cache_path.
             """
         case .anotherInstanceRunning:
             return "Another instance of this app is already running with the same profile directory."

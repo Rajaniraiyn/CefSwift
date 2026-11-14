@@ -238,3 +238,26 @@ Scripts/measure-footprint.py Examples/dist/Browser.app -- --js-flags=--lite-mode
 
 Cocoa reads a value that starts with `(` as a list, so prefix such a script
 with `void `.
+
+## Xcode
+
+`Xcode/XcodeExample.xcodeproj` is a SwiftUI app built by Xcode rather than
+SwiftPM: one `CefWebView`, as in Minimal. It depends on the CefSwift
+checkout as a local package and is set up as
+[the README](../README.md#with-xcode) describes: App Sandbox off,
+[`CefSwift.xcconfig`](Xcode/CefSwift.xcconfig) as the target's
+configuration file, and the CefSwift Run Script phase. It signs ad hoc
+("Sign to Run Locally"), so it builds without a team.
+
+Open it in Xcode and Run, or build, run, archive and export it from the
+command line:
+
+```sh
+Scripts/check-xcode-example.sh
+```
+
+The script builds Debug and Release with `xcodebuild`, archives and exports
+the app (`ExportOptions.plist`, method `mac-application`, which copies the
+app as it is signed), launches each with `-smoke YES` (load the page, print
+`PASS loaded …`, quit), and runs `cef doctor` on the exported app. It keeps
+its derived data in `Examples/Xcode/build`; delete it afterwards.

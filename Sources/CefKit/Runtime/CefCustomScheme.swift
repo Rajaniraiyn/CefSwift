@@ -6,8 +6,8 @@ import CefBase
 ///
 /// Declare schemes in ``CefRuntime/Configuration/customSchemes``. Chromium requires
 /// every process to register the same schemes; CefSwift passes the list to
-/// helper processes on their command line, and the helper executable that
-/// `swift package cef bundle` builds registers it there. Serve content with
+/// helper processes on their command line, and CefSwift's helper executable
+/// registers it there. Serve content with
 /// ``CefRuntime/registerSchemeHandler(scheme:domain:handler:)``.
 ///
 /// ```swift

@@ -9,6 +9,9 @@
 #     "Toolchain" step prints what each run used.
 #   - One short job beside it, in parallel and without CEF: `intel`
 #     compiles everything for x86_64 on the same arm64 runner.
+#   - One more in parallel, `xcode`: the Xcode example built, archived and
+#     run by xcodebuild (about 2.5 minutes on an M3; more on a runner). It
+#     is not a required check, so it never holds up a CEF update.
 #   - Only the minimal arm64 CEF flavor is downloaded, and `.cef/downloads`
 #     (~135 MB) is cached keyed on the pinned CEF version.
 #
@@ -234,6 +237,40 @@ jobs:
           lipo -archs "$helper" | tee "$RUNNER_TEMP/archs.txt"
           grep -qx x86_64 "$RUNNER_TEMP/archs.txt"
           xcrun vtool -show-build "$helper" | grep -Eq 'minos 14\.0$'
+
+  # The Xcode track: Examples/Xcode built with xcodebuild, Debug and Release,
+  # archived and exported, each launched with -smoke YES, and cef doctor on
+  # the exported app (Scripts/check-xcode-example.sh, docs/bundling.md#xcode).
+  # Its build phase downloads CEF into Examples/Xcode/.cef unless the cache
+  # has the archive.
+  xcode:
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Read the pinned CEF version
+        id: cef
+        run: echo "version=$(jq -r .cef CEF_VERSION.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache CEF downloads
+        uses: actions/cache@v4
+        with:
+          path: Examples/Xcode/.cef/downloads
+          key: cef-${{ steps.cef.outputs.version }}-macosarm64-minimal
+
+      - name: Build, archive and run the Xcode example
+        run: Scripts/check-xcode-example.sh
+
+      - name: Working tree must stay clean
+        run: |
+          git diff --exit-code
+          test -z "$(git status --porcelain)"
 
   # Runs started for an update pull request are dispatched with the workflow
   # token, so a failure notifies nobody and auto-merge just waits. Say so on

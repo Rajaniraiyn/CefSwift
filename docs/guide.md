@@ -3187,7 +3187,9 @@ with `dlopen`. That keeps about 12 MB of the framework's data as shared,
 clean memory in each process instead of private memory
 ([architecture](architecture.md#loading-the-framework-at-launch);
 [design notes](design-notes.md#loading-the-framework-at-launch) record the
-measurement).
+measurement). The Xcode build phase links the helpers the same way; an
+Xcode target's own executable is not linked to the framework and loads it
+with `dlopen` ([bundling](bundling.md#xcode)).
 
 ### What the presets turn off
 

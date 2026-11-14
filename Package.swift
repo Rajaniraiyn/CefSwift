@@ -13,8 +13,12 @@ let package = Package(
         .library(name: "CefPasskeys", targets: ["CefPasskeys"]),
         .library(name: "CefChromium", targets: ["CefChromium"]),
         .plugin(name: "CefPlugin", targets: ["CefPlugin"]),
+        // Assembles, signs and checks CEF app bundles: what the `cef` plugin
+        // and the Xcode build phase (Scripts/xcode-embed.sh) both run.
+        .executable(name: "cefswift", targets: ["CefSwiftTool"]),
         // The helper processes' executable and its startup library, which
-        // `swift package cef bundle` builds and puts in the app bundle.
+        // `swift package cef bundle` and the Xcode build phase build and put
+        // in the app bundle.
         .executable(name: "cefswift-helper", targets: ["CefHelper"]),
         .library(name: "cefswift_helper_startup", type: .dynamic, targets: ["CefHelperStartup"]),
     ],
@@ -81,8 +85,17 @@ let package = Package(
             name: "CefSwiftUI",
             dependencies: ["CefKit"]
         ),
-        // `swift package cef <download|bundle|info|clean|doctor|notarize>`
-        // Also builds the helper products when bundling.
+        // The bundling logic of `cefswift`: framework, helpers, Info.plists,
+        // entitlements, signing, cef doctor. Foundation only.
+        .target(
+            name: "CefBundling"
+        ),
+        .executableTarget(
+            name: "CefSwiftTool",
+            dependencies: ["CefBundling"]
+        ),
+        // `swift package cef <download|bundle|info|clean|doctor|package|notarize>`:
+        // builds the product and the helper with SwiftPM and runs cefswift.
         .plugin(
             name: "CefPlugin",
             capability: .command(
@@ -95,15 +108,15 @@ let package = Package(
                     .allowNetworkConnections(scope: .all(ports: []), reason: "Download CEF binaries from cef-builds.spotifycdn.com"),
                 ]
             ),
+            dependencies: ["CefSwiftTool"]
         ),
         .testTarget(
             name: "CefKitTests",
             dependencies: ["CefKit", "CefBase", "CefRenderer"]
         ),
-        // Compiles the plugin's pure logic (Plugins/CefPlugin/Distribution,
-        // linked in as a directory symlink) so it can be unit-tested.
         .testTarget(
-            name: "CefPluginTests"
+            name: "CefBundlingTests",
+            dependencies: ["CefBundling"]
         ),
         // An AppKit consumer: imports CefKit and AppKit only, without
         // `@testable`, to prove hosting a browser needs no SwiftUI.

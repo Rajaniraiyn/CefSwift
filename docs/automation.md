@@ -113,13 +113,22 @@ description to `.cef/update/`.
 
 `.github/workflows/ci.yml` runs on pushes and pull requests to `main`, and
 when dispatched. Its `ci` job, on a `macos-15` runner, does everything
-below; one short job runs beside it without CEF:
+below; two jobs run beside it:
 
 - `intel` compiles the package and its tests for x86_64
   (`swift build --build-tests --arch x86_64`) on the same arm64 runner,
   and checks that the result is x86_64 for macOS 14. CefKit loads the CEF
   framework at run time and the plugin builds the helper only when it
   bundles, so compiling needs no `macosx64` CEF archive.
+- `xcode` runs `Scripts/check-xcode-example.sh`: the Xcode example
+  (`Examples/Xcode`) built with `xcodebuild`, Debug and Release, archived
+  and exported, each build launched with `-smoke YES`, and `cef doctor` on
+  the exported app. Its build phase downloads CEF into
+  `Examples/Xcode/.cef` unless the cache, with the same key as `ci`'s, has
+  the archive. It takes about 2.5 minutes on an M3 and is not a required
+  check: release tags and CEF updates wait for `ci` and `intel` only. It
+  had not run on GitHub when it was added; the runner's Xcode is older
+  than the Xcode 27.2 it was written with.
 
 The `ci` job:
 

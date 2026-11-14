@@ -42,7 +42,15 @@ extension CefSwiftApp {
     /// The `@main` entry point: initializes Chromium, then runs the SwiftUI
     /// app. If Chromium cannot start, prints what went wrong and how to fix
     /// it, and exits with status 1.
+    ///
+    /// In Xcode's SwiftUI previews, which run the app's code in a process
+    /// of Xcode's that cannot start Chromium's helpers, it runs the SwiftUI
+    /// app without Chromium; ``CefWebView`` shows a placeholder there.
     @MainActor public static func main() {
+        if ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1" {
+            launchSwiftUIRuntime()
+            return
+        }
         // Must precede every other NSApp access, including SwiftUI's.
         CefApplication.install()
         do {

@@ -55,8 +55,8 @@ Since CEF 138 the macOS sandbox ships as a library inside the framework,
    at launch instead of loaded with `dlopen` afterwards. See
    [architecture](architecture.md#loading-the-framework-at-launch) for why.
 
-No other code changes are needed. Bundles from `cef bundle` contain both
-libraries.
+No other code changes are needed. Bundles from `cef bundle` and from the
+Xcode build phase contain both libraries.
 
 ### libcef_sandbox and Chromium's Aperitif helpers
 
@@ -96,8 +96,9 @@ does not have, fails to start the GPU process, and ends the app.
   process's command line, Chromium passes it on and helpers skip sealing.
   This is the switch Chromium itself uses.
 - The App Sandbox (the App Store entitlement) is a separate mechanism from
-  Chromium's sandbox, and CefSwift does not support it
-  ([bundling](bundling.md#app-sandbox)).
+  Chromium's sandbox. Chromium does not run in it, so both tracks refuse
+  it ([bundling](bundling.md#app-sandbox)); Xcode's app template turns it
+  on, so remove it there.
 
 ## Without the sandbox
 

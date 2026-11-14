@@ -24,21 +24,23 @@ swift test --sanitize=address --build-system native
 The default build system links the helper-startup library without the
 Address Sanitizer runtime, so that one uses the native build system.
 
-The Command Line Tools are enough; Xcode is not required. `CefKitTests`
+The Command Line Tools are enough; Xcode is not required, except for the
+Xcode example. `CefKitTests`
 covers CefKit and its AppKit views, `CefPasskeysTests` the passkeys
 library, `CefChromiumTests` the CefChromium library, `CefKitAppKitTests` hosts a browser through CefKit's public API
-alone (no SwiftUI), and `CefPluginTests` the
-plugin's signing, distribution and bundle-assembly logic; none of them
-starts Chromium.
+alone (no SwiftUI), and `CefBundlingTests` the bundling logic: signing,
+entitlements, bundle assembly, `cef doctor`, and the Xcode build phase
+driven by a fake Xcode environment; none of them starts Chromium.
 
-`CefPluginTests` compiles `Plugins/CefPlugin/Distribution` through a
-directory symlink (`Tests/CefPluginTests/Distribution`). SwiftPM lets a
-command plugin depend only on executable and binary targets, which it runs
-as tools, not on a library target, and a test target cannot depend on a
-plugin; so the plugin and its tests cannot share that code through a
-regular target. Keep `Distribution` free of `PackagePlugin` and of running
-tools: it is the plugin's pure logic, and the rest of the plugin runs
-`swift build`, `codesign` and the other tools around it.
+The bundling logic is the `CefBundling` library target, which the
+`cefswift` tool (`Sources/CefSwiftTool`) wraps. SwiftPM lets a command
+plugin depend only on executable and binary targets, which it runs as
+tools, so the `cef` plugin (`Plugins/CefPlugin`) runs `cefswift` rather
+than linking `CefBundling`, as the Xcode build phase does
+(`Scripts/xcode-embed.sh`). Keep the plugin to what only a plugin can do:
+find products and `CEF_VERSION.json` in the package graph and build with
+SwiftPM. Everything about the bundle goes in `CefBundling`, so that both
+tracks get it.
 
 The loader tests run only when `CEF_FRAMEWORK_PATH` names a CEF framework,
 either the `.framework` directory or the binary inside it. Download one with
@@ -71,6 +73,14 @@ The other products are `Gallery`, `Minimal`, `Compat` and `SelfTest`. The plugin
 in the invoking package, so the Examples package downloads CEF into
 `Examples/.cef/`. [Examples/README.md](Examples/README.md) lists the launch
 arguments.
+
+`Scripts/check-xcode-example.sh` builds the Xcode example
+(`Examples/Xcode`) with `xcodebuild`, Debug and Release, archives and
+exports it, and runs each build's smoke test; run it after changing
+`CefBundling`, `Scripts/xcode-embed.sh` or the example. It needs Xcode,
+keeps CEF in `Examples/Xcode/.cef/` (clone `Examples/.cef` there with
+`cp -Rc` to skip the download) and its derived data in
+`Examples/Xcode/build/`.
 
 ## Verify with SelfTest
 

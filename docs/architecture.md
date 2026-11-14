@@ -1405,8 +1405,9 @@ callback.
 
 The app is Chromium's browser process. Renderer, GPU and utility processes
 run from the helper apps inside the bundle, all the same executable,
-CefSwift's `cefswift-helper` product, which `cef bundle` builds with the
-app. It finds the framework dyld loaded with it, checks the API hash,
+CefSwift's `cefswift-helper` product, which `cef bundle` or the Xcode
+build phase builds with the app ([bundling](bundling.md)), through the
+`cefswift` tool both run. It finds the framework dyld loaded with it, checks the API hash,
 registers the custom URL schemes it receives on its command line
 (`--cefswift-schemes`), so every process registers the same list, and
 calls `cef_execute_process`; in renderers, with the render process handler
@@ -1429,8 +1430,8 @@ The helper links two libraries, in this order:
    executable's own code, and must not load the Swift runtime.
 2. The CEF framework.
 
-The plugin links the helper with `-needed_library` and `-needed_framework`
-for these two, in that order, and `-dead_strip_dylibs`, which drops
+Both tracks link the helper with `-needed_library` and `-needed_framework`
+for these two, in that order (`HelperLink.swift`), and `-dead_strip_dylibs`, which drops
 libraries the helper does not use, such as Foundation, which SwiftPM's
 build system links into executables by default. The helper uses the Swift
 standard library and the C API, not Foundation.
@@ -1440,7 +1441,9 @@ are read in (page-in linking), so the framework's `__DATA_CONST` segment,
 about 12 MB of pointers, stays clean memory that every process shares. A
 library loaded with `dlopen` has the same segment fixed up in the process,
 which makes all of it private, dirty memory. The app executable gets the
-same benefit from its weak link. Across the six processes of the Minimal
+same benefit from the weak link `cef bundle` gives it; an Xcode target's
+executable does not link the framework, so its process loads it with
+`dlopen` ([bundling](bundling.md#xcode)). Across the six processes of the Minimal
 example this takes the idle footprint from 185 MB to 101 MB
 ([guide](guide.md#footprint-and-launch-time)).
 
