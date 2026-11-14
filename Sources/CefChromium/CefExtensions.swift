@@ -283,8 +283,12 @@ public final class CefExtensions {
         guard response.status == "SUCCESS" else {
             throw CefError.operationFailed("extensions: \(response.message ?? response.status)")
         }
-        let base = directory.standardizedFileURL.deletingPathExtension()
-        return (base.appendingPathExtension("crx"), privateKey ?? base.appendingPathExtension("pem"))
+        // Chromium writes beside the directory. Built from the path, so the
+        // results are file URLs even where Foundation keeps the directory's
+        // trailing slash through `appendingPathExtension`.
+        let base = directory.standardizedFileURL.deletingPathExtension().path
+        return (URL(fileURLWithPath: base + ".crx", isDirectory: false),
+                privateKey ?? URL(fileURLWithPath: base + ".pem", isDirectory: false))
     }
 
     private func write(_ function: String, _ arguments: CefJSON) async throws {
