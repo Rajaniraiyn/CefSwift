@@ -247,9 +247,9 @@ extension SelfTest {
         // Cast. The embedded configuration turns the media router off, and
         // with it Chromium's Cast dialog; discovering devices would also ask
         // for local network access.
-        check("media router: off with the MediaRouter feature off", !CefMediaRouter.shared.isAvailable)
-        CefMediaRouter.shared.startDiscovery()
-        check("media router: discovery does not start when off", !CefMediaRouter.shared.isDiscovering)
+        check("media router: off with the MediaRouter feature off", !CefProfile.default.mediaRouter.isAvailable)
+        CefProfile.default.mediaRouter.startDiscovery()
+        check("media router: discovery does not start when off", !CefProfile.default.mediaRouter.isDiscovering)
         window.setCustomPresentation(for: .cast) { presented.append($0) }
         presented = []
         browser.execute(.castMedia)

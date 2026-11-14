@@ -79,6 +79,14 @@ struct CancellationTests {
         #expect(sessionRaw.has_expires == 0 && CefProfile.Cookie(raw: sessionRaw).expirationDate == nil)
     }
 
+    /// Each profile has a media router of its own.
+    @Test func eachProfileHasItsOwnMediaRouter() {
+        let incognito = CefProfile.incognito()
+        #expect(incognito.mediaRouter === incognito.mediaRouter)
+        #expect(incognito.mediaRouter !== CefProfile.incognito().mediaRouter)
+        #expect(!incognito.mediaRouter.isAvailable)  // Chromium is not running.
+    }
+
     @Test func aCookieIsSetForTheURLItsDomainMakes() {
         #expect(CefProfile.Cookie(name: "a", value: "1", domain: ".example.com", isSecure: true).defaultURL?.absoluteString
             == "https://example.com/")

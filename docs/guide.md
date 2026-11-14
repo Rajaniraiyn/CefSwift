@@ -2256,7 +2256,7 @@ presentation a kind does not allow stays native.
 |---|---|---|---|---|---|
 | Find bar | `.findBar` | Yes (own anchor) | Yes | Yes | `browser.findSession`: `text`, `isCaseSensitive`, `matchCount`, `activeMatch`, `next()`, `previous()`, `end()`; ⌘G and ⇧⌘G move through the matches. |
 | QR code | `.qrCode` | Yes | Yes | Yes | `url`, to encode with Core Image's `CIFilter.qrCodeGenerator()`. |
-| Cast | `.cast` | Yes | Yes | Yes | `url`; `CefMediaRouter.shared` lists `sinks` and `routes` and casts Cast apps and presentation URLs. Mirroring a tab needs Chromium's dialog. |
+| Cast | `.cast` | Yes | Yes | Yes | `url`; the profile's `mediaRouter` (each profile has its own) lists `sinks` and `routes` and casts Cast apps and presentation URLs. Mirroring a tab needs Chromium's dialog. |
 | Share | `.share` | Yes | Yes | Yes | `url`, `title`. Chromium's share menu needs its toolbar, so by default the command opens macOS's share menu at the anchor. |
 | Zoom bubble | `.zoom` | Yes | Yes | Yes | `browser.zoomLevel` (Chromium scales by 1.2 to its power). The zoom commands still zoom; hidden, only the bubble goes. |
 | Bookmark added (⌘D) | `.bookmark` | Yes | Yes | Yes | `url`, `title`; `CefBookmarks` adds, edits and removes the bookmark. |

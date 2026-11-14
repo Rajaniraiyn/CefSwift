@@ -49,6 +49,8 @@ public final class CefProfile {
 
     /// The download policy and the downloads; see `CefProfile+Downloads.swift`.
     let downloadStore = CefDownloadStore()
+    /// The profile's media router, made on first use; see `CefMediaRouter.swift`.
+    var mediaRouterStorage: CefMediaRouter?
 
     /// Whether the profile is in memory only, made by ``incognito()``.
     public var isIncognito: Bool { kind == .incognito }

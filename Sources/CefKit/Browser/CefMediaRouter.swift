@@ -49,12 +49,25 @@ public struct CefMediaRouteError: Error, Sendable, CustomStringConvertible {
     public var description: String { message }
 }
 
-/// Chromium's media router: the Cast and DIAL devices on the network, and
-/// the routes to them. For a cast picker of your own in place of
-/// Chromium's (CefChromium's `CefChromiumSurface.Kind.cast`).
+extension CefProfile {
+    /// The profile's media router: the Cast and DIAL devices its pages can
+    /// cast to, and its routes. Each profile has its own, as in Chrome,
+    /// so an incognito profile's casting stays apart from the default's.
+    public var mediaRouter: CefMediaRouter {
+        if let mediaRouterStorage { return mediaRouterStorage }
+        let router = CefMediaRouter(profile: self)
+        mediaRouterStorage = router
+        return router
+    }
+}
+
+/// A profile's media router (``CefProfile/mediaRouter``): the Cast and
+/// DIAL devices on the network, and the routes to them, from the
+/// profile's `cef_request_context_t`. For a cast picker of your own in
+/// place of Chromium's (CefChromium's `CefChromiumSurface.Kind.cast`).
 ///
 /// ```swift
-/// let router = CefMediaRouter.shared
+/// let router = profile.mediaRouter
 /// router.startDiscovery()
 /// // router.sinks fills in as devices are found.
 /// let route = try await router.cast("cast:CC1AD845", to: router.sinks[0])
@@ -67,8 +80,8 @@ public struct CefMediaRouteError: Error, Sendable, CustomStringConvertible {
 @MainActor
 @Observable
 public final class CefMediaRouter: CefShutdownParticipant {
-    /// The router for every profile.
-    public static let shared = CefMediaRouter()
+    /// The profile whose request context the router is.
+    private unowned let profile: CefProfile
 
     /// The devices found, in the order Chromium reports them. Empty until
     /// ``startDiscovery()``.
@@ -83,7 +96,8 @@ public final class CefMediaRouter: CefShutdownParticipant {
     @ObservationIgnored private var sinkObjects: [String: CefRef<cef_media_sink_t>] = [:]
     @ObservationIgnored private var routeObjects: [String: CefRef<cef_media_route_t>] = [:]
 
-    private init() {
+    init(profile: CefProfile) {
+        self.profile = profile
         CefRuntime.shared.addShutdownParticipant(self)
     }
 
@@ -95,12 +109,15 @@ public final class CefMediaRouter: CefShutdownParticipant {
     }
 
     /// Starts looking for devices; ``sinks`` and ``routes`` follow from
-    /// then on. Does nothing when the router is not ``isAvailable``.
+    /// then on. Does nothing when the router is not ``isAvailable``. On a
+    /// profile Chromium is still loading, discovery starts once it has.
     public func startDiscovery() {
-        guard !isDiscovering, isAvailable,
-              let router = router ?? CefRef(adopting: cef_media_router_get_global(nil))
-        else { return }
-        self.router = router
+        guard !isDiscovering, isAvailable else { return }
+        if router == nil {
+            guard let context = profile.loadedRequestContext(orWhenLoaded: { $0.mediaRouter.startDiscovery() }) else { return }
+            router = CefRef(adopting: context.pointer.pointee.get_media_router(context.pointer, nil))
+        }
+        guard let router else { return }
         isDiscovering = true
         // add_observer takes over the observer reference.
         let observer = MediaObserver(router: self).makeObserver()
