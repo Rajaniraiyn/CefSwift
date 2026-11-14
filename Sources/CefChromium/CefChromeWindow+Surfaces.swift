@@ -72,8 +72,10 @@ extension CefChromeWindow {
 extension CefChromeWindow: ChromiumSurfaceHost {
     var surfaceNSWindow: NSWindow? { window }
 
-    /// The browser whose page Chromium shows: the active tab's.
+    /// The browser whose page Chromium shows: the active tab's, or, before
+    /// it is matched, the one whose page the window shows.
     var surfaceBrowser: CefBrowser? {
+        if let browser = activeTab?.browser { return browser }
         if let page = window?.contentView.flatMap(ChromeWindowHost.page(in:)),
            let shown = CefRuntime.shared.browsers.first(where: { browser in
                guard let view = browser.nativeView else { return false }
@@ -81,7 +83,7 @@ extension CefChromeWindow: ChromiumSurfaceHost {
            }) {
             return shown
         }
-        return activeTab?.browser
+        return nil
     }
 
     var isSurfaceHostClosed: Bool { isClosed }

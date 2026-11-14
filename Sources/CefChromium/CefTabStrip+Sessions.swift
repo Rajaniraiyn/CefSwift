@@ -184,13 +184,16 @@ extension CefTabStrip {
         var isRunning: Bool
         var savedAt: Date
         var windows: [[PreviousSession.Tab]]
+        /// The run that saved it: a strip made again in the same run (a
+        /// profile loaded anew) does not take its own run for the previous.
+        var processID: Int32
     }
 
     /// Reads what the previous run left, then marks this run as running.
     func loadPreviousSession() {
         guard let file = sessionFile else { return }
         if let data = try? Data(contentsOf: file), let record = try? JSONDecoder().decode(SessionRecord.self, from: data),
-           !record.windows.isEmpty {
+           !record.windows.isEmpty, record.processID != getpid() {
             previousSession = PreviousSession(
                 exit: record.isRunning ? .crashed : .clean, endedAt: record.savedAt, windows: record.windows)
         }
@@ -231,7 +234,7 @@ extension CefTabStrip {
 
     func saveSession(isRunning: Bool, windows: [[PreviousSession.Tab]]? = nil) {
         guard let file = sessionFile else { return }
-        let record = SessionRecord(isRunning: isRunning, savedAt: .now, windows: windows ?? snapshot())
+        let record = SessionRecord(isRunning: isRunning, savedAt: .now, windows: windows ?? snapshot(), processID: getpid())
         guard let data = try? JSONEncoder().encode(record) else { return }
         try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
         try? data.write(to: file, options: .atomic)

@@ -241,13 +241,7 @@ extension SelfTest {
                 for params: CefJSON in [["format": "png"],
                                         ["format": "jpeg", "quality": 60, "clip": ["x": 0, "y": 0, "width": 1200, "height": 800, "scale": 0.25]]] {
                     let start = ContinuousClock.now
-                    let reply = await withTaskGroup(of: CefJSON?.self) { group in
-                        group.addTask { @MainActor in try? await browser.devTools.send("Page.captureScreenshot", params) }
-                        group.addTask { try? await Task.sleep(for: .seconds(5)); return nil }
-                        let first = await group.next() ?? nil
-                        group.cancelAll()
-                        return first
-                    }
+                    let reply = try? await browser.devTools.send("Page.captureScreenshot", params)
                     let bytes = reply?["data"].stringValue.flatMap { Data(base64Encoded: $0) }
                     let image = bytes.flatMap(NSImage.init(data:))
                     note("preview \(label) \(params["format"].stringValue ?? ""): \(bytes?.count ?? -1) bytes, \(image.map { "\(Int($0.size.width))x\(Int($0.size.height))" } ?? "no image") in \(ContinuousClock.now - start)")

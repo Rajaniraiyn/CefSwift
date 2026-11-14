@@ -229,6 +229,9 @@ public final class CefChromeWindow: Identifiable {
             if self.bounds != rect { self.bounds = rect }
         }
         host?.update()
+        // Chromium's read can tell of another active tab before AppKit's
+        // next window update shows its page.
+        surfaceController?.shownBrowserDidChange()
     }
 
     /// The window's `NSWindow` is known.

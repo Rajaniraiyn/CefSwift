@@ -525,7 +525,9 @@ public final class CefTabStrip {
                     let next = try await self.services.call(
                         Self.tabsModule, "(s, a, c) => s.wait(a.since, c.signal)", .object(arguments),
                         as: Int.self, timeout: .seconds(3600), isIdempotent: true, keepsHostFor: Self.hostIdle)
-                    if version != nil, next != version { self.setNeedsRead() }
+                    // With groups, their names and colours too: an
+                    // extension names a group right after making it.
+                    if version != nil, next != version { self.setNeedsRead(internals: !self.groupsByID.isEmpty) }
                     version = next
                 } catch {
                     guard !Task.isCancelled, self.isLive else { break }
