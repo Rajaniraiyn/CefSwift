@@ -38,7 +38,7 @@ extension SelfTest {
         let bridge = CefBridge(name: "app")  // The name frame.html calls.
         bridge.access = .anyFrame
         bridge.handle("greet") { (person: [String: String], call: CefBridge.Call) in
-            "Hello, \(person["name"] ?? "") from \(call.isMainFrame ? "main" : "sub")!"
+            "Hello, \(person["name"] ?? "") from \(call.frame.isMain ? "main" : "sub")!"
         }
         var configuration = CefBrowser.Configuration()
         configuration.bridges = [bridge]

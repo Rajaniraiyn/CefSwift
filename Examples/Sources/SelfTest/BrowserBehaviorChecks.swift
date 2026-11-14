@@ -130,6 +130,8 @@ extension SelfTest {
         recorder.downloadDestination = directory
         // A profile of its own, so its policy and download list are the checks' alone.
         let profile = CefProfile.incognito()
+        // Downloads are the profile's: its delegate decides where they go.
+        profile.delegate = recorder
         var configuration = CefBrowser.Configuration()
         configuration.profile = profile
         let browser = CefBrowser(url: URL(string: "selftest://edge/tab.html")!, configuration: configuration, delegate: recorder)
@@ -142,7 +144,7 @@ extension SelfTest {
         }
 
         check("download: the profile's policy starts as the Downloads folder", profile.downloadPolicy == .downloadsFolder)
-        // The delegate's decision wins over the policy.
+        // The profile delegate's decision wins over the policy.
         profile.downloadPolicy = .disabled
         browser.load(URL(string: "\(base)/report.txt")!)
         check("download: attachment is saved where the delegate says", await waitUntil {
@@ -165,7 +167,7 @@ extension SelfTest {
             download(named: "denied.txt")?.state == .cancelled
         }, detail: describe())
 
-        // Without a decision of the delegate's, the profile's policy applies.
+        // Without a decision of the profile delegate's, the profile's policy applies.
         recorder.followsDownloadPolicy = true
         defer { recorder.followsDownloadPolicy = false }
         let policyFolder = directory.appendingPathComponent("policy", isDirectory: true)
@@ -269,7 +271,7 @@ extension SelfTest {
 
     static func settingsPageChecks() async {
         var configuration = CefBrowser.Configuration()
-        configuration.userScripts = [.styleSheet(settingsStyles, matching: "chrome://settings/*")]
+        configuration.userScripts = [.styleSheet(settingsStyles, matching: ["chrome://settings/*"])]
         let browser = CefBrowser(url: URL(string: "chrome://settings/")!, configuration: configuration)
         let window = CefWindow(browser: browser)
         window.show()
@@ -343,9 +345,10 @@ extension SelfTest {
     }
 }
 
-/// Records what a browser reports and answers its questions.
+/// Records what a browser reports and answers its questions, and, as a
+/// profile's delegate, where its downloads go.
 @MainActor
-final class Recorder: CefBrowserDelegate {
+final class Recorder: CefBrowserDelegate, CefProfileDelegate {
     var downloadDestination: URL?
     /// Leaves downloads to the profile's policy instead of ``downloadDestination``.
     var followsDownloadPolicy = false
@@ -358,7 +361,7 @@ final class Recorder: CefBrowserDelegate {
     private(set) var challenges: [CefAuthenticationChallenge] = []
     private(set) var terminations: [CefTerminationReason] = []
 
-    func browser(_ browser: CefBrowser, decideDestinationFor download: CefDownload) async -> CefDownloadDecision {
+    func profile(_ profile: CefProfile, decideDestinationFor download: CefDownload) async -> CefDownloadDecision {
         if followsDownloadPolicy { return .default(for: download) }
         return downloadDestination.map { .save(to: $0.appendingPathComponent(download.suggestedFilename)) } ?? .cancel
     }

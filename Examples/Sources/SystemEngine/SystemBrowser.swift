@@ -20,7 +20,8 @@ import WebKit
 ///
 /// ```swift
 /// func browser(_ browser: CefBrowser, decidePolicyFor navigation: CefNavigationAction) -> CefNavigationDecision {
-///     guard let url = navigation.url, SystemBrowser.prefersSystemEngine(for: url) else { return .allow }
+///     guard navigation.isMainFrame, let url = navigation.url, SystemBrowser.prefersSystemEngine(for: url)
+///     else { return .allow }
 ///     openSystemTab(SystemBrowser(url: url, configuration: .init(profile: browser.configuration.profile)))
 ///     return .cancel
 /// }
@@ -311,12 +312,22 @@ public final class SystemBrowser {
 
     package static func webKitScript(for script: CefUserScript) -> WKUserScript {
         var source = script.source
-        if let pattern = script.urlPattern {
-            let regex = "^" + pattern.split(separator: "*", omittingEmptySubsequences: false)
-                .map { NSRegularExpression.escapedPattern(for: String($0)) }
-                .joined(separator: ".*") + "$"
-            let literal = String(decoding: (try? JSONEncoder().encode(regex)) ?? Data("\"\"".utf8), as: UTF8.self)
-            source = "if (new RegExp(\(literal)).test(location.href)) (function () {\n\(source)\n})();"
+        if !script.matches.isEmpty || !script.excludeMatches.isEmpty {
+            func regex(_ patterns: [String]) -> String {
+                let alternatives = patterns.map { pattern in
+                    pattern.split(separator: "*", omittingEmptySubsequences: false)
+                        .map { NSRegularExpression.escapedPattern(for: String($0)) }
+                        .joined(separator: ".*")
+                }
+                let text = "^(?:" + alternatives.joined(separator: "|") + ")$"
+                return String(decoding: (try? JSONEncoder().encode(text)) ?? Data("\"\"".utf8), as: UTF8.self)
+            }
+            var conditions: [String] = []
+            if !script.matches.isEmpty { conditions.append("new RegExp(\(regex(script.matches))).test(location.href)") }
+            if !script.excludeMatches.isEmpty {
+                conditions.append("!new RegExp(\(regex(script.excludeMatches))).test(location.href)")
+            }
+            source = "if (\(conditions.joined(separator: " && "))) (function () {\n\(source)\n})();"
         }
         return WKUserScript(
             source: source,

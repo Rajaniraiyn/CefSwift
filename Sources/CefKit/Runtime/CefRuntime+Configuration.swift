@@ -161,6 +161,7 @@ extension CefRuntime {
         /// Chromium preferences — the settings behind `chrome://settings` — by
         /// dotted name. Each applies to every profile when it is first used, or
         /// to the whole app at start-up for the few Chromium keeps application-wide.
+        /// They win over the typed options here and in ``profiles``.
         ///
         /// ```swift
         /// configuration.preferences["credentials_enable_service"] = false   // per profile
@@ -172,20 +173,24 @@ extension CefRuntime {
         public var preferences: [String: CefJSON] = [:]
 
         /// Chromium's background services: component updates, protected
-        /// media (the Widevine CDM) and translation.
+        /// media (the Widevine CDM) and system notifications.
         public var services = Services()
 
-        /// Preloading and DNS over HTTPS.
+        /// DNS over HTTPS.
         public var network = Network()
 
-        /// Third-party cookies and hyperlink auditing.
+        /// Hyperlink auditing.
         public var privacy = Privacy()
 
-        /// HTTPS-First.
-        public var security = Security()
-
-        /// Password saving and form autofill.
-        public var credentials = Credentials()
+        /// The settings every profile starts with: third-party cookies,
+        /// HTTPS-First, password saving and autofill, translation,
+        /// preloading and the proxy. A profile overrides them in its own
+        /// ``CefProfile/configuration``.
+        ///
+        /// ```swift
+        /// configuration.profiles.privacy.thirdPartyCookies = .block
+        /// ```
+        public var profiles = CefProfile.Configuration()
 
         /// Who asks for the credentials a site or proxy wants: the browser
         /// delegate's ``CefBrowserDelegate/browser(_:credentialFor:)`` (by
@@ -241,9 +246,12 @@ extension CefRuntime {
         ///   build shipped, which Chromium stops enforcing once it is old
         ///   enough. An app that shows arbitrary sites should turn it back
         ///   on.
-        /// - ``Services/translation``, ``Network/preloading``,
-        ///   ``Privacy/hyperlinkAuditing``, ``Credentials/passwordSaving`` and
-        ///   ``Credentials/autofill``: ``CefRuntime/Setting/disabled``.
+        /// - ``Privacy/hyperlinkAuditing``, and in ``profiles``
+        ///   ``CefProfile/Configuration/translation``,
+        ///   ``CefProfile/Configuration/Network/preloading``,
+        ///   ``CefProfile/Configuration/Credentials/passwordSaving`` and
+        ///   ``CefProfile/Configuration/Credentials/autofill``:
+        ///   ``CefRuntime/Setting/disabled``.
         /// - Switches (``extraCommandLineSwitches``):
         ///   `disable-background-networking` turns off several subsystems that
         ///   make requests in the background (Chromium made it for network
@@ -268,11 +276,11 @@ extension CefRuntime {
             configuration.processPolicy = .onDemand
             configuration.services.protectedMedia = .disabled
             configuration.services.componentUpdates = .disabled
-            configuration.services.translation = .disabled
-            configuration.network.preloading = .disabled
             configuration.privacy.hyperlinkAuditing = .disabled
-            configuration.credentials.passwordSaving = .disabled
-            configuration.credentials.autofill = .disabled
+            configuration.profiles.translation = .disabled
+            configuration.profiles.network.preloading = .disabled
+            configuration.profiles.credentials.passwordSaving = .disabled
+            configuration.profiles.credentials.autofill = .disabled
             for name in [
                 "disable-background-networking", "disable-sync", "disable-default-apps", "disable-domain-reliability",
                 "no-first-run", "no-default-browser-check",

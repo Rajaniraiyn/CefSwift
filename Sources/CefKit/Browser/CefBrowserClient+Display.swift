@@ -55,7 +55,12 @@ extension CefBrowserClient {
             return 0  // keep Chromium's own logging
         }
         h.pointee.on_media_access_change = { s, browser, hasVideo, hasAudio in
-            CefBrowserClient.run(s, browser, default: ()) { _, b in b.isCapturingMedia = hasVideo != 0 || hasAudio != 0 }
+            var capture: CefBrowser.MediaCapture = []
+            if hasVideo != 0 { capture.insert(.video) }
+            if hasAudio != 0 { capture.insert(.audio) }
+            CefBrowserClient.run(s, browser, default: ()) { _, b in
+                if b.mediaCapture != capture { b.mediaCapture = capture }
+            }
         }
         h.pointee.on_cursor_change = { s, browser, _, type, _ in
             let cursor = CefCursorType(cefValue: type)

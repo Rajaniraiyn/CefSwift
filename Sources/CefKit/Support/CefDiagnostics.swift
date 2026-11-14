@@ -15,7 +15,12 @@ import os
 
     /// What can be measured.
     public enum Metric: String, Sendable, CaseIterable {
-        /// CefKit's part of `on_before_resource_load`, around the filter.
+        /// CefKit's part of `get_resource_request_handler`: reading the
+        /// filter and testing its hosts, patterns and types in C, for every
+        /// request of a page or profile with a filter.
+        case requestFilterMatch
+        /// CefKit's part of `on_before_resource_load`, around the filter,
+        /// for each request the filter wants.
         case requestFilterOverhead
         /// The request filter itself.
         case requestFilter

@@ -237,9 +237,13 @@ extension cef_content_setting_values_t {
 /// settings.reset(origin: site)
 /// ```
 ///
-/// A stored ``CefSitePermission/Setting/allow`` or
-/// ``CefSitePermission/Setting/block`` answers a site's request without
-/// asking ``CefBrowserDelegate/browser(_:decidePermissionFor:)``.
+/// Site settings are the "check" side of permissions: what Chromium
+/// consults without asking anyone. A stored ``CefSitePermission/Setting/allow``
+/// or ``CefSitePermission/Setting/block`` answers a site's request without
+/// asking the page's ``CefBrowserDelegate/browser(_:decidePermissionFor:)``
+/// or its profile's ``CefProfileDelegate/profile(_:decidePermissionFor:in:)``,
+/// and their ``CefPermissionDecision/alwaysAllow`` and
+/// ``CefPermissionDecision/alwaysDeny`` answers are stored here.
 ///
 /// Settings apply to origins: `https://example.com/a` and
 /// `https://example.com/b` share theirs.

@@ -4,7 +4,7 @@ import UniformTypeIdentifiers
 /// The save panel behind ``CefDownloadDecision/ask``: an `NSSavePanel`
 /// named for the download's suggested file and its type. Call it from your
 /// own delegate to keep the stock panel for some downloads, or answer
-/// ``CefBrowserDelegate/browser(_:decideDestinationFor:)`` with
+/// ``CefProfileDelegate/profile(_:decideDestinationFor:)`` with
 /// ``CefDownloadDecision/save(to:)`` after showing your own.
 @MainActor
 public enum CefDownloadPresenter {

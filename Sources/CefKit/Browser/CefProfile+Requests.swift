@@ -96,7 +96,7 @@ extension CefProfile {
     /// incognito profile (which has none) the temporary directory.
     @_spi(Testing) public var spillDirectory: URL {
         if kind == .incognito { return FileManager.default.temporaryDirectory }
-        return directory ?? FileManager.default.temporaryDirectory
+        return storageDirectory ?? FileManager.default.temporaryDirectory
     }
 
     /// Waits for the profile first: a request started on a profile

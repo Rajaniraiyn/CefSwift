@@ -17,7 +17,7 @@ struct ChromiumPages: BrowserFeature {
     }
 
     func decidePolicy(for navigation: CefNavigationAction, in browser: CefBrowser) -> CefNavigationDecision? {
-        guard let replacement = Self.replacement(for: navigation.url) else { return nil }
+        guard navigation.isMainFrame, let replacement = Self.replacement(for: navigation.url) else { return nil }
         browser.load(replacement)
         return .cancel
     }
@@ -88,7 +88,7 @@ struct ChromiumPages: BrowserFeature {
         settings-toggle-button[pref-key="browser.confirm_to_quit"]
         { display: none !important }
         """,
-        matching: "chrome://settings/*")
+        matching: ["chrome://settings/*"])
 
     private struct AboutPage: CefSchemeHandler {
         func response(for request: CefSchemeRequest) async -> CefSchemeResponse {

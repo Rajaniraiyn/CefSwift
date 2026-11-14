@@ -52,6 +52,25 @@ public final class CefProfile {
     /// The profile's media router, made on first use; see `CefMediaRouter.swift`.
     var mediaRouterStorage: CefMediaRouter?
 
+    /// The object that decides, for every page of the profile, what its
+    /// pages' delegates leave to it: permissions and where downloads go.
+    /// See ``CefProfileDelegate``.
+    ///
+    /// The profile holds its delegate weakly; keep a strong reference to
+    /// it elsewhere.
+    public weak var delegate: CefProfileDelegate?
+
+    /// The request filter, read on the IO thread; see `CefProfile+Policy.swift`.
+    let requestPolicy = CefProfileRequestPolicy()
+    /// The scheme handlers registered with this profile alone.
+    var schemeHandlers: [CefRuntime.RegisteredSchemeHandler] = []
+    /// Page defaults; see `CefProfile+Policy.swift`.
+    var pageUserScripts: [CefUserScript] = []
+    var pageBridges: [CefBridge] = []
+    var pageAttachments: [any CefBrowserAttachment] = []
+    /// The profile's own ``configuration``, once the app changed it.
+    var ownConfiguration: Configuration?
+
     /// Whether the profile is in memory only, made by ``incognito()``.
     public var isIncognito: Bool { kind == .incognito }
 
@@ -159,12 +178,24 @@ public final class CefProfile {
         set { CefServiceHosts.idleTimeout = newValue }
     }
 
-    /// The directory Chromium keeps this profile's files in: `Default` in
-    /// the root cache directory for the default profile, the profile's own
-    /// for a persistent one; `nil` for an incognito profile and one
-    /// Chromium could not load. A new profile's files appear as Chromium
-    /// first saves them, some seconds after it loads.
-    package var directory: URL? {
+    /// The directory Chromium keeps this profile's files in — cookies,
+    /// storage, cache, preferences, extensions: `Default` in
+    /// ``CefRuntime/Configuration/rootCacheDirectory`` for the default
+    /// profile, `Profile-<id>` there for a persistent one; `nil` for an
+    /// incognito profile, which keeps everything in memory, and for one
+    /// Chromium could not load. Once Chromium has loaded the profile this
+    /// is the directory its request context reports (`get_cache_path`). A
+    /// new profile's files appear as Chromium first saves them, some
+    /// seconds after it loads.
+    ///
+    /// Read it to back the profile up or to show where it lives; do not
+    /// write into it while the app runs.
+    public var storageDirectory: URL? {
+        if readiness == .ready, kind != .incognito, let context,
+           let path = CefStringUtil.takingUserFree(context.pointer.pointee.get_cache_path(context.pointer)),
+           !path.isEmpty {
+            return URL(fileURLWithPath: path, isDirectory: true)
+        }
         switch kind {
         case .incognito:
             return nil
@@ -212,10 +243,16 @@ public final class CefProfile {
         guard CefRuntime.shared.isRunning else { return nil }
         switch kind {
         case .global:
-            // Chromium loads the default profile as it starts.
-            context = CefRef(adopting: cef_request_context_get_global_context())
+            // Chromium loads the default profile as it starts. Its global
+            // context has no handler, so the profile's pages use a context
+            // sharing its storage, with the handler that applies the
+            // profile's request filter, for workers too.
+            guard let global = cef_request_context_get_global_context() else { return nil }
+            context = CefRef(adopting: cef_request_context_cef_create_context_shared(
+                global, CefProfileContextHandler(policy: requestPolicy).makeHandler()))
             readiness = .ready
             applyConfigured()
+            for handler in schemeHandlers { register(handler) }
         case .incognito, .persistent:
             var settings = cef_request_context_settings_t()
             settings.size = MemoryLayout<cef_request_context_settings_t>.stride
@@ -243,7 +280,9 @@ public final class CefProfile {
             // in-memory one it makes within create_context, usable at once,
             // though it reports it later.
             readiness = .loading
-            let handler = ContextHandler { [weak self] path in self?.contextDidInitialize(cachePath: path) }.makeHandler()
+            let handler = CefProfileContextHandler(policy: requestPolicy) { [weak self] path in
+                self?.contextDidInitialize(cachePath: path)
+            }.makeHandler()
             let created = CefRef(adopting: cef_request_context_create_context(&settings, handler))
             if case .failed = readiness { return nil }
             context = created
@@ -254,7 +293,8 @@ public final class CefProfile {
             // Scheme handlers registered with CefRuntime reach only the
             // global context by themselves.
             Self.profilesWithOwnContext.append(WeakProfile(profile: self))
-            for handler in CefRuntime.shared.schemeHandlers { register(handler) }
+            for handler in CefRuntime.shared.schemeHandlers where !hasOwnSchemeHandler(handler) { register(handler) }
+            for handler in schemeHandlers { register(handler) }
         }
         return context
     }
@@ -381,31 +421,66 @@ public final class CefProfile {
     }
 
     /// Adds a scheme handler registered with ``CefRuntime`` to every
-    /// profile that has a request context of its own.
+    /// profile that has a request context of its own and no handler of its
+    /// own for that scheme and domain.
     static func registerSchemeHandler(_ handler: CefRuntime.RegisteredSchemeHandler) {
         profilesWithOwnContext.removeAll { $0.profile == nil }
-        for entry in profilesWithOwnContext { entry.profile?.register(handler) }
+        for entry in profilesWithOwnContext {
+            guard let profile = entry.profile, !profile.hasOwnSchemeHandler(handler) else { continue }
+            profile.register(handler)
+        }
     }
 
-    private func register(_ handler: CefRuntime.RegisteredSchemeHandler) {
-        guard let context = context?.pointer, let register = context.pointee.register_scheme_handler_factory else { return }
+    /// Removes a scheme handler ``CefRuntime`` no longer registers from
+    /// every profile with a request context of its own and no handler of
+    /// its own for it.
+    static func unregisterSchemeHandler(scheme: String, domain: String?) {
+        profilesWithOwnContext.removeAll { $0.profile == nil }
+        for entry in profilesWithOwnContext {
+            guard let profile = entry.profile,
+                  !profile.schemeHandlers.contains(where: { $0.scheme == scheme && $0.domain == domain })
+            else { continue }
+            profile.registerFactory(nil, scheme: scheme, domain: domain)
+        }
+    }
+
+    func hasOwnSchemeHandler(_ handler: CefRuntime.RegisteredSchemeHandler) -> Bool {
+        schemeHandlers.contains { $0.scheme == handler.scheme && $0.domain == handler.domain }
+    }
+
+    func register(_ handler: CefRuntime.RegisteredSchemeHandler) {
         // Registration consumes the factory reference.
-        let factory = handler.factory.makeFactory()
-        let registered = CefStringUtil.withCefString(handler.scheme) { scheme in
-            if let domain = handler.domain {
-                return CefStringUtil.withCefString(domain) { register(context, scheme, $0, factory) }
+        registerFactory(handler.factory.makeFactory(), scheme: handler.scheme, domain: handler.domain)
+    }
+
+    /// Registers `factory` on the profile's context, or removes what is
+    /// registered for `scheme` and `domain` when it is `nil`. Nothing
+    /// happens before the profile has a context; it registers its own and
+    /// the runtime's as it makes one.
+    func registerFactory(
+        _ factory: UnsafeMutablePointer<cef_scheme_handler_factory_t>?, scheme: String, domain: String?
+    ) {
+        guard let context = context?.pointer, let register = context.pointee.register_scheme_handler_factory else {
+            cefRelease(factory)
+            return
+        }
+        let registered = CefStringUtil.withCefString(scheme) { cefScheme in
+            if let domain {
+                return CefStringUtil.withCefString(domain) { register(context, cefScheme, $0, factory) }
             }
-            return register(context, scheme, nil, factory)
+            return register(context, cefScheme, nil, factory)
         }
         if registered == 0 {
-            CefLog.error("register_scheme_handler_factory failed for scheme '\(handler.scheme)'")
+            CefLog.error("register_scheme_handler_factory failed for scheme '\(scheme)'")
         }
     }
 
-    /// Applies the configuration's per-profile preferences, once the
-    /// profile is ready. Application-wide ones are CefRuntime's to apply.
+    /// Applies the profile's ``configuration`` and the runtime
+    /// configuration's preferences by name, once the profile is ready.
+    /// Application-wide ones are CefRuntime's to apply.
     private func applyConfigured() {
-        let configured = CefRuntime.shared.configuration?.effectivePreferences ?? [:]
+        let named = CefRuntime.shared.configuration?.preferences ?? [:]
+        let configured = configuration.setPreferences.merging(named) { $1 }
         if !configured.isEmpty { preferences.apply(configured) }
     }
 
@@ -529,30 +604,6 @@ public final class CefProfile {
     @_spi(Testing) public static var testDirectories: [String: URL] = [:]
 }
 
-// MARK: - Context readiness
-
-/// Owner of a `cef_request_context_handler_t` that reports when a new
-/// context is ready. The callback arrives on the UI thread.
-/// It passes on the context's cache path, empty for an in-memory one.
-private final class ContextHandler: Sendable {
-    private let onInitialized: @MainActor @Sendable (_ cachePath: String) -> Void
-
-    init(onInitialized: @escaping @MainActor @Sendable (_ cachePath: String) -> Void) {
-        self.onInitialized = onInitialized
-    }
-
-    func makeHandler() -> UnsafeMutablePointer<cef_request_context_handler_t> {
-        let handler = cefAllocate(cef_request_context_handler_t.self, owner: self)
-        handler.pointee.on_request_context_initialized = { s, context in
-            defer { cefRelease(context) }
-            guard let context, let owner = cefOwner(ContextHandler.self, s) else { return }
-            let path = CefStringUtil.takingUserFree(context.pointee.get_cache_path(context)) ?? ""
-            MainActor.assumeIsolated { owner.onInitialized(path) }
-        }
-        return handler
-    }
-}
-
 extension cef_basetime_t {
     /// Seconds between the Windows epoch (1601) Chromium counts from and the
     /// Unix epoch.
@@ -584,13 +635,23 @@ extension CefProfile {
         guard let host = CefRef(adopting: browser.pointee.get_host(browser)),
               let context = CefRef(adopting: host.pointer.pointee.get_request_context(host.pointer))
         else { return nil }
-        if context.pointer.pointee.is_global(context.pointer) != 0 { return .default }
+        return owning(context.pointer)
+    }
+
+    /// The profile `context` belongs to, among the profiles made so far.
+    /// Does not consume `context`.
+    static func owning(_ context: UnsafeMutablePointer<cef_request_context_t>) -> CefProfile? {
+        if context.pointee.is_global(context) != 0 { return .default }
+        if let own = CefProfile.default.context {
+            cefAddRef(own.pointer)
+            if context.pointee.is_sharing_with(context, own.pointer) != 0 { return .default }
+        }
         profilesWithOwnContext.removeAll { $0.profile == nil }
         return profilesWithOwnContext.lazy.compactMap(\.profile).first { profile in
             guard let own = profile.context else { return false }
             // Arguments passed into CEF are consumed.
             cefAddRef(own.pointer)
-            return context.pointer.pointee.is_sharing_with(context.pointer, own.pointer) != 0
+            return context.pointee.is_sharing_with(context, own.pointer) != 0
         }
     }
 }

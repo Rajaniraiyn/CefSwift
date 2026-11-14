@@ -44,6 +44,8 @@ extension CefOffscreenBrowserView {
     }
 
     public override func mouseDown(with event: NSEvent) {
+        // A page's `-webkit-app-region: drag` moves the window instead.
+        if let browser, browser.handleWindowDrag(event, at: viewPoint(for: event)) { return }
         // `makeFirstResponder` does nothing when this view already is first
         // responder, so the browser is focused explicitly as well.
         window?.makeFirstResponder(self)

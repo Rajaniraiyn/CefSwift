@@ -62,20 +62,24 @@ extension CefBrowserClient {
     func makeRequestHandler() -> UnsafeMutablePointer<cef_request_handler_t> {
         let h = cefAllocate(cef_request_handler_t.self, owner: self)
         h.pointee.on_before_browse = { s, browser, frame, request, userGesture, isRedirect in
-            let isMain = frame.map { $0.pointee.is_main($0) != 0 } ?? false
+            let frameValue = frame.map(CefFrame.init(reading:))
             cefRelease(frame)
             let url = request.flatMap { CefStringUtil.takingUserFree($0.pointee.get_url($0)) }
             let transition = request.map { $0.pointee.get_transition_type($0) } ?? TT_EXPLICIT
             cefRelease(request)
-            guard isMain else {
+            guard let frameValue else {
                 cefRelease(browser)
                 return 0
             }
             let action = CefNavigationAction(
-                url: url.flatMap(URL.init(string:)), isRedirect: isRedirect != 0, hasUserGesture: userGesture != 0)
+                url: url.flatMap(URL.init(string:)), frame: frameValue, isRedirect: isRedirect != 0,
+                hasUserGesture: userGesture != 0, transition: CefNavigationTransition(cefValue: transition.rawValue))
             return CefBrowserClient.run(s, browser, default: 0) { _, b in
                 let cancels = b.cancelsNavigation(action)
-                b.trackNavigationWillStart(url: action.url, transition: transition, isRedirect: action.isRedirect, isCancelled: cancels)
+                if action.isMainFrame {
+                    b.trackNavigationWillStart(
+                        url: action.url, transition: transition, isRedirect: action.isRedirect, isCancelled: cancels)
+                }
                 return cancels ? 1 : 0
             }
         }
@@ -167,12 +171,25 @@ extension CefBrowserClient {
         }
         Self.installResponsivenessCallbacks(on: h)
         Self.installClientCertificateCallback(on: h)
-        // IO thread.
-        h.pointee.get_resource_request_handler = { s, browser, frame, request, _, _, _, _ in
-            cefRelease(browser)
-            cefRelease(frame)
-            cefRelease(request)
-            return cefOwner(CefBrowserClient.self, s)?.handlers.retained(cef_resource_request_handler_t.self)
+        // IO thread. A page without a filter of its own returns no handler,
+        // so its profile's request context handler decides its requests.
+        h.pointee.get_resource_request_handler = { s, browser, frame, request, isNavigation, _, initiator, _ in
+            defer {
+                cefRelease(browser)
+                cefRelease(frame)
+                cefRelease(request)
+            }
+            guard let client = cefOwner(CefBrowserClient.self, s) else { return nil }
+            switch client.requestFiltering {
+            case .profile:
+                return nil
+            case .page(let filter):
+                return CefResourceRequestHandlers.handler(
+                    filter: filter, browser: browser, request: request, isNavigation: isNavigation != 0,
+                    initiator: initiator)
+            case .unfiltered:
+                return CefResourceRequestHandlers.unfilteredHandler()
+            }
         }
         return h
     }

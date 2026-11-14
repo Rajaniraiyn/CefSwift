@@ -207,6 +207,7 @@ extension SelfTest {
     static let groupDeadlines: [String: Duration] = [
         "lifecycle": .seconds(180),
         "profileStorage": .seconds(240),
+        "profilePolicy": .seconds(150),
         "systemPrompts": .seconds(150),
         "authentication": .seconds(120),
         "localization": .seconds(150),

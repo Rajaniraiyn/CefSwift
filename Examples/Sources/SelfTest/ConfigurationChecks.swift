@@ -76,8 +76,8 @@ extension SelfTest {
     static func configurePoliciesProbe(_ configuration: inout CefRuntime.Configuration) {
         configuration.services.componentUpdates = .automatic
         configuration.privacy.hyperlinkAuditing = .automatic
-        configuration.privacy.thirdPartyCookies = .block
-        configuration.security.httpsFirst = .strict
+        configuration.profiles.privacy.thirdPartyCookies = .block
+        configuration.profiles.security.httpsFirst = .strict
         configuration.network.secureDNS = .secure(templates: ["https://dns.example/dns-query{?dns}"])
         if let domain = ProcessInfo.processInfo.environment[policyDomainKey] {
             configuration.enterprisePolicy = .domain(domain)

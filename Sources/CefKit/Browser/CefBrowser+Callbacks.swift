@@ -14,6 +14,9 @@ extension CefBrowser {
         // or the reload it asked for, was about.
         endUnresponsiveEpisode()
         pageScripting.mainFrameDidStartLoading()
+        // A new document declares its own, and one that declares none is
+        // never reported.
+        if !draggableRegions.isEmpty { draggableRegions = [] }
         hideTooltip()
         let wasDiscarded = isDiscarded
         // The document has committed, so a level set before the browser
@@ -146,7 +149,7 @@ extension CefBrowser {
     }
 
     func applyDownload(_ snapshot: CefDownload.Snapshot, control: CefRef<cef_download_item_callback_t>?) {
-        let download = effectiveProfile.trackDownload(snapshot, startedBy: self)
+        let download = profile.trackDownload(snapshot, startedBy: self)
         download.apply(snapshot)
         // Kept while the download can go on, paused or interrupted included.
         download.control = download.state.isFinished ? nil : control
@@ -327,7 +330,7 @@ extension CefBrowser {
         isShowingDevTools = false
         frames = []
         for download in downloads { download.control = nil }
-        for attachment in configuration.attachments { attachment.browserDidClose(self) }
+        for attachment in attachments { attachment.browserDidClose(self) }
         accessibilityDidClose()
         cancelDecisions { _ in true }
         endUnresponsiveEpisode()

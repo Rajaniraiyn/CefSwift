@@ -30,7 +30,9 @@ final class CefBrowserClient {
     /// shows the browser.
     var detachedOffscreenViewInfo: CefOffscreenViewInfo?
 
-    let requestFilter: CefRequestFilter?
+    /// Whose filter decides the requests of this client's browsers. Read on
+    /// the IO thread.
+    nonisolated let requestFiltering: CefRequestFiltering
     let chromeToolbar: CefRuntime.Configuration.ChromeToolbar
 
     /// Handler structs, readable from any thread (CEF calls the getters from
@@ -48,10 +50,13 @@ final class CefBrowserClient {
     /// `on_before_popup` until the popup's browser is wrapped.
     var pendingPopupFeatures: CefPopupFeatures?
 
-    init(browser: CefBrowser?, requestFilter: CefRequestFilter?, chromeToolbar: CefRuntime.Configuration.ChromeToolbar) {
+    init(
+        browser: CefBrowser?, requestFiltering: CefRequestFiltering = .profile,
+        chromeToolbar: CefRuntime.Configuration.ChromeToolbar
+    ) {
         self.primary = browser
         self.pending = browser
-        self.requestFilter = requestFilter
+        self.requestFiltering = requestFiltering
         self.chromeToolbar = chromeToolbar
         self.isDefaultClient = browser == nil
     }
@@ -114,7 +119,16 @@ final class CefBrowserClient {
         let isPopup = browser.pointee.is_popup(browser) != 0
         let opener = isPopup ? primary : nil
         let profile = opener?.configuration.profile ?? CefProfile.owning(contextOf: browser)
-        let wrapper = CefBrowser(adopting: CefRef(adopting: browser), client: self, opener: opener, profile: profile)
+        // A tab Chromium opens in one of CefKit's windows shares that
+        // window's first browser's client and `extra_info`, and so takes its
+        // configuration; one in a window Chromium opened itself has the
+        // default client and no `extra_info`, so its renderer gets its
+        // profile's scripts and bridges as its frames attach
+        // (`CefPageScripting.frameDidAttach(_:)`), from its next document on.
+        let wrapper = CefBrowser(
+            adopting: CefRef(adopting: browser), client: self, opener: opener, configurationOf: primary,
+            profile: profile)
+
         if isPopup {
             wrapper.popupFeatures = pendingPopupFeatures
             pendingPopupFeatures = nil
@@ -179,11 +193,11 @@ final class CefBrowserClient {
         handlers.set(makeFrameHandler())
         handlers.set(makeDialogHandler())
         handlers.set(makeFocusHandler())
+        handlers.set(makeDragHandler())
         if isOffscreen {
             handlers.set(makeRenderHandler())
             handlers.set(makeAccessibilityHandler())
         }
-        handlers.set(ResourceRequestHandler(filter: requestFilter).makeHandler())
 
         let client = cefAllocate(cef_client_t.self, owner: self)
         client.pointee.get_life_span_handler = { CefBrowserClient.handler($0) }
@@ -201,6 +215,7 @@ final class CefBrowserClient {
         client.pointee.get_frame_handler = { CefBrowserClient.handler($0) }
         client.pointee.get_dialog_handler = { CefBrowserClient.handler($0) }
         client.pointee.get_focus_handler = { CefBrowserClient.handler($0) }
+        client.pointee.get_drag_handler = { CefBrowserClient.handler($0) }
         client.pointee.on_process_message_received = { s, browser, frame, _, message in
             // Owned before anything can return early.
             let frame = CefRef(adopting: frame)

@@ -234,25 +234,32 @@ Input), as in Chrome on macOS; `spellcheck.dictionaries` reports it and
 Typed options for what Chromium does on its own. Each defaults to
 Chromium's behavior, which users can change in `chrome://settings` where
 Chromium offers the setting; any other value is set again at every launch
-and wins over what users chose there. A key in `preferences` wins over the
-typed option that sets the same preference.
+(for a profile's, as Chromium loads the profile) and wins over what users
+chose there. A key in `preferences` wins over the typed option that sets
+the same preference.
+
+What the whole app shares is in the runtime configuration; what each
+profile can choose for itself is in `profiles`, a
+`CefProfile.Configuration` every profile starts from, and which a profile
+overrides in its own `configuration` ([Profile settings](#profile-settings)):
 
 | Option | Values | Chromium setting | Scope |
 |---|---|---|---|
 | `services.componentUpdates` | `.automatic`, `.disabled` | `--disable-component-update` | App, at start-up |
-| `services.translation` | `.automatic`, `.disabled` | `translate.enabled` | Every profile |
-| `network.preloading` | `.automatic`, `.standard`, `.extended`, `.disabled` | `net.network_prediction_options` | Every profile |
 | `network.secureDNS` | `.automatic`, `.disabled`, `.secure(templates:)` | `dns_over_https.mode`, `dns_over_https.templates` | App |
-| `privacy.thirdPartyCookies` | `.automatic`, `.block` | `profile.cookie_controls_mode` | Every profile |
 | `privacy.hyperlinkAuditing` | `.automatic`, `.disabled` | `--no-pings` | App, at start-up |
-| `security.httpsFirst` | `.automatic`, `.balanced`, `.strict` | `https_first_balanced_mode_enabled`, `https_only_mode_enabled` | Every profile |
-| `credentials.passwordSaving` | `.automatic`, `.disabled` | `credentials_enable_service`, `credentials_enable_autosignin` | Every profile |
-| `credentials.autofill` | `.automatic`, `.disabled` | `autofill.profile_enabled`, `autofill.credit_card_enabled` | Every profile |
+| `profiles.translation` | `.automatic`, `.disabled` | `translate.enabled` | Profile |
+| `profiles.network.preloading` | `.automatic`, `.standard`, `.extended`, `.disabled` | `net.network_prediction_options` | Profile |
+| `profiles.network.proxy` | `.automatic`, `.system`, `.direct`, `.servers(_:bypassing:)`, `.autoConfiguration(_:)` | `proxy` | Profile |
+| `profiles.privacy.thirdPartyCookies` | `.automatic`, `.block` | `profile.cookie_controls_mode` | Profile |
+| `profiles.security.httpsFirst` | `.automatic`, `.balanced`, `.strict` | `https_first_balanced_mode_enabled`, `https_only_mode_enabled` | Profile |
+| `profiles.credentials.passwordSaving` | `.automatic`, `.disabled` | `credentials_enable_service`, `credentials_enable_autosignin` | Profile |
+| `profiles.credentials.autofill` | `.automatic`, `.disabled` | `autofill.profile_enabled`, `autofill.credit_card_enabled` | Profile |
 
 ```swift
 var configuration = CefRuntime.Configuration.chrome
-configuration.privacy.thirdPartyCookies = .block
-configuration.security.httpsFirst = .balanced
+configuration.profiles.privacy.thirdPartyCookies = .block
+configuration.profiles.security.httpsFirst = .balanced
 configuration.network.secureDNS = .secure(templates: ["https://dns.example/dns-query{?dns}"])
 ```
 
@@ -495,44 +502,38 @@ when it is first shown.
 
 | Kind | Members |
 |---|---|
-| State | `url`, `title`, `isLoading`, `estimatedProgress`, `canGoBack`, `canGoForward`, `favicon`, `faviconURL`, `zoomLevel`, `isFullscreen`, `statusText`, `downloads`, `findResult`, `state` (`.pending`, `.live`, `.closed`) |
+| State | `url`, `title`, `isLoading`, `estimatedProgress`, `canGoBack`, `canGoForward`, `favicon`, `faviconURL`, `zoomLevel`, `isFullscreen`, `statusText`, `downloads`, `findResult`, `mediaCapture` (`.video`, `.audio`: what the page captures now), `draggableRegions` ([title bars in web content](#title-bars-in-web-content)), `frames`, `state` (`.pending`, `.live`, `.closed`) |
 | Navigation | `load(_:)` (returns a `CefNavigation`), `goBack()`, `goForward()`, `backForwardList`, `go(to:)` ([back/forward list](#back-and-forward)), `reload(ignoringCache:)`, `stopLoading()`, `waitUntilLoaded(timeout:)` ([waiting for a load](#waiting-for-a-load)) |
 | Page | `isAudioMuted`, `zoom(_:)`, `canZoom(_:)`, `defaultZoomLevel`, `exitFullscreen()`, `replaceMisspelling(with:)`, `learnSpelling(_:)`, `text(of:)`, `source(of:)`, `find(_:backwards:caseSensitive:)` (its `findResult` has the match's `selectionRect`), `stopFinding(clearingSelection:)`, `findSession` (an observable find-bar model), `print()` (Chromium's printing, which in Chrome style is Chrome's print preview, not the system dialog), `pdf(configuration:)`, `printToPDF(at:configuration:)` ([PDF](#pdf)), `snapshot()` |
-| JavaScript | `evaluateJavaScript(_:timeout:)`, `evaluateJavaScript(_:as:timeout:)`, `executeJavaScript(_:)`, `addUserScript(_:)` |
+| JavaScript | `evaluateJavaScript(_:timeout:)`, `evaluateJavaScript(_:as:timeout:)`, `executeJavaScript(_:)`, `addUserScript(_:)`, `removeUserScript(_:)` |
 | DevTools | `devTools`, `showDevTools(inspecting:)`, `closeDevTools()`, `isShowingDevTools` |
 | Lifetime | `ready()`, `close(force:)` |
 | Memory | `isDiscarded`, `discard()`, `restore()`, `discardBlockers()`, `discardSnapshot`, `lifecycle`, `lifecycleChangedAt` ([discarding](#discarding-browsers)) |
-| Relations | `delegate`, `configuration`, `opener`, `popupFeatures`, `hostWindow` |
+| Relations | `delegate`, `configuration`, `profile`, `opener`, `popupFeatures`, `hostWindow` |
 
 Options are fixed at creation:
 
 ```swift
 var browserConfiguration = CefBrowser.Configuration()
 browserConfiguration.profile = .persistent(id: "work", displayName: "Work")
-browserConfiguration.requestFilter = { request in
-    request.url?.host() == "ads.example" ? .block : .allow
-}
+browserConfiguration.content.javaScript = .disabled
 let browser = CefBrowser(url: URL(string: "https://swift.org")!, configuration: browserConfiguration, delegate: policy)
 ```
 
-A `requestFilter` sees every network request and returns `.allow`, `.block`,
-`.redirect(_:)` or `.setHeaders(_:)`. Chromium waits for the answer on its
-IO thread, so the filter runs there, isolated to `CefIOActor`, and must be
-fast. State it keeps on `CefIOActor` needs no lock; state on the main actor
-it cannot read. Keep a copy on `CefIOActor` and update it from the main
-actor:
+Most policy belongs to the page's `profile` and reaches every page in it,
+those Chromium opens itself included: request filters, scheme handlers,
+user scripts, bridges, attachments, permissions and downloads. The page's
+configuration adds its own or overrides the profile's; see
+[What is configured where](#what-is-configured-where).
 
-```swift
-@CefIOActor var blockedHosts: Set<String> = []
-
-browserConfiguration.requestFilter = { @CefIOActor request in
-    blockedHosts.contains(request.url?.host() ?? "") ? .block : .allow
-}
-
-// When the user edits the list, on the main actor:
-let hosts = Set(settings.blockedHosts)
-Task { @CefIOActor in blockedHosts = hosts }
-```
+`content` holds Chromium's per-page web preferences
+(`cef_browser_settings_t`): `javaScript`, `images`, `webGL`,
+`localStorage` and `webFonts` (`.automatic` or `.disabled`),
+`clipboardAccess` (`.automatic`, `.copy`, or `.copyAndPaste`, which lets
+the page read the clipboard: for your own content only), `fonts` (the
+families for the CSS generic families) and `defaultEncoding`. A popup
+Chromium opens gets its opener's. Font sizes are the profile's
+`webkit.webprefs` preferences: in CEF 156 they win over a page's own.
 
 `CefIOActor` runs on Chromium's IO thread, which carries every request
 and message between processes: never block it. `CefFileActor` runs on
@@ -660,7 +661,8 @@ no page, make the call throw.
 ### Attachments
 
 `CefBrowser.Configuration.attachments` adds code of your own that sets up
-every browser made with the configuration: objects adopting
+every browser made with the configuration, and `CefProfile.attachments`
+every page of a profile, before the page's own: objects adopting
 `CefBrowserAttachment`. CefKit tells each one when Chromium has created a
 browser, when a discarded browser is created anew, and when a browser
 closes. One attachment serves every browser made with its configuration,
@@ -708,7 +710,7 @@ opener's configuration. It arrives as a native popup does
 page cannot script it: `window.open` returns `null`, the popup has no
 `window.opener`, and a blank popup is refused. Browsers Chromium opens
 without a page asking, such as a tab from Chrome's own UI, have the
-default configuration and so no attachments. [Passkeys](#passkeys) are
+default configuration, so only their profile's attachments set them up. [Passkeys](#passkeys) are
 built this way.
 
 ## Showing a browser
@@ -839,6 +841,18 @@ Pinch and smart magnify change `zoomLevel`. Set
 `CefBrowser.Configuration.forwardsRawTouchEvents = true` to send trackpad touches to the
 page instead of interpreting them as gestures.
 
+`browser.offscreenFrameRate` starts as the rendering's rate and can change
+while the browser runs, from 1 to 240: a game's menu at 30 and its play at
+120. While Low Power Mode or the Mac's heat lowers offscreen rates
+(`CefRuntime.shared.energyPolicy`), the lower of the two applies.
+`setNeedsDisplay()` asks Chromium to paint the whole view again
+(`invalidate`), with the next frame:
+
+```swift
+browser.offscreenFrameRate = 30
+browser.setNeedsDisplay()
+```
+
 Offscreen browsers cannot open native popup windows: a request that would
 open one loads in the same browser instead (see
 [Navigation and new windows](#navigation-and-new-windows)).
@@ -873,6 +887,35 @@ In return the host drives the browser as AppKit drives a view:
 The page's tooltips (a `title` under the mouse) reach the host through
 `offscreenDidChangeToolTip(_:)`; `CefOffscreenBrowserView` shows them as
 its own `toolTip`, as AppKit does for any view (see [Tooltips](#tooltips)).
+
+### Title bars in web content
+
+An app whose window chrome is web content, a music player's or a chat
+client's, marks its title bar with the CSS property
+`-webkit-app-region: drag`, and its buttons inside it with `no-drag`, as
+Electron apps do. `browser.draggableRegions` lists the regions the page
+declares, in the page's view points with a top-left origin, and
+`browser.isDraggable(at:)` says whether a point is in one (the last region
+that contains it decides). `CefWindowedBrowserView` and
+`CefOffscreenBrowserView` move their window when a drag starts in a
+draggable region, and zoom or minimize it on a double click as the user's
+"Double-click a window's title bar" setting says; the page does not get
+those clicks. A host view of your own asks `isDraggable(at:)` and calls
+`NSWindow.performDrag(with:)`.
+
+```swift
+let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 600),
+                      styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
+                      backing: .buffered, defer: false)
+window.titlebarAppearsTransparent = true
+window.titleVisibility = .hidden
+window.contentView = CefWindowedBrowserView(browser: browser)
+```
+
+```css
+header { -webkit-app-region: drag; height: 38px; padding-left: 78px; }
+header button { -webkit-app-region: no-drag; }
+```
 
 ### Tooltips
 
@@ -1305,7 +1348,10 @@ Protocol can do that, so it attaches `devTools` to the browser; see
 `browser.frames` lists the page's frames connected to a renderer: the main
 frame first, then each `iframe` in the order it attached. `mainFrame` is
 the top-level one. Each `CefFrame` has an `id`, its `url`, the `name` of
-its `iframe`, `isMain`, and its parent's `parentID`. The list is
+its `iframe`, `isMain`, its parent's `parentID`, and its `origin`: what the
+browser process establishes from its own record of the frame's address,
+as the bridge does for its callers (`about:blank` and `srcdoc` frames have
+their parent's, `nil` when the address gives an opaque one). The list is
 observable and follows Chromium's frame events: an `iframe` appears when it
 attaches and goes when it is removed, and a frame's `url` follows its
 navigations. A cross-site navigation of the main frame replaces it with a
@@ -1347,22 +1393,24 @@ try await browser.load(request).waitUntilLoaded()
 
 ### User scripts and style sheets
 
-User scripts run in every document the browser loads, before the page's own
-scripts:
+User scripts run in every document, before the page's own scripts: a
+profile's in every page of the profile, Chromium's own included, and a
+page's own after them:
 
 ```swift
+profile.userScripts = [CefUserScript(source: "window.appVersion = '1.2'")]
 browserConfiguration.userScripts = [
-    CefUserScript(source: "window.appVersion = '1.2'"),
     // At document start the page has no <body> yet; this one waits for it.
-    CefUserScript(source: "document.body.dataset.app = 'yes'", matching: "https://*.example.com/*",
-                  injectionTime: .documentEnd),
-    .styleSheet("header { display: none }", matching: "https://news.example/*"),
+    CefUserScript(source: "document.body.dataset.app = 'yes'", matching: ["https://*.example.com/*"],
+                  excluding: ["https://login.example.com/*"], injectionTime: .documentEnd),
+    .styleSheet("header { display: none }", matching: ["https://news.example/*"]),
 ]
 ```
 
-- `matching:` limits a script to URLs that match the pattern as a whole,
-  where `*` stands for any run of characters. A matched script runs inside a
-  function, so its top-level declarations are not global.
+- `matching:` limits a script to URLs that match one of the patterns as a
+  whole, where `*` stands for any run of characters, and `excluding:` keeps
+  it out of URLs that match one of those. A script with either list runs
+  inside a function, so its top-level declarations are not global.
 - `injectionTime: .documentEnd` runs the script when the document has been
   parsed (`DOMContentLoaded`), before the page's own listeners for it.
 - `frames: .mainFrame` runs it in top-level documents only; by default it
@@ -1372,10 +1420,20 @@ browserConfiguration.userScripts = [
   `includingShadowRoots` (the default) its rules also apply inside every
   shadow root, including roots whose component sets its own
   `adoptedStyleSheets`.
-- `browser.addUserScript(_:)` adds a script after creation; it applies from
-  the next document on. A renderer process the browser moves to later
-  learns of it as its first document of the browser starts, and runs it
-  from the next one.
+- `browser.addUserScript(_:)` adds a script after creation and
+  `browser.removeUserScript(_:)` takes one of the page's own away; a change
+  to `profile.userScripts` reaches every page of the profile. Each applies
+  from the next document on: a document already loaded keeps what a
+  removed script, or a removed style sheet, did until it reloads.
+- A page in a window Chromium opens by itself (a ⌘-clicked link from a
+  Chrome-style window, `chrome.windows.create`, a tab dragged out) has no
+  CefKit `extra_info`, and CEF connects its frames only once their first
+  document has committed: its profile's scripts and bridges apply from its
+  second document on. Native popups, and tabs Chromium opens inside a
+  window CefKit made, get them from the first.
+- An exception a user script throws is logged on the page's console as
+  `CefUserScript: <message> (line <n>)`, which `browser(_:didLog:)`
+  receives.
 
 A selector cannot cross a shadow boundary, even when the rules reach inside
 shadow roots. If `#row` lives in the shadow root of `settings-section`, the
@@ -1401,6 +1459,8 @@ bridge.handle("save") { (document: Document, call: CefBridge.Call) in
 
 var browserConfiguration = CefBrowser.Configuration()
 browserConfiguration.bridges = [bridge]
+// Or for every page of a profile, Chromium's own included:
+profile.bridges = [bridge]
 ```
 
 ```js
@@ -1412,10 +1472,13 @@ const stop = app.on("themeChanged", theme => apply(theme));
   permits, cross-site frames and popups included.
 - A handler that throws rejects the promise.
 - `bridge.emit("themeChanged", theme)` delivers an event to `app.on`
-  listeners, in every browser the bridge is attached to or in one
-  (`to: browser`).
+  listeners, in the top-level page of every browser the bridge is attached
+  to or of one (`to: browser`), and `bridge.emit(_:_:to:in:)` to one frame,
+  such as the one a call came from (`call.frame`).
+- A page's own bridge of the same name as one of its profile's takes its
+  place in that page.
 - `CefBridge.Call` describes the caller: `browser`, `method`, `origin` and
-  `isMainFrame`. The browser process establishes the origin from its own
+  `frame`, the calling `CefFrame`. The browser process establishes the origin from its own
   record of the frame's address, so neither a page nor a compromised
   renderer can claim another one. `about:blank` and `srcdoc` frames have
   their parent's origin and a `blob:` document the origin in its address.
@@ -1455,7 +1518,7 @@ user, and return.
 ```swift
 final class Policy: CefBrowserDelegate {
     func browser(_ browser: CefBrowser, decidePermissionFor request: CefPermissionRequest) async -> CefPermissionDecision {
-        await askUser(about: request.kinds, from: request.origin) ? .allow : .deny
+        await askUser(about: request.kinds, from: request.origin.absoluteString) ? .allow : .deny
     }
 
     func browser(_ browser: CefBrowser, runJavaScriptDialog dialog: CefJavaScriptDialog) async -> CefJavaScriptDialogResponse {
@@ -1469,13 +1532,12 @@ final class Policy: CefBrowserDelegate {
 |---|---|
 | `browser(_:runJavaScriptDialog:) async` | Native sheet |
 | `browser(_:confirmLeavingPage:) async` (`beforeunload`) | Native sheet |
-| `browser(_:decidePermissionFor:) async` | `.deny`. Asked only when the site settings leave the request to the user; see [Site settings](#site-settings) |
+| `browser(_:decidePermissionFor:) async` | Hands the request to the profile's delegate (`CefProfileDelegate`), which denies by default. Asked only when the site settings leave the request to the user; see [Permissions](#permissions) |
 | `browser(_:credentialFor:) async` (HTTP and proxy authentication) | Native sign-in sheet; see [HTTP authentication](#http-authentication) |
 | `browser(_:shouldProceedDespite:) async` (certificate errors) | `false`: the load is cancelled |
 | `browser(_:selectClientCertificateFor:) async` | Native sheet; asked only with `CefBrowser.Configuration.clientCertificates = .delegate`, otherwise Chromium's picker. See [Client certificates](#client-certificates) |
 | `browserPageIsUnresponsive(_:) async` | Native sheet; Chrome-style browsers show Chromium's dialog instead. See [Unresponsive pages](#unresponsive-pages) |
-| `browser(_:decideDestinationFor:) async` | `CefDownloadDecision.default(for:)`: the profile's `downloadPolicy`, the Downloads folder unless set. See [Downloads](#downloads) |
-| `browser(_:decidePolicyFor:)` | `.allow` |
+| `browser(_:decidePolicyFor:)` (main frame and subframes) | `.allow` |
 | `browser(_:decideWindowOpenFor:)` | `CefWindowOpenDecision.default(for:)` |
 | `browser(_:decideExternalProtocolFor:) async` | Native sheet (`CefExternalProtocolPresenter`); `.deny` when no app handles the scheme. See [Links to other apps](#links-to-other-apps) |
 | `browser(_:handleKeyEvent:isBeforePage:)` | `false` |
@@ -1499,6 +1561,36 @@ the delegate), `browser(_:didFinishLoadWithStatus:)`,
 `CefDialogPresenter` provides the native sheets behind the defaults, so your
 delegate can keep them for some cases.
 
+### Permissions
+
+A permission request goes to the page's delegate, whose default hands it
+to the page's profile: `CefProfileDelegate.profile(_:decidePermissionFor:in:)`,
+which denies unless the app sets a profile delegate. A profile delegate
+decides for every page of the profile, pages Chromium opens itself
+included, and a page's own delegate decides for that page instead:
+
+```swift
+final class ProfilePolicy: CefProfileDelegate {
+    func profile(_ profile: CefProfile, decidePermissionFor request: CefPermissionRequest,
+                 in page: CefBrowser) async -> CefPermissionDecision {
+        guard request.isMainFrame else { return .deny }
+        return await askUser(about: request.kinds, from: request.origin.absoluteString) ? .alwaysAllow : .deny
+    }
+}
+
+let profilePolicy = ProfilePolicy()
+CefProfile.default.delegate = profilePolicy   // held weakly, as a browser's delegate is
+```
+
+A `CefPermissionRequest` has the `kinds` asked for, the asking `origin`
+and the page's `topLevelOrigin`, both URLs as `CefSiteSettings` takes them,
+`isMainFrame`, and the asking `frame` where CEF names it (camera,
+microphone and screen capture; for the other kinds CEF reports only the
+origin). Chromium asks only when the profile's [site settings](#site-settings)
+leave a request to the user: the settings are the "check" side, what
+Chromium consults without asking anyone, and `.alwaysAllow` or
+`.alwaysDeny` stores the answer there.
+
 ### Built-in sheets
 
 Every sheet CefSwift shows by default answers a delegate method, so an app
@@ -1513,7 +1605,7 @@ for some cases by calling its presenter:
 | Client certificate | `browser(_:selectClientCertificateFor:)` | `CefClientCertificatePresenter` |
 | Unresponsive page | `browserPageIsUnresponsive(_:)` | `CefUnresponsivePagePresenter` |
 | File chooser | `browser(_:runFileDialog:)` | `CefFileDialogPresenter` |
-| Download save panel | `browser(_:decideDestinationFor:)` | `CefDownloadPresenter` |
+| Download save panel | `CefProfileDelegate.profile(_:decideDestinationFor:)` | `CefDownloadPresenter` |
 | Opening another app (`mailto:`, `zoommtg:`) | `browser(_:decideExternalProtocolFor:)` | `CefExternalProtocolPresenter` |
 | Page tooltip (not a sheet) | `browser.tooltipPolicy = .custom`, then show `browser.tooltip` | The offscreen view's `toolTip`; Chromium's own elsewhere. See [Tooltips](#tooltips) |
 | Context menu | `browser(_:runContextMenu:for:)` | `CefContextMenuPresenter` |
@@ -1592,7 +1684,20 @@ window (Chromium crashes when the browser closes under it).
 ### Navigation and new windows
 
 `browser(_:decidePolicyFor:)` returns `.allow` or `.cancel` for each
-main-frame navigation. To handle a URL yourself, cancel it and act.
+navigation of the main frame and of its subframes, redirects included.
+A `CefNavigationAction` has the `url`, the navigating `frame` (as it is
+before the navigation) and `isMainFrame`, `isRedirect`, `hasUserGesture`
+and the `transition`: its `source` (`.link`, `.explicit`, `.formSubmit`,
+`.reload`, `.autoSubframe`, `.manualSubframe`, …) and whether it went
+`isBackForward`. To handle a URL yourself, cancel it and act; cancelling a
+subframe's navigation leaves the rest of the page as it is:
+
+```swift
+func browser(_ browser: CefBrowser, decidePolicyFor navigation: CefNavigationAction) -> CefNavigationDecision {
+    if !navigation.isMainFrame, navigation.url?.host() == "ads.example" { return .cancel }
+    return .allow
+}
+```
 
 `browser(_:decideWindowOpenFor:)` routes links with `target=_blank`,
 `window.open` and ⌘-clicks. The request has `targetURL`, `disposition`
@@ -1689,10 +1794,10 @@ navigates away.
 
 ### Downloads
 
-A download goes where its profile's `downloadPolicy` says, unless the
-browser's delegate decides otherwise. The policy is a setting an app, or
-its settings window, sets without writing a delegate; it belongs to the
-profile because Chromium keeps downloads per profile:
+Downloads belong to the profile, as Chromium keeps them. A download goes
+where its profile's `downloadPolicy` says, unless the profile's delegate
+decides otherwise. The policy is a setting an app, or its settings window,
+sets without writing a delegate:
 
 ```swift
 profile.downloadPolicy = .ask   // .downloadsFolder (the default), .folder(url), .ask, .disabled
@@ -1712,14 +1817,17 @@ default and makes its delegate choose; CefSwift's delegate methods all
 have one, and this is it.
 
 To decide per download, implement
-`browser(_:decideDestinationFor:)`. Its answer wins over the policy;
-`CefDownloadDecision.default(for:)` is what the policy would do:
+`CefProfileDelegate.profile(_:decideDestinationFor:)`. Its answer wins over
+the policy; `CefDownloadDecision.default(for:)` is what the policy would
+do. The download's `browser` is the page that started it:
 
 ```swift
-func browser(_ browser: CefBrowser, decideDestinationFor download: CefDownload) async -> CefDownloadDecision {
-    if download.mimeType == "application/pdf" { return .ask }
-    guard download.url?.host() != "ads.example" else { return .cancel }
-    return .default(for: download)
+final class Downloads: CefProfileDelegate {
+    func profile(_ profile: CefProfile, decideDestinationFor download: CefDownload) async -> CefDownloadDecision {
+        if download.mimeType == "application/pdf" { return .ask }
+        guard download.url?.host() != "ads.example" else { return .cancel }
+        return .default(for: download)
+    }
 }
 ```
 
@@ -1958,7 +2066,7 @@ language (`CefRuntime.locale`):
   with its disposition (`.newBackgroundTab`, `.newWindow`,
   `.offTheRecord`), one of Chromium's pages to
   [`onChromeTab`](#tabs-chromium-opens-itself), a file to
-  `browser(_:decideDestinationFor:)`.
+  the profile delegate's `profile(_:decideDestinationFor:)`.
 - Alloy-style browsers (views) show CEF's shorter menu (Back, Forward,
   Print, View Page Source, the editing commands, spelling suggestions)
   completed with Chrome's link, image, audio and video items, Look Up and
@@ -2514,7 +2622,7 @@ them with a URL pattern:
 
 ```swift
 browserConfiguration.userScripts = [
-    .styleSheet("#about-menu { display: none !important }", matching: "chrome://settings/*"),
+    .styleSheet("#about-menu { display: none !important }", matching: ["chrome://settings/*"]),
 ]
 ```
 
@@ -2554,7 +2662,9 @@ theme. Browsers that share a profile share all of it.
 | `CefProfile.incognito()` | In memory only; discarded with the profile. Its `isIncognito` is true. |
 
 `<root>` is `CefRuntime.Configuration.rootCacheDirectory`, by default
-`~/Library/Application Support/<bundle ID>/CefSwift`.
+`~/Library/Application Support/<bundle ID>/CefSwift`. `profile.storageDirectory`
+is where a loaded profile keeps its files, as its request context reports
+it (`get_cache_path`); `nil` for an incognito profile.
 
 ```swift
 let profile = CefProfile.persistent(id: "work", displayName: "Work")
@@ -2606,6 +2716,114 @@ after the caller stopped waiting is ended) and
 `preferences.allValues(includingDefaults:)` returns every preference as one JSON
 object. `setColorScheme(_:accentColor:)` themes Chrome-style UI and sets the
 `prefers-color-scheme` pages see.
+
+### What is configured where
+
+A profile holds the defaults for every page in it: pages the app creates
+and pages Chromium creates itself (native popups, tabs and windows opened
+from Chrome's UI, extension pages). A page adds to them or overrides them
+where CEF lets it. The runtime keeps what is process-wide, and what every
+profile starts from.
+
+| Concern | Runtime (`CefRuntime`, its `Configuration`) | Profile (`CefProfile`) | Page (`CefBrowser.Configuration`, its delegate) |
+|---|---|---|---|
+| Scheme handlers | `registerSchemeHandler(scheme:domain:handler:)`: every profile, present and future | `registerSchemeHandler(scheme:domain:handler:)`: this profile, in place of the runtime's | — |
+| Request filter | — | `requestFilter`: its pages' requests and their workers' | `requestFilter`: the page's own requests, instead of the profile's |
+| Permissions | — | `delegate`'s `profile(_:decidePermissionFor:in:)`; `siteSettings` answer first | delegate's `browser(_:decidePermissionFor:)`, instead of the profile's |
+| Downloads | — | `downloadPolicy`, `delegate`'s `profile(_:decideDestinationFor:)`, `downloads` | `downloads` (the page's share of the profile's) |
+| User scripts | — | `userScripts` | `userScripts`, after the profile's; `addUserScript(_:)`, `removeUserScript(_:)` |
+| Bridges | — | `bridges` | `bridges`; one of the same name replaces the profile's |
+| Attachments | — | `attachments` | `attachments`, after the profile's |
+| Chromium settings | `profiles`: what every profile starts from; `network.secureDNS`, `privacy.hyperlinkAuditing`, `services`, switches and features: process-wide | `configuration`: third-party cookies, HTTPS-First, passwords, autofill, translation, preloading, proxy | `content`: JavaScript, images, WebGL, storage, clipboard, fonts, encoding |
+| Preferences by name | `preferences` (every profile, and the app's own) | `preferences` | — |
+
+Precedence is page, then profile, then runtime, and nothing is set in two
+places with different meanings. A page's popups, and the tabs Chromium
+opens inside a CefKit window, take the configuration of the page that
+opened them; a page in a window Chromium opens by itself has the default
+configuration, so the profile's policy is all it gets. CefKit's hidden
+service pages get none of a profile's page policy.
+
+### Request filter
+
+`profile.requestFilter` sees the network requests of every page of the
+profile and of their service and shared workers, and returns `.allow`,
+`.block`, `.redirect(_:)`, `.setHeaders(_:)` or `.restrictCookies(to:)`.
+A page with a `requestFilter` of its own uses that one for its own
+requests instead. The app's own requests ([Requests through Chromium's
+network stack](#requests-through-chromiums-network-stack)) are not
+filtered: CEF does not hand them to a profile's handlers.
+
+```swift
+profile.requestFilter = CefRequestFilter(
+    hosts: ["ads.example", "tracker.example"], resourceTypes: [.script, .image, .fetch]
+) { request in
+    request.isThirdParty ? .block : .allow
+}
+```
+
+`hosts` (each with its subdomains), `urlPatterns` (`*` for any run of
+characters) and `resourceTypes` say which requests the filter wants. They
+are tested in C, on Chromium's IO thread, on the address as Chromium hands
+it over, as each request starts: a request outside them costs no Swift
+value and never reaches the closure. A filter with none of them wants
+every request.
+
+A `CefResourceRequest` has the `url`, `method`, `resourceType` (`.mainFrame`,
+`.subframe`, `.script`, `.image`, `.fetch`, `.serviceWorker`, …),
+`isNavigation`, the requesting `frame` (`nil` for a worker's request), the
+`pageIdentifier`, the `referrer`, the `initiator` (the origin of the
+document that started it), `firstPartyURL` (the site of the top-level
+document, for cookies) and `isThirdParty`. `isThirdParty` compares the
+request's site with its first party's by registrable domain, the last two
+labels of a host or three under a two-letter country code with a short
+second label (`example.co.uk`); it has no public suffix list.
+
+`.restrictCookies(to: [])` sends the request without the profile's cookies
+and saves none its response sets (`get_cookie_access_filter`); `.save` or
+`.send` lets one direction through. A filter cannot change a response: CEF
+lets an embedder change a request before it is sent, not a response's
+headers in place, and CefKit offers no response rewriting.
+
+Chromium waits for the answer on its IO thread, so the closure runs
+there, isolated to `CefIOActor`, and must be fast. State it keeps on
+`CefIOActor` needs no lock; state on the main actor it cannot read. Keep a
+copy on `CefIOActor` and update it from the main actor:
+
+```swift
+@CefIOActor var blockedHosts: Set<String> = []
+
+profile.requestFilter = CefRequestFilter { @CefIOActor request in
+    blockedHosts.contains(request.url?.host() ?? "") ? .block : .allow
+}
+
+// When the user edits the list, on the main actor:
+let hosts = Set(settings.blockedHosts)
+Task { @CefIOActor in blockedHosts = hosts }
+```
+
+### Profile settings
+
+`profile.configuration` holds the Chromium settings a profile applies to
+itself. It starts as `CefRuntime.Configuration.profiles`, and changing any
+of it overrides it for that profile alone, at once or as Chromium loads
+the profile; setting an option back to `.automatic` resets its
+preference. An incognito profile that blocks third-party cookies and
+saves no passwords, and one that goes through a proxy:
+
+```swift
+let incognito = CefProfile.incognito()
+incognito.configuration.privacy.thirdPartyCookies = .block
+incognito.configuration.credentials.passwordSaving = .disabled
+
+let work = CefProfile.persistent(id: "work")
+work.configuration.network.proxy = .servers("proxy.example:8080", bypassing: ["*.internal", "<local>"])
+// .automatic, .system, .direct, .servers(_:bypassing:), .autoConfiguration(URL)
+```
+
+The proxy is the profile's `proxy` preference, which Chromium applies to
+its request context as it changes. A `--proxy-server` switch on the
+command line wins over it for the whole app.
 
 ### Loading a persistent profile
 
@@ -2788,7 +3006,9 @@ no call for that; it reads the profile's
 them, so for an incognito profile, which keeps them in memory, it lists
 none.
 
-The settings and the permission delegate agree. Chromium does not ask
+The settings are the "check" side of permissions: what Chromium consults
+without asking anyone. The settings and the permission delegates
+([Permissions](#permissions)) agree. Chromium does not ask
 about a prompt-based permission (notifications, location, MIDI, window
 management, …) that a site has `.allow` or `.block` for, and keeps the
 answer the delegate gives, `.allow` or `.deny`, for the site as Chrome
@@ -2805,7 +3025,7 @@ movement (`.cameraPanTiltZoom`) is separate from `.camera` too, stored as
 
 ```swift
 func browser(_ browser: CefBrowser, decidePermissionFor request: CefPermissionRequest) async -> CefPermissionDecision {
-    let (allowed, remember) = await askUserRemembering(about: request.kinds, from: request.origin)
+    let (allowed, remember) = await askUserRemembering(about: request.kinds, from: request.origin.absoluteString)
     switch (allowed, remember) {
     case (true, true): return .alwaysAllow
     case (true, false): return .allow
@@ -3439,8 +3659,20 @@ struct Pages: CefSchemeHandler {
 }
 ```
 
-A registered handler serves every profile, including incognito and
-persistent ones. The default `CefCustomScheme` options make the scheme
+A handler registered with the runtime serves every profile, present and
+future, incognito and persistent ones included. A profile can serve a
+scheme its own way: `profile.registerSchemeHandler(scheme:domain:handler:)`
+takes the place of the runtime's handler for that scheme and domain in
+that profile alone, and `profile.removeSchemeHandler(scheme:domain:)` brings
+the runtime's back. `CefRuntime.shared.removeSchemeHandler(scheme:domain:)`
+removes the runtime's from every profile without one of its own.
+
+```swift
+let preview = CefProfile.incognito()
+preview.registerSchemeHandler(scheme: "app", handler: CefDirectorySchemeHandler(directory: URL(filePath: "/tmp/draft")))
+```
+
+The default `CefCustomScheme` options make the scheme
 standard, secure, CORS-enabled and fetchable; pass `options:` to change
 them.
 
@@ -3754,6 +3986,14 @@ the switches measured and not used.
 
 ## Known limits
 
+- A request filter cannot edit a response or its headers: CEF changes
+  requests before they are sent, and has no way to rewrite response
+  headers in place.
+- The app's own requests through `CefProfile.data(for:)`, `bytes(for:)` and
+  `download(for:to:)` do not reach a profile's request filter.
+- A page in a window Chromium opens by itself gets its profile's scripts
+  and bridges from its second document on; see
+  [User scripts and style sheets](#user-scripts-and-style-sheets).
 - Chrome style (`chrome://` pages, extensions, history, the password manager)
   exists only in `CefWindow` and Chrome UI windows, a Chromium
   constraint on macOS. `CefWebView` uses the Alloy style.

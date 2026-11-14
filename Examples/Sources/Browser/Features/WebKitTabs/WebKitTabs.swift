@@ -31,7 +31,7 @@ final class WebKitTabs: BrowserFeature {
     }
 
     func decidePolicy(for navigation: CefNavigationAction, in browser: CefBrowser) -> CefNavigationDecision? {
-        guard let url = navigation.url, Self.opensStreamingSitesAutomatically,
+        guard navigation.isMainFrame, let url = navigation.url, Self.opensStreamingSitesAutomatically,
               !keptInChromium.contains(ObjectIdentifier(browser)), SystemBrowser.prefersSystemEngine(for: url)
         else { return nil }
         open(url, profile: browser.configuration.profile ?? .default, replacing: browser)

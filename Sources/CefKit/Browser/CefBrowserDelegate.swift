@@ -55,7 +55,9 @@ public protocol CefBrowserDelegate: AnyObject {
 
     // MARK: Synchronous policy
 
-    /// Allow or cancel a main-frame navigation.
+    /// Allow or cancel a navigation of the main frame or of a subframe
+    /// (``CefNavigationAction/frame``), redirects included. Cancelling a
+    /// subframe's leaves the rest of the page as it is.
     func browser(_ browser: CefBrowser, decidePolicyFor navigation: CefNavigationAction) -> CefNavigationDecision
     /// Route a `target=_blank` / `window.open` / ⌘-click request. The default
     /// is ``CefWindowOpenDecision/default(for:)``.
@@ -94,7 +96,11 @@ public protocol CefBrowserDelegate: AnyObject {
     /// `NSWorkspace`. Cancelled when the page navigates away.
     func browser(_ browser: CefBrowser, decideExternalProtocolFor request: CefExternalProtocolRequest) async
         -> CefExternalProtocolDecision
-    /// Resolve a permission request. The default denies.
+    /// Resolve a permission request the profile's site settings do not
+    /// answer. The default hands it to the profile:
+    /// ``CefProfileDelegate/profile(_:decidePermissionFor:in:)``, which
+    /// denies unless the app set a profile delegate. Implement it to decide
+    /// for this page instead of its profile.
     func browser(_ browser: CefBrowser, decidePermissionFor request: CefPermissionRequest) async -> CefPermissionDecision
     /// Supply credentials for HTTP/proxy authentication, or `nil` to cancel.
     /// Asked again, with the same challenge, when the server refuses the
@@ -112,11 +118,6 @@ public protocol CefBrowserDelegate: AnyObject {
     /// its own picker. The default asks with
     /// ``CefClientCertificatePresenter``.
     func browser(_ browser: CefBrowser, selectClientCertificateFor request: CefClientCertificateRequest) async -> CefCertificate?
-    /// Decide whether and where to save a download. The default,
-    /// ``CefDownloadDecision/default(for:)``, follows the profile's
-    /// ``CefProfile/downloadPolicy``: the Downloads folder unless the app
-    /// set another.
-    func browser(_ browser: CefBrowser, decideDestinationFor download: CefDownload) async -> CefDownloadDecision
 }
 
 extension CefBrowserDelegate {
@@ -165,7 +166,8 @@ extension CefBrowserDelegate {
         await CefExternalProtocolPresenter.present(request, in: browser.hostWindow)
     }
     public func browser(_ browser: CefBrowser, decidePermissionFor request: CefPermissionRequest) async -> CefPermissionDecision {
-        .deny
+        let profile = browser.profile
+        return await profile.effectiveDelegate.profile(profile, decidePermissionFor: request, in: browser)
     }
     public func browser(_ browser: CefBrowser, credentialFor challenge: CefAuthenticationChallenge) async -> CefCredential? {
         await CefDialogPresenter.requestCredential(for: challenge, in: browser.hostWindow)
@@ -173,9 +175,6 @@ extension CefBrowserDelegate {
     public func browser(_ browser: CefBrowser, shouldProceedDespite error: CefCertificateError) async -> Bool { false }
     public func browser(_ browser: CefBrowser, selectClientCertificateFor request: CefClientCertificateRequest) async -> CefCertificate? {
         await CefClientCertificatePresenter.present(request, in: browser.hostWindow)
-    }
-    public func browser(_ browser: CefBrowser, decideDestinationFor download: CefDownload) async -> CefDownloadDecision {
-        .default(for: download)
     }
 
 }
@@ -227,18 +226,37 @@ public struct CefConsoleMessage: Sendable, Equatable {
     }
 }
 
-/// A main-frame navigation awaiting a policy decision.
+/// A navigation awaiting a policy decision: of the page's main frame or
+/// of one of its subframes.
 public struct CefNavigationAction: Sendable, Equatable {
+    /// Where the frame navigates to.
     public var url: URL?
+    /// The frame that navigates, as it is before the navigation: its
+    /// ``CefFrame/url`` is still the document it leaves.
+    public var frame: CefFrame
+    /// Whether this is a redirect of a navigation already allowed.
     public var isRedirect: Bool
     /// Whether a user gesture (click, key) triggered the navigation.
     public var hasUserGesture: Bool
+    /// How the navigation started: a link, a form submission
+    /// (``CefNavigationTransition/Source/formSubmit``), a reload, going back
+    /// or forward, an address given to ``CefBrowser/load(_:)``, a subframe
+    /// loading by itself.
+    public var transition: CefNavigationTransition
+
+    /// Whether the main frame navigates.
+    public var isMainFrame: Bool { frame.isMain }
 
     /// Creates a value of your own, for previews and tests.
-    public init(url: URL?, isRedirect: Bool = false, hasUserGesture: Bool = false) {
+    public init(
+        url: URL?, frame: CefFrame = CefFrame(id: "", url: nil, isMain: true), isRedirect: Bool = false,
+        hasUserGesture: Bool = false, transition: CefNavigationTransition = CefNavigationTransition(source: .link)
+    ) {
         self.url = url
+        self.frame = frame
         self.isRedirect = isRedirect
         self.hasUserGesture = hasUserGesture
+        self.transition = transition
     }
 }
 

@@ -14,7 +14,7 @@ import CefBase
 /// configuration.userScripts = [
 ///     // Hide Chromium's update status on the settings About page.
 ///     .styleSheet("settings-about-page #updateStatusContainer { display: none }",
-///                 matching: "chrome://settings/*"),
+///                 matching: ["chrome://settings/*"]),
 /// ]
 /// ```
 ///
@@ -43,20 +43,26 @@ public struct CefUserScript: Sendable, Equatable {
     }
 
     public var source: String
-    /// Limits the script to pages whose URL matches this pattern, where `*`
-    /// stands for any run of characters: `"chrome://settings/*"`,
-    /// `"https://*.example.com/*"`. `nil` runs it everywhere. A scoped script
-    /// runs inside a function, so its top-level declarations are not global.
-    public var urlPattern: String?
+    /// The documents the script runs in, by address, where `*` stands for
+    /// any run of characters: `"chrome://settings/*"`,
+    /// `"https://*.example.com/*"`. Empty runs it in every document.
+    public var matches: [String]
+    /// Addresses the script does not run in, though ``matches`` lists
+    /// them: `"https://example.com/login*"`.
+    ///
+    /// A script with either list runs inside a function, so its top-level
+    /// declarations are not global.
+    public var excludeMatches: [String]
     public var injectionTime: InjectionTime
     public var frames: Frames
 
     public init(
-        source: String, matching urlPattern: String? = nil,
+        source: String, matching matches: [String] = [], excluding excludeMatches: [String] = [],
         injectionTime: InjectionTime = .documentStart, frames: Frames = .all
     ) {
         self.source = source
-        self.urlPattern = urlPattern
+        self.matches = matches
+        self.excludeMatches = excludeMatches
         self.injectionTime = injectionTime
         self.frames = frames
     }
@@ -71,8 +77,13 @@ public struct CefUserScript: Sendable, Equatable {
     /// internals matches there. Selectors still cannot cross a shadow
     /// boundary: `settings-section #row` matches nothing when `#row` lives in
     /// the section's shadow root; write `#row`.
+    ///
+    /// Removing the script (``CefProfile/userScripts``,
+    /// ``CefBrowser/removeUserScript(_:)``) keeps the sheet out of documents
+    /// loaded afterwards; a loaded document keeps it until it reloads.
     public static func styleSheet(
-        _ css: String, matching urlPattern: String? = nil, includingShadowRoots: Bool = true
+        _ css: String, matching matches: [String] = [], excluding excludeMatches: [String] = [],
+        includingShadowRoots: Bool = true
     ) -> CefUserScript {
         // Covers shadow roots that already exist and those created later.
         // Components commonly assign their own `adoptedStyleSheets` after
@@ -109,6 +120,6 @@ public struct CefUserScript: Sendable, Equatable {
                 \(includingShadowRoots ? shadowRoots : "")
                 })();
                 """,
-            matching: urlPattern)
+            matching: matches, excluding: excludeMatches)
     }
 }

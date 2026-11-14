@@ -269,16 +269,16 @@ final class CefLifecycleCoordinator {
     // MARK: Energy
 
     private func applyFrameRate(_ browser: CefBrowser, conditions: CefEnergyConditions) {
-        guard browser.isOffscreen, browser.state == .live, case .offscreen(let requested) = browser.configuration.rendering
+        guard browser.isOffscreen, browser.state == .live, case .offscreen(let created) = browser.configuration.rendering
         else { return }
-        var rate = requested
+        var rate = browser.offscreenFrameRate
         if conditions.isConstrained, let reduced = energyPolicy.reducedOffscreenFrameRate {
             rate = min(rate, reduced)
         }
         // A rate below the one the browser was created with does not hold:
         // Chromium goes back to it now and then, while still reporting the
         // lower one. It is set again on every update and twice a second.
-        let isReduced = rate < requested
+        let isReduced = rate < created
         if isReduced { needsFrameRateRefresh = true }
         guard browser.appliedOffscreenFrameRate != rate || isReduced else { return }
         browser.appliedOffscreenFrameRate = rate

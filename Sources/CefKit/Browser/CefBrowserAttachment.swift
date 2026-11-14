@@ -2,7 +2,8 @@
 /// Chromium has created the browser, again when it is restored after a
 /// discard, and lets go when it closes.
 ///
-/// Add attachments to ``CefBrowser/Configuration/attachments``. One
+/// Add attachments to ``CefBrowser/Configuration/attachments``, or to
+/// ``CefProfile/attachments`` for every page of a profile. One
 /// attachment object serves every browser made with that configuration,
 /// popups included, since a popup gets its opener's configuration; keep
 /// what belongs to one browser keyed by the browser, and drop it in
@@ -64,7 +65,8 @@ public protocol CefBrowserAttachment: AnyObject {
     /// page cannot script it: `window.open` returns `null`, the popup has
     /// no `window.opener`, and a popup without a URL is refused. Browsers
     /// Chromium opens without a page asking, such as a tab from Chrome's
-    /// own UI, have the default configuration and so no attachments.
+    /// own UI, have the default configuration, so only their profile's
+    /// attachments (``CefProfile/attachments``) set them up.
     var preparesBeforeFirstDocument: Bool { get }
 
     /// Chromium has created the browser. When any of the browser's

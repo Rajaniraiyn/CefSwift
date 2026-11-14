@@ -65,9 +65,9 @@ extension SelfTest {
 
     static func configureSurfaceInventoryProbe(_ configuration: inout CefRuntime.Configuration) {
         configuration.authenticationPrompt = .chromium
-        configuration.services.translation = .automatic
-        configuration.credentials.passwordSaving = .automatic
-        configuration.credentials.autofill = .automatic
+        configuration.profiles.translation = .automatic
+        configuration.profiles.credentials.passwordSaving = .automatic
+        configuration.profiles.credentials.autofill = .automatic
         configuration.safeStorage = .mockKeychain
         configuration.extraCommandLineSwitches["use-fake-device-for-media-stream"] = .some(nil)
         configuration.extraCommandLineSwitches["enable-automation"] = .some(nil)
@@ -160,7 +160,7 @@ extension SelfTest {
 
 /// Records the delegate calls a trigger causes, answering each with a refusal.
 @MainActor
-final class SurfaceInventoryDelegate: CefBrowserDelegate {
+final class SurfaceInventoryDelegate: CefBrowserDelegate, CefProfileDelegate {
     var calls: [String] = []
 
     func browser(_ browser: CefBrowser, decidePermissionFor request: CefPermissionRequest) async -> CefPermissionDecision {
@@ -183,7 +183,7 @@ final class SurfaceInventoryDelegate: CefBrowserDelegate {
         return nil
     }
 
-    func browser(_ browser: CefBrowser, decideDestinationFor download: CefDownload) async -> CefDownloadDecision {
+    func profile(_ profile: CefProfile, decideDestinationFor download: CefDownload) async -> CefDownloadDecision {
         calls.append("decideDestinationFor download")
         return .save(to: FileManager.default.temporaryDirectory.appendingPathComponent("cefswift-inventory-\(UUID().uuidString).txt"))
     }
@@ -250,6 +250,7 @@ final class SurfaceInventory {
         let delegate = SurfaceInventoryDelegate()
         let browser = CefBrowser(url: base.appendingPathComponent("surfaces"))
         browser.delegate = delegate
+        browser.profile.delegate = delegate
         var configuration = CefWindow.Configuration()
         configuration.toolbar = toolbar
         configuration.frame = CGRect(x: 140, y: 120, width: 1000, height: 720)

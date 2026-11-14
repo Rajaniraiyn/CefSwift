@@ -160,22 +160,39 @@ import CefBase
         #expect(CefDownloadDestination.downloadsFolder.path == downloads?.path)
     }
 
-    /// The default delegate follows the download's profile; a delegate's
-    /// own answer wins over it.
-    @Test func delegateFollowsThePolicyUnlessItDecides() async {
+    /// The default profile delegate follows the download's profile's
+    /// policy; a profile delegate's own answer wins over it.
+    @Test func profileDelegateFollowsThePolicyUnlessItDecides() async {
         let profile = CefProfile.incognito()
         let browser = CefBrowser(configuration: CefDownloadStateTests.configuration(profile: profile))
         browser.applyDownload(CefDownload.Snapshot(id: 3, suggestedFilename: "r.pdf"), control: nil)
         let download = browser.downloads[0]
-        let standard = CefDefaultBrowserDelegate.shared
+        let standard = profile.effectiveDelegate
         profile.downloadPolicy = .folder(folder)
-        #expect(await standard.browser(browser, decideDestinationFor: download) == .saveInFolder(folder))
+        #expect(await standard.profile(profile, decideDestinationFor: download) == .saveInFolder(folder))
         profile.downloadPolicy = .disabled
-        #expect(await standard.browser(browser, decideDestinationFor: download) == .cancel)
+        #expect(await standard.profile(profile, decideDestinationFor: download) == .cancel)
         profile.downloadPolicy = .ask
-        #expect(await standard.browser(browser, decideDestinationFor: download) == .ask)
-        #expect(await PDFsToFolder(folder: folder).browser(browser, decideDestinationFor: download)
+        #expect(await standard.profile(profile, decideDestinationFor: download) == .ask)
+        let pdfs = PDFsToFolder(folder: folder)
+        profile.delegate = pdfs
+        #expect(await profile.effectiveDelegate.profile(profile, decideDestinationFor: download)
                     == .save(to: folder.appendingPathComponent("r.pdf")))
+    }
+
+    /// A page's delegate that does not decide a permission leaves it to
+    /// the page's profile's delegate, which denies by default.
+    @Test func permissionsFallBackFromThePageToItsProfile() async {
+        let profile = CefProfile.incognito()
+        let browser = CefBrowser(configuration: CefDownloadStateTests.configuration(profile: profile))
+        let request = CefPermissionRequest(kinds: .geolocation, origin: URL(string: "https://maps.example")!)
+        #expect(await CefDefaultBrowserDelegate.shared.browser(browser, decidePermissionFor: request) == .deny)
+        let profileDelegate = AllowsGeolocation()
+        profile.delegate = profileDelegate
+        #expect(await CefDefaultBrowserDelegate.shared.browser(browser, decidePermissionFor: request) == .allow)
+        #expect(profileDelegate.pages == [ObjectIdentifier(browser)])
+        // A page delegate's own answer wins.
+        #expect(await DeniesEverything().browser(browser, decidePermissionFor: request) == .deny)
     }
 
     @Test func cancelAndAskResolveToThemselves() {
@@ -215,12 +232,31 @@ import CefBase
 }
 
 @MainActor
-private final class PDFsToFolder: CefBrowserDelegate {
+private final class PDFsToFolder: CefProfileDelegate {
     let folder: URL
     init(folder: URL) { self.folder = folder }
 
-    func browser(_ browser: CefBrowser, decideDestinationFor download: CefDownload) async -> CefDownloadDecision {
+    func profile(_ profile: CefProfile, decideDestinationFor download: CefDownload) async -> CefDownloadDecision {
         download.suggestedFilename.hasSuffix(".pdf") ? .save(to: folder.appendingPathComponent(download.suggestedFilename)) : .default(for: download)
+    }
+}
+
+@MainActor
+private final class AllowsGeolocation: CefProfileDelegate {
+    var pages: [ObjectIdentifier] = []
+
+    func profile(
+        _ profile: CefProfile, decidePermissionFor request: CefPermissionRequest, in page: CefBrowser
+    ) async -> CefPermissionDecision {
+        pages.append(ObjectIdentifier(page))
+        return request.kinds == .geolocation ? .allow : .deny
+    }
+}
+
+@MainActor
+private final class DeniesEverything: CefBrowserDelegate {
+    func browser(_ browser: CefBrowser, decidePermissionFor request: CefPermissionRequest) async -> CefPermissionDecision {
+        .deny
     }
 }
 

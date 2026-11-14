@@ -56,7 +56,8 @@ CefPlugin    swift package cef download | bundle | info | clean; builds the
 CefKit names no optional feature. An optional module, such as
 CefPasskeys or CefChromium, plugs into it at these points:
 
-- `CefBrowserAttachment` (public), through
+- `CefBrowserAttachment` (public), through `CefProfile.attachments` (every
+  page of a profile, Chromium's own included) and
   `CefBrowser.Configuration.attachments`: told when Chromium has created a
   browser (`browserDidCreate(_:)`), when a discarded one is created anew
   (`browserDidRestore(_:)`) and when it closes (`browserDidClose(_:)`). An
@@ -104,7 +105,7 @@ API: `CefDevTools.addListener(for:_:)`, `removeListener(_:for:)` and
 `CefBrowser.decision(_:_:)` with `CefBrowser.DecisionScope` (a question
 cancelled when its page or browser goes), `CefDialogPresenter.run(_:in:)`
 (an alert that dismisses itself on cancellation), `CefLog`,
-`CefWindow.owning(_:)`, `CefProfile.directory`, and `CefObjCHook`
+`CefWindow.owning(_:)`, `CefProfile.storageDirectory` (now public), and `CefObjCHook`
 for overrides of Chromium's AppKit classes.
 
 **CefChromium** wraps Chromium's own browser features, which are bound to
@@ -186,7 +187,7 @@ names at run time:
 
 | Callback | Thread | CefKit |
 |---|---|---|
-| `cef_resource_request_handler_t.on_before_resource_load`, `get_resource_request_handler` | IO (`Chrome_IOThread`) | The request filter runs there, isolated to `CefIOActor`. |
+| `cef_request_handler_t.get_resource_request_handler`, `cef_request_context_handler_t.get_resource_request_handler`, `cef_resource_request_handler_t.on_before_resource_load`, `cef_cookie_access_filter_t` | IO (`Chrome_IOThread`) | The filter's declarative match runs in C in `get_resource_request_handler`; the filter itself runs in `on_before_resource_load`, isolated to `CefIOActor`. |
 | `cef_scheme_handler_factory_t.create` | IO | Creates the resource handler. |
 | `cef_resource_handler_t.get_response_headers`, `cancel` | IO | Read and change the handler's locked state. |
 | `cef_resource_handler_t.open`, `skip`, `read` | Chromium's thread pool (`ThreadPoolForegroundWorker`), in sequence | `open` starts the `CefSchemeHandler` in a task; `read` reads a file, copies buffered bytes or waits for them. |
@@ -280,11 +281,66 @@ addresses. `zoomLevel` is read back with `get_zoom_level` after each
 navigation, each zoom command and each change made through the property,
 in every browser, since Chromium keeps one level per site.
 
+### Profile policy
+
+A profile holds the defaults for every page in it, and CEF scopes what it
+can per request context, so CefKit scopes it there too:
+
+- **Requests.** Every request context a profile has, its own and the
+  shared one of the default profile, carries a `cef_request_context_handler_t`
+  (`CefProfileContextHandler`) whose `get_resource_request_handler`
+  applies the profile's `requestFilter`. CEF asks it only when the page's
+  client returns no handler for the request, which a page's client does
+  unless the page has a filter of its own (`CefRequestFiltering.page`) or
+  is one of CefKit's service pages (`.unfiltered`, a handler that only
+  checks external protocols). Requests without a page, a service
+  worker's or a shared worker's, reach only a context handler: CEF picks
+  one of the handlers of the contexts that share the storage, which for a
+  profile are all the same. A context Chromium creates itself, for a
+  window it opens from its own UI, gets one from
+  `get_default_request_context_handler`, which finds its profile from
+  `on_request_context_initialized`. CEF does not hand the app's own
+  `cef_urlrequest_t`s to these handlers.
+- **Matching.** A `CefRequestFilter`'s hosts, patterns and resource types
+  are compiled into a C matcher (`ccef_request_match`). Each request is
+  tested on its `cef_resource_type_t` first, then on its UTF-16 address
+  as CEF hands it over, in `get_resource_request_handler`; a request the
+  filter does not want gets no handler, so it never reaches Swift values
+  or the filter. A request it wants gets a handler of its own whose
+  `on_before_resource_load` builds the `CefResourceRequest` (the
+  initiator comes from `get_resource_request_handler`), runs the filter,
+  and whose `get_cookie_access_filter` applies `.restrictCookies(to:)`.
+- **Scheme handlers.** `register_scheme_handler_factory` registers on the
+  browser context, so every context of a profile shares a registration.
+  A runtime registration goes to the global context
+  (`cef_register_scheme_handler_factory`) and to every other profile's
+  context as it is made; a profile's own goes to its context and wins
+  there. Removing one registers a `NULL` factory, or the runtime's again.
+- **Pages.** A page's effective user scripts, bridges and attachments are
+  its profile's followed by its configuration's (a page bridge replaces a
+  profile bridge of the same name). Permission and download decisions go
+  to the page's delegate, whose default implementation asks the profile's
+  `CefProfileDelegate`. A popup takes its opener's configuration; a tab
+  Chromium opens inside a CefKit window takes that window's first
+  browser's, since CEF gives it that browser's client, settings and
+  `extra_info`; one in a window Chromium opens itself has the default
+  client and no `extra_info`, so only its profile's policy applies.
+- **Settings.** `CefProfile.Configuration` maps onto the profile's
+  preferences; a profile applies `CefRuntime.Configuration.profiles`, or
+  its own, as it loads and again when it changes, resetting what an
+  earlier value set. The proxy is the context's `proxy` preference.
+
+The request filter's cost was measured with `-benchmark filters`: see
+[design notes](design-notes.md#request-filter-matching).
+
 ### Profiles and their request contexts
 
-`CefProfile.default` is the global request context, Chromium's `Default`
-profile under `root_cache_path`, loaded as Chromium starts. Every other
-profile creates its own context on first use with
+`CefProfile.default` is Chromium's `Default` profile under
+`root_cache_path`, loaded as Chromium starts. Its pages use a context that
+shares the global context's storage (`cef_create_context_shared`), because
+the global context has no handler and the profile's needs one (see
+[Profile policy](#profile-policy)). Every other profile creates its own
+context on first use with
 `cef_request_context_create_context`: an empty `cache_path` for an
 incognito profile, `<root>/Profile-<id>` for a persistent one, the root
 taken with its symbolic links resolved (`realpath`), because Chromium's
@@ -693,12 +749,16 @@ A later renderer-side feature is one more extension type.
 `PageScripting` is the extension behind bridges, user scripts and
 `evaluateJavaScript`:
 
-- A browser's bridges and user scripts travel as JSON in the `extra_info`
-  of its creation (`cef_browser_host_create_browser`,
-  `cef_browser_view_create`, and `on_before_popup` for popups). CEF hands
-  `extra_info` to every renderer process that shows a frame of the
-  browser, before that frame's first document starts, so nothing waits on
-  a message and no first document runs on `about:blank`.
+- A browser's bridges and user scripts, its profile's and its own, travel
+  as JSON in the `extra_info` of its creation
+  (`cef_browser_host_create_browser`, `cef_browser_view_create`, and
+  `on_before_popup` for popups). CEF hands `extra_info` to every renderer
+  process that shows a frame of the browser, before that frame's first
+  document starts, so nothing waits on a message and no first document
+  runs on `about:blank`. A browser Chromium creates in a window of its own
+  has no `extra_info`; its configuration reaches each renderer as the
+  browser's frames attach (`on_frame_attached`), which CEF reports once a
+  frame's first document has committed, so that document goes without.
 - When a context is created in a frame's main world, the user scripts that
   match run with `cef_v8_context_t.eval`, as scripts without a URL; scripts
   for document end run from a `DOMContentLoaded` listener added first.
@@ -754,11 +814,14 @@ A later renderer-side feature is one more extension type.
 - `evaluateJavaScript` sends `cefswift.page.evaluate` to the main frame,
   whose renderer runs the script in the main world and sends the value
   back the same way. A returned promise is awaited through its `then`.
-- Changes after creation (`addUserScript`, `CefBridge.access`) go as a
-  `cefswift.page.configure` message to every frame of the browser. A
-  renderer process reports its configuration generation the first time it
-  sees one of the browser's documents, and gets the current one if it is
-  older.
+- Changes after creation (`addUserScript`, `removeUserScript`, a
+  profile's `userScripts` or `bridges`, `CefBridge.access`) go as a
+  `cefswift.page.configure` message to every frame of the browser, and to
+  each frame that attaches later. A renderer process reports its
+  configuration generation (-1 for none) the first time it sees one of the
+  browser's documents, and gets the current one if it differs.
+  Generations come from one counter for every browser, so a configuration
+  made later is always newer than any a renderer has.
 
 Two CEF 156 behaviors shape this code. A message from the browser process
 is handled inside a scope that defers promise jobs, and Blink does not run
@@ -862,7 +925,7 @@ else: a `sync` must be exactly one `.int`.
 
 | Message | Header | Values |
 |---|---|---|
-| `cefswift.page.call` | document, call | bridge, method, origin, argument |
+| `cefswift.page.call` | document, call | bridge, method, origin, argument (the calling frame is the message's frame) |
 | `cefswift.page.reply` | document, call, succeeded | bridge, result or error message |
 | `cefswift.page.emit` | none | bridge, event, payload |
 | `cefswift.page.evaluate` | request | script |

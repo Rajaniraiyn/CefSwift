@@ -16,8 +16,18 @@ import Foundation
 @MainActor
 final class CefPageScripting {
     private weak var browser: CefBrowser?
-    /// Counts configuration changes; the renderer keeps the newest.
-    private(set) var generation = 0
+    /// Numbers the configuration; the renderer keeps the newest. Numbers
+    /// come from one counter for every browser, so a configuration made
+    /// later is newer than any a renderer got earlier, as a tab Chromium
+    /// opens gets its window's first browser's `extra_info`.
+    private(set) var generation = CefPageScripting.nextGeneration()
+
+    private static var lastGeneration = 0
+
+    private static func nextGeneration() -> Int {
+        lastGeneration += 1
+        return lastGeneration
+    }
     /// Evaluations waiting for the renderer, by request. A request number
     /// is unique for the browser's lifetime; the renderer tells requests of
     /// different browsers apart by the browser's identifier.
@@ -46,7 +56,7 @@ final class CefPageScripting {
 
     private var configuration: CefJSON {
         guard let browser else { return .null }
-        return Self.configuration(bridges: browser.configuration.bridges, scripts: browser.userScripts, generation: generation)
+        return Self.configuration(bridges: browser.bridges, scripts: browser.userScripts, generation: generation)
     }
 
     /// A browser's `extra_info` for creation, with one reference, which the
@@ -59,14 +69,45 @@ final class CefPageScripting {
         return dictionary
     }
 
+    /// The browser's `extra_info` for its creation, which renderers get
+    /// with it.
     func makeExtraInfo() -> UnsafeMutablePointer<cef_dictionary_value_t>? {
+        extraInfoGeneration = generation
+        return Self.makeExtraInfo(configuration)
+    }
+
+    /// `extra_info` for a popup of this browser, which gets this browser's
+    /// configuration.
+    func makeExtraInfoForPopup() -> UnsafeMutablePointer<cef_dictionary_value_t>? {
         Self.makeExtraInfo(configuration)
+    }
+
+    /// The generation the browser's `extra_info` carried; `nil` for a
+    /// browser Chromium created, whose `extra_info` CefKit did not write.
+    private var extraInfoGeneration: Int?
+
+    /// A frame connected to a renderer, which may be a process new to the
+    /// browser. When the configuration is not the one the browser's
+    /// `extra_info` carried (it changed since, or Chromium created the
+    /// browser without it), the frame's renderer gets the current one now,
+    /// for the documents it loads from then on. CEF connects a frame once
+    /// its first document has committed, so that document goes without.
+    func frameDidAttach(_ frame: UnsafeMutablePointer<cef_frame_t>) {
+        guard extraInfoGeneration != generation, extraInfoGeneration != nil || hasConfiguration else { return }
+        CefProcessMessage(CefPageScriptingMessage.configure, [.string(configuration.text)])
+            .send(from: frame, to: PID_RENDERER)
+    }
+
+    /// Whether the browser has bridges or user scripts.
+    var hasConfiguration: Bool {
+        guard let browser else { return false }
+        return !browser.bridges.isEmpty || !browser.userScripts.isEmpty
     }
 
     /// Sends the browser's configuration to every renderer that shows one
     /// of its frames. Documents loaded from then on use it.
     func configurationDidChange() {
-        generation += 1
+        generation = Self.nextGeneration()
         let message = CefProcessMessage(CefPageScriptingMessage.configure, [.string(configuration.text)])
         browser?.forEachFrame { message.send(from: $0, to: PID_RENDERER) }
     }
@@ -181,7 +222,9 @@ final class CefPageScripting {
                 CefLog.error("CefPageScripting: dropped a malformed \(message.name) message")
                 return true
             }
-            if reported < generation {
+            // A renderer that had none reports -1; it needs one only if
+            // there is something to configure.
+            if reported != generation, reported >= 0 || hasConfiguration {
                 CefProcessMessage(CefPageScriptingMessage.configure, [.string(configuration.text)])
                     .send(from: frame.pointer, to: PID_RENDERER)
             }
@@ -204,7 +247,7 @@ final class CefPageScripting {
             var reader = payload.reader
             reader.skipHeader()
             guard let browser, let name = try? reader.readString(),
-                  let bridge = browser.configuration.bridges.first(where: { $0.name == name })
+                  let bridge = browser.bridges.first(where: { $0.name == name })
             else { return true }
             bridge.received(payload, reader: reader, in: browser, from: frame)
         default:
@@ -234,7 +277,8 @@ extension CefUserScript {
             "atDocumentEnd": .bool(injectionTime == .documentEnd),
             "mainFrameOnly": .bool(frames == .mainFrame),
         ]
-        if let urlPattern { json["urlPattern"] = .string(urlPattern) }
+        if !matches.isEmpty { json["matches"] = .array(matches.map(CefJSON.string)) }
+        if !excludeMatches.isEmpty { json["excludeMatches"] = .array(excludeMatches.map(CefJSON.string)) }
         return .object(json)
     }
 }

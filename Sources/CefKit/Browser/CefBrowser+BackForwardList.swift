@@ -9,57 +9,6 @@ extension CefBrowser {
     public struct BackForwardList: Sendable, Equatable {
         /// One page of the list.
         public struct Item: Sendable, Equatable, Identifiable {
-            /// How the page was reached: Chromium's transition type.
-            public struct Transition: Sendable, Hashable {
-                /// What started the navigation.
-                public enum Source: Sendable, Hashable {
-                    /// A link click, or `window.open`.
-                    case link
-                    /// Any other explicit navigation, such as `load(_:)`
-                    /// or an address typed into Chrome's omnibox.
-                    case explicit
-                    /// A suggestion Chrome showed (Chrome style).
-                    case autoBookmark
-                    /// Content loaded in a subframe by itself.
-                    case autoSubframe
-                    /// A subframe navigation the user asked for.
-                    case manualSubframe
-                    /// A search Chrome's omnibox generated (Chrome style).
-                    case generated
-                    /// A page Chromium opened at the top level by itself
-                    /// (Chrome style).
-                    case autoToplevel
-                    case formSubmit
-                    case reload
-                    /// A search keyword (Chrome style).
-                    case keyword
-                    case keywordGenerated
-                    case unknown
-                }
-
-                public var source: Source
-                /// Whether going back or forward reached the page.
-                public var isBackForward: Bool
-                /// Whether a client (script, `meta refresh`) or server
-                /// redirect ended here.
-                public var isRedirect: Bool
-                /// Whether the navigation was a direct load: an address
-                /// typed or given, a bookmark.
-                public var isDirectLoad: Bool
-                /// Whether an app's call started it (`load(_:)`).
-                public var isFromAPI: Bool
-
-                /// Creates a value of your own, for previews and tests.
-                public init(source: Source, isBackForward: Bool = false, isRedirect: Bool = false,
-                            isDirectLoad: Bool = false, isFromAPI: Bool = false) {
-                    self.source = source
-                    self.isBackForward = isBackForward
-                    self.isRedirect = isRedirect
-                    self.isDirectLoad = isDirectLoad
-                    self.isFromAPI = isFromAPI
-                }
-            }
-
             /// The item's place in the list when it was read, from 0 (the
             /// oldest page).
             public var id: Int
@@ -77,7 +26,8 @@ extension CefBrowser {
             public var httpStatusCode: Int
             /// When the page finished loading; nil when it has not.
             public var completionDate: Date?
-            public var transition: Transition
+            /// How the page was reached.
+            public var transition: CefNavigationTransition
             /// Whether the page was the result of a POST, which going back
             /// to it sends again.
             public var hasPostData: Bool
@@ -86,7 +36,7 @@ extension CefBrowser {
             public init(
                 id: Int, url: URL?, displayURL: URL? = nil, originalURL: URL? = nil, title: String = "",
                 httpStatusCode: Int = 0, completionDate: Date? = nil,
-                transition: Transition = Transition(source: .link), hasPostData: Bool = false
+                transition: CefNavigationTransition = CefNavigationTransition(source: .link), hasPostData: Bool = false
             ) {
                 self.id = id
                 self.url = url
@@ -210,12 +160,12 @@ extension CefBrowser.BackForwardList.Item {
             title: CefStringUtil.takingUserFree(entry.pointee.get_title(entry)) ?? "",
             httpStatusCode: Int(entry.pointee.get_http_status_code(entry)),
             completionDate: completion.val == 0 ? nil : completion.date,
-            transition: Transition(cefValue: entry.pointee.get_transition_type(entry).rawValue),
+            transition: CefNavigationTransition(cefValue: entry.pointee.get_transition_type(entry).rawValue),
             hasPostData: entry.pointee.has_post_data(entry) != 0)
     }
 }
 
-extension CefBrowser.BackForwardList.Item.Transition {
+extension CefNavigationTransition {
     init(cefValue value: UInt32) {
         let source: Source = switch value & TT_SOURCE_MASK.rawValue {
         case TT_LINK.rawValue: .link
