@@ -1496,9 +1496,10 @@ Return one of:
 | `.deny` | Ignores the request. |
 
 `CefWindowOpenDecision.default(for:)`, the default, chooses
-`.allowNativePopup` for Chrome-style browsers; for other browsers it loads
-the URL in place, and allows a blank popup only when the browser is not
-offscreen. Return it for requests you do not handle:
+`.allowNativePopup` for Chrome-style browsers; for other browsers it denies
+a request without a user gesture, loads the URL in place, and allows a
+blank popup only when the browser is not offscreen. Return it for requests
+you do not handle:
 
 ```swift
 func browser(_ browser: CefBrowser, decideWindowOpenFor request: CefWindowOpenRequest) -> CefWindowOpenDecision {
@@ -1507,6 +1508,21 @@ func browser(_ browser: CefBrowser, decideWindowOpenFor request: CefWindowOpenRe
     return .handled
 }
 ```
+
+Chromium's popup blocker runs before the delegate in both runtime styles:
+a `window.open` without a user gesture never reaches
+`decideWindowOpenFor`, unless the site's `.popups` setting allows popups
+(the default blocks them). An app that wants to see such popups, to offer
+"Show blocked popup" or to open them itself, allows the setting and decides
+in the delegate, where `hasUserGesture` is `false`:
+
+```swift
+profile.siteSettings.set(.allow, for: .popups, origin: URL(string: "https://example.com")!)
+```
+
+`default(for:)` then still denies them in an Alloy-style browser, where
+loading in place would let a script navigate the page away; a Chrome-style
+browser opens them.
 
 ### Downloads
 

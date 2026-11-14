@@ -159,6 +159,7 @@ enum SelfTest {
         ("windowed", windowedBrowserChecks),
         ("offscreen", offscreenBrowserChecks),
         ("hosting", hostingChecks),
+        ("popups", popupBlockingChecks),
         ("threads", threadChecks),
         ("lifecycle", lifecycleChecks),
         ("frames", frameChecks),
