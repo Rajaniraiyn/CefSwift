@@ -168,7 +168,7 @@ Common options:
 | `chromeToolbar` | Hides Chrome app-menu commands, toolbar buttons and page-action icons in Chrome-style windows. |
 | `extensions` | Extensions the app installs: `.webStore(id)`, `.package(at:id:version:)`, `.unpacked(at:)`. See [Extensions](#extensions). |
 | `processPolicy` | How many helper processes Chromium keeps running. See [Footprint and launch time](#footprint-and-launch-time). |
-| `enabledFeatures`, `disabledFeatures` | Chromium feature names, passed as `--enable-features` and `--disable-features`. |
+| `enabledFeatures`, `disabledFeatures` | Chromium feature names, passed as `--enable-features` and `--disable-features`. CefKit turns off `RemoteCoreAnimationAPI`, with which no page Chromium draws itself reaches the screen on macOS 27.2 ([why](architecture.md#presenting-pages)); listing it in `enabledFeatures` turns it back on. |
 | `safeStorage`, `keychainItem` | Whether Chromium uses the keychain, and which item. See [Keychain access](#keychain-access). |
 | `services`, `network`, `privacy`, `security`, `credentials` | Component updates, protected media, translation and system notifications; preloading and DNS over HTTPS; third-party cookies and hyperlink auditing; HTTPS-First; password saving and autofill. See [Services and privacy](#services-and-privacy). |
 | `enterprisePolicy` | Whether Chromium applies administrator-managed policies, and from which preferences domain. See [Enterprise policies](#enterprise-policies). |
@@ -900,11 +900,11 @@ while that happens ([how it works](architecture.md#animating-pages)).
 
 | Animation | Offscreen | Windowed |
 |---|---|---|
-| Size (`frame`, a split view's divider, a window's live resize) | Lays out once per refresh by default; the last frame, stretched, covers the view until the next arrives | Lays out live, as `WKWebView` does; where Chromium's frame is smaller than the view, the browser's `backgroundColor` shows for a frame or two |
+| Size (`frame`, a split view's divider, a window's live resize) | Lays out once per refresh by default; the last frame, stretched, covers the view until the next arrives | Lays out live, as `WKWebView` does; Chromium's frame arrives a few refreshes behind a spring, and until it does the page's canvas shows where it has not reached: white, or the dark canvas of a page that opts into a dark color scheme (give an animated page `color-scheme: light` and a background of its own to keep that area light) |
 | `scaleEffect`, `rotationEffect`, `offset` | Exact; clicks land where the page shows them | Applied to Chromium's layers by the window server; clicks land (macOS 27, which converts them through the transform) |
 | `rotation3DEffect` | Exact; clicks that reach the view land on the page point under them | Applied to Chromium's layers; clicks land at the untransformed point |
 | `opacity`, `clipShape`, corner radius, `shadow`, `blur` | Exact, on the app's own layer | Applied to Chromium's layers by the window server |
-| Moving between containers (`matchedGeometryEffect`), `.transition` | Arrives showing its last frame; the view it leaves keeps that frame while it animates out | Chromium's view moves; the page is not drawn twice |
+| Moving between containers (`matchedGeometryEffect`), `.transition` | Arrives showing its last frame; the view it leaves keeps that frame while it animates out | Chromium's view moves to the new view and shows there at once; the view it leaves shows the canvas color while it animates out |
 | SwiftUI content over the page | Drawn above it, and takes its clicks | Takes its clicks; placed above the page's layers, which Chromium's GPU process draws |
 
 Which rendering for which interface:

@@ -12,8 +12,8 @@ import CefSwiftUI
 ///   shows its suggestions.
 /// - `-private YES` opens the tabs in a private window.
 /// - `-tabsAtTheSide YES` puts the tab rail down the side.
-/// - `-railScreenshots <directory>` saves PNGs of the browser's own views
-///   (the tab rail and toolbar) in a few states, then quits (`RailScreenshots`).
+/// - `-railScreenshots <directory>` saves PNGs of the browser's window,
+///   page included, in a few states, then quits (`RailScreenshots`).
 /// - `-cacheDirectory <path>` keeps Chromium's data there
 ///   (`CefRuntime.Configuration.browser`).
 /// - `-benchmark YES` reports the first finished load and quits when

@@ -197,15 +197,19 @@ final class ChromeWindowHost {
 /// The app's views over Chrome's: the top bar, the sidebar, the page
 /// overlay. Events outside the covered areas pass to Chromium beneath.
 final class ChromeUICoverView: NSView {
-    private let background = NSView()
+    /// Opaque behind the top bar and the sidebar, one each: a single view
+    /// over both would span their bounding box, and so the page.
+    private let backgrounds = [NSView(), NSView()]
     private var topRect = CGRect.zero
     private var sideRect = CGRect.zero
     private let overlayContainer = PassthroughView()
 
     override init(frame: NSRect) {
         super.init(frame: frame)
-        background.wantsLayer = true
-        addSubview(background)
+        for background in backgrounds {
+            background.wantsLayer = true
+            addSubview(background)
+        }
         addSubview(overlayContainer)
         setAccessibilityElement(false)
     }
@@ -225,9 +229,11 @@ final class ChromeUICoverView: NSView {
         topRect = CGRect(x: 0, y: 0, width: bounds.width, height: topHeight)
         sideRect = CGRect(x: isRightToLeft ? bounds.width - sidebarWidth : 0, y: topHeight,
                           width: sidebarWidth, height: max(0, bounds.height - topHeight))
-        background.frame = topRect.union(sideRect)
-        background.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
-        background.isHidden = topHeight == 0 && sidebarWidth == 0
+        for (background, rect) in zip(backgrounds, [topRect, sideRect]) {
+            background.frame = rect
+            background.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+            background.isHidden = rect.width < 1 || rect.height < 1
+        }
         place(topBar, in: topRect)
         place(sidebar, in: sideRect)
         if self.pageBar !== pageBar, let old = self.pageBar { old.removeFromSuperview() }
@@ -284,7 +290,7 @@ final class ChromeUICoverView: NSView {
 
     override func accessibilityChildren() -> [Any]? {
         // pageBar is among the subviews while shown.
-        subviews.filter { !$0.isHidden && $0 !== background && $0 !== overlayContainer }
+        subviews.filter { view in !view.isHidden && !backgrounds.contains { $0 === view } && view !== overlayContainer }
     }
 }
 

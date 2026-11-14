@@ -3,13 +3,14 @@ import CefChromium
 import CefSwiftUI
 
 /// `-railScreenshots <directory>`: puts a window's tabs through a few
-/// states and saves a PNG of the browser's own views in each — the tab
-/// rail and the toolbar over Chrome's — then quits.
+/// states and saves a PNG of the whole window in each — the tab rail, the
+/// toolbar and the page — then quits.
 ///
-/// Each picture is the app's views drawn into a bitmap
-/// (`cacheDisplay(in:to:)`), from inside the process: no screen recording
-/// is involved, so no permission is asked for. Chromium's page is not in
-/// them.
+/// Each picture is the window as the window server composites it, with
+/// Chromium's page, from `CGWindowListCreateImage` of the app's own
+/// window, which needs no screen-recording permission. (Drawing the app's
+/// views into a bitmap would leave the page out, and with it anything
+/// covering the page by mistake.)
 @MainActor
 enum RailScreenshots {
     static func capture(_ window: CefChromeWindow, controller: BrowserController, into directory: URL) async {
@@ -19,16 +20,11 @@ enum RailScreenshots {
             URL(string: "data:text/html,<title>\(title)</title><h1>\(title)</h1>")!
         }
         func settle() async { try? await Task.sleep(for: .milliseconds(900)) }
-        func shoot(_ name: String, extra: CGFloat = 0) async {
+        func shoot(_ name: String) async {
             await settle()
-            guard let cover = window.topBar?.superview else { return }
-            cover.layoutSubtreeIfNeeded()
-            let bounds = cover.bounds
-            let height = controller.tabsAtTheSide ? bounds.height : window.topBarHeight + extra
-            let rect = CGRect(x: 0, y: 0, width: bounds.width, height: min(bounds.height, max(height, 1)))
-            guard let bitmap = cover.bitmapImageRepForCachingDisplay(in: rect) else { return }
-            cover.cacheDisplay(in: rect, to: bitmap)
-            try? bitmap.representation(using: .png, properties: [:])?.write(to: directory.appendingPathComponent("\(name).png"))
+            guard let nsWindow = window.window, let image = windowImage(nsWindow) else { return }
+            try? NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])?
+                .write(to: directory.appendingPathComponent("\(name).png"))
             print("cefswift-rail-screenshot \(name)")
         }
 
@@ -38,6 +34,8 @@ enum RailScreenshots {
             _ = await controller.openTabNow(url: page(title), inBackground: true)
         }
         await shoot("1-several-tabs")
+        try? await window.tabs.dropFirst(2).first?.select()
+        await shoot("1b-switched-tab")
 
         let tabs = window.tabs
         if tabs.count >= 6 {
@@ -63,7 +61,7 @@ enum RailScreenshots {
         window.activeTab?.browser?.execute(.find)
         await settle()
         window.activeTab?.browser?.findSession.text = "Article"
-        await shoot("4b-find-bar", extra: window.pageBar?.fittingSize.height ?? 0)
+        await shoot("4b-find-bar")
         window.activeTab?.browser?.findSession.end()
 
         NSApp.appearance = NSAppearance(named: .darkAqua)
@@ -78,6 +76,24 @@ enum RailScreenshots {
         NSApp.appearance = nil
         controller.tabsAtTheSide = false
         await settle()
+        window.window?.setContentSize(NSSize(width: 900, height: 600))
+        await shoot("8-resized")
+        window.window?.toggleFullScreen(nil)
+        try? await Task.sleep(for: .seconds(2))
+        await shoot("9-full-screen")
+        window.window?.toggleFullScreen(nil)
+        try? await Task.sleep(for: .seconds(2))
         NSApp.terminate(nil)
+    }
+
+    private typealias CreateImage = @convention(c) (CGRect, UInt32, UInt32, UInt32) -> Unmanaged<CGImage>?
+
+    /// `CGWindowListCreateImage`, which the macOS 15 SDK and later keep
+    /// from Swift, looked up at run time, for a window of this process.
+    private static func windowImage(_ window: NSWindow) -> CGImage? {
+        guard let symbol = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "CGWindowListCreateImage") else { return nil }
+        let create = unsafeBitCast(symbol, to: CreateImage.self)
+        // kCGWindowListOptionIncludingWindow, kCGWindowImageBoundsIgnoreFraming
+        return create(.null, 1 << 3, UInt32(window.windowNumber), 1 << 0)?.takeRetainedValue()
     }
 }

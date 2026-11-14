@@ -36,24 +36,36 @@ private struct AppShell: View {
     }
 }
 
+/// The app's bar, as tall as the Chrome tab strip and toolbar it covers:
+/// the sections on the row of the window buttons, the active section's
+/// title on the row below.
 private struct ShellBar: View {
     let window: CefChromeWindow
     let sections: [String]
 
     var body: some View {
-        HStack(spacing: 4) {
-            Spacer().frame(width: 72)
-            ForEach(Array(window.tabs.prefix(sections.count).enumerated()), id: \.element.id) { offset, tab in
-                Button(sections[offset]) { Task { try? await tab.select() } }
-                    .buttonStyle(.borderless)
-                    .fontWeight(tab.isActive ? .semibold : .regular)
-                    .foregroundStyle(tab.isActive ? .primary : .secondary)
-                    .keyboardShortcut(KeyEquivalent(Character("\(offset + 1)")), modifiers: .command)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 4) {
+                // The window buttons sit at the leading edge of this row.
+                Spacer().frame(width: 72)
+                ForEach(Array(window.tabs.prefix(sections.count).enumerated()), id: \.element.id) { offset, tab in
+                    Button(sections[offset]) { Task { try? await tab.select() } }
+                        .buttonStyle(.borderless)
+                        .fontWeight(tab.isActive ? .semibold : .regular)
+                        .foregroundStyle(tab.isActive ? .primary : .secondary)
+                        .keyboardShortcut(KeyEquivalent(Character("\(offset + 1)")), modifiers: .command)
+                }
+                Spacer()
             }
-            Spacer()
+            .frame(height: 40)
+            Divider()
+            Text(window.activeTab?.title ?? "")
+                .font(.title3.weight(.semibold))
+                .lineLimit(1)
+                .padding(.horizontal, 16)
+                .frame(maxHeight: .infinity)
         }
-        .padding(.horizontal, 12)
-        .frame(maxHeight: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(.bar)
     }
 }

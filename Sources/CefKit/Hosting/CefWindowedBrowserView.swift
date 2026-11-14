@@ -136,6 +136,28 @@ public final class CefWindowedBrowserView: NSView {
         }
     }
 
+    public override func resizeSubviews(withOldSize oldSize: NSSize) {
+        super.resizeSubviews(withOldSize: oldSize)
+        if let native = browser?.nativeView, native.superview === self { layoutChromiumView(native) }
+    }
+
+    /// Sizes Chromium's view to fill this one in whole points, its top
+    /// edge on this view's, the fraction past the bottom and trailing
+    /// edges clipped.
+    ///
+    /// Chromium's view keeps the layer that holds its frames sized with
+    /// Core Animation's autoresizing, which rounds each change of size: at
+    /// the fractional sizes an animation gives a view on every refresh the
+    /// rounding adds up, a few points per spring, and that layer ends up
+    /// larger than the view, so the page shows shifted up, cut off at the
+    /// top, with its background along the bottom. Whole sizes resize it
+    /// exactly.
+    func layoutChromiumView(_ native: NSView) {
+        let size = CGSize(width: bounds.width.rounded(.up), height: bounds.height.rounded(.up))
+        let frame = CGRect(x: 0, y: isFlipped ? 0 : bounds.height - size.height, width: size.width, height: size.height)
+        if native.frame != frame { native.frame = frame }
+    }
+
     /// A discarded browser comes back when its view is shown again.
     public override func viewDidUnhide() {
         super.viewDidUnhide()

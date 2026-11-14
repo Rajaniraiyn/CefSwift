@@ -170,6 +170,7 @@ enum SelfTest {
         ("frames", frameChecks),
         ("compositor", compositorChecks),
         ("animation", animationChecks),
+        ("visibility", visibilityChecks),
         ("graphics", graphicsChecks),
         ("accessibility", offscreenAccessibilityChecks),
         ("profile", profileChecks),
