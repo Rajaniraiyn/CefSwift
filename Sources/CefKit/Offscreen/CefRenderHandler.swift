@@ -153,6 +153,10 @@ public protocol CefOffscreenHost: AnyObject {
     /// default does nothing. ``CefOffscreenBrowserView`` sets its
     /// ``CefOffscreenBrowserView/browser`` to nil.
     func offscreenDidStopHosting(_ browser: CefBrowser)
+    /// The page's tooltip changed (a `title` attribute under the mouse);
+    /// nil when none shows. The default does nothing;
+    /// ``CefOffscreenBrowserView`` sets its `toolTip`.
+    func offscreenDidChangeToolTip(_ toolTip: String?)
 }
 
 extension CefOffscreenHost {
@@ -164,6 +168,7 @@ extension CefOffscreenHost {
     public func offscreenDragOperationDidChange(_ operation: CefDragOperation) {}
     public func offscreenAccessibilityTreeDidChange(_ changes: CefAccessibilityChanges) {}
     public func offscreenDidStopHosting(_ browser: CefBrowser) {}
+    public func offscreenDidChangeToolTip(_ toolTip: String?) {}
 }
 
 extension CefBrowserClient {

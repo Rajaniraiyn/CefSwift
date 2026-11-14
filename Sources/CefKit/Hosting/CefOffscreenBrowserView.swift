@@ -153,6 +153,7 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
             CATransaction.commit()
             contentCompositor.reset()
             popupCompositor.reset()
+            toolTip = nil
         }
         if let browser { layer?.backgroundColor = browser.hostBackgroundColor }
         hostBrowserIfPossible()
@@ -475,6 +476,13 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
 
     public func offscreenDidChangeSelection(_ selectedText: String, selectedRange: NSRange) {
         currentSelectedTextRange = selectedRange
+    }
+
+    /// AppKit shows the page's tooltip as the view's own, where the mouse
+    /// rests.
+    public func offscreenDidChangeToolTip(_ toolTip: String?) {
+        guard self.toolTip != toolTip else { return }
+        self.toolTip = toolTip
     }
 
     public func offscreenDidStopHosting(_ browser: CefBrowser) {

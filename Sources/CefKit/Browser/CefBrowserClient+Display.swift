@@ -64,6 +64,15 @@ extension CefBrowserClient {
             CefBrowserClient.run(s, browser, default: ()) { client, _ in client.offscreenHost?.offscreenDidChangeCursor(cursor) }
             return 0
         }
+        // Windowed browsers show their tooltips themselves; offscreen ones
+        // leave them to the host, and CEF ignores the return value.
+        h.pointee.on_tooltip = { s, browser, text in
+            let tip = text.map { CefStringUtil.string(from: $0.pointee) } ?? ""
+            CefBrowserClient.run(s, browser, default: ()) { client, _ in
+                client.offscreenHost?.offscreenDidChangeToolTip(tip.isEmpty ? nil : tip)
+            }
+            return 0
+        }
         return h
     }
 }

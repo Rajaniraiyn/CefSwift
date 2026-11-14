@@ -846,6 +846,10 @@ In return the host drives the browser as AppKit drives a view:
   `performDrop(at:modifiers:)` and `draggingSessionEnded(at:operation:)`,
   which mirror `NSDraggingDestination` and `NSDraggingSource`.
 
+The page's tooltips (a `title` under the mouse) reach the host through
+`offscreenDidChangeToolTip(_:)`; `CefOffscreenBrowserView` shows them as
+its own `toolTip`, as AppKit does for any view.
+
 When the browser moves to another host, or `stopHosting(in:)` withdraws it,
 the host hears `offscreenDidStopHosting(_:)`: stop calling the browser
 from then on. The new host gets the whole page painted again.
