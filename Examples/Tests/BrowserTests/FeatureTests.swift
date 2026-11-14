@@ -83,12 +83,3 @@ import Testing
         #expect(String(menuTitle: long, url: nil) == String(repeating: "a", count: 59) + "…")
     }
 }
-
-@MainActor @Suite struct PopupTests {
-    @Test func popupsGetTheSizeTheyAskForWithinTheOpener() {
-        let available = CGSize(width: 1000, height: 800)
-        #expect(PopupPresenter.pageSize(requested: CGSize(width: 420, height: 360), available: available) == CGSize(width: 420, height: 360))
-        #expect(PopupPresenter.pageSize(requested: .zero, available: available) == CGSize(width: 520, height: 640))
-        #expect(PopupPresenter.pageSize(requested: CGSize(width: 2000, height: 2000), available: available) == CGSize(width: 952, height: 752))
-    }
-}

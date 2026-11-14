@@ -330,12 +330,52 @@ failed profile closes as it would on a failed creation, and its
 | `CefWebView`, `.offscreen` | Alloy | Frames in a shared `IOSurface`, copied into a surface of its own and set as layer contents by `CefOffscreenBrowserView`, which forwards input |
 | `CefWindow` | Chrome | A CEF Views window; your toolbar is an `NSToolbar` and your accessory a title-bar accessory view |
 | `CefRuntime.openChromeWindow` | Chrome | Chrome's own window and UI |
+| `CefChromeWindow` (CefChromium) | Chrome | Chrome's own window, with the app's views laid over Chrome's tab strip and toolbar |
 
 macOS provides Chrome style only in windows Chromium creates, which is why
 the Chrome-style hosts own their `NSWindow`. A `CefWindow` draws the
 whole content area in one layer, so `contentInsets` and
 `contentCornerRadius` are drawn by a native view laid over the page that
 paints everything except the page's rectangle and passes events through.
+
+### Windows, tabs and views
+
+Three things are kept apart, each usable alone:
+
+- **Content**: `CefBrowser`, one page's model, whatever shows it.
+- **View**: where content shows. `CefWebView` (`CefWindowedBrowserView`,
+  `CefOffscreenBrowserView`) puts a page anywhere in the app's own view
+  tree, Alloy style: such pages are not Chromium tabs. A Chrome-style
+  window's content area shows its active tab's page.
+- **Window and tab**: Chromium's model of tabs. A `CefWindow` is a CEF Views
+  window (`cef_window_t`) holding one `cef_browser_view_t`; Chromium makes
+  it a `Browser` of type `popup` with one tab, and CEF refuses a second
+  Chrome-style browser view in it. Tabbed windows are the windows Chromium
+  draws itself (`cef_browser_host_create_browser` with Chrome style and no
+  CEF Views): CefChromium's `CefChromeWindow`, with its `CefTab`s and
+  `CefTabGroup`s, all listed by the profile's `CefTabStrip`.
+
+`CefWindow` and `CefChromeWindow` stay two types because they are two
+different things in CEF: the first is a CEF Views object CefKit creates and
+lays out (toolbar, insets, popups through `onPopup`, Chromium's surfaces
+recognised per window); the second has no CEF object at all, only the
+`NSWindow` Chromium made and the tab model Chromium keeps, reached through
+Chromium's WebUI hosts (`chrome://bookmarks`' `chrome.tabs`,
+`tab_strip_internals.mojom`). A one-tab `CefChromeWindow` is a different
+Chromium window from a `CefWindow`: a `normal` one, with a toolbar for
+extensions' action popups and a tab strip extensions can group and move
+tabs in.
+
+`CefChromeWindow` covers Chrome's tab strip and toolbar with a view in the
+window's frame view, above Chromium's `BridgedContentView` (which answers
+every hit test inside itself) and below the title bar's window buttons. No
+preference, command-line switch or CEF callback takes them out of a normal
+window. Under the cover, Chrome's controls are kept out of the way through
+AppKit: `AXPlatformNodeCocoa`'s `accessibilityChildren` leaves out elements
+lying wholly under the cover (only in covered windows; the method is
+replaced only if the class defines it), and keyboard focus Chromium moves
+to them (Tab past the page, ⌘L, F6) moves on to the app's views. The page
+is the visible `WebContentsViewCocoa`, whose frame the window follows.
 
 ## Chromium's AppKit classes
 
@@ -978,8 +1018,8 @@ Chromium locks a WebUI renderer to its host, and neither
 
 | Host | Reaches | Used for |
 |---|---|---|
-| `chrome://bookmarks` | `chrome.bookmarks`, `chrome.tabs`, `chrome.windows`, `chrome://favicon2` | `CefBookmarks`, `CefHistory.favicon`, `CefTabStrip`'s changes |
-| `chrome://tab-strip-internals` | `tab_strip_internals.mojom.PageHandlerFactory` | `CefTabStrip`'s mirror |
+| `chrome://bookmarks` | `chrome.bookmarks`, `chrome.tabs`, `chrome.windows`, `chrome://favicon2` | `CefBookmarks`, `CefHistory.favicon`, `CefTabStrip`'s reads of tabs and windows and its changes (no `chrome.tabs` event listeners: one on this page crashed Chromium later, when an extension was disabled or an incognito window opened) |
+| `chrome://tab-strip-internals` | `tab_strip_internals.mojom.PageHandlerFactory` | `CefTabStrip`'s groups (names, colours, collapsing), tab alerts, recently closed, and the updates that wake its reads |
 | `chrome://history` | `history.mojom.PageHandler`, `chrome://favicon2` | `CefHistory.search`, `remove` |
 | `chrome://new-tab-page-third-party` | `most_visited.mojom.MostVisitedPageHandlerFactory` | `CefHistory.topSites` |
 | `chrome://omnibox` | `mojom.OmniboxPageHandler` | `CefAutocomplete` |

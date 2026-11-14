@@ -543,7 +543,7 @@ public final class CefRuntime {
     }
 
     /// Whether the app is quitting, so no new service browsers should start.
-    var isTerminating: Bool { isTerminationRequested }
+    package var isTerminating: Bool { isTerminationRequested }
 
     // MARK: Energy policy
 

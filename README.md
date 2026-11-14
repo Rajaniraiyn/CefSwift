@@ -188,7 +188,7 @@ browser's state in their `body` and update when it changes.
 | | Your own or trusted content | Arbitrary sites, with Chrome's services |
 |---|---|---|
 | Configuration | `CefRuntime.Configuration.embedded` | `CefRuntime.Configuration.chrome` |
-| Host | `CefWebView` in your own windows (Alloy style) | `CefWindow` (Chrome style), or `CefRuntime.shared.openChromeWindow(url:)` for Chrome's complete UI |
+| Host | `CefWebView` in your own windows (Alloy style) | `CefWindow` (Chrome style, one tab), `CefChromeWindow` (Chromium's tabbed windows, with your own tab interface over Chrome's), or `CefRuntime.shared.openChromeWindow(url:)` for Chrome's complete UI |
 | Chrome runtime (`chrome://` pages, extensions, history) | No | Yes |
 | Background services | Off | On |
 
@@ -198,7 +198,7 @@ browser's state in their `body` and update when it changes.
 |---|---|---|
 | `CefKit` (core) | What any app embedding CEF needs and could not write itself: the runtime, browsers, profiles, the AppKit host views, CEF Views windows (`CefWindow`), handlers and delegates, offscreen rendering and its accessibility, discarding | `CefRuntime`, `CefBrowser`, `CefProfile`, `CefOffscreenBrowserView`, `CefWindow` |
 | `CefSwiftUI` | SwiftUI on top of `CefKit`, nothing else | `CefSwiftApp`, `CefWebView`, `setToolbar`, `setPageOverlay` |
-| `CefPasskeys`, `CefChromium` (optional) | Capabilities on Chromium internals some apps want: passkeys the app answers; Chromium's bookmark, history and suggestion stores, its extensions, its tab strip and its bubbles | `CefPasskeyController`, `CefBookmarks`, `CefTabStrip`, `CefChromiumSurface` |
+| `CefPasskeys`, `CefChromium` (optional) | Capabilities on Chromium internals some apps want: passkeys the app answers; Chromium's bookmark, history and suggestion stores, its extensions, its tab strip and its bubbles | `CefPasskeyController`, `CefBookmarks`, `CefChromeWindow`, `CefTabStrip`, `CefChromiumSurface` |
 | `Examples` | Product decisions written against the public API: UI, defaults, heuristics for when to use a capability | the Browser's toolbar, swipe indicator, Memory Saver, permission names |
 
 The rule: the library holds what an app cannot write against its public
@@ -229,7 +229,7 @@ implemented, each replaceable. Everything else belongs to the app.
 | Profiles, typed cookies, Chromium preferences, per-profile casting | `CefProfile`, `CefProfile.Cookie`, `mediaRouter` | [Profiles](docs/guide.md#profiles) |
 | The app's own requests through Chromium's network stack, sharing a profile's cookies, cache and proxy | `CefProfile.data(for:)`, `bytes(for:)` | [Requests through Chromium's network stack](docs/guide.md#requests-through-chromiums-network-stack) |
 | Chromium's bookmarks, history and omnibox suggestions (the optional `CefChromium` library) | `CefBookmarks`, `CefHistory`, `CefAutocomplete` | [Bookmarks, history and suggestions](docs/guide.md#bookmarks-history-and-suggestions) |
-| Chromium's own tabs, windows and tab groups, mirrored and driven, for a tab interface of your own (`CefChromium`) | `CefTabStrip` | [Chromium's tab strip](docs/guide.md#chromiums-tab-strip) |
+| Chromium's own tabs, windows and tab groups, mirrored and driven, with your own tab interface over Chrome's (`CefChromium`) | `CefChromeWindow`, `CefTab`, `CefTabGroup`, `CefTabStrip` | [Chromium's tab strip](docs/guide.md#chromiums-tabs-windows-tabs-and-groups) |
 | Chrome extensions: the Chrome Web Store, a profile's extensions (the optional `CefChromium` library), extensions the app installs by store identifier or ships in its bundle | `CefExtensions`, `CefRuntime.Configuration.extensions` | [Extensions](docs/guide.md#extensions) |
 | Discarding hidden browsers to free memory, and restoring them when shown (when to discard is the app's choice) | `discard()`, `discardBlockers()`, `lifecycle`, `lifecycleChangedAt` | [Discarding browsers](docs/guide.md#discarding-browsers) |
 | Chrome DevTools Protocol, in-process | `CefDevTools` | [DevTools](docs/guide.md#devtools) |

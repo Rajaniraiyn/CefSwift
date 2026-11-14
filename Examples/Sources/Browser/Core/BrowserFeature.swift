@@ -1,3 +1,4 @@
+import CefChromium
 import CefSwiftUI
 import SwiftUI
 
@@ -24,8 +25,9 @@ protocol BrowserFeature {
     /// chosen.
     func configure(_ configuration: inout CefBrowser.Configuration)
 
-    /// Called for each new window: every tab, and every popup a page opens.
-    func windowDidOpen(_ window: CefWindow)
+    /// Called for each new window, once the browser has dressed it: the
+    /// windows the browser opens and those Chromium opens itself.
+    func windowDidOpen(_ window: CefChromeWindow)
 
     /// Decides a main-frame navigation, or returns `nil` to leave it to the
     /// features after this one. Navigations no feature decides are allowed.
@@ -72,7 +74,7 @@ extension EnvironmentValues {
 extension BrowserFeature {
     func start(_ controller: BrowserController) {}
     func configure(_ configuration: inout CefBrowser.Configuration) {}
-    func windowDidOpen(_ window: CefWindow) {}
+    func windowDidOpen(_ window: CefChromeWindow) {}
     func decidePolicy(for navigation: CefNavigationAction, in browser: CefBrowser) -> CefNavigationDecision? { nil }
     func decidePermission(for request: CefPermissionRequest, in browser: CefBrowser) async -> CefPermissionDecision? { nil }
 }
@@ -107,7 +109,7 @@ struct BrowserFeatures<Content: BrowserFeature>: BrowserFeature {
 
     func start(_ controller: BrowserController) { content.start(controller) }
     func configure(_ configuration: inout CefBrowser.Configuration) { content.configure(&configuration) }
-    func windowDidOpen(_ window: CefWindow) { content.windowDidOpen(window) }
+    func windowDidOpen(_ window: CefChromeWindow) { content.windowDidOpen(window) }
 
     func decidePolicy(for navigation: CefNavigationAction, in browser: CefBrowser) -> CefNavigationDecision? {
         content.decidePolicy(for: navigation, in: browser)
@@ -154,7 +156,7 @@ struct FeaturePair<First: BrowserFeature, Second: BrowserFeature>: BrowserFeatur
         second.configure(&configuration)
     }
 
-    func windowDidOpen(_ window: CefWindow) {
+    func windowDidOpen(_ window: CefChromeWindow) {
         first.windowDidOpen(window)
         second.windowDidOpen(window)
     }

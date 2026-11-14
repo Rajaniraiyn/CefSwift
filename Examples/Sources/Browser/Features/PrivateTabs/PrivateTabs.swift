@@ -1,14 +1,15 @@
 import CefSwiftUI
 import SwiftUI
 
-/// Private tabs: File › New Private Tab (⇧⌘N) opens a tab on a new
-/// incognito profile, which keeps no history, cookies or site data once it
-/// closes. Tabs it opens share its profile, and its address field carries
+/// Private windows: File › New Private Window (⇧⌘N) opens a window of
+/// Chromium's own on the browser's incognito profile, which keeps no
+/// history, cookies or site data once the app quits. Its tabs share that
+/// profile, its tabs carry a small badge in the rail, and its address field
 /// a "Private" badge.
 struct PrivateTabs: BrowserFeature {
     func commands(for controller: BrowserController) -> some Commands {
         CommandGroup(after: .newItem) {
-            Button("New Private Tab") { controller.openTab(isPrivate: true) }
+            Button("New Private Window") { Task { await controller.openWindow(isPrivate: true) } }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
         }
     }

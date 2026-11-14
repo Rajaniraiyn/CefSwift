@@ -88,6 +88,13 @@ extension CefBrowser {
         /// Who picks the certificate a site asks the user to identify with:
         /// Chromium's picker, or the delegate.
         public var clientCertificates: CefBrowser.ClientCertificatePolicy = .automatic
+        /// Whether a Chrome-style browser in a window Chrome draws (a tab
+        /// of `openChromeWindow`'s windows) shows Chromium's status bubble,
+        /// the link address at the page's lower left
+        /// (`cef_browser_settings_t`'s `chrome_status_bubble`). Turn it off
+        /// to draw ``CefBrowser/statusText`` yourself. A ``CefWindow`` sets
+        /// its own from its configuration.
+        public var showsChromiumStatusBubble = true
 
         public init() {}
     }

@@ -15,22 +15,44 @@ open Examples/dist/Browser.app
 
 A tabbed browser (`Sources/Browser`), composed of features on a small
 core. Each feature is a folder of `Features/` written against CefSwift's
-public API; CefSwift itself has no notion of a browser.
+public API; CefSwift itself has no notion of a browser. Its windows and
+tabs are Chromium's own (`CefChromeWindow`), so extensions' `chrome.tabs`,
+tab groups, recently closed tabs and moving tabs between windows work as in
+Chrome, under the browser's own tab rail and toolbar.
 
 **The core** (`Core/`) is what every feature relies on:
 
-- `BrowserController`: the tabs, each a Chrome-style `CefWindow` grouped
-  with the others as native macOS tabs. It opens tabs (in a private
-  profile, or the profile of the tab that opened them), puts each window
-  together from the features, shows popups as panels over their opener
-  (`PopupPresenter`), and is every tab's `CefBrowserDelegate`, handing
-  navigation and permission decisions to the features.
+- `BrowserController`: the windows, Chromium's tabbed windows of the
+  default profile and of the private session (`CefChromeWindow`). It keeps
+  no list of tabs: it reads them from `CefTabStrip`. It opens windows and
+  tabs (`openTab` with the features' configuration), turns rail gestures
+  into Chromium commands (select, ⌘/⇧-select, drop, drag out to a new
+  window), and is every tab's `CefBrowserDelegate`, handing navigation and
+  permission decisions to the features; tabs Chromium opens itself get it
+  through `CefRuntime.onBrowserCreated`. Popups (`window.open` with
+  features) are Chromium's own popup windows, which show the site's
+  address.
+- `BrowserWindow`: dresses each window: Chrome's tab strip and toolbar
+  covered (`showsChromeUI = false`) by the browser's top bar — the
+  `TabRail` beside the window buttons and the toolbar, bound to the active
+  tab — or, with View › Tabs at the Side, a sidebar; the features' views
+  over the active tab's page.
+- `TabRail/`: the tab rail, a view of `CefChromeWindow.tabs` and `groups`
+  across the top or down the side (one model, two layouts): favicons,
+  titles, sound, muted, asleep and private indicators, close buttons,
+  pinned tabs compact, groups as coloured chips that collapse, menus for
+  tabs and groups, dragging within and between windows and out to a new
+  one, keyboard commands (⌘T ⌘W ⌘⇧T ⌘1–9 ⌃Tab ⌃⇧Tab ⌘⌥←/→ ⌘⇧[ ]), overflow
+  that shrinks then scrolls, VoiceOver labels and actions, Reduce Motion.
+  `TabRailLogic` is its arithmetic (widths, drop targets, keyboard), unit
+  tested. Collapsing a group is the rail's own when Chromium cannot
+  (`CefTabGroup.setCollapsed` throws `.unsupported`).
 - `BrowserFeature`: the points a feature plugs into, each with a default
   that does nothing.
 - `BrowserScene`: the Settings window and the menu bar, filled with the
   features' rows and commands; the example's runtime configuration (`CefRuntime.Configuration.browser`, the library's `.chrome` under the example's name, with its scheme).
-- Back and forward and the New Tab button, the tab's icon, File › New Tab
-  and the View menu's reload, zoom and Developer Tools; what typed text
+- Back and forward, File › New Tab and New Window, the tab commands, and
+  the View menu's reload, zoom and Developer Tools; what typed text
   means (`TypedAddress`: an address, or a search); the `browser://` scheme
   features serve their pages from (`BrowserPages`); and the launch
   arguments (`LaunchOptions`).
@@ -40,24 +62,23 @@ public API; CefSwift itself has no notion of a browser.
 | Feature | What it adds | Built on |
 |---|---|---|
 | `AddressBar` | The address field: the site, load progress, editing with ranked suggestions (↑ ↓ choose, Return opens, Esc closes) and inline completion; File › Open Location | `CefAutocomplete` |
-| `PrivateTabs` | File › New Private Tab, and the field's "Private" badge | `CefProfile.incognito()` |
+| `PrivateTabs` | File › New Private Window, a Chromium window on the incognito profile; the field's "Private" badge | `CefProfile.incognito()`, `CefChromeWindow` |
 | `PageInfo` | The field's security badge and page info (connection, certificate, site permissions); the sheet asking whether a site may use the camera, location and the like | `CefSiteSettings`, `CefConnectionSecurity` |
 | `Bookmarks` | The star in the field (⌘D) and the Bookmarks menu | `CefBookmarks` |
 | `History` | The History menu: back, forward and the latest pages | `CefHistory` |
 | `StartPage` | `browser://start/`, which new tabs open: frequently visited sites and recent bookmarks | `CefSchemeHandler`, `CefBridge`, `topSites()` |
-| `FindBar` | Edit › Find, a Safari-style bar under the toolbar | `setFindBar`, `CefFindSession` |
-| `StatusBubble` | The hovered link's address over the page | `statusText`, `pageOverlay` |
+| `FindBar` | Edit › Find, Chromium's find bar | `CefChromeCommand.find` |
+| `StatusBubble` | The hovered link's address over the page, in place of Chromium's | `statusText`, `showsChromiumStatusBubble`, `setPageOverlay` |
 | `SwipeIndicator` | The browser's own back and forward swipe indicator | `navigationGestureProgress`, `pageOverlay` |
 | `Appearance` | Settings › Appearance, for the windows and the pages | `CefProfile.setColorScheme` |
 | `Downloads` | A toolbar button listing downloads | `CefBrowser.downloads` |
-| `TabDiscarding` | Memory Saver: hidden tabs put to sleep after a while or under memory pressure; Settings › Put tabs to sleep; a button that wakes them | `discard()`, `lifecycle` |
-| `ChromiumPanels` | QR code and Share buttons, View › Cast, and optionally the browser's own QR code and Cast panels | `CefChromiumSurface`, `CefMediaRouter` |
+| `TabDiscarding` | Memory Saver: background tabs put to sleep after a while or under memory pressure; Settings › Put tabs to sleep; a button that wakes them. Background tabs are Chromium's real background tabs now, so Chromium's own discarding applies to them too | `discard()`, `lifecycle` |
+| `ChromiumPanels` | QR code and Share buttons and View › Cast, with Chromium's bubbles | `CefChromeCommand` |
 | `ChromiumPages` | `chrome://settings` without what does nothing in an embedded Chromium, an About page of the browser's own, and a Browser menu of Chromium's pages | `CefUserScript.styleSheet`, navigation policy |
 | `Playground` | `browser://playground/` (Help › Playground): popups, a download, a page that asks before leaving, an unreachable site, Widevine and FairPlay test streams | `CefSchemeHandler` |
-| `WebKitTabs` | Streaming services (Netflix, Disney+ and others) in tabs shown by the system's WebKit, which plays FairPlay; View › Open in WebKit, and "Open in Chromium" back | `Sources/SystemEngine` |
+| `WebKitTabs` | Streaming services (Netflix, Disney+ and others) in windows shown by the system's WebKit, which plays FairPlay; View › Open in WebKit, and "Open in Chromium" back. WebKit pages are not Chromium tabs, so each is a window of its own, not an entry in the rail | `Sources/SystemEngine` |
 | `Passkeys` | Passkeys answered by Chromium or by the browser itself, and the saved passkeys, in Settings | `CefPasskeyController` |
 | `TaskManager` | Window › Task Manager | `CefTaskManager` |
-| `ChromeTabs` | Tabs Chromium opens itself, shown as the browser's own | `CefRuntime.onChromeTab` |
 | `SingleInstance` | Launching the app again opens a tab, or one for each URL or file passed | `CefRuntime.onRelaunch` |
 
 `Sources/SystemEngine` (`SystemBrowser`, `SystemWebView`) is a small
@@ -117,7 +138,11 @@ running demo, what it shows, and its file.
   requests through Chromium's network stack; profiles and cookies;
   permissions and site settings; downloads.
 - **Chrome-Style Windows**: a `CefWindow` with a SwiftUI toolbar; Chromium's
-  find bar, status bubble and QR code bubble replaced with SwiftUI.
+  find bar, status bubble and QR code bubble replaced with SwiftUI;
+  Chromium's own tabs listed and driven from SwiftUI, with the window's own
+  bar over Chrome's (`TabStripDemo`, a "tab overview"); and an app shell
+  whose sections are Chromium tabs with no tab interface at all
+  (`AppShellDemo`).
 - **Runtime**: the task manager; discarding and restoring; the media
   router's devices.
 - **Chromium Data** (`CefChromium`): bookmarks, history and address
@@ -218,11 +243,12 @@ Examples/dist/Browser.app/Contents/MacOS/Browser -private YES -addressBarText sw
 | `-evaluate "<script>"` | Runs JavaScript in the last tab once it has loaded. |
 | `-focusAddressBar YES` | Starts with the address field editing. |
 | `-addressBarText <text>` | Starts editing with that text typed. |
-| `-private YES` | Opens the tabs as private tabs. |
+| `-private YES` | Opens the tabs in a private window. |
+| `-tabsAtTheSide YES` | Puts the tab rail down the side. |
+| `-railScreenshots <directory>` | Opens tabs, pins, groups and overflows them, saves a PNG of the browser's own views in each state (light, dark, side), then quits. Drawn from inside the app (`cacheDisplay(in:to:)`), so no screen recording is involved. |
 | `-appearance light\|dark\|system` | Overrides the appearance setting. |
 | `-showTaskManager YES` | Opens the Task Manager window. |
 | `-showPageInfo YES` | Opens the page info of the first secure page shown. |
-| `-customChromiumPanels YES` | Uses the browser's QR code and Cast panels, as the setting does. |
 | `-cacheDirectory <path>` | Keeps Chromium's data there instead of in Application Support. |
 
 Minimal and Browser also take `-benchmark YES`: the app prints

@@ -6,8 +6,8 @@ import SwiftUI
 /// place of Chromium's status bubble: ``CefBrowser/statusText`` drawn over
 /// the page.
 struct StatusBubble: BrowserFeature {
-    func windowDidOpen(_ window: CefWindow) {
-        window.chromiumSurfacePolicy[.statusBubble] = .hidden
+    func configure(_ configuration: inout CefBrowser.Configuration) {
+        configuration.showsChromiumStatusBubble = false
     }
 
     func pageOverlay(for browser: CefBrowser) -> some View {
