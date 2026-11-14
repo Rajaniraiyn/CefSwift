@@ -83,10 +83,10 @@ private struct QRCodePanel: View {
     }
 }
 
-/// Cast devices, from Chromium's media router.
+/// Cast devices, from the media router of the browser's profile.
 private struct CastPicker: View {
     let surface: CefChromiumSurface
-    @State private var router = CefMediaRouter.shared
+    private var router: CefMediaRouter { (surface.browser.configuration.profile ?? .default).mediaRouter }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
