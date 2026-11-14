@@ -148,24 +148,29 @@ package final class CefServiceHosts: CefShutdownParticipant {
     ///   whose host stops before it answers (its renderer crashed, or the
     ///   host was closed) is then made once more, on a new host. Reads are;
     ///   changes are not.
+    /// - Parameter idle: How long the host stays open after this call
+    ///   without another, instead of ``idleTimeout``: for a caller that
+    ///   calls in bursts and keeps nothing on the host between them. A
+    ///   longer wait asked by an earlier call still holds.
     package func call<Result: Decodable & Sendable, Progress: Decodable>(
         _ module: CefServiceHost.Module, _ function: String, _ arguments: CefJSON = [:], as type: Result.Type,
-        timeout: Duration = .seconds(15), isIdempotent: Bool = false, progress: @escaping @MainActor (Progress) -> Void
+        timeout: Duration = .seconds(15), isIdempotent: Bool = false, keepsHostFor idle: Duration? = nil,
+        progress: @escaping @MainActor (Progress) -> Void
     ) async throws -> Result {
         try await call(
-            module, function, arguments, as: type, timeout: timeout, isIdempotent: isIdempotent,
+            module, function, arguments, as: type, timeout: timeout, isIdempotent: isIdempotent, idle: idle,
             onProgress: { (data: Data) in
                 guard let value = try? Self.decodeEncoded(Progress.self, from: data) else { return }
                 progress(value)
             })
     }
 
-    /// ``call(_:_:_:as:timeout:isIdempotent:progress:)`` without progress.
+    /// ``call(_:_:_:as:timeout:isIdempotent:keepsHostFor:progress:)`` without progress.
     package func call<Result: Decodable & Sendable>(
         _ module: CefServiceHost.Module, _ function: String, _ arguments: CefJSON = [:], as type: Result.Type,
-        timeout: Duration = .seconds(15), isIdempotent: Bool = false
+        timeout: Duration = .seconds(15), isIdempotent: Bool = false, keepsHostFor idle: Duration? = nil
     ) async throws -> Result {
-        try await call(module, function, arguments, as: type, timeout: timeout, isIdempotent: isIdempotent, onProgress: nil)
+        try await call(module, function, arguments, as: type, timeout: timeout, isIdempotent: isIdempotent, idle: idle, onProgress: nil)
     }
 
     /// Calls `function` and returns its value as `CefJSON`.
@@ -177,7 +182,7 @@ package final class CefServiceHosts: CefShutdownParticipant {
 
     private func call<Result: Decodable & Sendable>(
         _ module: CefServiceHost.Module, _ function: String, _ arguments: CefJSON, as type: Result.Type,
-        timeout: Duration, isIdempotent: Bool, onProgress: (@MainActor (Data) -> Void)?
+        timeout: Duration, isIdempotent: Bool, idle: Duration?, onProgress: (@MainActor (Data) -> Void)?
     ) async throws -> Result {
         let started = CefDiagnostics.start()
         defer { CefDiagnostics.record(.serviceCall, since: started) }
@@ -190,7 +195,8 @@ package final class CefServiceHosts: CefShutdownParticipant {
             defer { progressHandlers[call] = nil }
             let host = try runningHost(for: module)
             do {
-                return try await host.call(module, function, arguments, call: call, as: type, timeout: timeout)
+                return try await host.call(
+                    module, function, arguments, call: call, as: type, timeout: timeout, idle: idle ?? Self.idleTimeout)
             } catch let stopped as CefServiceHostBrowser.HostStopped {
                 guard isIdempotent, attempt == 1, !Task.isCancelled else {
                     throw CefError.operationFailed(stopped.message)
@@ -439,12 +445,14 @@ final class CefServiceHostBrowser {
 
     func call<Result: Decodable & Sendable>(
         _ module: CefServiceHost.Module, _ function: String, _ arguments: CefJSON, call: Int, as type: Result.Type,
-        timeout: Duration
+        timeout: Duration, idle: Duration
     ) async throws -> Result {
         callsInProgress += 1
         idleStop?.cancel()
         defer {
             callsInProgress -= 1
+            let until = ContinuousClock.now + idle
+            if until > idleUntil { idleUntil = until }
             if callsInProgress == 0 { scheduleIdleStop() }
         }
         // One deadline over the whole call, starting the host included: an
@@ -513,10 +521,14 @@ final class CefServiceHostBrowser {
             call: call, eventBridge: Self.eventBridgeName)
     }
 
+    /// When the host may stop, if no call comes before.
+    private var idleUntil = ContinuousClock.now
+
     private func scheduleIdleStop() {
         idleStop?.cancel()
+        let until = idleUntil
         idleStop = Task { [weak self] in
-            try? await Task.sleep(for: CefServiceHosts.idleTimeout)
+            try? await Task.sleep(until: until, clock: .continuous)
             guard !Task.isCancelled, let self, self.isIdle else { return }
             self.stop()
         }

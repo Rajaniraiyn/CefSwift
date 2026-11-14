@@ -11,6 +11,11 @@ extension CefRuntime.Configuration {
         // Chrome's own UI is replaced by the SwiftUI toolbar; keep its
         // internal pages free of buttons that would open Chrome windows.
         configuration.chromeToolbar.hiddenAppMenuCommands = [.newWindow, .newIncognitoWindow]
+        // Chrome's omnibox, under the browser's own address field, is never
+        // used; its WebUI popup would be preloaded in a renderer of its own
+        // (about 50 MB) and drawn off screen (about 110 MB in the GPU
+        // process). Chromium falls back to its views popup.
+        configuration.disabledFeatures.formUnion(["WebUIOmniboxPopup", "WebUIOmniboxAimPopup", "WebUIOmniboxFullPopup"])
         configuration.customSchemes = [CefCustomScheme(name: BrowserPages.scheme)]
         // Quit immediately on ⌘Q instead of Chromium's "Hold ⌘Q to Quit".
         configuration.preferences["browser.confirm_to_quit"] = false
@@ -167,5 +172,6 @@ private struct RecentlyClosedMenu: View {
             }
         }
         .disabled(strip.recentlyClosed.isEmpty)
+        .task { await strip.refreshRecentlyClosed() }
     }
 }

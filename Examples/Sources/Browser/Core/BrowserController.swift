@@ -151,6 +151,15 @@ final class BrowserController: CefBrowserDelegate {
     private func dress(_ strip: CefTabStrip) {
         guard dressedStrips.insert(ObjectIdentifier(strip)).inserted else { return }
         strip.layout = tabsAtTheSide ? .vertical(width: 232) : .horizontal
+        // The rail's sound icons follow Chromium's events while the browser
+        // is the active app (one hidden page, CefTabStrip.observesChromiumEvents);
+        // in the background, the strip follows CEF's events alone.
+        strip.observesChromiumEvents = NSApp.isActive
+        for (name, isActive) in [(NSApplication.didBecomeActiveNotification, true), (NSApplication.didResignActiveNotification, false)] {
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak strip] _ in
+                MainActor.assumeIsolated { strip?.observesChromiumEvents = isActive }
+            }
+        }
         strip.onWindowOpened = { [weak self] chrome in
             guard let self, !self.windows.contains(where: { $0.chrome === chrome }) else { return }
             let window = BrowserWindow(chrome: chrome, controller: self)

@@ -8,10 +8,10 @@ import Observation
 /// Chromium.
 ///
 /// It is the model a custom tab interface draws: Chromium stays the source
-/// of truth, so what extensions do with `chrome.tabs` and what Chrome's own
-/// commands do shows up here by itself, and every change made here is one
-/// Chromium makes — moving a tab to another window keeps its page, history
-/// and ``CefBrowser``.
+/// of truth, so what Chrome's own commands and shortcuts do, and what
+/// extensions do with `chrome.tabs`, shows up here, and every change made
+/// here is one Chromium makes — moving a tab to another window keeps its
+/// page, history and ``CefBrowser``.
 ///
 /// ```swift
 /// let strip = CefProfile.default.tabStrip
@@ -22,14 +22,26 @@ import Observation
 /// try await first.move(to: 0, in: otherWindow)
 /// ```
 ///
-/// The strip follows Chromium from the moment it is first used, for as long
-/// as the runtime runs, and is kept by the profile meanwhile. Each change
-/// is reported by Chromium and read again: `chrome.tabs` and
-/// `chrome.windows` events, on Chromium's own `chrome://bookmarks` page,
-/// which Chromium grants those extension APIs, and
-/// `tab_strip_internals.mojom` (`chrome://tab-strip-internals`), which
-/// reports groups' names, colours and collapsing; both from hidden service
-/// hosts. Windows CefKit hosts (``CefWindow``, one tab each, which Chromium
+/// ## Following Chromium
+///
+/// The strip follows the events CEF and AppKit already deliver for every
+/// tab — a browser created or closed, a page's title, address, icon and
+/// loading, the page a window shows, every Chrome command — and reads
+/// Chromium's tab model only when one of them reports a change to its
+/// structure: a new tab or window, a tab command (⌘⇧T, ⌃Tab, moving and
+/// pinning), or a change made through the strip. Each read is one call to
+/// a hidden service host — `chrome.tabs` and `chrome.windows` on Chromium's
+/// own `chrome://bookmarks` page, which Chromium grants those extension
+/// APIs, and, for groups' names and colours and what Chromium can reopen,
+/// `tab_strip_internals.mojom` (`chrome://tab-strip-internals`) — which
+/// closes a few seconds after the last one. While nothing changes, no host
+/// runs.
+///
+/// What CEF does not report — sound starting or stopping in a tab, and an
+/// extension moving, pinning or grouping tabs — shows at the next read, or
+/// at once while ``observesChromiumEvents`` is on.
+///
+/// Windows CefKit hosts (``CefWindow``, one tab each, which Chromium
 /// counts as popup windows) and Chromium's popup windows are left out.
 ///
 /// ## Tabs and browsers
@@ -68,12 +80,31 @@ public final class CefTabStrip {
         }
     }
 
-    /// A tab or window Chromium can reopen, newest first.
-    public struct ClosedItem: Hashable, Sendable {
+    /// A tab, window or group Chromium can reopen (Chromium's
+    /// `TabRestoreService` entries), newest first.
+    public struct ClosedItem: Hashable, Sendable, Identifiable {
         public enum Kind: Hashable, Sendable { case tab, window, group, other }
+        /// Chromium's identifier for the entry, for
+        /// ``CefTabStrip/reopen(_:)``. It is valid while the entry is listed.
+        public var id: Int
         public var kind: Kind
+        /// The tab's title; for a window or group, its active or first
+        /// tab's, or the group's name.
         public var title: String
         public var url: URL?
+        /// How many tabs reopening it brings back.
+        public var tabCount: Int
+        /// When it closed.
+        public var closedAt: Date?
+
+        public init(id: Int, kind: Kind, title: String, url: URL?, tabCount: Int = 1, closedAt: Date? = nil) {
+            self.id = id
+            self.kind = kind
+            self.title = title
+            self.url = url
+            self.tabCount = tabCount
+            self.closedAt = closedAt
+        }
     }
 
     /// The profile's tabbed windows, in the order Chromium lists them.
@@ -86,7 +117,9 @@ public final class CefTabStrip {
     private(set) var allWindows: [CefChromeWindow] = []
 
     /// What Chromium can reopen, newest first: tabs, windows and groups
-    /// closed in this session.
+    /// closed in this session, as of the last read of them. Closing tabs
+    /// does not read them by itself; ``refreshRecentlyClosed()`` does,
+    /// before a menu of them opens.
     public private(set) var recentlyClosed: [ClosedItem] = []
 
     /// Why the last read failed — an internal page moved or changed in a
@@ -95,9 +128,28 @@ public final class CefTabStrip {
 
     /// Called once for each window as soon as its `NSWindow` is known:
     /// the windows the app opens and those Chromium opens itself (a tab
-    /// dragged out, `chrome.windows.create` from an extension). Dress the
-    /// window here: hide Chrome's tab strip and toolbar, give it a top bar.
+    /// dragged out, `chrome.windows.create` from an extension, a window
+    /// reopened or restored). Dress the window here: hide Chrome's tab
+    /// strip and toolbar, give it a top bar.
     @ObservationIgnored public var onWindowOpened: ((CefChromeWindow) -> Void)?
+
+    /// Whether the strip also listens to Chromium's own tab events, so that
+    /// what CEF does not report shows at once: sound starting and stopping
+    /// in any tab, and an extension moving, pinning or grouping tabs.
+    ///
+    /// Off by default, and then no service host runs while nothing changes.
+    /// On, one hidden host stays open meanwhile (the `chrome://bookmarks`
+    /// page, one renderer process, about 30 MB), listening to
+    /// `chrome.tabs`' events and `chrome.windows`' `onCreated` and
+    /// `onRemoved`. (Not `chrome.windows.onFocusChanged`: with a listener
+    /// to it on a WebUI page, CEF 156 crashes when an incognito window
+    /// opens.)
+    public var observesChromiumEvents = false {
+        didSet {
+            guard observesChromiumEvents != oldValue else { return }
+            updateListening()
+        }
+    }
 
     public let profile: CefProfile
 
@@ -131,120 +183,125 @@ public final class CefTabStrip {
 
     // MARK: Following
 
-    @ObservationIgnored private var following: Task<Void, Never>?
     @ObservationIgnored private var tabsSnapshot: TabsSnapshot?
     @ObservationIgnored private var internalsSnapshot: InternalsSnapshot?
     /// Group names and colours by group, as last read from the internal
     /// page: kept while a read of it does not line up with `chrome.tabs`.
     @ObservationIgnored private var visuals: [CefTabGroup.ID: InternalsSnapshot.Group] = [:]
-    /// Callers waiting for the strip to show a read of at least a version.
-    @ObservationIgnored private var readWaiters: [(version: Int, continuation: CheckedContinuation<Void, Never>)] = []
-    @ObservationIgnored private var readSoon = false
-    /// Windows being opened, which keep the strip following meanwhile.
-    @ObservationIgnored var openings = 0
-    @ObservationIgnored private var windowObserver: NSObjectProtocol?
 
-    /// Starts following Chromium, if not yet: on first use, whenever the
-    /// app opens a window, and when one of Chromium's windows becomes the
-    /// main window. The strip stops once the profile has no windows left,
-    /// so its hidden service hosts can close.
+    /// Reads asked for, and the reads done: a caller waiting for a read
+    /// waits for the count it asked to be done.
+    @ObservationIgnored private var readsRequested = 0
+    @ObservationIgnored private var readsDone = 0
+    @ObservationIgnored private var readWaiters: [(request: Int, continuation: CheckedContinuation<Void, Never>)] = []
+    @ObservationIgnored private var reading: Task<Void, Never>?
+    /// Whether the next read also reads the internal page: for groups'
+    /// names and colours, and what Chromium can reopen.
+    @ObservationIgnored private var readsInternalsNext = false
+    @ObservationIgnored private var listening: Task<Void, Never>?
+    @ObservationIgnored private var isObservingEvents = false
+    @ObservationIgnored private var browserIDs = Set<ObjectIdentifier>()
+
+    /// How long a service host the strip used stays open after its last
+    /// call: reads come in bursts (a tab opening reads two or three times),
+    /// and nothing is kept on the host between them.
+    static let hostIdle: Duration = .seconds(3)
+
+    /// Starts following CEF's and AppKit's events for the profile's tabs,
+    /// once, and reads Chromium's tabs.
     func startFollowing() {
-        if windowObserver == nil {
-            windowObserver = NotificationCenter.default.addObserver(
+        guard CefRuntime.shared.isRunning, !CefRuntime.shared.isTerminating else { return }
+        if !isObservingEvents {
+            isObservingEvents = true
+            Self.installCommandObserver()
+            followBrowsers()
+            NotificationCenter.default.addObserver(
                 forName: NSWindow.didBecomeMainNotification, object: nil, queue: .main
             ) { [weak self] notification in
                 let window = notification.object as? NSWindow
                 MainActor.assumeIsolated {
-                    guard let self, let window, self.following == nil, CefWindow.owning(window) == nil,
+                    // One of Chromium's windows the strip does not know yet.
+                    guard let self, let window, CefWindow.owning(window) == nil, self.window(for: window) == nil,
                           "\(type(of: window.contentView ?? NSView()))" == "BridgedContentView"
                     else { return }
-                    self.startFollowing()
+                    self.setNeedsRead()
                 }
             }
+            setNeedsRead(internals: true)
         }
-        guard following == nil, CefRuntime.shared.isRunning, !CefRuntime.shared.isTerminating else { return }
-        following = Task { [self] in
-            let internals = Task { await self.followInternals() }
-            await followTabs()
-            internals.cancel()
-            following = nil
+        updateListening()
+    }
+
+    /// Whether the strip should go on reading.
+    private var isLive: Bool {
+        CefRuntime.shared.isRunning && !CefRuntime.shared.isTerminating
+    }
+
+    /// Asks for a read of Chromium's tabs, soon; reads asked for together
+    /// are one.
+    func setNeedsRead(internals: Bool = false) {
+        readsRequested += 1
+        if internals { readsInternalsNext = true }
+        guard reading == nil else { return }
+        reading = Task { [weak self] in
+            await self?.readWhileRequested()
+        }
+    }
+
+    private func readWhileRequested() async {
+        while readsDone < readsRequested, isLive {
+            // Events come together (a tab opening sends several): read once
+            // they have.
+            try? await Task.sleep(for: .milliseconds(16))
+            let request = readsRequested
+            let withInternals = readsInternalsNext || (!groupsByID.isEmpty && readsDone == 0)
+            readsInternalsNext = false
+            await readOnce(withInternals: withInternals)
+            readsDone = request
+            let ready = readWaiters.filter { $0.request <= request }
+            readWaiters.removeAll { $0.request <= request }
+            ready.forEach { $0.continuation.resume() }
+        }
+        reading = nil
+        if !isLive {
+            readsDone = readsRequested
             let waiting = readWaiters
             readWaiters = []
             waiting.forEach { $0.continuation.resume() }
         }
     }
 
-    /// Whether the strip should go on reading.
-    private var isLive: Bool {
-        !Task.isCancelled && CefRuntime.shared.isRunning && !CefRuntime.shared.isTerminating
-    }
-
-    private func followTabs() async {
-        var version: Int?
-        while isLive {
-            do {
-                // Woken by the internal page's reports of changes to tab
-                // strips; what it does not report (a new window, a tab's
-                // title, sound and loading) is read every second as well.
-                var arguments: [String: CefJSON] = ["idle": .number(1_000)]
-                if let version { arguments["since"] = .number(Double(version)) }
-                let next = try await services.call(
-                    Self.tabsModule, "(s, a, c) => s.read(a.since, c.signal, a.idle)", .object(arguments),
-                    as: TabsSnapshot.self, timeout: .seconds(40), isIdempotent: true)
-                version = next.version
-                tabsSnapshot = next
-                lastError = nil
-                let groupsBefore = Set(groupsByID.keys)
-                rebuild()
-                // A new group: read its name and colour from the internal
-                // page at once.
-                if !Set(groupsByID.keys).subtracting(groupsBefore).isEmpty {
-                    Task { _ = try? await internalsServices.call(Self.internalsModule, "s => s.bump()", as: Int.self) }
-                }
-                await bindBrowsers()
-                let ready = readWaiters.filter { $0.version <= next.version }
-                readWaiters.removeAll { $0.version <= next.version }
-                ready.forEach { $0.continuation.resume() }
-                if allWindows.isEmpty, pendingWindows.isEmpty, openings == 0, readWaiters.isEmpty { break }
-                // Several events come together (a load sends a few): read
-                // once they have.
-                if readWaiters.isEmpty { try? await Task.sleep(for: .milliseconds(16)) }
-            } catch {
-                guard isLive else { break }
-                lastError = "chrome.tabs: \(error)"
-                version = nil
-                try? await Task.sleep(for: .seconds(1))
-            }
+    private func readOnce(withInternals: Bool) async {
+        do {
+            let next = try await services.call(
+                Self.tabsModule, "s => s.read()", as: TabsSnapshot.self, timeout: .seconds(15), isIdempotent: true,
+                keepsHostFor: Self.hostIdle)
+            tabsSnapshot = next
+            lastError = nil
+        } catch {
+            guard isLive else { return }
+            lastError = "chrome.tabs: \(error)"
+            return
         }
+        let groupsBefore = Set(groupsByID.keys)
+        rebuild()
+        // A new group: read its name and colour from the internal page too.
+        if withInternals || !Set(groupsByID.keys).subtracting(groupsBefore).isEmpty {
+            await readInternals()
+            rebuild()
+        }
+        await bindBrowsers()
     }
 
-    private func followInternals() async {
-        var version: Int?
-        // The internal page is not built for incognito profiles; the
-        // default profile's lists every window.
-        let services = internalsServices
-        while isLive {
-            do {
-                // Chromium does not tell the internal page when a group is
-                // renamed, recoloured or collapsed (an extension's
-                // chrome.tabGroups.update), so while there are groups it
-                // reads every two seconds as well.
-                var arguments: [String: CefJSON] = ["idle": .number(groupsByID.isEmpty ? 30_000 : 2_000)]
-                if let version { arguments["since"] = .number(Double(version)) }
-                let next = try await services.call(
-                    Self.internalsModule, "(s, a, c) => s.read(a.since, c.signal, a.idle)", .object(arguments),
-                    as: InternalsSnapshot.self, timeout: .seconds(40), isIdempotent: true)
-                version = next.version
-                internalsSnapshot = next
-                rebuild()
-                // A change to a tab strip: read chrome.tabs at once.
-                _ = try? await self.services.call(Self.tabsModule, "s => s.bump()", as: Int.self)
-            } catch {
-                guard isLive else { break }
-                lastError = "tab-strip-internals: \(error)"
-                version = nil
-                try? await Task.sleep(for: .seconds(1))
-            }
+    private func readInternals() async {
+        do {
+            internalsSnapshot = try await internalsServices.call(
+                Self.internalsModule, "s => s.read()", as: InternalsSnapshot.self, timeout: .seconds(15),
+                isIdempotent: true, keepsHostFor: Self.hostIdle)
+            updateRecentlyClosed()
+        } catch {
+            guard isLive else { return }
+            lastError = "tab-strip-internals: \(error)"
         }
     }
 
@@ -258,35 +315,207 @@ public final class CefTabStrip {
     /// Asks Chromium's tabs to be read again, and returns when the strip
     /// shows a read made after this call: everything Chromium had done
     /// before it is then in the strip.
-    func nextRead() async {
+    func nextRead(internals: Bool = false) async {
         startFollowing()
-        // Chromium reports some changes to groups (their names, colours
-        // and collapsing) to the internal page only when it reads again.
-        _ = try? await internalsServices.call(Self.internalsModule, "s => s.bump()", as: Int.self)
-        guard following != nil,
-              let version = try? await services.call(Self.tabsModule, "s => s.bump()", as: Int.self),
-              following != nil
-        else { return }
-        if let tabsSnapshot, tabsSnapshot.version >= version { return }
-        await withCheckedContinuation { readWaiters.append((version, $0)) }
+        guard isLive else { return }
+        setNeedsRead(internals: internals)
+        let request = readsRequested
+        await withCheckedContinuation { readWaiters.append((request, $0)) }
     }
 
     /// Reads again soon: after a change Chromium may not report, such as a
     /// tab muted through CEF.
     func scheduleRead() {
-        guard !readSoon else { return }
-        readSoon = true
-        Task {
-            try? await Task.sleep(for: .milliseconds(50))
-            readSoon = false
-            await nextRead()
+        setNeedsRead()
+    }
+
+    /// Reads Chromium's tabs once more, with groups' names and colours and
+    /// what Chromium can reopen, and returns when the strip shows them.
+    public func refresh() async {
+        await nextRead(internals: true)
+    }
+
+    /// Reads what Chromium can reopen into ``recentlyClosed``, and returns
+    /// it. Call it as a menu of recently closed tabs opens.
+    @discardableResult
+    public func refreshRecentlyClosed() async -> [ClosedItem] {
+        startFollowing()
+        await readInternals()
+        return recentlyClosed
+    }
+
+    // MARK: Events
+
+    /// Follows the runtime's browsers: a new Chrome-style browser of the
+    /// profile is a new tab (or window) to read; a closed one, a tab gone.
+    private func followBrowsers() {
+        let browsers = withObservationTracking {
+            CefRuntime.shared.browsers
+        } onChange: { [weak self] in
+            Task { @MainActor in self?.followBrowsers() }
+        }
+        let current = Set(browsers.map(ObjectIdentifier.init))
+        let added = browsers.filter { !browserIDs.contains(ObjectIdentifier($0)) }
+        let removed = browserIDs.subtracting(current)
+        browserIDs = current
+        let candidates = added.filter(isCandidate)
+        if !candidates.isEmpty { setNeedsRead() }
+        candidates.forEach(matchWhenCommitted)
+        var closedTabs = false
+        for id in removed {
+            if let tabID = tabIDsByBrowser[id], let tab = tabsByID[tabID] {
+                removeLocally(tab)
+                closedTabs = true
+            }
+        }
+        // Chromium can reopen what closed: read its list once the closing
+        // is over.
+        if closedTabs, !isReadingClosedSoon {
+            isReadingClosedSoon = true
+            Task { [weak self] in
+                try? await Task.sleep(for: .milliseconds(300))
+                self?.isReadingClosedSoon = false
+                await self?.readInternals()
+            }
         }
     }
 
-    /// Reads Chromium's tabs once more, and returns when the strip shows
-    /// them.
-    public func refresh() async {
-        await nextRead()
+    @ObservationIgnored private var isReadingClosedSoon = false
+
+    /// Matches a new browser with its tab once its page has an address
+    /// (and so can be told from the window's other browsers), if it is not
+    /// matched by then.
+    private func matchWhenCommitted(_ browser: CefBrowser) {
+        guard browser.state != .closed, tabIDsByBrowser[ObjectIdentifier(browser)] == nil else { return }
+        let url = withObservationTracking {
+            browser.url
+        } onChange: { [weak self, weak browser] in
+            Task { @MainActor in
+                guard let self, let browser else { return }
+                if self.tabIDsByBrowser[ObjectIdentifier(browser)] == nil { await self.bindBrowsers() }
+                self.matchWhenCommitted(browser)
+            }
+        }
+        _ = url
+    }
+
+    /// Whether `browser` can be one of the profile's Chromium tabs.
+    private func isCandidate(_ browser: CefBrowser) -> Bool {
+        browser.isChromeStyle && CefWindow.hosting(browser) == nil
+            && (browser.configuration.profile ?? .default) === profile
+    }
+
+    /// A tab's browser closed: the tab is gone from Chromium's strip. It
+    /// leaves the mirror at once; a later read confirms it.
+    private func removeLocally(_ tab: CefTab) {
+        guard let window = tab.window else { return }
+        let remaining = window.tabs.filter { $0 !== tab }
+        if let browser = tab.browser { tabIDsByBrowser[ObjectIdentifier(browser)] = nil }
+        tabsByID[tab.id] = nil
+        knownBindings[tab.id] = nil
+        tab.browser = nil
+        tab.window = nil
+        if let group = tab.group {
+            group.tabs.removeAll { $0 === tab }
+            if group.tabs.isEmpty {
+                groupsByID[group.id] = nil
+                group.window = nil
+            }
+        }
+        tab.group = nil
+        for (index, other) in remaining.enumerated() where other.index != index { other.index = index }
+        if remaining.isEmpty {
+            allWindows.removeAll { $0 === window }
+            window.didClose()
+        } else {
+            window.update(tabs: remaining, groups: window.groups.filter { !$0.tabs.isEmpty },
+                          isFocused: window.isFocused, bounds: nil, state: nil)
+        }
+    }
+
+    /// The page `window` shows changed (Chromium switched tabs: a
+    /// shortcut, a closed tab's neighbour, a command): its tab becomes the
+    /// active one, at once when its browser is known.
+    func windowDidShowPage(_ page: NSView, in window: CefChromeWindow) {
+        // Chromium adds a new background tab's page shown for a moment
+        // before hiding it: look again once it has.
+        DispatchQueue.main.async { [weak self, weak page, weak window] in
+            MainActor.assumeIsolated {
+                guard let self, let page, let window, !page.isHiddenOrHasHiddenAncestor,
+                      let content = window.window?.contentView, ChromeWindowHost.page(in: content) === page
+                else { return }
+                self.activate(page, in: window)
+            }
+        }
+    }
+
+    private func activate(_ page: NSView, in window: CefChromeWindow) {
+        guard let shown = window.tabs.first(where: { tab in
+            guard let view = tab.browser?.nativeView else { return false }
+            return view === page || view.isDescendant(of: page)
+        }) else {
+            if !window.tabs.isEmpty { setNeedsRead() }
+            return
+        }
+        guard !shown.isActive else { return }
+        for tab in window.tabs where tab !== shown {
+            if tab.isActive { tab.isActive = false }
+            if tab.isSelected { tab.isSelected = false }
+        }
+        shown.isActive = true
+        shown.isSelected = true
+    }
+
+    /// Reads after Chrome commands that change tabs and windows, from any
+    /// of the runtime's Chromium windows: Chromium runs them after the
+    /// observer returns.
+    private static func installCommandObserver() {
+        guard !isObservingCommands else { return }
+        isObservingCommands = true
+        CefBrowser.addChromeCommandInterceptor { browser, command in
+            // IDC_* window and tab commands (chrome_command_ids.h, 34000–34999).
+            guard (34_000..<35_000).contains(command.rawValue) else { return false }
+            let profile = browser.configuration.profile ?? .default
+            if let strip = profile.chromiumStores.tabStrip {
+                DispatchQueue.main.async { MainActor.assumeIsolated { strip.setNeedsRead(internals: command == .restoreTab) } }
+            }
+            return false
+        }
+    }
+
+    private static var isObservingCommands = false
+
+    /// Listens to Chromium's tab events while ``observesChromiumEvents``
+    /// is on and the profile has windows; each wakes a read.
+    private func updateListening() {
+        let wanted = observesChromiumEvents && isLive && isObservingEvents
+        if !wanted {
+            listening?.cancel()
+            listening = nil
+            return
+        }
+        guard listening == nil else { return }
+        // What changed while the strip was not listening.
+        setNeedsRead()
+        listening = Task { [weak self] in
+            var version: Int?
+            while !Task.isCancelled, let self, self.isLive, self.observesChromiumEvents {
+                do {
+                    var arguments: [String: CefJSON] = [:]
+                    if let version { arguments["since"] = .number(Double(version)) }
+                    let next = try await self.services.call(
+                        Self.tabsModule, "(s, a, c) => s.wait(a.since, c.signal)", .object(arguments),
+                        as: Int.self, timeout: .seconds(3600), isIdempotent: true, keepsHostFor: Self.hostIdle)
+                    if version != nil, next != version { self.setNeedsRead() }
+                    version = next
+                } catch {
+                    guard !Task.isCancelled, self.isLive else { break }
+                    self.lastError = "chrome.tabs events: \(error)"
+                    version = nil
+                    try? await Task.sleep(for: .seconds(1))
+                }
+            }
+        }
     }
 
     // MARK: Building the model
@@ -382,9 +611,13 @@ public final class CefTabStrip {
         let closedWindows = allWindows.filter { window in !nextWindows.contains { $0 === window } }
         if nextWindows.map(ObjectIdentifier.init) != allWindows.map(ObjectIdentifier.init) { allWindows = nextWindows }
         for window in closedWindows { window.didClose() }
+    }
 
+    private func updateRecentlyClosed() {
         let closed = (internalsSnapshot?.closed ?? []).map { item in
-            ClosedItem(kind: item.itemKind, title: item.title, url: URL(string: item.url))
+            ClosedItem(id: item.id, kind: item.itemKind, title: item.title, url: URL(string: item.url),
+                       tabCount: max(item.tabs, item.itemKind == .tab ? 1 : 0),
+                       closedAt: item.time > 0 ? Date(timeIntervalSince1970: item.time / 1_000_000 - 11_644_473_600) : nil)
         }
         if closed != recentlyClosed { recentlyClosed = closed }
     }
@@ -399,9 +632,8 @@ public final class CefTabStrip {
         if tab.isActive != listed.active { tab.isActive = listed.active }
         if tab.isSelected != listed.highlighted { tab.isSelected = listed.highlighted }
         if tab.isPinned != listed.pinned { tab.isPinned = listed.pinned }
-        if tab.isDiscarded != listed.discarded { tab.isDiscarded = listed.discarded }
-        if tab.isAudible != listed.audible { tab.isAudible = listed.audible }
-        if tab.isMuted != listed.muted { tab.isMuted = listed.muted }
+        if tab.reportedDiscarded != listed.discarded { tab.reportedDiscarded = listed.discarded }
+        if tab.reportedAudible != listed.audible { tab.reportedAudible = listed.audible }
         if tab.reportedLoading != listed.loading { tab.reportedLoading = listed.loading }
         let opener = listed.opener >= 0 ? CefTab.ID(rawValue: listed.opener) : nil
         if tab.openerID != opener { tab.openerID = opener }
@@ -411,9 +643,9 @@ public final class CefTabStrip {
         if let internalWindow, listed.index < internalWindow.tabs.count, internalWindow.tabs[listed.index].url == listed.url {
             alerts = internalWindow.tabs[listed.index].alerts.map(CefTab.Alert.init(name:))
         }
-        if listed.muted, !alerts.contains(.muted) { alerts.append(.muted) }
-        if listed.audible, !listed.muted, !alerts.contains(.playingAudio) { alerts.insert(.playingAudio, at: 0) }
-        if tab.alerts != alerts { tab.alerts = alerts }
+        // Sound comes from chrome.tabs, and muting from CEF (CefTab.alerts).
+        alerts.removeAll { $0 == .playingAudio || $0 == .muted }
+        if tab.otherAlerts != alerts { tab.otherAlerts = alerts }
     }
 
     /// Browsers the app made in a window of their own on their way to
@@ -443,11 +675,8 @@ public final class CefTabStrip {
     /// Browsers of this profile that can be one of its Chromium tabs and
     /// are not yet matched: live, Chrome style, not in a ``CefWindow``.
     private var unboundBrowsers: [CefBrowser] {
-        let hosted = Set(CefWindow.all.map { ObjectIdentifier($0.browser) })
-        return CefRuntime.shared.browsers.filter { browser in
-            browser.state == .live && browser.isChromeStyle && !hosted.contains(ObjectIdentifier(browser))
-                && tabIDsByBrowser[ObjectIdentifier(browser)] == nil
-                && (browser.configuration.profile ?? .default) === profile
+        CefRuntime.shared.browsers.filter { browser in
+            browser.state == .live && isCandidate(browser) && tabIDsByBrowser[ObjectIdentifier(browser)] == nil
         }
     }
 
@@ -546,7 +775,7 @@ public final class CefTabStrip {
         let read: () async -> [Int: Bool]? = { [services] in
             guard let pairs = try? await services.call(
                 Self.tabsModule, "async (s, a) => Promise.all(a.ids.map(async id => [id, (await s.t.get(id)).mutedInfo?.muted ? 1 : 0]))",
-                .object(["ids": .array(ids)]), as: [[Int]].self)
+                .object(["ids": .array(ids)]), as: [[Int]].self, keepsHostFor: Self.hostIdle)
             else { return nil }
             // Booleans arrive as numbers in an array of integers.
             return Dictionary(pairs.compactMap { $0.count == 2 ? ($0[0], $0[1] != 0) : nil }, uniquingKeysWith: { a, _ in a })
@@ -642,7 +871,7 @@ public final class CefTabStrip {
     /// `chrome.windows.create` and the others after it.
     @discardableResult
     public func moveToNewWindow(_ tabs: [CefTab]) async throws -> CefChromeWindow {
-        guard let first = tabs.first else { throw Error.tabClosed }
+        guard !tabs.isEmpty else { throw Error.tabClosed }
         let id = try await run(
             """
             async (s, a) => {
@@ -651,7 +880,6 @@ public final class CefTabStrip {
               return w.id;
             }
             """, ["ids": ids(tabs)], as: Int.self)
-        _ = first
         guard let window = window(CefChromeWindow.ID(rawValue: id)) else { throw Error.chromium("Chromium did not open the window.") }
         return window
     }
@@ -676,11 +904,10 @@ public final class CefTabStrip {
         browser.execute(.restoreTab)
     }
 
-
     func editGroup(_ group: CefTabGroup, title: String?, color: CefTabGroup.Color?) async throws {
         guard let window = group.window else { throw Error.tabClosed }
         try await ChromeTabStripAccessibility.edit(group, in: window, title: title, color: color)
-        await nextRead()
+        await nextRead(internals: true)
     }
 
     /// Opens `url` in a new tab Chromium makes, in `window` at `index` (by
@@ -713,17 +940,6 @@ public final class CefTabStrip {
         return CefTab.ID(rawValue: id)
     }
 
-    /// The windows Chromium lists now, read directly.
-    func listedWindowIDs() async throws -> [(id: CefChromeWindow.ID, tabs: [String])] {
-        let listed = try await services.call(
-            Self.tabsModule, "async s => (await s.w.getAll({populate: true})).filter(w => w.type == 'normal').map(w => [String(w.id), ...w.tabs.map(t => t.url || t.pendingUrl || '')])",
-            as: [[String]].self, isIdempotent: true)
-        return listed.compactMap { row in
-            guard let first = row.first, let id = Int(first) else { return nil }
-            return (CefChromeWindow.ID(rawValue: id), Array(row.dropFirst()))
-        }
-    }
-
     /// Closes `window`'s tabs through CEF.
     func close(_ window: CefChromeWindow) {
         close(window.tabs)
@@ -753,7 +969,7 @@ public final class CefTabStrip {
         startFollowing()
         let result: Result
         do {
-            result = try await services.call(Self.tabsModule, function, arguments, as: type)
+            result = try await services.call(Self.tabsModule, function, arguments, as: type, keepsHostFor: Self.hostIdle)
         } catch let error as CefError {
             throw Error.chromium("\(error)")
         }
@@ -764,39 +980,46 @@ public final class CefTabStrip {
     // MARK: Plumbing
 
     /// `chrome.tabs` and `chrome.windows` on the bookmarks host: their
-    /// state, and a version counted up at each event, so a read can wait
-    /// for the next one.
+    /// state, and, for ``observesChromiumEvents``, a version counted up at
+    /// each of their events.
     static let tabsModule = CefServiceHost.Module(
         name: "tabs", hosts: [.bookmarks],
         setup: """
             async emit => {
               const t = chrome.tabs, w = chrome.windows;
               if (!t || !w) throw new Error('chrome.tabs is not available on this page');
-              // No chrome.tabs or chrome.windows event listeners: with one
-              // on this WebUI page, Chromium (CEF 156) crashes later, when an
-              // extension is disabled or an incognito window opens. Reads
-              // are woken by the internal page's updates instead (bump).
-              let version = 0, waiters = [];
-              const bump = () => { version++; for (const f of waiters.splice(0)) f(); return version; };
               const tab = x => ({id: x.id, index: x.index, url: x.url || x.pendingUrl || '', title: x.title || '',
                 active: !!x.active, highlighted: !!x.highlighted, pinned: !!x.pinned, group: x.groupId ?? -1,
                 audible: !!x.audible, muted: !!(x.mutedInfo && x.mutedInfo.muted), discarded: !!x.discarded,
                 loading: x.status == 'loading', favicon: x.favIconUrl || '', opener: x.openerTabId ?? -1});
-              const read = async (since, signal, idle) => {
-                if (since != null && since == version) {
-                  await new Promise(resolve => {
-                    waiters.push(resolve);
-                    signal.addEventListener('abort', resolve);
-                    setTimeout(resolve, idle ?? 30000);
-                  });
-                }
-                const seen = version;
+              const read = async () => {
                 const windows = (await w.getAll({populate: true})).filter(x => x.type == 'normal').map(x => ({
                   id: x.id, focused: !!x.focused, incognito: !!x.incognito, state: x.state || '',
                   bounds: [x.left ?? 0, x.top ?? 0, x.width ?? 0, x.height ?? 0], tabs: (x.tabs || []).map(tab)}));
-                return {version: seen, windows};
+                return {windows};
               };
-              return {t, w, read, bump};
+              // Events, added on the first wait and kept with the page. Not
+              // chrome.windows.onFocusChanged: with a listener to it on this
+              // WebUI page, Chromium (CEF 156) crashes when an incognito
+              // window opens. A tab's title, icon and loading come from CEF.
+              let version = 0, waiters = [], listening = false;
+              const bump = () => { version++; for (const f of waiters.splice(0)) f(); };
+              const changed = (id, info) => { if (Object.keys(info).some(k => !['title', 'favIconUrl', 'status'].includes(k))) bump(); };
+              const listen = () => {
+                if (listening) return;
+                listening = true;
+                t.onUpdated.addListener(changed);
+                for (const e of [t.onCreated, t.onMoved, t.onActivated, t.onHighlighted, t.onDetached, t.onAttached,
+                                 t.onRemoved, t.onReplaced, w.onCreated, w.onRemoved]) e.addListener(bump);
+              };
+              const wait = async (since, signal) => {
+                listen();
+                if (since != null && since == version) {
+                  await new Promise(resolve => { waiters.push(resolve); signal.addEventListener('abort', resolve); });
+                }
+                return version;
+              };
+              return {t, w, read, wait};
             }
             """)
 
@@ -821,9 +1044,6 @@ public final class CefTabStrip {
               const router = new m.PageCallbackRouter();
               m.PageHandlerFactory.getRemote().createPageHandler(
                 router.$.bindNewPipeAndPassRemote(), handler.$.bindNewPipeAndPassReceiver());
-              let version = 0, waiters = [];
-              const bump = () => { version++; for (const w of waiters.splice(0)) w(); return version; };
-              router.onTabStripUpdated.addListener(bump);
               const text = s => typeof s == 'string' ? s : (s && s.data ? String.fromCharCode(...s.data) : '');
               const url = u => typeof u == 'string' ? u : (u && u.url) || '';
               const flatten = (node, out, group) => {
@@ -840,35 +1060,19 @@ public final class CefTabStrip {
                 }
                 for (const child of node.children || []) flatten(child, out, inner);
               };
+              // A TabRestoreService entry: {tab: …}, {window: {tabs: […]}} or
+              // {group: {tabs: […], visualData}}, each with an id and a time.
               const closedItem = entry => {
-                const found = {kind: 'other', title: '', url: ''};
-                const visit = (value, key, depth) => {
-                  if (depth > 6 || value == null) return;
-                  if (typeof value == 'string') {
-                    if (key == 'title' && !found.title) found.title = value;
-                    if (key == 'url' && !found.url) found.url = value;
-                    return;
-                  }
-                  if (typeof value != 'object') return;
-                  if (value.data && Array.isArray(value.data) && key == 'title') { if (!found.title) found.title = text(value); return; }
-                  if (key == 'url' && typeof value.url == 'string') { if (!found.url) found.url = value.url; return; }
-                  for (const [k, v] of Object.entries(value)) {
-                    if (depth == 0 && v != null && ['tab', 'window', 'group'].includes(k)) found.kind = k;
-                    visit(v, k, depth + 1);
-                  }
-                };
-                visit(entry, '', 0);
-                return found;
+                const kind = ['tab', 'window', 'group'].find(k => entry[k] != null) || 'other';
+                const v = entry[kind] || {};
+                const tabs = Array.isArray(v.tabs) ? v.tabs.map(x => x.tab || x) : [];
+                const first = kind == 'tab' ? v : (tabs[v.selectedTabIndex ?? 0] || tabs[0] || {});
+                const groupTitle = kind == 'group' ? text((v.visualData || v.groupVisualData || {}).title) : '';
+                const time = (v.restoreEntry && v.restoreEntry.timestamp && Number(v.restoreEntry.timestamp.internalValue)) || 0;
+                return {id: Number((v.id && v.id.nodeId) ?? -1), kind, title: groupTitle || text(first.title), url: url(first.url),
+                        tabs: kind == 'tab' ? 1 : tabs.length, time};
               };
-              const read = async (since, signal, idle) => {
-                if (since != null && since == version) {
-                  await new Promise(resolve => {
-                    waiters.push(resolve);
-                    signal.addEventListener('abort', resolve);
-                    setTimeout(resolve, idle ?? 30000);
-                  });
-                }
-                const seen = version;
+              const read = async () => {
                 const {data} = await handler.getTabStripData();
                 const windows = data.tabstripTree.windows.map(w => {
                   const out = {id: w.id.nodeId, tabs: [], groups: []};
@@ -876,9 +1080,9 @@ public final class CefTabStrip {
                   return out;
                 });
                 const closed = ((data.tabRestore && data.tabRestore.entries) || []).map(closedItem);
-                return {version: seen, windows, closed};
+                return {windows, closed};
               };
-              return {read, bump};
+              return {read};
             }
             """)
 }
@@ -911,7 +1115,6 @@ struct TabsSnapshot: Decodable, Sendable {
         var tabs: [Tab]
     }
 
-    var version: Int
     var windows: [Window]
 }
 
@@ -937,9 +1140,12 @@ struct InternalsSnapshot: Decodable, Sendable {
     }
 
     struct Closed: Decodable, Sendable {
+        var id: Int
         var kind: String
         var title: String
         var url: String
+        var tabs: Int
+        var time: Double
 
         var itemKind: CefTabStrip.ClosedItem.Kind {
             switch kind {
@@ -951,7 +1157,6 @@ struct InternalsSnapshot: Decodable, Sendable {
         }
     }
 
-    var version: Int
     var windows: [Window]
     var closed: [Closed]
 }

@@ -74,6 +74,8 @@ final class ChromeWindowHost {
         guard let page = Self.page(in: contentView) else { return }
         if observedPage !== page {
             observedPage = page
+            // Chromium shows another tab's page: that tab is active now.
+            window.strip.windowDidShowPage(page, in: window)
             page.postsFrameChangedNotifications = true
             observers.append(NotificationCenter.default.addObserver(
                 forName: NSView.frameDidChangeNotification, object: page, queue: .main
