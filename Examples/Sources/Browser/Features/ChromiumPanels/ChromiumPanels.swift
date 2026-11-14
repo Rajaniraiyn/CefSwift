@@ -13,7 +13,10 @@ import SwiftUI
 struct ChromiumPanels: BrowserFeature {
     static let customPanelsKey = "customChromiumPanels"
 
-    func windowDidOpen(_ window: CefWindow) {
+    /// The browser's own panels, for windows that take over Chromium's
+    /// surfaces (`CefWindow`); the browser's `CefChromeWindow`s show
+    /// Chromium's bubbles until CefChromium follows surfaces there too.
+    static func presentCustomPanels(in window: CefWindow) {
         guard UserDefaults.standard.bool(forKey: Self.customPanelsKey) else { return }
         window.setCustomPresentation(for: .qrCode) { surface in QRCodePanel(surface: surface) }
         window.setCustomPresentation(for: .cast) { surface in CastPicker(surface: surface) }

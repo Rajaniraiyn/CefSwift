@@ -7,9 +7,10 @@ import SystemEngine
 /// `SystemBrowser`), which plays the FairPlay-protected video Chromium in
 /// CefSwift cannot: streaming services open there by themselves (Settings ›
 /// "Play streaming services with WebKit"), and View › Open in WebKit moves
-/// any page there. Each is a window of its own (`WebKitTab`) in the same
-/// native tab group as the Chromium tabs, marked with a WebKit badge, and
-/// its "Open in Chromium" button moves the page back.
+/// any page there. WebKit pages are not Chromium tabs, so each is a window
+/// of its own (`WebKitTab`) beside the browser's windows rather than an
+/// entry in their tab rail, marked with a WebKit badge, and its "Open in
+/// Chromium" button moves the page back.
 @MainActor
 final class WebKitTabs: BrowserFeature {
     static let automaticKey = "streamingInSystemEngine"
@@ -54,7 +55,7 @@ final class WebKitTabs: BrowserFeature {
             }
         }
         controller.showTab(tab.window, page: tab.browser)
-        if let source, !source.canGoBack { controller.window(of: source)?.close() }
+        if let source, !source.canGoBack { controller.tab(of: source)?.close() }
         Task {
             _ = try? await tab.browser.importCookies(from: profile, for: url)
             tab.browser.load(url)
@@ -67,7 +68,11 @@ final class WebKitTabs: BrowserFeature {
         // Chromium asks about the first navigation only once the browser
         // exists, after this returns.
         guard let controller else { return }
-        keptInChromium.insert(ObjectIdentifier(controller.openTab(url: url, isPrivate: isPrivate)))
+        Task {
+            if let browser = await controller.openTabNow(url: url, isPrivate: isPrivate)?.browser {
+                keptInChromium.insert(ObjectIdentifier(browser))
+            }
+        }
     }
 
     /// A link followed out of a streaming site in WebKit: back to Chromium.
@@ -79,10 +84,10 @@ final class WebKitTabs: BrowserFeature {
     /// WebKit tab instead.
     private func openCurrentTab() {
         guard let controller, let browser = controller.current, let url = browser.url,
-              url.scheme == "https" || url.scheme == "http", let window = controller.window(of: browser)
+              url.scheme == "https" || url.scheme == "http", let tab = controller.tab(of: browser)
         else { return }
         open(url, profile: browser.configuration.profile ?? .default)
-        window.close()
+        tab.close()
     }
 
     func commands(for controller: BrowserController) -> some Commands {

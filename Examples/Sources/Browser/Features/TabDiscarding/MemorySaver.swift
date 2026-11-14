@@ -67,7 +67,7 @@ private struct SleepingTabsButton: View {
     @Environment(BrowserController.self) private var controller
 
     var body: some View {
-        let sleeping = controller.tabs.map(\.browser).filter(\.isDiscarded)
+        let sleeping = controller.allTabs.compactMap(\.browser).filter(\.isDiscarded)
         if !sleeping.isEmpty {
             Menu {
                 Text("^[\(sleeping.count) tab](inflect: true) asleep to save memory")

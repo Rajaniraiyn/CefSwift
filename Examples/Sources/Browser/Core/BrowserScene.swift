@@ -21,7 +21,8 @@ extension CefRuntime.Configuration {
 }
 
 /// The browser's scenes: its Settings window, and its commands in the menu
-/// bar. Browser windows are opened by ``BrowserController``, not by a scene.
+/// bar. Browser windows are Chromium's, opened by ``BrowserController``,
+/// not by a scene.
 struct BrowserScene<Features: BrowserFeature>: Scene {
     let features: Features
     let controller: BrowserController
@@ -30,6 +31,7 @@ struct BrowserScene<Features: BrowserFeature>: Scene {
         Settings {
             Form {
                 NewTabPageSetting()
+                TabLayoutSetting()
                 features.settings
             }
             .formStyle(.grouped)
@@ -41,7 +43,9 @@ struct BrowserScene<Features: BrowserFeature>: Scene {
             // File › New Tab first: the features' File items follow it.
             CommandGroup(replacing: .newItem) {
                 Button("New Tab") { controller.openTab() }.keyboardShortcut("t")
+                Button("New Window") { Task { await controller.openWindow() } }.keyboardShortcut("n")
             }
+            TabCommands(controller: controller)
             features.commands(for: controller)
             // Groups placed before the same item stack up in reverse, so
             // declared last, these lead the View menu.
@@ -94,5 +98,52 @@ extension String {
     init(menuTitle title: String, url: URL?) {
         let text = title.isEmpty ? (url?.absoluteString ?? "Untitled") : title
         self = text.count > 60 ? text.prefix(59) + "…" : text
+    }
+}
+
+/// Commands on tabs: closing and reopening them, picking another, and where
+/// the rail is.
+struct TabCommands: Commands {
+    let controller: BrowserController
+
+    var body: some Commands {
+        CommandGroup(after: .newItem) {
+            Divider()
+            Button("Close Tab") {
+                if let tab = controller.keyWindow?.chrome.activeTab { tab.close() } else { NSApp.keyWindow?.performClose(nil) }
+            }
+            .keyboardShortcut("w")
+            Button("Reopen Closed Tab") { controller.keyWindow?.chrome.reopenClosedTab() }
+                .keyboardShortcut("t", modifiers: [.command, .shift])
+        }
+        CommandGroup(before: .windowList) {
+            Button("Show Next Tab") { controller.select(.next) }.keyboardShortcut(.tab, modifiers: .control)
+            Button("Show Previous Tab") { controller.select(.previous) }.keyboardShortcut(.tab, modifiers: [.control, .shift])
+            Button("Next Tab") { controller.select(.next) }.keyboardShortcut("]", modifiers: [.command, .shift])
+            Button("Previous Tab") { controller.select(.previous) }.keyboardShortcut("[", modifiers: [.command, .shift])
+            Button("Select Next Tab") { controller.select(.next) }.keyboardShortcut(.rightArrow, modifiers: [.command, .option])
+            Button("Select Previous Tab") { controller.select(.previous) }.keyboardShortcut(.leftArrow, modifiers: [.command, .option])
+            ForEach(1..<10) { number in
+                Button(number == 9 ? "Last Tab" : "Tab \(number)") { controller.select(.number(number)) }
+                    .keyboardShortcut(KeyEquivalent(Character("\(number)")), modifiers: .command)
+            }
+            Divider()
+        }
+        CommandGroup(after: .sidebar) {
+            Toggle("Tabs at the Side", isOn: Binding(
+                get: { controller.tabsAtTheSide }, set: { controller.tabsAtTheSide = $0 }))
+        }
+    }
+}
+
+/// Settings: whether tabs are across the top or down the side.
+private struct TabLayoutSetting: View {
+    @Environment(BrowserController.self) private var controller
+
+    var body: some View {
+        Picker("Tabs", selection: Binding(get: { controller.tabsAtTheSide }, set: { controller.tabsAtTheSide = $0 })) {
+            Text("Across the Top").tag(false)
+            Text("Down the Side").tag(true)
+        }
     }
 }

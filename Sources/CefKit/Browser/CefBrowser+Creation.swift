@@ -251,6 +251,7 @@ extension CefBrowser {
     func createInChromeUIWindow(frame: CGRect?) {
         guard profileAllowsCreation(for: nil, { $0.createInChromeUIWindow(frame: frame) }) else { return }
         var blueprint = makeBlueprint()
+        if !configuration.showsChromiumStatusBubble { blueprint.settings.chrome_status_bubble = STATE_DISABLED }
         isChromeStyle = true
         var windowInfo = cef_window_info_t()
         windowInfo.size = MemoryLayout<cef_window_info_t>.stride

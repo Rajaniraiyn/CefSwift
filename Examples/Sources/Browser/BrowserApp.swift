@@ -3,8 +3,9 @@ import CefSwiftUI
 import SwiftUI
 
 /// A tabbed web browser composed of features, each built from CefSwift's
-/// public API (`Features/`) on a small core (`Core/`): the tabs, their
-/// windows, and the points features plug into (``BrowserFeature``).
+/// public API (`Features/`) on a small core (`Core/`): Chromium's own
+/// windows and tabs with the browser's tab rail and toolbar over them, and
+/// the points features plug into (``BrowserFeature``).
 @main
 struct BrowserApp: CefSwiftApp {
     /// The browser's features, in the order their toolbar items, menu
@@ -30,7 +31,6 @@ struct BrowserApp: CefSwiftApp {
         WebKitTabs()
         Passkeys()
         TaskManager()
-        ChromeTabs()
         SingleInstance()
     }
 
@@ -52,13 +52,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller.start()
     }
 
-    /// Lets the native tab bar show its "+" button.
-    @objc func newWindowForTab(_ sender: Any?) {
-        controller.openTab()
-    }
-
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
-        if !hasVisibleWindows { controller.openTab() }
+        if !hasVisibleWindows { Task { await controller.openWindow() } }
         return true
     }
 }

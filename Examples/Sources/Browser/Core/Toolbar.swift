@@ -42,32 +42,3 @@ struct ToolbarIconButtonStyle: ButtonStyle {
         }
     }
 }
-
-/// A favicon, or a spinner while the page loads, shown in the tab itself.
-/// A tab that has been discarded to save memory shows its icon faded.
-struct TabIcon: View {
-    let browser: CefBrowser
-    @Environment(BrowserController.self) private var controller
-
-    var body: some View {
-        Group {
-            if browser.isLoading {
-                ProgressView().controlSize(.mini)
-            } else if let favicon = browser.favicon {
-                Image(nsImage: favicon).resizable().interpolation(.high).aspectRatio(contentMode: .fit)
-            } else {
-                Image(systemName: symbol)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .frame(width: 16, height: 16)
-        .opacity(browser.isDiscarded ? 0.4 : 1)
-        .help(browser.isDiscarded ? "Asleep to save memory" : "")
-    }
-
-    /// The symbol standing in for a page without a favicon.
-    private var symbol: String {
-        controller.isStartPage(browser.url) ? "square.grid.2x2" : BrowserPages.isInternal(browser.url) ? "gearshape" : "globe"
-    }
-}

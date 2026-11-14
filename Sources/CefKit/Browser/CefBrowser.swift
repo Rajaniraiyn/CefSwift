@@ -222,7 +222,7 @@ public final class CefBrowser: Identifiable {
     /// Whether the current renderer's ending reloads the page: the answer
     /// to its unresponsive question was ``CefUnresponsivePageDecision/reload``.
     @ObservationIgnored var reloadsWhenRendererEnds = false
-    @ObservationIgnored var isChromeStyle = false
+    @ObservationIgnored package internal(set) var isChromeStyle = false
     @ObservationIgnored var isEmbeddedView = false
     /// How far discarding has got; see `CefBrowser+Discarding.swift`.
     @ObservationIgnored var discardPhase = DiscardPhase.none

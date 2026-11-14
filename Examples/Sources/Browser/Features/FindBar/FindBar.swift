@@ -2,13 +2,13 @@ import CefChromium
 import CefSwiftUI
 import SwiftUI
 
-/// Find in page, Safari style: Edit › Find (⌘F) shows a bar under the
-/// toolbar in place of Chromium's (`CefWindow.setFindBar`), driven by the
-/// browser's `CefFindSession`.
+/// Find in page: Edit › Find (⌘F) shows Chromium's find bar.
+///
+/// `Bar`, a Safari-style bar driven by the browser's `CefFindSession`,
+/// replaces it in a `CefWindow` (`CefWindow.setFindBar`); Chromium's
+/// surfaces are not yet taken over in `CefChromeWindow`, so the browser's
+/// windows show Chromium's own.
 struct FindBar: BrowserFeature {
-    func windowDidOpen(_ window: CefWindow) {
-        window.setFindBar { session in Bar(session: session) }
-    }
 
     func commands(for controller: BrowserController) -> some Commands {
         CommandGroup(after: .textEditing) {

@@ -10,7 +10,10 @@ import CefSwiftUI
 /// - `-focusAddressBar YES` starts with the address field editing.
 /// - `-addressBarText swift` starts editing with that text typed, which
 ///   shows its suggestions.
-/// - `-private YES` opens the tabs as private tabs.
+/// - `-private YES` opens the tabs in a private window.
+/// - `-tabsAtTheSide YES` puts the tab rail down the side.
+/// - `-railScreenshots <directory>` saves PNGs of the browser's own views
+///   (the tab rail and toolbar) in a few states, then quits (`RailScreenshots`).
 /// - `-cacheDirectory <path>` keeps Chromium's data there
 ///   (`CefRuntime.Configuration.browser`).
 /// - `-benchmark YES` reports the first finished load and quits when
@@ -39,28 +42,34 @@ struct LaunchOptions {
         focusesAddressBar = defaults.bool(forKey: "focusAddressBar") || addressBarText != nil
     }
 
-    /// Opens the tabs the options ask for, or one on the new tab page, and
-    /// does what they ask in the last.
+    /// Opens a window with the tabs the options ask for, or one on the new
+    /// tab page, and does what they ask in the last.
     func openTabs(in controller: BrowserController) {
-        let urls = urls.isEmpty ? [nil] : urls.map(Optional.some)
         if benchmarks { Benchmark.reportFirstLoadAndQuitWhenInputCloses(controller) }
-        let browsers = urls.map { controller.openTab(url: $0, isPrivate: opensPrivateTabs) }
-        if let browser = browsers.last, script != nil || focusesAddressBar {
-            Task {
-                _ = try? await browser.waitUntilLoaded(timeout: .seconds(10))
-                if let script { _ = try? await browser.evaluateJavaScript(script, userGesture: true) }
-                if focusesAddressBar {
-                    // Focus goes to the key window, so wait for the app to be active.
-                    // Chromium focuses the page as the window becomes key.
-                    while !NSApp.isActive { try? await Task.sleep(for: .milliseconds(100)) }
-                    try? await Task.sleep(for: .milliseconds(500))
-                    controller.focusAddressBar()
-                    if let text = addressBarText {
-                        try? await Task.sleep(for: .milliseconds(200))
-                        // Typed into the field editor, as the keyboard would.
-                        let editor = NSApp.keyWindow?.firstResponder as? NSTextView
-                        editor?.insertText(text, replacementRange: editor?.selectedRange() ?? NSRange())
-                    }
+        Task {
+            guard let window = await controller.openWindow(url: urls.first, isPrivate: opensPrivateTabs) else { return }
+            var last = window.tabs.first?.browser
+            for url in urls.dropFirst() {
+                last = await controller.openTabNow(url: url, isPrivate: opensPrivateTabs)?.browser ?? last
+            }
+            if let directory = UserDefaults.standard.string(forKey: "railScreenshots") {
+                await RailScreenshots.capture(window, controller: controller, into: URL(fileURLWithPath: directory))
+                return
+            }
+            guard let browser = last, script != nil || focusesAddressBar else { return }
+            _ = try? await browser.waitUntilLoaded(timeout: .seconds(10))
+            if let script { _ = try? await browser.evaluateJavaScript(script, userGesture: true) }
+            if focusesAddressBar {
+                // Focus goes to the key window, so wait for the app to be active.
+                // Chromium focuses the page as the window becomes key.
+                while !NSApp.isActive { try? await Task.sleep(for: .milliseconds(100)) }
+                try? await Task.sleep(for: .milliseconds(500))
+                controller.focusAddressBar()
+                if let text = addressBarText {
+                    try? await Task.sleep(for: .milliseconds(200))
+                    // Typed into the field editor, as the keyboard would.
+                    let editor = NSApp.keyWindow?.firstResponder as? NSTextView
+                    editor?.insertText(text, replacementRange: editor?.selectedRange() ?? NSRange())
                 }
             }
         }
