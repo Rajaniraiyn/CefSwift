@@ -211,9 +211,9 @@ public final class CefTabGroup: Identifiable {
 
     /// Moves the group into a new window of its own.
     ///
-    /// Chromium regroups the tabs there; the group's name, colour and
-    /// collapsing are carried over through Chromium's own group header
-    /// (see ``setTitle(_:)``) where it can, which is not guaranteed.
+    /// Chromium regroups the tabs there; the group's name and colour are
+    /// carried over through Chromium's group editor (see ``setTitle(_:)``)
+    /// where it can, which is not guaranteed.
     @discardableResult
     public func moveToNewWindow() async throws -> CefChromeWindow {
         guard let strip else { throw CefTabStrip.Error.tabClosed }
@@ -222,14 +222,17 @@ public final class CefTabGroup: Identifiable {
 
     /// Collapses or expands the group.
     ///
-    /// Chromium gives no WebUI page or extension API outside extensions
-    /// (`chrome.tabGroups`) a way to change a group; CefChromium presses
-    /// the group's header in Chromium's own tab strip, beneath the app's
-    /// views, through its accessibility interface, as a click would.
+    /// Not available on CEF 156: Chromium grants `chrome.tabGroups` to
+    /// extensions only, no WebUI page or Chrome command collapses a group,
+    /// and Chromium's own group header, beneath the app's views, takes no
+    /// accessibility action, synthesized click or key press for it. Throws
+    /// ``CefTabStrip/Error/unsupported(_:)``; ``isCollapsed`` still follows
+    /// collapsing done by an extension. An app can collapse a group in its
+    /// own view meanwhile.
     public func setCollapsed(_ isCollapsed: Bool) async throws {
         guard isCollapsed != self.isCollapsed else { return }
-        guard let strip else { throw CefTabStrip.Error.tabClosed }
-        try await strip.toggleCollapsed(self)
+        throw CefTabStrip.Error.unsupported(
+            "Chromium offers no way to collapse a tab group outside chrome.tabGroups, which only extensions have.")
     }
 
     /// Renames the group, through Chromium's own group editor.

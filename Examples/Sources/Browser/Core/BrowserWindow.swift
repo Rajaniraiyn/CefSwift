@@ -36,6 +36,9 @@ struct WindowTopBar: View {
     static let toolbarHeight: CGFloat = 44
 
     var body: some View {
+        // Chromium decides how tall the area is (its tab strip and toolbar):
+        // the toolbar takes its bottom, the tabs the rest.
+        let height = max(window.topBarHeight, Self.toolbarHeight)
         VStack(spacing: 0) {
             if !controller.tabsAtTheSide {
                 HStack(spacing: 0) {
@@ -43,17 +46,18 @@ struct WindowTopBar: View {
                     TabRail(window: window, axis: .horizontal)
                         .padding(.trailing, 8)
                 }
-                .frame(maxHeight: .infinity)
-                .padding(.top, 4)
+                .padding(.top, 5)
+                .frame(height: height - Self.toolbarHeight)
                 Toolbar(window: window).frame(height: Self.toolbarHeight)
             } else {
                 HStack(spacing: 0) {
                     Color.clear.frame(width: Self.windowButtonsWidth)
                     Toolbar(window: window)
                 }
-                .frame(maxHeight: .infinity)
+                .frame(height: height)
             }
         }
+        .frame(maxHeight: .infinity, alignment: .top)
         .background { WindowDragArea() }
         .background(.bar)
         .overlay(alignment: .bottom) { Divider() }

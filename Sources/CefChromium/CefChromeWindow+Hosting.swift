@@ -59,6 +59,15 @@ final class ChromeWindowHost {
         contentView.subviews.last { !$0.isHidden && "\(type(of: $0))" == "WebContentsViewCocoa" }
     }
 
+    /// Runs `body` with the app's views out of the way of events, for
+    /// events CefChromium sends to Chrome's covered controls.
+    func withCoverSetAside(_ body: () -> Void) {
+        let wasHidden = cover.isHidden
+        cover.isHidden = true
+        body()
+        cover.isHidden = wasHidden
+    }
+
     /// Lays the app's views out again where Chrome's are now.
     func update() {
         guard let window, let nsWindow, let contentView = nsWindow.contentView, let frameView = contentView.superview else { return }
@@ -123,7 +132,8 @@ final class ChromeWindowHost {
     /// page's last link, F6, Chrome's focus shortcuts — moves to the app's
     /// top bar instead (or back to the page when the top bar takes none).
     private func firstResponderChanged() {
-        guard let window, !window.showsChromeUI, let nsWindow, let contentView = nsWindow.contentView,
+        guard !ChromeTabStripAccessibility.isWorkingStrip,
+              let window, !window.showsChromeUI, let nsWindow, let contentView = nsWindow.contentView,
               nsWindow.firstResponder === contentView
         else { return }
         // Which of Chromium's views has focus, through its accessibility.

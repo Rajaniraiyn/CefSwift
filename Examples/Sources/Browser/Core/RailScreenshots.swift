@@ -15,7 +15,8 @@ enum RailScreenshots {
     static func capture(_ window: CefChromeWindow, controller: BrowserController, into directory: URL) async {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         func page(_ title: String) -> URL {
-            URL(string: "data:text/html,<title>\(title.replacingOccurrences(of: " ", with: "%20"))</title><h1>\(title.replacingOccurrences(of: " ", with: "%20"))</h1>")!
+            // URL(string:) escapes the spaces and brackets itself.
+            URL(string: "data:text/html,<title>\(title)</title><h1>\(title)</h1>")!
         }
         func settle() async { try? await Task.sleep(for: .milliseconds(900)) }
         func shoot(_ name: String) async {
@@ -31,6 +32,7 @@ enum RailScreenshots {
             print("cefswift-rail-screenshot \(name)")
         }
 
+        NSApp.appearance = NSAppearance(named: .aqua)
         window.window?.setContentSize(NSSize(width: 1180, height: 720))
         for title in ["Swift.org", "Apple Developer", "The Swift Programming Language", "WWDC Videos", "Human Interface Guidelines"] {
             _ = await controller.openTabNow(url: page(title), inBackground: true)
@@ -47,7 +49,7 @@ enum RailScreenshots {
             let videos = try? await window.strip.group([tabs[4], tabs[5]])
             try? await videos?.setTitle("Videos")
             try? await videos?.setColor(.orange)
-            try? await videos?.setCollapsed(true)
+            if let videos { controller.toggleCollapsed(videos) }
             try? await window.tabs.last?.select()
             await shoot("3-groups-one-collapsed")
         }
@@ -59,7 +61,7 @@ enum RailScreenshots {
 
         NSApp.appearance = NSAppearance(named: .darkAqua)
         await shoot("5-dark")
-        NSApp.appearance = nil
+        NSApp.appearance = NSAppearance(named: .aqua)
 
         controller.tabsAtTheSide = true
         try? await Task.sleep(for: .seconds(1))

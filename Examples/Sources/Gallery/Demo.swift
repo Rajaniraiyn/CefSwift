@@ -63,6 +63,8 @@ enum Demos {
 
         ChromeWindowDemo(),
         ChromiumSurfacesDemo(),
+        TabStripDemo(),
+        AppShellDemo(),
 
         TaskManagerDemo(),
         DiscardDemo(),

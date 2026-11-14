@@ -69,6 +69,30 @@ final class BrowserController: CefBrowserDelegate {
 
     @ObservationIgnored let features: any BrowserFeature
 
+    /// Groups the rail shows collapsed although Chromium's are not:
+    /// Chromium collapses groups only for extensions
+    /// (`CefTabGroup.setCollapsed` throws), so the rail collapses them in
+    /// its own view.
+    private(set) var groupsCollapsedHere: Set<CefTabGroup.ID> = []
+
+    /// Whether the rail shows `group` collapsed.
+    func isCollapsed(_ group: CefTabGroup) -> Bool {
+        group.isCollapsed || groupsCollapsedHere.contains(group.id)
+    }
+
+    /// Collapses or expands `group`: Chromium's, if it can, otherwise in
+    /// the rail.
+    func toggleCollapsed(_ group: CefTabGroup) {
+        let collapse = !isCollapsed(group)
+        Task {
+            do {
+                try await group.setCollapsed(collapse)
+            } catch CefTabStrip.Error.unsupported {
+                if collapse { groupsCollapsedHere.insert(group.id) } else { groupsCollapsedHere.remove(group.id) }
+            } catch {}
+        }
+    }
+
     /// The tab being dragged within the app, if one is.
     @ObservationIgnored var draggedTab: CefTab.Transfer?
 
@@ -301,7 +325,7 @@ final class BrowserController: CefBrowserDelegate {
     /// Selects the tab `selection` picks in the frontmost window.
     func select(_ selection: TabRailLogic.Selection) {
         guard let window = keyWindow?.chrome else { return }
-        let visible = window.tabs.filter { !($0.group?.isCollapsed ?? false) || $0.isActive }
+        let visible = window.tabs.filter { !($0.group.map(isCollapsed) ?? false) || $0.isActive }
         guard let index = TabRailLogic.index(for: selection, active: visible.firstIndex { $0.isActive }, count: visible.count)
         else { return }
         Task { try? await visible[index].select() }

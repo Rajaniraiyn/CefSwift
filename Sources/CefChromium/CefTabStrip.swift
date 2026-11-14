@@ -643,12 +643,11 @@ public final class CefTabStrip {
     /// Moves `group` into a new window, grouped again there.
     func moveGroupToNewWindow(_ group: CefTabGroup) async throws -> CefChromeWindow {
         let tabs = group.tabs
-        let title = group.title, color = group.color, isCollapsed = group.isCollapsed
+        let title = group.title, color = group.color
         let window = try await moveToNewWindow(tabs)
         let regrouped = try await self.group(tabs.compactMap { self.tab($0.id) })
         if let regrouped {
             if !title.isEmpty || color != .grey { try? await editGroup(regrouped, title: title, color: color) }
-            if isCollapsed { try? await regrouped.setCollapsed(true) }
         }
         return window
     }
@@ -661,11 +660,6 @@ public final class CefTabStrip {
         browser.execute(.restoreTab)
     }
 
-    func toggleCollapsed(_ group: CefTabGroup) async throws {
-        guard let window = group.window else { throw Error.tabClosed }
-        try await ChromeTabStripAccessibility.toggleCollapsed(group, in: window)
-        await nextRead()
-    }
 
     func editGroup(_ group: CefTabGroup, title: String?, color: CefTabGroup.Color?) async throws {
         guard let window = group.window else { throw Error.tabClosed }

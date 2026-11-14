@@ -6,29 +6,22 @@ import CefKit
 /// only), and neither `tab_strip_internals.mojom` nor any Chrome command
 /// renames, recolours or collapses a group. Chrome's tab strip is still
 /// there beneath the app's views, so CefChromium works its group header
-/// through accessibility, as assistive software would: pressing it
-/// collapses or expands the group; its menu action opens Chrome's group
-/// editor bubble, which CefChromium keeps transparent while it types the
-/// name (through the bubble's text input, as a keyboard would) and presses
-/// a colour.
+/// through accessibility, as assistive software would: its menu action
+/// opens Chrome's group editor bubble, which CefChromium keeps transparent
+/// while it types the name (through the bubble's text input, as a keyboard
+/// would) and presses a colour.
+///
+/// Collapsing has no such route: the header offers no accessibility press
+/// or expanded state, the editor has no collapse item, and a click or a
+/// Space key sent to Chromium's view at the header (measured with the
+/// window key, CEF 156) does not collapse it.
 @MainActor
 enum ChromeTabStripAccessibility {
     enum MouseButton { case left, right }
 
-    /// Collapses or expands `group`, as a click on its header does: the
-    /// header takes no accessibility press, so the click is sent to
-    /// Chromium's content view at the header, beneath the app's views.
-    static func toggleCollapsed(_ group: CefTabGroup, in window: CefChromeWindow) async throws {
-        let header = try header(of: group, in: window)
-        let wasCollapsed = group.isCollapsed
-        try click(header, in: window, button: .left)
-        for _ in 0..<15 {
-            await window.strip.nextRead()
-            if group.isCollapsed != wasCollapsed { return }
-            try? await Task.sleep(for: .milliseconds(20))
-        }
-        throw CefTabStrip.Error.unsupported("Chromium's group header did not take the click.")
-    }
+    /// Whether CefChromium is working Chromium's covered tab strip, which
+    /// may take keyboard focus meanwhile.
+    static var isWorkingStrip = false
 
     /// Renames or recolours `group` in Chrome's group editor, opened as a
     /// right click on the header opens it, and kept transparent meanwhile.
@@ -104,21 +97,28 @@ enum ChromeTabStripAccessibility {
     /// Sends a click at `element`'s middle to the window's content view,
     /// Chromium's, as AppKit would send one that reached it.
     private static func click(_ element: AnyObject, in window: CefChromeWindow, button: MouseButton) throws {
-        guard let nsWindow = window.window, let content = nsWindow.contentView,
-              let frame = element.accessibilityFrame?() as CGRect?, frame.width > 0
-        else { throw CefTabStrip.Error.unsupported("Chromium's group header has no place in the window.") }
+        guard let frame = element.accessibilityFrame?() as CGRect?, frame.width > 0 else {
+            throw CefTabStrip.Error.unsupported("Chromium's group header has no place in the window.")
+        }
+        try click(at: frame, in: window, button: button)
+    }
+
+    /// Sends a click at the middle of `frame`, in screen coordinates.
+    private static func click(at frame: CGRect, in window: CefChromeWindow, button: MouseButton) throws {
+        guard let nsWindow = window.window, let content = nsWindow.contentView else { throw CefTabStrip.Error.tabClosed }
         let point = nsWindow.convertPoint(fromScreen: CGPoint(x: frame.midX, y: frame.midY))
         let (down, up): (NSEvent.EventType, NSEvent.EventType) = button == .left ? (.leftMouseDown, .leftMouseUp) : (.rightMouseDown, .rightMouseUp)
-        for type in [down, up] {
-            guard let event = NSEvent.mouseEvent(
-                with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
-                windowNumber: nsWindow.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: type == down ? 1 : 0)
-            else { continue }
-            switch type {
-            case .leftMouseDown: content.mouseDown(with: event)
-            case .leftMouseUp: content.mouseUp(with: event)
-            case .rightMouseDown: content.rightMouseDown(with: event)
-            default: content.rightMouseUp(with: event)
+        _ = content
+        isWorkingStrip = true
+        defer { isWorkingStrip = false }
+        window.host?.withCoverSetAside {
+            for (offset, type) in [NSEvent.EventType.mouseMoved, down, up].enumerated() {
+                guard let event = NSEvent.mouseEvent(
+                    with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                    windowNumber: nsWindow.windowNumber, context: nil, eventNumber: offset, clickCount: type == .mouseMoved ? 0 : 1,
+                    pressure: type == down ? 1 : 0)
+                else { continue }
+                nsWindow.sendEvent(event)
             }
         }
     }

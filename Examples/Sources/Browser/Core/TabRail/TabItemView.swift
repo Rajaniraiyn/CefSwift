@@ -37,9 +37,14 @@ struct TabItemView: View {
         .background {
             shape.fill(.background.opacity(tab.isActive ? 1 : 0))
                 .shadow(color: .black.opacity(tab.isActive ? 0.12 : 0), radius: 1, y: 0.5)
-            shape.fill(.primary.opacity(!tab.isActive && (isHovered || tab.isSelected) ? 0.06 : 0))
+            shape.fill(.primary.opacity(!tab.isActive && (isHovered || tab.isSelected) ? 0.06 : style == .pinnedTile ? 0.04 : 0))
         }
         .overlay(alignment: .bottom) { groupBar }
+        .overlay(alignment: .leading) {
+            if let group = tab.group, style == .row {
+                Capsule().fill(group.color.swiftUIColor).frame(width: 3).padding(.vertical, 7).offset(x: -5)
+            }
+        }
         .contentShape(shape)
         .opacity(tab.isDiscarded ? 0.6 : 1)
         .onHover { isHovered = $0 }
@@ -95,14 +100,12 @@ struct TabItemView: View {
     }
 
     @ViewBuilder private var groupBar: some View {
-        if let group = tab.group, style != .pinned {
+        if let group = tab.group, style == .tab {
             Capsule()
                 .fill(group.color.swiftUIColor)
                 .frame(height: 2)
-                .padding(.horizontal, style == .row ? 0 : 4)
-                .frame(maxWidth: style == .row ? 3 : .infinity, maxHeight: style == .row ? .infinity : 2,
-                       alignment: style == .row ? .leading : .bottom)
-                .offset(y: style == .row ? 0 : 1)
+                .padding(.horizontal, 8)
+                .offset(y: 1)
         }
     }
 
@@ -150,6 +153,7 @@ struct GroupHeaderView: View {
     let group: CefTabGroup
     let axis: TabRail.Axis
 
+    @Environment(BrowserController.self) private var controller
     @State private var isRenaming = false
     @State private var name = ""
 
@@ -158,14 +162,15 @@ struct GroupHeaderView: View {
     }
 
     var body: some View {
+        let isCollapsed = controller.isCollapsed(group)
         Button {
-            Task { try? await group.setCollapsed(!group.isCollapsed) }
+            controller.toggleCollapsed(group)
         } label: {
             HStack(spacing: 4) {
                 if axis == .vertical {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 9, weight: .bold))
-                        .rotationEffect(.degrees(group.isCollapsed ? 0 : 90))
+                        .rotationEffect(.degrees(isCollapsed ? 0 : 90))
                         .foregroundStyle(.secondary)
                 }
                 if group.title.isEmpty {
@@ -180,7 +185,7 @@ struct GroupHeaderView: View {
                         .background(group.color.swiftUIColor, in: .capsule)
                 }
                 if axis == .vertical { Spacer(minLength: 0) }
-                if group.isCollapsed, axis == .vertical {
+                if isCollapsed, axis == .vertical {
                     Text("\(group.tabs.count)").font(.caption).foregroundStyle(.secondary)
                 }
             }
@@ -202,10 +207,8 @@ struct GroupHeaderView: View {
         }
         .help(group.title.isEmpty ? "Tab group" : group.title)
         .accessibilityLabel(group.title.isEmpty ? "Tab group" : "\(group.title) group")
-        .accessibilityValue("\(group.tabs.count) tabs, \(group.isCollapsed ? "collapsed" : "expanded")")
-        .accessibilityAction(named: group.isCollapsed ? "Expand" : "Collapse") {
-            Task { try? await group.setCollapsed(!group.isCollapsed) }
-        }
+        .accessibilityValue("\(group.tabs.count) tabs, \(isCollapsed ? "collapsed" : "expanded")")
+        .accessibilityAction(named: isCollapsed ? "Expand" : "Collapse") { controller.toggleCollapsed(group) }
     }
 }
 

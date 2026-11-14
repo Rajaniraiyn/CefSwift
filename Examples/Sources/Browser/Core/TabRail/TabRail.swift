@@ -23,7 +23,7 @@ struct TabRail: View {
     @State private var dropTarget: TabRailLogic.DropTarget?
 
     var body: some View {
-        let items = Self.items(of: window)
+        let items = Self.items(of: window, isCollapsed: controller.isCollapsed)
         let hidden = TabRailLogic.hiddenItems(in: items)
         Group {
             switch axis {
@@ -37,7 +37,7 @@ struct TabRail: View {
             window: window, axis: axis, items: items, extents: { extents }, isRightToLeft: layoutDirection == .rightToLeft,
             target: $dropTarget, controller: controller))
         .animation(reduceMotion ? nil : .snappy(duration: 0.22), value: window.tabs.map(\.id))
-        .animation(reduceMotion ? nil : .snappy(duration: 0.22), value: window.groups.map(\.isCollapsed))
+        .animation(reduceMotion ? nil : .snappy(duration: 0.22), value: window.groups.map(controller.isCollapsed))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Tabs")
     }
@@ -47,26 +47,29 @@ struct TabRail: View {
     private func horizontal(items: [TabRailLogic.Item], hidden: Set<Int>) -> some View {
         GeometryReader { proxy in
             let headerWidths = items.map { headerWidth(for: $0) }
-            let available = proxy.size.width - 34
+            let available = max(0, proxy.size.width - 36)
             let widths = TabRailLogic.widths(for: items, headerWidths: headerWidths, hiddenItems: hidden, available: available)
-            HStack(spacing: 2) {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 2) {
-                        ForEach(Array(items.enumerated()), id: \.offset) { offset, item in
-                            if !hidden.contains(offset) {
-                                itemView(item, offset: offset, axis: .horizontal)
-                                    .frame(width: widths.widths[offset])
-                                    .overlay(alignment: .leading) { dropMarker(before: item) }
-                            }
-                        }
+            let row = HStack(spacing: 2) {
+                ForEach(Array(items.enumerated()), id: \.offset) { offset, item in
+                    if !hidden.contains(offset) {
+                        itemView(item, offset: offset, axis: .horizontal)
+                            .frame(width: widths.widths[offset])
+                            .overlay(alignment: .leading) { dropMarker(before: item) }
                     }
-                    .frame(height: proxy.size.height)
                 }
-                .scrollDisabled(!widths.isScrolling)
-                .frame(maxWidth: widths.isScrolling ? .infinity : widths.contentWidth, alignment: .leading)
-                NewTabButton(window: window)
-                Spacer(minLength: 0)
             }
+            .frame(height: proxy.size.height)
+            HStack(spacing: 4) {
+                // Tabs shrink to fit; once at their narrowest, they scroll.
+                if widths.isScrolling {
+                    ScrollView(.horizontal, showsIndicators: false) { row }
+                        .frame(width: available)
+                } else {
+                    row
+                }
+                NewTabButton(window: window)
+            }
+            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .leading)
         }
     }
 
@@ -126,13 +129,13 @@ struct TabRail: View {
     }
 
     /// The window's tabs and group headers, in strip order.
-    static func items(of window: CefChromeWindow) -> [TabRailLogic.Item] {
+    static func items(of window: CefChromeWindow, isCollapsed: (CefTabGroup) -> Bool) -> [TabRailLogic.Item] {
         var items: [TabRailLogic.Item] = []
         var lastGroup: Int?
         for tab in window.tabs {
             let group = tab.group?.id.rawValue
             if let group, group != lastGroup, let model = tab.group {
-                items.append(.init(kind: .groupHeader(isCollapsed: model.isCollapsed), index: tab.index, group: group,
+                items.append(.init(kind: .groupHeader(isCollapsed: isCollapsed(model)), index: tab.index, group: group,
                                    count: model.tabs.count))
             }
             lastGroup = group

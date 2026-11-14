@@ -85,9 +85,7 @@ struct GroupMenu: View {
                 }
             }
         }
-        Button(group.isCollapsed ? "Expand Group" : "Collapse Group") {
-            Task { try? await group.setCollapsed(!group.isCollapsed) }
-        }
+        Button(controller.isCollapsed(group) ? "Expand Group" : "Collapse Group") { controller.toggleCollapsed(group) }
         Divider()
         Button("New Tab in Group") {
             if let window = group.window, let last = group.tabs.last {

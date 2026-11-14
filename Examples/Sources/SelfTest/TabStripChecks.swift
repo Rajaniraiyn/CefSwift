@@ -87,12 +87,13 @@ extension SelfTest {
             }
         }
         if let group = window.groups.first {
-            await expect("tab strip: collapses a group through Chrome's own header") {
+            do {
                 try await group.setCollapsed(true)
-                let collapsed = await waitUntil(timeout: .seconds(3)) { group.isCollapsed }
-                try await group.setCollapsed(false)
-                let expanded = await waitUntil(timeout: .seconds(3)) { !group.isCollapsed }
-                return (collapsed && expanded, "collapsed \(collapsed)")
+                check("tab strip: collapses a group", await waitUntil(timeout: .seconds(3)) { group.isCollapsed })
+            } catch CefTabStrip.Error.unsupported(let reason) {
+                skip("tab strip: collapses a group", because: reason, .limitation)
+            } catch {
+                check("tab strip: collapses a group", false, detail: "\(error)")
             }
             await expect("tab strip: renames and recolours a group through Chrome's own editor") {
                 try await group.setTitle("Reading")
