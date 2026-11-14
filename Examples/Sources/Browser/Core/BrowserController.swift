@@ -85,6 +85,15 @@ final class BrowserController: CefBrowserDelegate {
     func toggleCollapsed(_ group: CefTabGroup) {
         let collapse = !isCollapsed(group)
         Task {
+            // As Chrome does, a group with the shown tab hands it to the
+            // nearest tab outside it before collapsing.
+            if collapse, group.tabs.contains(where: \.isActive), let window = group.window {
+                let outside = window.tabs.filter { $0.group !== group }
+                let after = outside.first { $0.index > (group.tabs.last?.index ?? 0) }
+                let before = outside.last { $0.index < (group.tabs.first?.index ?? 0) }
+                guard let next = after ?? before else { return }
+                try? await next.select()
+            }
             do {
                 try await group.setCollapsed(collapse)
             } catch CefTabStrip.Error.unsupported {

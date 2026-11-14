@@ -49,8 +49,8 @@ enum RailScreenshots {
             let videos = try? await window.strip.group([tabs[4], tabs[5]])
             try? await videos?.setTitle("Videos")
             try? await videos?.setColor(.orange)
+            try? await window.tabs.first { $0.group === reading }?.select()
             if let videos { controller.toggleCollapsed(videos) }
-            try? await window.tabs.last?.select()
             await shoot("3-groups-one-collapsed")
         }
 

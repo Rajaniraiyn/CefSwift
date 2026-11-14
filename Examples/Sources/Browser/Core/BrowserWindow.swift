@@ -71,7 +71,7 @@ struct TabSidebar: View {
     var body: some View {
         TabRail(window: window, axis: .vertical)
             .background(.bar)
-            .overlay(alignment: .trailing) { Divider() }
+            .overlay(alignment: .trailing) { Rectangle().fill(.separator).frame(width: 1) }
     }
 }
 

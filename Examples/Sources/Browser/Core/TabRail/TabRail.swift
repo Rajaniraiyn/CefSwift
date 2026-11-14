@@ -54,6 +54,7 @@ struct TabRail: View {
                     if !hidden.contains(offset) {
                         itemView(item, offset: offset, axis: .horizontal)
                             .frame(width: widths.widths[offset])
+                            .id(offset)
                             .overlay(alignment: .leading) { dropMarker(before: item) }
                     }
                 }
@@ -62,8 +63,17 @@ struct TabRail: View {
             HStack(spacing: 4) {
                 // Tabs shrink to fit; once at their narrowest, they scroll.
                 if widths.isScrolling {
-                    ScrollView(.horizontal, showsIndicators: false) { row }
-                        .frame(width: available)
+                    ScrollViewReader { reader in
+                        ScrollView(.horizontal, showsIndicators: false) { row }
+                            .frame(width: available)
+                            // The tabs past the edges fade out.
+                            .mask(LinearGradient(
+                                stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.03),
+                                        .init(color: .black, location: 0.97), .init(color: .clear, location: 1)],
+                                startPoint: .leading, endPoint: .trailing))
+                            .onAppear { scrollToActive(reader, items: items) }
+                            .onChange(of: window.activeTab?.id) { scrollToActive(reader, items: items) }
+                    }
                 } else {
                     row
                 }
@@ -71,6 +81,13 @@ struct TabRail: View {
             }
             .frame(width: proxy.size.width, height: proxy.size.height, alignment: .leading)
         }
+    }
+
+    /// Keeps the active tab in view in a rail that scrolls.
+    private func scrollToActive(_ reader: ScrollViewProxy, items: [TabRailLogic.Item]) {
+        guard let active = window.activeTab, let offset = items.firstIndex(where: { $0.kind != .groupHeader(isCollapsed: true) && $0.kind != .groupHeader(isCollapsed: false) && $0.index == active.index })
+        else { return }
+        withAnimation(reduceMotion ? nil : .snappy) { reader.scrollTo(offset) }
     }
 
     private func vertical(items: [TabRailLogic.Item], hidden: Set<Int>) -> some View {

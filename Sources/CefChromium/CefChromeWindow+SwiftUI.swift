@@ -12,19 +12,30 @@ extension CefChromeWindow {
     /// `content` runs once; the view updates with the observable state it
     /// reads, such as this window's ``tabs``.
     public func setTopBar(@ViewBuilder _ content: () -> some View) {
-        topBar = NSHostingView(rootView: content())
+        topBar = Self.hostingView(content())
     }
 
     /// Sets ``sidebar`` to a SwiftUI view, over Chrome's vertical tab
     /// strip.
     public func setSidebar(@ViewBuilder _ content: () -> some View) {
-        sidebar = NSHostingView(rootView: content())
+        sidebar = Self.hostingView(content())
+    }
+
+    /// A hosting view laid out in exactly the area it is given: the window's
+    /// title bar is under the top bar, not a safe area to keep clear of.
+    private static func hostingView(_ content: some View) -> NSView {
+        let hosting = NSHostingView(rootView: content)
+        hosting.safeAreaRegions = []
+        hosting.sizingOptions = []
+        return hosting
     }
 
     /// Sets ``pageOverlay`` to a SwiftUI view: sized to the page, and
     /// passing every event through to it.
     public func setPageOverlay(@ViewBuilder _ content: () -> some View) {
         let hosting = NSHostingView(rootView: content().allowsHitTesting(false))
+        hosting.safeAreaRegions = []
+        hosting.sizingOptions = []
         hosting.wantsLayer = true
         hosting.layer?.backgroundColor = .clear
         let container = PassthroughView()
