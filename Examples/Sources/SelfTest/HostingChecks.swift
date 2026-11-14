@@ -11,33 +11,6 @@ extension SelfTest {
         await offscreenToolTipChecks()
     }
 
-    /// A `title` under the mouse becomes the offscreen view's `toolTip`.
-    private static func offscreenToolTipChecks() async {
-        var configuration = CefBrowser.Configuration()
-        configuration.rendering = .offscreen
-        let browser = CefBrowser(url: transferPage, configuration: configuration)
-        let view = hostOffscreen(browser)
-        guard await loaded(browser, title: "transfer") else {
-            check("hosting: offscreen tooltip page loads", false, detail: browser.title)
-            await closeHosted(browser, view)
-            return
-        }
-        _ = try? await browser.evaluateJavaScript("""
-            document.body.innerHTML = '<div title="A tip" style="position:fixed;inset:0"></div>'; 0
-            """)
-        let center = CGPoint(x: view.bounds.midX, y: view.bounds.midY)
-        browser.sendMouseMove(to: center, modifiers: [])
-        browser.sendMouseMove(to: CGPoint(x: center.x + 1, y: center.y), modifiers: [])
-        check("hosting: an offscreen page's tooltip becomes the view's toolTip",
-              await waitUntil(timeout: .seconds(5)) { view.toolTip == "A tip" }, detail: view.toolTip ?? "none")
-        browser.sendMouseExit(at: CGPoint(x: -1, y: -1), modifiers: [])
-        _ = try? await browser.evaluateJavaScript("document.body.innerHTML = ''; 0")
-        browser.sendMouseMove(to: center, modifiers: [])
-        check("hosting: the toolTip goes when the page has none",
-              await waitUntil(timeout: .seconds(5)) { view.toolTip == nil }, detail: view.toolTip ?? "none")
-        await closeHosted(browser, view)
-    }
-
     /// Zoom and mute set before Chromium creates the browser apply once it
     /// has.
     private static func settersBeforeCreationChecks() async {

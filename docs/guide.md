@@ -3406,6 +3406,10 @@ the switches measured and not used.
   address and title, so Chrome-style tabs showing the same page under the
   same title cannot be discarded (`.unknown`) until one of them moves on.
 - DevTools opens in a window of its own; there is no docked DevTools.
+  Measured with CEF 156.0.28: `show_dev_tools` given a parent view (which
+  makes the DevTools browser Alloy style) logs `Alloy style is not
+  supported for this browser` (`browser_host_create.cc`) and opens
+  nothing, so DevTools cannot be embedded in an app's view.
 - In offscreen browsers, assistive apps can focus elements inside frames
   only by clicking text fields, and press them only while they are in
   view; elements of the main frame have no such limit. The scroll
