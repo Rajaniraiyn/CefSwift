@@ -91,7 +91,12 @@ final class CefPageScripting {
 
     /// Sends `script` to `frameID`'s renderer, or the main frame's, and
     /// waits for the reply: its header, then the value or the error.
-    func evaluatedPayload(_ script: String, in frameID: CefFrame.ID?) async throws -> CefWirePayload {
+    /// `didSend` runs once the script has gone to the renderer, and only
+    /// then: a caller cancelled or a browser closed before that sends
+    /// nothing.
+    func evaluatedPayload(
+        _ script: String, in frameID: CefFrame.ID?, didSend: () -> Void = {}
+    ) async throws -> CefWirePayload {
         guard let browser else { throw CefError.browserClosed }
         try await browser.ready()
         if let frameID, browser.frame(withID: frameID) == nil { throw CefError.frameDetached }
@@ -109,7 +114,9 @@ final class CefPageScripting {
             } else {
                 browser.withMainFrame(send)
             }
-            if !sent {
+            if sent {
+                didSend()
+            } else {
                 pendingEvaluations.complete(request, .failure(frameID == nil ? CefError.browserClosed : CefError.frameDetached))
             }
         }

@@ -150,3 +150,84 @@ import Testing
         #expect(try CefServiceHosts.decodeValue(Int.self, from: plain.bytes, at: CefWireHeader.size) == 5)
     }
 }
+
+/// What a host document has installed, as `CefServiceHostBrowser` keeps
+/// it: recorded only for a script that was sent, so a call cancelled
+/// before its script left (as during the host's start-up) leaves the next
+/// call to install the runtime.
+@Suite struct ServiceHostInstallationTests {
+    typealias Installation = CefServiceHostRuntime.Installation
+
+    func script(_ installation: Installation, handle: Int = 1, call: Int = 1)
+        -> (script: String, additions: Installation.Additions) {
+        installation.script(
+            handle: handle, module: "m", setup: "async () => ({ twice: n => n * 2 })",
+            function: "(s, a) => s.twice(a.n)", arguments: ["n": 21], call: call, eventBridge: "__bridge")
+    }
+
+    /// Runs `sources` in order in `context`; the first exception's message.
+    func run(_ sources: [String], in context: JSContext) -> String? {
+        var exception: String?
+        context.exceptionHandler = { _, value in exception = value?.toString() }
+        for source in sources {
+            context.evaluateScript(source)
+            if exception != nil { break }
+        }
+        return exception
+    }
+
+    func makeContext() throws -> JSContext {
+        let context = try #require(JSContext())
+        context.evaluateScript("globalThis.window = globalThis;")
+        context.evaluateScript(ServiceHostRuntimeTests.textEncoder)
+        return context
+    }
+
+    @Test func aScriptThatWasNotSentInstallsNothing() {
+        var installation = Installation()
+        let first = script(installation)
+        #expect(first.additions == .init(runtime: true, function: 1))
+        #expect(first.script.contains("__cefswiftServices ??="))
+        // Cancelled before it was sent: the next call carries it all again.
+        let retry = script(installation, call: 2)
+        #expect(retry.additions == first.additions)
+        #expect(retry.script.contains("__cefswiftServices ??="))
+        installation.didSend(retry.additions)
+        let later = script(installation, call: 3)
+        #expect(later.additions == .init())
+        #expect(!later.script.contains("??=") && !later.script.contains(".define("))
+        // Another function needs its definition only.
+        let other = script(installation, handle: 2, call: 4)
+        #expect(other.additions == .init(runtime: false, function: 2))
+        installation.reset()
+        #expect(installation == Installation())
+    }
+
+    /// A document without the runtime, as the poisoned state left it,
+    /// fails with the marker that makes the engine install it again, not
+    /// with a ReferenceError it would report as the call's failure.
+    @Test func aDocumentWithoutTheRuntimeAsksForItAgain() throws {
+        var installation = Installation()
+        installation.didSend(script(installation).additions)
+        // That first script never reached this document.
+        let context = try makeContext()
+        let message = try #require(run([script(installation, call: 2).script], in: context))
+        #expect(message.contains(CefServiceHostRuntime.undefinedFunctionMarker), "\(message)")
+        // Installed again, the call runs.
+        installation.reset()
+        #expect(run([script(installation, call: 3).script], in: context) == nil)
+        #expect(context.evaluateScript("typeof window.__cefswiftServices.invoke").toString() == "function")
+    }
+
+    /// The runtime and its `define` are idempotent: two calls built before
+    /// either was sent both carry them, and the second keeps the first's
+    /// runtime, with its calls in flight.
+    @Test func installingTwiceIsHarmless() throws {
+        let installation = Installation()
+        let context = try makeContext()
+        #expect(run([script(installation, call: 1).script], in: context) == nil)
+        context.evaluateScript("window.__first = window.__cefswiftServices;")
+        #expect(run([script(installation, call: 2).script], in: context) == nil)
+        #expect(context.evaluateScript("window.__first === window.__cefswiftServices").toBool())
+    }
+}

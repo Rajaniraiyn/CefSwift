@@ -22,6 +22,7 @@ extension SelfTest {
         "widevine": widevineProbeChecks,
         "profilePersistence": profilePersistenceProbeChecks,
         "launchPrompts": launchPromptsProbeChecks,
+        "quitWhilePending": quitWhilePendingProbeChecks,
     ]
 
     /// Changes the configuration for the probe `name`.

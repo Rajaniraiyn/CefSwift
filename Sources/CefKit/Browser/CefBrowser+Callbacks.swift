@@ -310,6 +310,8 @@ extension CefBrowser {
             return
         }
         discardPhase = .none
+        // Closed while waiting for its profile: nothing is created later.
+        dropDeferredCreation()
         isDiscarded = false
         discardSnapshot = nil
         commandsAfterRestore = []

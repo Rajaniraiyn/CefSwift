@@ -62,6 +62,9 @@ CefPasskeys or CefChromium, plugs into it at these points:
   page: the browser starts on `about:blank`, `CefBrowser.bootstrap()`
   awaits every attachment with the task-local `settingUp` set (so their
   DevTools calls do not wait for `ready()`), and only then loads the page.
+  Without such an attachment nothing is held: `adopt(_:)` completes
+  `ready()` and then tells the attachments, in a task, so that one
+  attachment cannot delay every browser.
   Such a browser's native popups are opened in a browser CefKit creates
   (`openPopupInNewBrowser`), since Chromium runs a native popup's first
   document before anything can attach to it.
@@ -297,14 +300,20 @@ exists, which is how Chromium's silent fall-back to memory is caught. A
 failed profile drops its context, and every call on it fails or does
 nothing.
 
-Browser creation goes through `CefBrowser.profileAllowsCreation(_:)`
+Browser creation goes through `CefBrowser.profileAllowsCreation(for:_:)`
 first, in every path: windowed, offscreen, Chrome's own window and
 `CefWindow`'s browser view. `cef_browser_host_create_browser_sync` and
 `cef_browser_view_create` fail on a context that is not initialized
 yet, and the asynchronous `cef_browser_host_create_browser` would go
 ahead on the in-memory fallback, so a browser on a profile still loading
 stays `.pending` and the creation runs again once the profile reports;
-the last host asked for wins. A `CefWindow` creates its window at once
+the last host asked for wins. The deferred creation is a token,
+`creationAwaitingProfile`, checked when the profile reports: a host view
+given another browser or none (`hostDidRelease(_:)`) or leaving its
+window, a close, or a quit clears it, and nothing is created. Such
+browsers are in no browser list, so `CefRuntime` tracks them
+(`browsersAwaitingProfiles`) and quitting closes them first, which ends
+their `ready()` with `CefError.browserClosed`. A `CefWindow` creates its window at once
 and adds the browser view when the profile is ready. Popups need nothing:
 they share their opener's context, which is loaded. The default profile
 and loaded profiles take the direct path, with no wait. A browser on a

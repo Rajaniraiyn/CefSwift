@@ -181,6 +181,21 @@ import Testing
         #expect(CefPageGraph.elapsed(fromDescriberTime: "0 h, 0 m, 3 s") == nil)
     }
 
+    /// The describer's numbers are the renderer's page graph: each valid
+    /// as an integer, but whose total overflows, or negative. Unreadable,
+    /// so a blocker, never a trap.
+    @MainActor @Test func describerTimesThatOverflowAreUnreadable() {
+        for text in ["9223372036854775807 hr, 0 min, 0 sec", "0 hr, 9223372036854775807 min, 0 sec",
+                     "2562047788015215 hr, 59 min, 59 sec", "-1 hr, 0 min, 0 sec", "0 hr, -5 min, 0 sec",
+                     "0 hr, 0 min, -9223372036854775808 sec", "-9223372036854775808 hr, 0 min, 0 sec"] {
+            #expect(CefPageGraph.elapsed(fromDescriberTime: text) == nil, "\(text)")
+            var page = quiet
+            page["audible_change_time"] = .string(text)
+            let blockers = CefPageGraph.blockers(fromDescription: reply(page))
+            #expect(blockers.count == 1 && blockers.allSatisfy(isUnknown), "\(text)")
+        }
+    }
+
     /// The store the service host keeps of the graph's frames, run in
     /// JavaScriptCore on events shaped like `GraphChangeStream`'s.
     @MainActor @Test func theFrameStoreFollowsTheGraph() throws {

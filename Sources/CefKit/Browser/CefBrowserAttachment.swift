@@ -29,10 +29,24 @@
 /// configuration.attachments = [ConsoleRecorder()]
 /// ```
 ///
-/// While CefKit waits for ``browserDidCreate(_:)`` or
-/// ``browserDidRestore(_:)``, the browser is not ready
-/// (``CefBrowser/ready()``), yet DevTools calls and JavaScript made from
-/// that method, and from tasks it starts, go through.
+/// For each creation of a browser, every attachment is told once, in
+/// order: ``browserDidCreate(_:)``, then ``browserDidRestore(_:)`` each
+/// time it is created anew after a discard, then ``browserDidClose(_:)``
+/// once it closes. A browser that closes before Chromium created it, or
+/// while an earlier attachment set it up, is closed for every attachment,
+/// including those not told of its creation.
+///
+/// ``CefBrowser/ready()`` waits for attachments only when the browser is
+/// held for them: when one of its attachments
+/// ``preparesBeforeFirstDocument``, every attachment is told of the
+/// creation before the first page, and the browser is ready once all have
+/// returned; after a discard, it is ready once every
+/// ``browserDidRestore(_:)`` has returned. Meanwhile DevTools calls and
+/// JavaScript made from those methods, and from tasks they start, go
+/// through. Otherwise the browser is ready as Chromium creates it, and
+/// attachments are told of the creation as it becomes ready, without
+/// holding anything: a caller of `ready()` may see an attachment still
+/// setting up.
 @MainActor
 public protocol CefBrowserAttachment: AnyObject {
     /// Whether no page may run in the browser before
@@ -53,9 +67,10 @@ public protocol CefBrowserAttachment: AnyObject {
     /// own UI, have the default configuration and so no attachments.
     var preparesBeforeFirstDocument: Bool { get }
 
-    /// Chromium has created the browser, and its first page has not
-    /// started loading. With ``preparesBeforeFirstDocument``, the page
-    /// waits until this returns.
+    /// Chromium has created the browser. When any of the browser's
+    /// attachments ``preparesBeforeFirstDocument``, its first page waits
+    /// until every attachment's call has returned; otherwise the page may
+    /// already be loading.
     ///
     /// The browser can close while this runs; ``browserDidClose(_:)`` is
     /// then called before it returns. Attachments later in the list are

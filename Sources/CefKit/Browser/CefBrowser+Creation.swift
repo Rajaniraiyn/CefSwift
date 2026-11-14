@@ -81,8 +81,8 @@ extension CefBrowser {
         if client == nil {
             // A browser discarded by closing it comes back when shown.
             guard state == .pending || isDiscarded else { return }
-            guard profileAllowsCreation({ [weak parentView] browser in
-                if let parentView { browser.host(windowedIn: parentView) }
+            guard profileAllowsCreation(for: parentView, { [weak parentView] browser in
+                if let parentView, parentView.window != nil { browser.host(windowedIn: parentView) }
             }) else {
                 hostView = parentView
                 return
@@ -108,7 +108,7 @@ extension CefBrowser {
             hostView = host as? NSView
             // A browser discarded by closing it comes back when shown.
             guard state == .pending || isDiscarded else { return }
-            guard profileAllowsCreation({ browser in
+            guard profileAllowsCreation(for: host, { browser in
                 // The host it was last asked to show in, at its size then.
                 guard let host = browser.restoringOffscreenHost else { return }
                 browser.host(offscreenIn: host, size: host.offscreenViewInfo.size)
@@ -189,7 +189,7 @@ extension CefBrowser {
     /// Creates the browser in a window owned and drawn entirely by Chrome:
     /// tab strip, omnibox, menus, extensions toolbar.
     func createInChromeUIWindow(frame: CGRect?) {
-        guard profileAllowsCreation({ $0.createInChromeUIWindow(frame: frame) }) else { return }
+        guard profileAllowsCreation(for: nil, { $0.createInChromeUIWindow(frame: frame) }) else { return }
         var blueprint = makeBlueprint()
         isChromeStyle = true
         var windowInfo = cef_window_info_t()
@@ -207,16 +207,18 @@ extension CefBrowser {
 
     /// Whether the browser's profile can take a new browser now. While
     /// Chromium is still loading the profile, `create` runs once it has
-    /// (the last one given, if asked again meanwhile), unless the browser
-    /// closed or was created meanwhile. A browser on a profile Chromium
-    /// could not load closes, and its ``ready()`` throws the profile's
-    /// error. The default profile is always ready.
+    /// (the last one given, if asked again meanwhile), unless meanwhile the
+    /// browser closed or was created, `host` let go of it
+    /// (``hostDidRelease(_:)``), or the app began to quit, which closes
+    /// it. A browser on a profile Chromium could not load closes, and its
+    /// ``ready()`` throws the profile's error. The default profile is
+    /// always ready.
     ///
     /// Chromium creates a browser only on a loaded profile: synchronous
     /// creation and browser views fail on one it is still loading, and
     /// asynchronous creation would go ahead on the in-memory profile it
     /// gives when it cannot load one.
-    func profileAllowsCreation(_ create: @escaping @MainActor (CefBrowser) -> Void) -> Bool {
+    func profileAllowsCreation(for host: AnyObject?, _ create: @escaping @MainActor (CefBrowser) -> Void) -> Bool {
         let profile = configuration.profile ?? .default
         _ = profile.requestContext()
         switch profile.readiness {
@@ -224,29 +226,62 @@ extension CefBrowser {
             // Pending: Chromium is not running, which creation reports.
             return true
         case .failed(let reason):
-            creationAwaitingProfile = nil
+            dropDeferredCreation()
             readyWaiters.completeAll(.failure(CefError.profileUnavailable(reason)))
             creationFailed()
             return false
         case .loading:
+            // Quitting closes the browsers waiting for a profile; one
+            // asked for now would be created after that.
+            guard !CefRuntime.shared.isTerminating else {
+                close()
+                return false
+            }
             let isWaiting = creationAwaitingProfile != nil
-            creationAwaitingProfile = create
+            creationAwaitingProfile = DeferredCreation(host: host, create: create)
+            CefRuntime.shared.browserAwaitsProfile(self)
             guard !isWaiting else { return false }
             Task { [weak self] in
                 // Loaded or failed, which `create` turns into a close; or
-                // Chromium shut down meanwhile, which leaves nothing to do.
+                // Chromium shut down meanwhile, which closed the browser.
                 try? await profile.ready()
-                guard let self, let create = self.creationAwaitingProfile else { return }
-                self.creationAwaitingProfile = nil
-                guard CefRuntime.shared.isRunning, self.client == nil, self.state == .pending || self.isDiscarded
+                guard let self, let deferred = self.creationAwaitingProfile else { return }
+                self.dropDeferredCreation()
+                guard CefRuntime.shared.isRunning, !CefRuntime.shared.isTerminating, self.client == nil,
+                      self.state == .pending || self.isDiscarded
                 else { return }
-                create(self)
+                deferred.create(self)
             }
             return false
         }
     }
 
+    /// Forgets the creation waiting for the profile, if any.
+    func dropDeferredCreation() {
+        guard creationAwaitingProfile != nil else { return }
+        creationAwaitingProfile = nil
+        CefRuntime.shared.browserStoppedAwaitingProfile(self)
+    }
+
+    /// `host`, a view or window that showed or was to show the browser,
+    /// shows another browser or none now: a creation deferred for it until
+    /// the profile loads is dropped, and a browser that has nothing in
+    /// Chromium (not created yet, or discarded by closing it) is no longer
+    /// restored there. A browser shown in `host` meanwhile is unaffected.
+    func hostDidRelease(_ host: AnyObject) {
+        cancelDeferredCreation(in: host)
+        if restoringOffscreenHost === host { restoringOffscreenHost = nil }
+        if raw == nil, hostView === host { hostView = nil }
+    }
+
+    /// `host` cannot create the browser for now (it left its window): a
+    /// creation deferred for it is dropped, and it asks again when it can.
+    func cancelDeferredCreation(in host: AnyObject) {
+        if creationAwaitingProfile?.host === host { dropDeferredCreation() }
+    }
+
     func creationFailed() {
+        dropDeferredCreation()
         client?.cancelCreation()
         client = nil
         discardPhase = .none
@@ -333,8 +368,8 @@ extension cef_rect_t {
     /// A view-local rectangle, rounded to whole points and at least 1×1.
     init(_ rect: CGRect) {
         self.init(
-            x: Int32(rect.origin.x.rounded()), y: Int32(rect.origin.y.rounded()),
-            width: Int32(max(1, rect.width.rounded())), height: Int32(max(1, rect.height.rounded())))
+            x: Int32(saturating: rect.origin.x), y: Int32(saturating: rect.origin.y),
+            width: Int32(saturating: max(1, rect.width)), height: Int32(saturating: max(1, rect.height)))
     }
 
     /// An AppKit screen rectangle (bottom-left origin) in CEF's screen
@@ -343,7 +378,7 @@ extension cef_rect_t {
     init(screenRect: CGRect) {
         let primaryHeight = NSScreen.screens.first?.frame.height ?? screenRect.maxY
         self.init(
-            x: Int32(screenRect.origin.x.rounded()), y: Int32((primaryHeight - screenRect.maxY).rounded()),
-            width: Int32(screenRect.width.rounded()), height: Int32(screenRect.height.rounded()))
+            x: Int32(saturating: screenRect.origin.x), y: Int32(saturating: primaryHeight - screenRect.maxY),
+            width: Int32(saturating: screenRect.width), height: Int32(saturating: screenRect.height))
     }
 }

@@ -153,7 +153,11 @@ The phase (`Scripts/xcode-embed.sh`, then `cefswift embed`):
   warnings in the Issue navigator (`CEF_DOCTOR = NO` turns them off).
 
 When nothing that decides these parts has changed, an incremental build
-leaves them as they are, without running SwiftPM, and the phase takes
+leaves them as they are (what decides them: the CEF version and
+framework, the architectures, the app's Info.plist and localizations,
+every entitlement and its value, the signing identity, keychain and
+flags, the trimming settings, cefapp.json's contents, and the helper and
+`cefswift` as built), without running SwiftPM, and the phase takes
 about 2 seconds, most of it `cef doctor`'s checks (measured with the Xcode
 example on an M3; the whole incremental build took 3.7 s). Xcode then signs the app, sealing everything inside.
 

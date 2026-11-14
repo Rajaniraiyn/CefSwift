@@ -603,6 +603,7 @@ extension SelfTest {
 
     /// Checks made once Chromium has shut down.
     static func quitChecksAfterShutdown() {
+        quitWhilePendingChecksAfterShutdown()
         if stalledRequestServer != nil {
             // Each loader released its CEF references on the IO thread
             // before shutdown began. A caller may hear of it after (its

@@ -164,7 +164,7 @@ extension CefBrowser {
     public func draggingSessionEnded(at point: CGPoint, operation: CefDragOperation) {
         withHost {
             $0.pointee.drag_source_ended_at(
-                $0, Int32(point.x.rounded()), Int32(point.y.rounded()), operation.cefValue)
+                $0, Int32(saturating: point.x), Int32(saturating: point.y), operation.cefValue)
             $0.pointee.drag_source_system_drag_ended($0)
         }
     }

@@ -210,6 +210,108 @@ private struct FakeXcodeBuild {
         #expect(Log.format("warning", "w", file: nil, line: nil, style: .plugin) == "[cef] warning: w")
     }
 
+    // MARK: Incremental builds
+
+    /// The stamp of an incremental build of `fake` with `extra` settings,
+    /// as `run()` computes it, and the phase and build it was made for.
+    private func embedStamp(_ fake: FakeXcodeBuild, _ extra: [String: String] = [:], tool: URL? = nil) throws
+        -> (stamp: String, embed: XcodeEmbed, build: XcodeEmbed.Build, settings: XcodeEmbed.Settings) {
+        let embed = XcodeEmbed(environment: fake.environment(extra))
+        let build = try embed.build()
+        let settings = try embed.settings(build: build)
+        let helper = HelperLink.Products(executable: fake.root.appendingPathComponent("helper"),
+                                         startupLibrary: fake.root.appendingPathComponent("startup"))
+        let embedder = embed.embedder(build: build, settings: settings, frameworkSource: nil, helper: helper)
+        let stamp = embed.stamp(
+            cef: "156.0.28", build: build, settings: settings, embedder: embedder,
+            appInfoPlist: XcodeEmbed.embeddingInfoPlist(settings.infoPlist, app: build.app), helper: helper,
+            tool: tool ?? fake.root.appendingPathComponent("cefswift"))
+        return (stamp, embed, build, settings)
+    }
+
+    /// The parts an embedded app has, and the stamp of the run that
+    /// embedded them.
+    private func markEmbedded(_ fake: FakeXcodeBuild, stamp: String, build: XcodeEmbed.Build) throws {
+        let frameworks = fake.app.appendingPathComponent("Contents/Frameworks")
+        for part in [BuiltProduct.cefFrameworkName, HelperLink.startupLibraryName]
+            + HelperKind.allCases.map({ "\($0.appName(for: build.executableName)).app" }) {
+            try FileManager.default.createDirectory(at: frameworks.appendingPathComponent(part), withIntermediateDirectories: true)
+        }
+        try Data(stamp.utf8).write(to: build.stampFile)
+    }
+
+    /// The review's case: a Debug build signs the helpers with
+    /// get-task-allow; turning it off with the same identity must sign
+    /// them again, though the entitlement keys stay the same.
+    @Test func anEntitlementValueChangeEmbedsAgain() throws {
+        let fake = try FakeXcodeBuild(entitlements: ["com.apple.security.get-task-allow": .bool(true)])
+        defer { fake.remove() }
+        let development = [
+            "EXPANDED_CODE_SIGN_IDENTITY": "0123456789ABCDEF0123456789ABCDEF01234567",
+            "EXPANDED_CODE_SIGN_IDENTITY_NAME": "Apple Development: Someone (ABCDE12345)", "DEVELOPMENT_TEAM": "ABCDE12345",
+        ]
+        let first = try embedStamp(fake, development)
+        try markEmbedded(fake, stamp: first.stamp, build: first.build)
+        #expect(!first.embed.needsEmbedding(build: first.build, stamp: try embedStamp(fake, development).stamp))
+
+        try Plist.write(["com.apple.security.get-task-allow": .bool(false)], to: fake.xcent)
+        let second = try embedStamp(fake, development)
+        // What a key-only fingerprint could not tell apart.
+        for kind in HelperKind.allCases {
+            let before = first.settings.plan.helperEntitlements[kind] ?? [:]
+            let after = second.settings.plan.helperEntitlements[kind] ?? [:]
+            #expect(Set(before.keys) == Set(after.keys) && before != after, "\(kind)")
+        }
+        #expect(second.embed.needsEmbedding(build: second.build, stamp: second.stamp))
+    }
+
+    /// Every other input of trimming and signing changes the stamp; the
+    /// same inputs keep it.
+    @Test func everyEmbeddingInputIsInTheStamp() throws {
+        let fake = try FakeXcodeBuild(info: ["NSCameraUsageDescription": .string("Calls.")])
+        defer { fake.remove() }
+        let base = try embedStamp(fake).stamp
+        #expect(try embedStamp(fake).stamp == base)
+        var changed: [String: String] = [:]
+
+        // Signing.
+        changed["identity"] = try embedStamp(fake, [
+            "EXPANDED_CODE_SIGN_IDENTITY": "0123456789ABCDEF0123456789ABCDEF01234567",
+            "EXPANDED_CODE_SIGN_IDENTITY_NAME": "Apple Development: Someone (ABCDE12345)", "DEVELOPMENT_TEAM": "ABCDE12345",
+        ]).stamp
+        changed["keychain"] = try embedStamp(fake, ["OTHER_CODE_SIGN_FLAGS": "--keychain /tmp/k.keychain"]).stamp
+        changed["timestamp"] = try embedStamp(fake, ["OTHER_CODE_SIGN_FLAGS": "--timestamp"]).stamp
+        changed["hardened runtime"] = try embedStamp(fake, ["ENABLE_HARDENED_RUNTIME": "YES"]).stamp
+        // Trimming.
+        changed["CEF_LOCALIZATIONS"] = try embedStamp(fake, ["CEF_LOCALIZATIONS": "en fr"]).stamp
+        changed["CEF_SOFTWARE_GPU_FALLBACK"] = try embedStamp(fake, ["CEF_SOFTWARE_GPU_FALLBACK": "exclude"]).stamp
+        // The tool, rebuilt.
+        let tool = fake.root.appendingPathComponent("tool")
+        try Data("one".utf8).write(to: tool)
+        let toolBefore = try embedStamp(fake, tool: tool).stamp
+        try Data("two!".utf8).write(to: tool)
+        #expect(try embedStamp(fake, tool: tool).stamp != toolBefore, "tool")
+        // cefapp.json's contents, even where the settings read the same.
+        let config = fake.root.appendingPathComponent("cefapp.json")
+        try Data(#"{ "capabilities": [] }"#.utf8).write(to: config)
+        let configBefore = try embedStamp(fake, ["CEF_APP_CONFIG": "cefapp.json"]).stamp
+        try Data(#"{ "capabilities": [], "usageDescriptions": { "NSCameraUsageDescription": "Other." } }"#.utf8).write(to: config)
+        #expect(try embedStamp(fake, ["CEF_APP_CONFIG": "cefapp.json"]).stamp != configBefore, "cefapp.json")
+        for (input, stamp) in changed { #expect(stamp != base, "\(input)") }
+
+        // The app's localizations, from an .lproj directory as well as
+        // its Info.plist: they decide which locale packs stay.
+        try FileManager.default.createDirectory(
+            at: fake.app.appendingPathComponent("Contents/Resources/fr.lproj"), withIntermediateDirectories: true)
+        let localized = try embedStamp(fake).stamp
+        #expect(localized != base, "localizations")
+        // An Info.plist value the helpers copy.
+        var info = try Plist.read(fake.infoPlist)
+        info["NSCameraUsageDescription"] = .string("Video calls.")
+        try Plist.write(info, to: fake.infoPlist)
+        #expect(try embedStamp(fake).stamp != localized, "usage description")
+    }
+
     @Test func argumentsParseLikeSwiftPMs() throws {
         var arguments = Arguments(["App.app", "--format=dmg", "--sign", "-", "--json", "--capability", "a",
                                    "--capability", "b", "--no-timestamp"])

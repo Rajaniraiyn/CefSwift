@@ -31,8 +31,10 @@ extension SelfTest {
 
     static func profileStorageChecks() async {
         await newProfileHostingChecks()
+        await reassignedWhileLoadingChecks()
         await loadedProfileChecks()
         await unavailableProfileChecks()
+        await runProbe("quitWhilePending", label: "profile storage quit while pending", timeout: .seconds(60))
         // Two launches on one root cache directory.
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("cefswift-selftest-profiles-\(UUID().uuidString)")
@@ -127,6 +129,121 @@ extension SelfTest {
             check("profile storage: … and Chromium never creates it",
                   !CefRuntime.shared.browsers.contains { $0 === browser })
         }
+    }
+
+    // MARK: Hosting withdrawn while loading
+
+    /// A view given another browser, or none, while its first browser's
+    /// profile loads: once the profile is loaded, only the browser the
+    /// view shows is created there; the first, still alive, is not created
+    /// at all, and goes once released.
+    static func reassignedWhileLoadingChecks() async {
+        for (kind, offscreen) in [("windowed", false), ("offscreen", true)] {
+            let profile = brandNewProfile("reassigned-\(kind)")
+            weak var releasedFirst: CefBrowser?
+            do {
+                var first: CefBrowser? = inProfile(profile, "https://cefswift.test/first.html")
+                releasedFirst = first
+                let replacement = inProfile(.default, "https://cefswift.test/replacement.html")
+                let windowed = offscreen ? nil : hostWindowed(first!)
+                let offscreenView = offscreen ? hostOffscreen(first!) : nil
+                check("profile storage: \(kind): the first browser waits for its new profile",
+                      first?.state == .pending && !profile.isReady, detail: "\(String(describing: first?.state))")
+                windowed?.browser = replacement
+                offscreenView?.browser = replacement
+                check("profile storage: \(kind): the browser the view shows instead loads",
+                      await loaded(replacement, title: "replacement"), detail: replacement.title)
+                await expect("profile storage: \(kind): the first browser is not created once its profile loads") {
+                    try await profile.ready()
+                    // Time for a creation the profile's loading set off.
+                    let created = await waitUntil(timeout: .seconds(1)) { first?.state != .pending }
+                    let native = first?.nativeView
+                    return (!created && native == nil && !CefRuntime.shared.browsers.contains { $0 === first },
+                            "\(String(describing: first?.state))")
+                }
+                if let windowed {
+                    check("profile storage: \(kind): the view holds the new browser's view only",
+                          windowed.subviews.count == 1 && windowed.subviews.first === replacement.nativeView,
+                          detail: "\(windowed.subviews.count) subviews")
+                }
+                // Shown again, the first browser comes.
+                let again = offscreen ? nil : hostWindowed(first!)
+                let againOffscreen = offscreen ? hostOffscreen(first!) : nil
+                check("profile storage: \(kind): the first browser loads once a view shows it",
+                      await loaded(first!, title: "first"), detail: first!.title)
+                let views: [NSView?] = [windowed, again, offscreenView, againOffscreen]
+                views.compactMap { $0 }.forEach { $0.removeFromSuperview() }
+                first?.close(force: true)
+                replacement.close(force: true)
+                _ = await waitUntil { first?.state == .closed && replacement.state == .closed }
+                first = nil
+            }
+            check("profile storage: \(kind): the first browser goes once released",
+                  await waitUntil { releasedFirst == nil })
+        }
+        do {
+            // Never shown again: released while still waiting.
+            let profile = brandNewProfile("withdrawn")
+            weak var released: CefBrowser?
+            do {
+                let browser = inProfile(profile, "https://cefswift.test/withdrawn.html")
+                released = browser
+                let view = hostWindowed(browser)
+                view.browser = nil
+                view.removeFromSuperview()
+            }
+            await expect("profile storage: a browser whose view let go while its profile loads is released") {
+                try await profile.ready()
+                return (await waitUntil { released == nil }, "")
+            }
+        }
+    }
+
+    // MARK: Quitting while loading
+
+    /// What the quit probe left to check after shutdown: each browser that
+    /// was waiting for its profile, and how its `ready()` ended.
+    static var browsersPendingAtQuit: [(name: String, browser: CefBrowser)] = []
+    static var readyEndingsAtQuit: [String: String] = [:]
+
+    /// Browsers on a profile Chromium is still creating when the app quits,
+    /// in a view, in Chrome's own window and in a `CefWindow`: quitting
+    /// closes them, their `ready()` throws, and Chromium never creates
+    /// them. Checked after shutdown, in `quitChecksAfterShutdown()`.
+    static func quitWhilePendingProbeChecks() async {
+        let profile = brandNewProfile("quit")
+        let windowed = inProfile(profile, "https://cefswift.test/quit-windowed.html")
+        _ = hostWindowed(windowed)
+        let chrome = CefRuntime.shared.openChromeWindow(
+            url: URL(string: "https://cefswift.test/quit-chrome.html")!, configuration: configuration(in: profile))
+        let window = CefWindow(browser: inProfile(profile, "https://cefswift.test/quit-window.html"))
+        browsersPendingAtQuit = [("windowed", windowed), ("Chrome's window", chrome), ("CefWindow", window.browser)]
+        for (name, browser) in browsersPendingAtQuit {
+            Task { @MainActor in
+                do {
+                    try await browser.ready()
+                    readyEndingsAtQuit[name] = "ready"
+                } catch {
+                    readyEndingsAtQuit[name] = "\(error)"
+                }
+            }
+        }
+        // The probe quits as this returns, in the same turn.
+        check("quit while pending: the browsers wait for their new profile",
+              browsersPendingAtQuit.allSatisfy { $0.browser.state == .pending } && !profile.isReady,
+              detail: browsersPendingAtQuit.map { "\($0.name) \($0.browser.state)" }.joined(separator: ", "))
+    }
+
+    static func quitWhilePendingChecksAfterShutdown() {
+        guard !browsersPendingAtQuit.isEmpty else { return }
+        for (name, browser) in browsersPendingAtQuit {
+            check("quit: a browser waiting for its profile (\(name)) closed, and its ready() threw browserClosed",
+                  browser.state == .closed && readyEndingsAtQuit[name] == "\(CefError.browserClosed)",
+                  detail: "\(browser.state), \(readyEndingsAtQuit[name] ?? "still waiting")")
+            check("quit: … Chromium never created it (\(name))", browser.identifier == -1 && browser.nativeView == nil,
+                  detail: "identifier \(browser.identifier)")
+        }
+        browsersPendingAtQuit = []
     }
 
     // MARK: Settings while loading

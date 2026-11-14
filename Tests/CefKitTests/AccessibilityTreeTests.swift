@@ -179,6 +179,41 @@ struct AccessibilityTreeTests {
         #expect(tree.frame(ofCharacterRange: NSRange(location: 0, length: 1), in: Self.id(4)) == nil)
     }
 
+    // MARK: Renderer values out of range
+
+    /// Two frames' trees that each name the other as a child: a frame is
+    /// positioned through a bounded number of hosts, never forever.
+    @Test func framesHostingEachOtherDoNotRecurseForever() {
+        let tree = CefAccessibilityTree()
+        tree.applyTreeChange(Self.change(root: 1, treeData: ["focus_id": 1, "loaded": true], nodes: [
+            Self.node(1, "rootWebArea", children: [2], frame: CGRect(x: 0, y: 0, width: 800, height: 600), container: nil),
+            Self.node(2, "iframe", frame: CGRect(x: 10, y: 10, width: 300, height: 80), attributes: ["childTreeId": "a"]),
+        ]))
+        for (name, other) in [("a", "b"), ("b", "a")] {
+            tree.applyTreeChange(Self.change(tree: name, root: 1, treeData: ["focus_id": 1, "loaded": true, "parent_tree_id": "main"], nodes: [
+                Self.node(1, "rootWebArea", children: [2], frame: CGRect(x: 0, y: 0, width: 300, height: 80), container: nil),
+                Self.node(2, "iframe", frame: CGRect(x: 1, y: 1, width: 10, height: 10), attributes: ["childTreeId": .string(other)]),
+            ]))
+        }
+        // Returns, whatever position it settles on.
+        _ = tree.frame(of: Self.id(2, "a"))
+        _ = tree.frame(of: Self.id(2, "b"))
+    }
+
+    /// A selection the renderer reports before the start of the text, and
+    /// a range an accessibility client asks for at the end of `Int`.
+    @Test func selectionsAndRangesOutOfRangeAreClamped() {
+        let tree = CefAccessibilityTree()
+        tree.applyTreeChange(Self.change(root: 1, treeData: ["focus_id": 1, "loaded": true], nodes: [
+            Self.node(1, "rootWebArea", children: [2], frame: CGRect(x: 0, y: 0, width: 800, height: 600), container: nil),
+            Self.node(2, "textField", frame: CGRect(x: 0, y: 0, width: 100, height: 20),
+                      attributes: ["value": "Ada", "textSelStart": -5, "textSelEnd": 2]),
+        ]))
+        #expect(tree.node(Self.id(2))?.textSelection == NSRange(location: 0, length: 2))
+        _ = tree.frame(ofCharacterRange: NSRange(location: Int.max - 1, length: 10), in: Self.id(2))
+        _ = tree.frame(ofCharacterRange: NSRange(location: NSNotFound, length: 1), in: Self.id(2))
+    }
+
     // MARK: Frames
 
     @Test func childTreesHangUnderTheirIframe() {

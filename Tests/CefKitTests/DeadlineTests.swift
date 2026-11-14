@@ -80,6 +80,50 @@ struct DeadlineTests {
         stuck.release()
     }
 
+    /// A caller cancelled before the call starts gets `CancellationError`
+    /// and nothing runs: a service change must not happen after it.
+    @Test func anAlreadyCancelledCallRunsNothing() async {
+        var ran = false
+        var timedOut = false
+        let call = Task { @MainActor in
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try await withDeadline(.milliseconds(50), timeoutError: TimedOut(), onTimeout: { timedOut = true }) {
+                ran = true
+                return 42
+            }
+        }
+        let result = await call.result
+        #expect(throws: CancellationError.self) { try result.get() }
+        // Long past the deadline: neither the operation nor the timer ran.
+        try? await Task.sleep(for: .milliseconds(200))
+        #expect(!ran && !timedOut)
+    }
+
+    /// Cancelled from another thread while the call registers, the caller
+    /// resumes exactly once, with `CancellationError` or the result.
+    @Test func cancellingFromAnotherThreadResumesOnce() async {
+        for _ in 0..<200 {
+            let call = Task { @MainActor in
+                try await withDeadline(.seconds(30), timeoutError: TimedOut()) { 7 }
+            }
+            Task.detached { call.cancel() }
+            switch await call.result {
+            case .success(let value): #expect(value == 7)
+            case .failure(let error): #expect(error is CancellationError)
+            }
+        }
+    }
+
+    /// Cancelled after the result: the result stands.
+    @Test func cancellingAfterTheResultChangesNothing() async throws {
+        let call = Task { @MainActor in
+            try await withDeadline(.seconds(30), timeoutError: TimedOut()) { 5 }
+        }
+        let value = try await call.value
+        call.cancel()
+        #expect(value == 5)
+    }
+
     /// Cancelled from the main thread, as a superseded query is, the caller
     /// resumes in the same turn rather than after a hop through a new task.
     @Test func cancellingFromTheMainThreadResumesTheCallerAtOnce() async {
@@ -134,6 +178,32 @@ struct PendingOperationsTests {
         let result = await waiter.result
         #expect(throws: CancellationError.self) { try result.get() }
         #expect(!started && pending.count == 0)
+    }
+
+    /// Cancelled from another thread around registration: each waiter
+    /// resumes exactly once, and nothing stays registered.
+    @Test func cancellationRacingRegistrationResumesOnce() async {
+        let pending = CefPendingOperations<Int>()
+        for _ in 0..<200 {
+            var started = 0
+            let waiter = Task { @MainActor in try await pending.wait { _ in started += 1 } }
+            Task.detached { waiter.cancel() }
+            let result = await waiter.result
+            #expect(throws: CancellationError.self) { try result.get() }
+            #expect(started <= 1)
+        }
+        // The off-main cancellations reach the main actor's next turns.
+        for _ in 0..<100 where pending.count > 0 { await Task.yield() }
+        #expect(pending.count == 0)
+    }
+
+    /// A result first, then the cancellation: the result stands, once.
+    @Test func cancellingAfterCompletionChangesNothing() async throws {
+        let pending = CefPendingOperations<Int>()
+        let waiter = Task { @MainActor in try await pending.wait { id in pending.complete(id, .success(3)) } }
+        let value = try await waiter.value
+        waiter.cancel()
+        #expect(value == 3 && pending.count == 0)
     }
 
     @Test func completingAllResumesEveryWaiter() async {

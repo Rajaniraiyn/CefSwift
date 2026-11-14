@@ -405,7 +405,10 @@ extension SelfTest {
 
     static func viewDiscardChecks() async {
         let recorder = DiscardRecorder()
-        let browser = CefBrowser(url: URL(string: "selftest://edge/heavy.html?view")!, configuration: discardConfiguration(), delegate: recorder)
+        let attachment = RecordingAttachment()
+        var configuration = discardConfiguration()
+        configuration.attachments = [attachment]
+        let browser = CefBrowser(url: URL(string: "selftest://edge/heavy.html?view")!, configuration: configuration, delegate: recorder)
         let view = hostWindowed(browser)
         _ = await loaded(browser, title: "heavy")
         let renderer = await allocateInRenderer(browser)
@@ -448,12 +451,17 @@ extension SelfTest {
         }
         check("discard (view): delegate hears will, did and restore",
               recorder.events == ["will", "did", "restore"], detail: "\(recorder.events)")
+        check("discard (view): an attachment is told of the restore, once, before the page loads again",
+              attachment.events == ["create", "created", "restore"] && attachment.pageDuringRestore == "about:blank",
+              detail: "\(attachment.events), \(attachment.pageDuringRestore ?? "nil")")
 
         view.isHidden = true
         check("discard (view): a restored browser is discarded again", (try? await browser.discard()) != nil && browser.isDiscarded)
         browser.close()
         view.removeFromSuperview()
         check("discard (view): a discarded browser closes", await waitUntil { browser.state == .closed })
+        check("discard (view): … and its attachment hears the close once, after the creation",
+              attachment.events == ["create", "created", "restore", "close"], detail: "\(attachment.events)")
     }
 
     // MARK: Quitting

@@ -658,15 +658,19 @@ final class ConsoleRecorder: CefBrowserAttachment {
 
 | Member | Called |
 |---|---|
-| `browserDidCreate(_:) async` | Once Chromium has created the browser, before its first page starts loading. |
+| `browserDidCreate(_:) async` | Once Chromium has created the browser. Before its first page starts loading only when an attachment `preparesBeforeFirstDocument`. |
 | `browserDidRestore(_:) async` | Once a browser discarded by closing it is created anew; its page loads again after this returns. Domains enabled through `devTools` are on again by then and event streams go on, but what the old Chromium browser held, such as scripts added with `Page.addScriptToEvaluateOnNewDocument`, is gone. |
-| `browserDidClose(_:)` | When the browser has closed, before its DevTools session ends. Not for a discard. |
+| `browserDidClose(_:)` | When the browser has closed, before its DevTools session ends, once, after the other calls. Also for a browser that closed before every attachment was told of its creation. Not for a discard. |
 | `preparesBeforeFirstDocument` | `false` by default. `true` holds the first page until `browserDidCreate(_:)` returns. |
 
 When an attachment `preparesBeforeFirstDocument`, the browser starts on
 `about:blank` and loads its page once every attachment has been told of
 its creation; `ready()` waits for that, and DevTools calls and JavaScript
-the attachment makes meanwhile go through. A native popup cannot be held
+the attachment makes meanwhile go through. Without such an attachment,
+`ready()` means the browser exists and can be used: it does not wait for
+attachments, which are told of the creation as the browser becomes
+ready, and one of them may still be setting up when `ready()` returns.
+After a discard, `ready()` waits for every `browserDidRestore(_:)`. A native popup cannot be held
 that way, since Chromium creates it and runs its first document at once.
 So a popup, tab or window the delegate lets Chromium open
 (`.allowNativePopup`) opens instead in a browser CefKit creates with the
@@ -2380,7 +2384,7 @@ and what does not:
 
 | Called while the profile loads | What happens |
 |---|---|
-| Browsers, in every host (`CefWebView`, the AppKit views, `CefWindow`, `openChromeWindow`) and their popups | Wait, and are created once it is loaded. The browser stays `.pending`, and `load(_:)`, `ready()` and `waitUntilLoaded(timeout:)` work as for any browser being created. A `CefWindow` opens at once and gets its page when the browser comes. |
+| Browsers, in every host (`CefWebView`, the AppKit views, `CefWindow`, `openChromeWindow`) and their popups | Wait, and are created once it is loaded. The browser stays `.pending`, and `load(_:)`, `ready()` and `waitUntilLoaded(timeout:)` work as for any browser being created. A `CefWindow` opens at once and gets its page when the browser comes. A view given another browser, or none, meanwhile does not get this one later. Quitting closes the browsers still waiting: their `ready()` throws `CefError.browserClosed`, and the profile's `ready()` throws `CefError.shutDown`. |
 | `cookies(for:)`, `setCookie(_:)`, `deleteCookies(for:named:)` | Chromium queues them until the profile is loaded. |
 | `data(for:)`, `bytes(for:)`, `download(for:to:)`, `resolveHost(_:)`, the `clear…` calls | Wait for the profile. |
 | `siteSettings.set(…)`, `setDefaultSetting(_:for:)`, `setColorScheme(_:accentColor:)` | Apply once it is loaded. |

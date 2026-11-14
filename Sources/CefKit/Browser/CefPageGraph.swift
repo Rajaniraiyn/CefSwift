@@ -95,15 +95,26 @@ enum CefPageGraph {
 
     /// A time the describers give as how long ago it was,
     /// `"<h> hr, <m> min, <s> sec"` (`TimeDeltaFromNowToValue`,
-    /// `node_data_describer_util.cc`).
+    /// `node_data_describer_util.cc`). `nil` for anything else, a negative
+    /// field or a total past ``maximumDescriberTime`` included: the text
+    /// comes from the graph the renderers report to.
     static func elapsed(fromDescriberTime text: String) -> Duration? {
         let fields = text.split(separator: ",").map { $0.split(separator: " ") }
-        guard fields.count == 3, fields.map({ $0.last }) == ["hr", "min", "sec"],
-              let hours = fields[0].first.flatMap({ Int($0) }), let minutes = fields[1].first.flatMap({ Int($0) }),
-              let seconds = fields[2].first.flatMap({ Int($0) }), fields.allSatisfy({ $0.count == 2 })
+        guard fields.count == 3, fields.map({ $0.last }) == ["hr", "min", "sec"], fields.allSatisfy({ $0.count == 2 })
         else { return nil }
-        return .seconds(hours * 3600 + minutes * 60 + seconds)
+        var total = 0
+        for (field, unit) in zip(fields, [3600, 60, 1]) {
+            guard let value = field.first.flatMap({ Int($0) }), value >= 0 else { return nil }
+            let (scaled, overflowed) = value.multipliedReportingOverflow(by: unit)
+            guard !overflowed, scaled <= maximumDescriberTime - total else { return nil }
+            total += scaled
+        }
+        return .seconds(total)
     }
+
+    /// The longest time ``elapsed(fromDescriberTime:)`` reads, in seconds:
+    /// about a hundred years, longer than any process has been running.
+    static let maximumDescriberTime = 100 * 365 * 24 * 3600
 
     /// Keeps the frames of Chromium's graph by node id, from a
     /// subscription that lasts as long as the host's document:

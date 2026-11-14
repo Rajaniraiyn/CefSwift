@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 /// `cefswift embed`: the Xcode build phase. Xcode builds, embeds and signs
@@ -368,33 +369,13 @@ struct XcodeEmbed {
         let helper = HelperLink.Products(
             executable: build.workDirectory.appendingPathComponent("helper/\(HelperLink.helperProduct)"),
             startupLibrary: build.workDirectory.appendingPathComponent("helper/\(HelperLink.startupLibraryName)"))
-        let info = settings.infoPlist
-        let embedder = CefEmbedder(
-            executableName: build.executableName,
-            bundleIdentifier: info["CFBundleIdentifier"]?.stringValue ?? "",
-            minimumSystemVersion: info["LSMinimumSystemVersion"]?.stringValue ?? setting("MACOSX_DEPLOYMENT_TARGET") ?? "14.0",
-            version: info["CFBundleShortVersionString"]?.stringValue ?? "1.0",
-            build: info["CFBundleVersion"]?.stringValue ?? "1",
-            helper: helper,
-            frameworkSource: frameworkSource,
-            identity: settings.identity,
-            plan: settings.plan,
-            trim: settings.trim,
-            signingKeychain: settings.keychain,
-            workDirectory: build.workDirectory.appendingPathComponent("signing"))
-
-        let stamp = try stamp(manifest: manifest, embedder: embedder, settings: settings, helper: built)
+        let embedder = embedder(build: build, settings: settings, frameworkSource: frameworkSource, helper: helper)
+        let trimInfo = Self.embeddingInfoPlist(settings.infoPlist, app: build.app)
+        let stamp = stamp(cef: manifest.cef, build: build, settings: settings, embedder: embedder,
+                          appInfoPlist: trimInfo, helper: built, tool: Self.toolExecutable)
         if !needsEmbedding(build: build, stamp: stamp) {
             Log.info("Chromium's framework and helpers are up to date in \(build.app.lastPathComponent).")
         } else {
-            // The localizations macOS picks the app's language from: its
-            // .lproj directories, as well as CFBundleLocalizations.
-            var localizations = FrameworkTrim.appLocalizations(infoPlist: info)
-            for localization in FrameworkTrim.resourceLocalizations(in: [build.app]) where !localizations.contains(localization) {
-                localizations.append(localization)
-            }
-            var trimInfo = info
-            trimInfo["CFBundleLocalizations"] = .array(localizations.map { .string($0) })
             _ = try HelperLink.prepare(startup: built.startupLibrary, helper: built.executable, framework: framework,
                                        in: helper.executable.deletingLastPathComponent())
             try embedder.embed(into: build.app.appendingPathComponent("Contents"), appInfoPlist: trimInfo,
@@ -486,33 +467,101 @@ struct XcodeEmbed {
         return clean
     }
 
-    /// What decides the embedded parts. When it is the last run's and the
-    /// parts are in the app, an incremental build skips copying and signing.
-    private func stamp(manifest: CefManifest, embedder: CefEmbedder, settings: Settings,
-                       helper: HelperLink.Products) throws -> String {
+    /// The embedder for this build: Xcode's Info.plist and identity, the
+    /// plan, and the helper this phase built.
+    func embedder(build: Build, settings: Settings, frameworkSource: URL?, helper: HelperLink.Products) -> CefEmbedder {
+        let info = settings.infoPlist
+        return CefEmbedder(
+            executableName: build.executableName,
+            bundleIdentifier: info["CFBundleIdentifier"]?.stringValue ?? "",
+            minimumSystemVersion: info["LSMinimumSystemVersion"]?.stringValue ?? setting("MACOSX_DEPLOYMENT_TARGET") ?? "14.0",
+            version: info["CFBundleShortVersionString"]?.stringValue ?? "1.0",
+            build: info["CFBundleVersion"]?.stringValue ?? "1",
+            helper: helper,
+            frameworkSource: frameworkSource,
+            identity: settings.identity,
+            plan: settings.plan,
+            trim: settings.trim,
+            signingKeychain: settings.keychain,
+            workDirectory: build.workDirectory.appendingPathComponent("signing"))
+    }
+
+    /// The Info.plist the embedder trims and makes the helpers' from: the
+    /// app's, with the localizations macOS picks the app's language from,
+    /// its .lproj directories as well as CFBundleLocalizations.
+    static func embeddingInfoPlist(_ info: PlistDictionary, app: URL) -> PlistDictionary {
+        var localizations = FrameworkTrim.appLocalizations(infoPlist: info)
+        for localization in FrameworkTrim.resourceLocalizations(in: [app]) where !localizations.contains(localization) {
+            localizations.append(localization)
+        }
+        var embedding = info
+        embedding["CFBundleLocalizations"] = .array(localizations.map { .string($0) })
+        return embedding
+    }
+
+    /// This tool's executable: a rebuilt tool may embed differently.
+    static var toolExecutable: URL {
+        Bundle.main.executableURL ?? URL(fileURLWithPath: CommandLine.arguments[0])
+    }
+
+    /// Everything that decides the embedded parts, as text. When it is the
+    /// last run's and the parts are in the app, an incremental build skips
+    /// copying, trimming and signing; so it holds every input of those, in
+    /// full: entitlement values and not only their keys, the Info.plist the
+    /// helpers' are made from and the framework trimmed by (localizations
+    /// included), the identity, keychain and signing flags, the CEF version
+    /// and framework, the architectures, cefapp.json's bytes, and the
+    /// helper, startup library and this tool as built.
+    func stamp(cef: String, build: Build, settings: Settings, embedder: CefEmbedder, appInfoPlist: PlistDictionary,
+               helper: HelperLink.Products, tool: URL) -> String {
         func fileStamp(_ url: URL) -> String {
             let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
             let size = (attributes?[.size] as? Int) ?? 0
             let date = (attributes?[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
             return "\(size)@\(date)"
         }
-        let helperEntitlements = HelperKind.allCases.map { kind in
-            "\(kind.rawValue)=\((settings.plan.helperEntitlements[kind] ?? [:]).keys.sorted().joined(separator: ","))"
+        let config = settings.config.map { config -> String in
+            let data = (try? Data(contentsOf: config.source)) ?? Data()
+            return config.source.path + "@" + SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
         }
-        let usage = settings.infoPlist.keys.filter { $0.hasSuffix("UsageDescription") }.sorted()
-            .map { "\($0)=\(settings.infoPlist[$0]?.stringValue ?? "")" }
+        let helperEntitlements = HelperKind.allCases.map { kind in
+            "entitlements.\(kind.rawValue)=\(Self.canonical(.dictionary(settings.plan.helperEntitlements[kind] ?? [:])))"
+        }
         let parts: [String] = [
-            "cef=\(manifest.cef)", "framework=\(embedder.frameworkSource?.path ?? "embedded")",
+            "cef=\(cef)", "framework=\(embedder.frameworkSource?.path ?? "embedded")", "flavor=\(build.flavor)",
+            "architectures=\(build.architectures.joined(separator: ","))",
             "executable=\(embedder.executableName)", "id=\(embedder.bundleIdentifier)",
             "version=\(embedder.version)", "build=\(embedder.build)", "min=\(embedder.minimumSystemVersion)",
-            "identity=\(settings.identity.name)", "runtime=\(settings.plan.hardenedRuntime)",
-            "timestamp=\(settings.plan.secureTimestamp)", "trim=\(settings.trim)",
+            "identity=\(settings.identity.name)", "kind=\(settings.identity.kind)",
+            "team=\(settings.identity.teamIdentifier ?? "")", "keychain=\(settings.keychain ?? "")",
+            "runtime=\(settings.plan.hardenedRuntime)", "timestamp=\(settings.plan.secureTimestamp)",
+            "trim=\(settings.trim)", "config=\(config ?? "none")",
             "helper=\(fileStamp(helper.executable))", "startup=\(fileStamp(helper.startupLibrary))",
-        ] + helperEntitlements + usage
+            "tool=\(tool.path)@\(fileStamp(tool))",
+            "app.entitlements=\(Self.canonical(.dictionary(settings.appEntitlements)))",
+            "info=\(Self.canonical(.dictionary(appInfoPlist)))",
+        ] + helperEntitlements
         return parts.joined(separator: "\n") + "\n"
     }
 
-    private func needsEmbedding(build: Build, stamp: String) -> Bool {
+    /// A property-list value as text, the same for the same value:
+    /// dictionaries by sorted key, strings quoted.
+    static func canonical(_ value: PlistValue) -> String {
+        switch value {
+        case .string(let string): return string.debugDescription
+        case .bool(let bool): return bool ? "true" : "false"
+        case .integer(let integer): return "\(integer)"
+        case .real(let real): return "\(real)"
+        case .date(let date): return "date(\(date.timeIntervalSince1970))"
+        case .data(let data): return "data(\(data.base64EncodedString()))"
+        case .array(let array): return "[" + array.map(canonical).joined(separator: ",") + "]"
+        case .dictionary(let dictionary):
+            return "{" + dictionary.keys.sorted().map { $0.debugDescription + ":" + canonical(dictionary[$0]!) }
+                .joined(separator: ",") + "}"
+        }
+    }
+
+    func needsEmbedding(build: Build, stamp: String) -> Bool {
         let fm = FileManager.default
         let frameworks = build.app.appendingPathComponent("Contents/Frameworks")
         let parts = [BuiltProduct.cefFrameworkName, HelperLink.startupLibraryName]
