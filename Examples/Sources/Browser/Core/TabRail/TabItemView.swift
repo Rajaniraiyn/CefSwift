@@ -11,6 +11,8 @@ struct TabItemView: View {
 
     let tab: CefTab
     let style: Style
+    /// A narrow tab shows its close button only under the pointer.
+    var isCompact = false
 
     @Environment(BrowserController.self) private var controller
     @State private var isHovered = false
@@ -83,7 +85,7 @@ struct TabItemView: View {
     }
 
     @ViewBuilder private var closeButton: some View {
-        if isHovered || tab.isActive {
+        if isHovered || (tab.isActive && !isCompact) {
             Button {
                 tab.close()
             } label: {

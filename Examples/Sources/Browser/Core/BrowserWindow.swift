@@ -105,6 +105,8 @@ struct Toolbar: View {
                     if controller.tabsAtTheSide { NewTabButton(window: window) }
                 }
                 .buttonStyle(ToolbarIconButtonStyle())
+                .labelStyle(.iconOnly)
+                .fixedSize()
             } else {
                 Spacer()
             }

@@ -52,7 +52,7 @@ struct TabRail: View {
             let row = HStack(spacing: 2) {
                 ForEach(Array(items.enumerated()), id: \.offset) { offset, item in
                     if !hidden.contains(offset) {
-                        itemView(item, offset: offset, axis: .horizontal)
+                        itemView(item, offset: offset, axis: .horizontal, width: widths.widths[offset])
                             .frame(width: widths.widths[offset])
                             .id(offset)
                             .overlay(alignment: .leading) { dropMarker(before: item) }
@@ -114,12 +114,13 @@ struct TabRail: View {
         }
     }
 
-    @ViewBuilder private func itemView(_ item: TabRailLogic.Item, offset: Int, axis: Axis) -> some View {
+    @ViewBuilder private func itemView(_ item: TabRailLogic.Item, offset: Int, axis: Axis, width: CGFloat? = nil) -> some View {
         switch item.kind {
         case .pinnedTab, .tab:
             if item.index < window.tabs.count {
                 let tab = window.tabs[item.index]
-                TabItemView(tab: tab, style: item.kind == .pinnedTab ? .pinned : (axis == .vertical ? .row : .tab))
+                TabItemView(tab: tab, style: item.kind == .pinnedTab ? .pinned : (axis == .vertical ? .row : .tab),
+                            isCompact: (width ?? .infinity) < 120)
                     .railExtent(index: offset, axis: axis)
             }
         case .groupHeader:
