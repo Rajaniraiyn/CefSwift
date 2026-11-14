@@ -20,7 +20,8 @@ import CefSwiftUI
 ///   standard input closes, for `Scripts/measure-footprint.py`.
 ///
 /// Features read their own: `-appearance` (Appearance), `-showTaskManager`
-/// (TaskManager) and `-showPageInfo` (PageInfo).
+/// (TaskManager), `-showPageInfo` (PageInfo) and `-customChromiumPanels`
+/// (ChromiumPanels); `-restoresWindowsOnLaunch` is Settings › On startup.
 @MainActor
 struct LaunchOptions {
     var urls: [URL] = []

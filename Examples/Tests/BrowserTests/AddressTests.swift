@@ -61,6 +61,9 @@ import Testing
     }
 
     @Test func blankTabsShowNothing() {
+        // A data: page never shows its content: Chromium's security display, or the scheme.
+        #expect(AddressBar.summary(of: URL(string: "data:text/html,<title>x</title>secret"), title: "x") == "data:")
+        #expect(AddressBar.summary(of: URL(string: "data:text/html,x"), title: "", securityDisplay: "data:") == "data:")
         #expect(AddressBar.summary(of: nil, title: "") == "")
         #expect(AddressBar.summary(of: URL(string: "about:blank"), title: "") == "")
         #expect(AddressBar.editableText(for: URL(string: "about:blank")) == "")
