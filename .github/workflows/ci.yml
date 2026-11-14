@@ -189,12 +189,12 @@ jobs:
       # existing profile, a static local page), written to the run summary.
       # A virtual machine's numbers differ from a Mac's and drift, so the
       # bounds are wide: about 1.5 times what an Apple M3 measures (Minimal
-      # about 100 MiB, Browser about 410 MiB) and today's process counts.
-      # The Browser's windows are Chromium's own tabbed windows (CefChromeWindow):
-      # Chrome's window draws more in the GPU process (about +110 MiB), and
-      # CefTabStrip keeps two hidden hosts running (chrome://bookmarks for
-      # chrome.tabs, chrome://tab-strip-internals for groups and updates),
-      # two renderers more than with one CefWindow per tab.
+      # about 100 MiB, Browser about 215 MiB in 8 processes) and today's
+      # process counts. The Browser's windows are Chromium's own tabbed
+      # windows (CefChromeWindow); CefTabStrip runs no hidden host while
+      # nothing changes, and the Browser turns Chromium's WebUI omnibox
+      # popup off (its preloaded renderer and off-screen drawing cost about
+      # 160 MiB under the covered omnibox).
       # They catch a gross regression, such as a page or a host process kept
       # alive at idle; compare smaller changes on a Mac (CONTRIBUTING.md).
       - name: Footprint
@@ -209,7 +209,7 @@ jobs:
           Scripts/measure-footprint.py Examples/dist/Minimal.app --kinds relaunch --runs 3 \
             --markdown "$GITHUB_STEP_SUMMARY" --max-mib 160 --max-processes 5 || status=1
           Scripts/measure-footprint.py Examples/dist/Browser.app --kinds relaunch --runs 3 \
-            --markdown "$GITHUB_STEP_SUMMARY" --max-mib 620 --max-processes 9 || status=1
+            --markdown "$GITHUB_STEP_SUMMARY" --max-mib 320 --max-processes 8 || status=1
           exit "$status"
 
       # On failure: the full log, the results, and any crash reports from
