@@ -193,6 +193,7 @@ enum SelfTest {
         ("passkeys", passkeyChecks),
         ("chromiumTabs", chromiumTabChecks),
         ("chromeWindow", chromeWindowChecks),
+        ("tabHosting", tabHostingChecks),
         ("operations", operationChecks),
         ("loading", loadingChecks),
         ("siteSettings", siteSettingsChecks),

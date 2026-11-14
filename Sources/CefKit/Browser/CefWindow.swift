@@ -117,6 +117,8 @@ public final class CefWindow: Identifiable {
     @ObservationIgnored private var cefWindow: CefRef<cef_window_t>?
     @ObservationIgnored private var browserView: CefRef<cef_browser_view_t>?
     @ObservationIgnored private var accessoryController: NSTitlebarAccessoryViewController?
+    /// Where the window is shown in an app's window (``attach(to:)``).
+    @ObservationIgnored var placement: Placement?
 
     /// Creates the window and its browser. `browser` must not have been
     /// hosted elsewhere. The window stays hidden until ``show()``.
@@ -325,8 +327,12 @@ public final class CefWindow: Identifiable {
         return Unmanaged<NSView>.fromOpaque(handle).takeUnretainedValue().window
     }
 
+    /// Shows the window; one attached to a view of yours
+    /// (``attach(to:)``) is shown over that view.
     public func show() {
+        placement?.place()
         cefWindow.map { $0.pointer.pointee.show($0.pointer) }
+        placement?.order()
     }
 
     public func hide() {
@@ -488,6 +494,26 @@ public final class CefWindow: Identifiable {
         if notifying { window.pointee.theme_changed(window) }
     }
 
+    /// Adds a Chrome-style view for `browser` beside the window's own, for
+    /// SelfTest's check that CEF still allows one Chrome-style browser per
+    /// window: CEF 156 leaves the second view empty and never creates its
+    /// browser ("Cannot add multiple Chrome style BrowserViews").
+    @_spi(Testing) public func addBrowserViewForTesting(_ browser: CefBrowser) {
+        guard let window = cefWindow?.pointer,
+              let view = CefRef(adopting: browser.createBrowserView(
+                  delegate: BrowserViewDelegate(toolbar: .none, window: nil).makeDelegate(),
+                  showsStatusBubble: true, showsZoomBubble: true))
+        else { return }
+        extraViewsForTesting.append(view)
+        cefAddRef(view.pointer)
+        window.withMemoryRebound(to: cef_panel_t.self, capacity: 1) { panel in
+            view.pointer.withMemoryRebound(to: cef_view_t.self, capacity: 1) { panel.pointee.add_child_view(panel, $0) }
+            panel.pointee.layout(panel)
+        }
+    }
+
+    @ObservationIgnored private var extraViewsForTesting: [CefRef<cef_browser_view_t>] = []
+
     /// The color Chromium paints behind the page, from the window's theme.
     @_spi(Testing) public var webContentsBackgroundColor: UInt32? {
         browserView.map { view in
@@ -527,9 +553,12 @@ public final class CefWindow: Identifiable {
             (state as? CefWindowParticipant)?.windowDidClose(self)
         }
         accessoryController = nil
+        placement?.stop()
+        placement = nil
         windowWaiters = []
         cefWindow = nil
         browserView = nil
+        extraViewsForTesting = []
         isClosed = true
         // Closed before its profile loaded: the browser never came.
         if browser.state == .pending { browser.close() }
