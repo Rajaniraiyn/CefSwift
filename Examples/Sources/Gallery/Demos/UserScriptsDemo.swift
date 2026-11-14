@@ -50,7 +50,7 @@ private struct UserScriptsView: View {
             configuration.userScripts.append(.styleSheet("""
                 body { font-family: ui-serif, Georgia, serif; }
                 h1, h2 { color: #c0392b; letter-spacing: 0.02em; }
-                """, matching: "gallery://pages/*"))
+                """, matching: ["gallery://pages/*"]))
         }
         return CefBrowser(url: SamplePage.article.url, configuration: configuration)
     }

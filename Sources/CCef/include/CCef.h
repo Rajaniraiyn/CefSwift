@@ -12,6 +12,7 @@
 #include "ccef_loader.h"
 #include "ccef_net_error.h"
 #include "ccef_object.h"
+#include "ccef_request_match.h"
 #include "ccef_string.h"
 
 #endif  // CCEF_H_

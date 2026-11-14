@@ -12,7 +12,7 @@ extension SelfTest {
     /// Answers ``CefBrowserDelegate/browser(_:runContextMenu:for:)`` without
     /// showing anything, recording each menu and choosing what `choose`
     /// picks.
-    final class MenuRecorder: CefBrowserDelegate {
+    final class MenuRecorder: CefBrowserDelegate, CefProfileDelegate {
         var menus: [(menu: CefContextMenu, target: CefContextMenuTarget)] = []
         var choose: (CefContextMenu) -> CefContextMenu.Item? = { _ in nil }
         /// Runs before the choice is returned.
@@ -34,7 +34,7 @@ extension SelfTest {
             return .deny
         }
 
-        func browser(_ browser: CefBrowser, decideDestinationFor download: CefDownload) async -> CefDownloadDecision {
+        func profile(_ profile: CefProfile, decideDestinationFor download: CefDownload) async -> CefDownloadDecision {
             downloads.append(download.suggestedFilename)
             return .cancel
         }
@@ -127,6 +127,8 @@ extension SelfTest {
     ) async -> MenuHost? {
         var configuration = CefBrowser.Configuration()
         configure(&configuration)
+        // Downloads a menu item starts are decided by the profile.
+        (configuration.profile ?? .default).delegate = recorder
         let url = base.appendingPathComponent("page.html")
         switch style {
         case "chrome":

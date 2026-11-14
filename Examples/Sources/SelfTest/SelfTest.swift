@@ -173,6 +173,8 @@ enum SelfTest {
         ("accessibility", offscreenAccessibilityChecks),
         ("profile", profileChecks),
         ("profileStorage", profileStorageChecks),
+        ("profilePolicy", profilePolicyChecks),
+        ("pageState", pageStateChecks),
         ("systemPrompts", systemPromptChecks),
         ("window", windowChecks),
         ("behavior", browserBehaviorChecks),

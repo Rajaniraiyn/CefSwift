@@ -998,3 +998,27 @@ example takes 3.7 s, of which the phase is 2.0 s, most of it `cef doctor`'s
 checks: it skips SwiftPM when the tool and helper are newer than their
 sources, since SwiftPM's own checks (three builds, each with its own linker flags,
 and their `--show-bin-path`) took 15.7 s to find nothing to do.
+
+## Request filter matching
+
+A profile's request filter is consulted for every request of every page
+in the profile. `-benchmark filters` loads a page that fetches 500 small
+responses through a scheme handler, in a profile with no filter, with a
+filter that wants every request, and with one whose hosts no request
+matches, alternating four times each. CefKit's own time on Chromium's IO
+thread per request (`CefDiagnostics`), on an M3 MacBook Air:
+
+| Profile filter | `get_resource_request_handler` (lock, type and address test) | `on_before_resource_load` around the filter | The filter's closure | 500 fetches, as the page timed them |
+|---|---|---|---|---|
+| None | 0.01 µs (0.10 µs in the first run) | — | — | 68–80 ms |
+| Wants every request, allows it | 1.76–1.95 µs | 4.97–5.43 µs | 0.18–0.21 µs | 72–82 ms |
+| Hosts no request matches | 0.26–0.29 µs | — | — | 66–74 ms |
+
+A filter that wants a request costs about 7 µs of IO-thread time: a
+handler and a cookie filter allocated for the request, and the request's
+address, method, referrer, first party and frame read into Swift values.
+A filter whose declarative match rules a request out costs a quarter of a
+microsecond, an address read and tested in C, and the request never
+reaches Swift values. The page's own timing does not move measurably:
+Chromium's work for 500 requests dominates.
+

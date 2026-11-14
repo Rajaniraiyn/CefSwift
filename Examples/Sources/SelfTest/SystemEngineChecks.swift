@@ -148,7 +148,7 @@ extension SelfTest {
               SystemBrowser.dataStoreIdentifier("Work") == SystemBrowser.dataStoreIdentifier("Work")
                   && Set(ids.map(SystemBrowser.dataStoreIdentifier)).count == ids.count)
 
-        let script = SystemBrowser.webKitScript(for: CefUserScript(source: "x()", matching: "https://*.example.com/*"))
+        let script = SystemBrowser.webKitScript(for: CefUserScript(source: "x()", matching: ["https://*.example.com/*"]))
         check("system engine: scoped user scripts check the URL",
               script.source.hasPrefix("if (new RegExp(") && script.source.contains(".*") && script.source.contains("x()"))
 

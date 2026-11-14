@@ -37,7 +37,7 @@ private func fake<T>(_ type: T.Type, _ flag: FreedFlag) -> UnsafeMutablePointer<
     }
 
     @Test func processMessageWithoutMessageReleasesFrame() {
-        let client = CefBrowserClient(browser: nil, requestFilter: nil, chromeToolbar: .init())
+        let client = CefBrowserClient(browser: nil, chromeToolbar: .init())
         let raw = client.makeClient()
         defer { cefRelease(raw) }
         let browser = FreedFlag(), frame = FreedFlag()
@@ -47,7 +47,7 @@ private func fake<T>(_ type: T.Type, _ flag: FreedFlag) -> UnsafeMutablePointer<
     }
 
     @Test func downloadWithoutItemReleasesCallback() {
-        let client = CefBrowserClient(browser: nil, requestFilter: nil, chromeToolbar: .init())
+        let client = CefBrowserClient(browser: nil, chromeToolbar: .init())
         let raw = client.makeClient()
         defer { cefRelease(raw) }
         let handler = client.handlers.retained(cef_download_handler_t.self)!
@@ -59,7 +59,7 @@ private func fake<T>(_ type: T.Type, _ flag: FreedFlag) -> UnsafeMutablePointer<
     }
 
     @Test func credentialsWithoutBrowserReleaseCallback() {
-        let client = CefBrowserClient(browser: nil, requestFilter: nil, chromeToolbar: .init())
+        let client = CefBrowserClient(browser: nil, chromeToolbar: .init())
         let raw = client.makeClient()
         defer { cefRelease(raw) }
         let handler = client.handlers.retained(cef_request_handler_t.self)!
@@ -86,7 +86,7 @@ private func fake<T>(_ type: T.Type, _ flag: FreedFlag) -> UnsafeMutablePointer<
         weak var weakBrowser: CefBrowser?
         do {
             let browser = CefBrowser(url: URL(string: "about:blank"))
-            let client = CefBrowserClient(browser: browser, requestFilter: nil, chromeToolbar: .init())
+            let client = CefBrowserClient(browser: browser, chromeToolbar: .init())
             // A failed creation call releases the client it was given.
             cefRelease(client.makeClient())
             browser.client = client

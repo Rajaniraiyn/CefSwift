@@ -128,17 +128,54 @@ public enum CefPermissionDecision: Sendable, Equatable {
     public var grants: Bool { self == .allow || self == .alwaysAllow }
 }
 
-/// A permission request delivered to
-/// ``CefBrowserDelegate/browser(_:decidePermissionFor:)``.
+/// A permission request a page makes, delivered to its delegate's
+/// ``CefBrowserDelegate/browser(_:decidePermissionFor:)`` and, by
+/// default, from there to its profile's
+/// ``CefProfileDelegate/profile(_:decidePermissionFor:in:)``.
+///
+/// Origins are URLs, as ``CefSiteSettings`` takes them, so an answer can
+/// be checked against or stored in the profile's site settings.
 public struct CefPermissionRequest: Sendable, Equatable {
     /// The permissions requested; a request can combine several.
     public var kinds: CefPermissionRequest.Kinds
-    /// The origin asking for permission.
-    public var origin: String
+    /// The origin asking for permission, `scheme://host[:port]`: the
+    /// requesting frame's.
+    public var origin: URL
+    /// The origin of the page's top-level document, which Chromium shows
+    /// in the address bar; `nil` before the page has one. It differs from
+    /// ``origin`` when an embedded frame asks.
+    public var topLevelOrigin: URL?
+    /// The frame asking, where CEF names it: for camera, microphone and
+    /// screen capture. `nil` for the other kinds, whose requests CEF
+    /// reports with their origin only.
+    public var frame: CefFrame?
 
-    public init(kinds: CefPermissionRequest.Kinds, origin: String) {
+    /// Whether the top-level document asks: the asking ``frame`` is the
+    /// main frame or, where CEF names no frame, ``origin`` is the
+    /// ``topLevelOrigin``.
+    public var isMainFrame: Bool {
+        if let frame { return frame.isMain }
+        return topLevelOrigin.map { CefSiteSettings.origin(of: $0) == CefSiteSettings.origin(of: origin) } ?? true
+    }
+
+    /// Creates a value of your own, for previews and tests.
+    public init(kinds: CefPermissionRequest.Kinds, origin: URL, topLevelOrigin: URL? = nil, frame: CefFrame? = nil) {
         self.kinds = kinds
         self.origin = origin
+        self.topLevelOrigin = topLevelOrigin
+        self.frame = frame
+    }
+
+    /// A request from `page`, whose top-level origin is its address's;
+    /// `nil` when CEF's origin is not an address with a host (an opaque
+    /// origin), which nothing can be stored for.
+    @MainActor
+    init?(kinds: CefPermissionRequest.Kinds, origin: String, frame: CefFrame?, in page: CefBrowser) {
+        guard let url = URL(string: origin), url.scheme != nil, url.host() != nil else { return nil }
+        self.init(
+            kinds: kinds, origin: URL(string: CefSiteSettings.origin(of: url)) ?? url,
+            topLevelOrigin: page.url.flatMap { $0.host() == nil ? nil : URL(string: CefSiteSettings.origin(of: $0)) },
+            frame: frame)
     }
 }
 

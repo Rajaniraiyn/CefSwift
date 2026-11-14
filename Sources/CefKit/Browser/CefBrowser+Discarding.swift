@@ -360,7 +360,8 @@ extension CefBrowser {
         statusText = ""
         findResult = nil
         tooltip = nil
-        isCapturingMedia = false
+        mediaCapture = []
+        draggableRegions = []
         for download in downloads { download.control = nil }
         cancelDecisions { _ in true }
         devTools.prepareForNewSession()

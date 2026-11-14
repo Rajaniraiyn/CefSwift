@@ -307,6 +307,16 @@ reading as one.
   `JSON`, `CDM`). A property holding a full address is `url`, not `origin`.
 - **One way to do a thing.** Remove a convenience that duplicates another
   API instead of keeping both, and drop options the host overrides.
+- **Policy belongs to the profile; a page overrides it.** What applies to
+  every page (request filters, scheme handlers, user scripts, bridges,
+  attachments, permission and download decisions, Chromium settings) is a
+  member of `CefProfile` or a method of `CefProfileDelegate`, so pages
+  Chromium creates itself get it too. A page's override has the same name
+  in `CefBrowser.Configuration` (`requestFilter`, `userScripts`) or on
+  `CefBrowserDelegate`, and its precedence (page, then profile, then
+  runtime) is documented once, in the guide's "What is configured where".
+  What is process-wide stays on `CefRuntime`; what every profile starts
+  from is `CefRuntime.Configuration.profiles`.
 - **Test hooks** are `@_spi(Testing)`, never plain `public`.
 - **Plain values the library hands out** (a history entry, a load error,
   a task manager row) have a public memberwise initializer, documented

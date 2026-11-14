@@ -30,10 +30,12 @@ extension CefBrowserClient {
             return CefBrowserClient.run(s, browser, default: 0) { _, b in
                 // Chromium may have reported the download already, without
                 // the name it suggests here.
-                let download = b.effectiveProfile.trackDownload(snapshot, startedBy: b)
+                let download = b.profile.trackDownload(snapshot, startedBy: b)
                 download.apply(snapshot)
-                b.decide(.browser) { delegate -> URL? in
-                    let decision = await delegate.browser(b, decideDestinationFor: download)
+                // Downloads belong to the profile, which decides where they go.
+                let profile = b.profile
+                b.decide(.browser) { _ -> URL? in
+                    let decision = await profile.effectiveDelegate.profile(profile, decideDestinationFor: download)
                     switch CefDownloadDestination.resolve(decision, suggestedFilename: download.suggestedFilename) {
                     case .file(let file): return file
                     case .cancel: return nil
@@ -119,14 +121,19 @@ extension CefBrowserClient {
     func makePermissionHandler() -> UnsafeMutablePointer<cef_permission_handler_t> {
         let h = cefAllocate(cef_permission_handler_t.self, owner: self)
         h.pointee.on_request_media_access_permission = { s, browser, frame, origin, requested, callback in
+            let frameValue = frame.map(CefFrame.init(reading:))
             cefRelease(frame)
             let kinds = CefPermissionRequest.Kinds.fromMediaTypes(requested)
-            let request = CefPermissionRequest(kinds: kinds, origin: CefStringUtil.string(from: origin))
+            let originText = CefStringUtil.string(from: origin)
             guard let callback = CefRef(adopting: callback) else {
                 cefRelease(browser)
                 return 0
             }
             return CefBrowserClient.run(s, browser, default: 0) { _, b in
+                guard let request = CefPermissionRequest(kinds: kinds, origin: originText, frame: frameValue, in: b) else {
+                    callback.pointer.pointee.cancel(callback.pointer)
+                    return 1
+                }
                 // Chromium asks before it reads the site settings for media,
                 // so stored values answer here, and only the rest is asked.
                 let stored = b.storedAnswer(to: request)
@@ -142,7 +149,8 @@ extension CefBrowserClient {
                     answer(stored.granted(after: nil))
                     return 1
                 }
-                let asked = CefPermissionRequest(kinds: stored.undecided, origin: request.origin)
+                var asked = request
+                asked.kinds = stored.undecided
                 b.decide(.page) { await $0.browser(b, decidePermissionFor: asked) } then: { decision in
                     b.remember(decision, for: asked.kinds, origin: asked.origin)
                     answer(stored.granted(after: decision))
@@ -151,15 +159,18 @@ extension CefBrowserClient {
             }
         }
         h.pointee.on_show_permission_prompt = { s, browser, promptID, origin, requested, callback in
-            let request = CefPermissionRequest(
-                kinds: CefPermissionRequest.Kinds.fromRequestTypes(requested),
-                origin: CefStringUtil.string(from: origin)
-            )
+            let kinds = CefPermissionRequest.Kinds.fromRequestTypes(requested)
+            let originText = CefStringUtil.string(from: origin)
             guard let callback = CefRef(adopting: callback) else {
                 cefRelease(browser)
                 return 0
             }
             return CefBrowserClient.run(s, browser, default: 0) { _, b in
+                // CEF does not say which frame asks.
+                guard let request = CefPermissionRequest(kinds: kinds, origin: originText, frame: nil, in: b) else {
+                    callback.pointer.pointee.cont(callback.pointer, CEF_PERMISSION_RESULT_DENY)
+                    return 1
+                }
                 b.decide(.permissionPrompt(promptID)) { await $0.browser(b, decidePermissionFor: request) } then: { decision in
                     b.remember(decision, for: request.kinds, origin: request.origin)
                     callback.pointer.pointee.cont(callback.pointer, decision.cefResult)

@@ -2,8 +2,8 @@ import Foundation
 import Observation
 
 extension CefProfile {
-    /// Where the profile's downloads go when the browser's delegate leaves
-    /// the decision to the profile, as the default delegate does.
+    /// Where the profile's downloads go when its delegate does not decide,
+    /// as the default delegate does not.
     public enum DownloadPolicy: Sendable, Hashable {
         /// Save in the user's Downloads folder, under the suggested name,
         /// numbered when the name is taken. The default, as in Safari and
@@ -19,9 +19,9 @@ extension CefProfile {
         case disabled
     }
 
-    /// Where this profile's downloads go, unless the browser's delegate
+    /// Where this profile's downloads go, unless the profile's delegate
     /// decides otherwise in
-    /// ``CefBrowserDelegate/browser(_:decideDestinationFor:)``. Takes
+    /// ``CefProfileDelegate/profile(_:decideDestinationFor:)``. Takes
     /// effect for the next download; the default is ``DownloadPolicy/downloadsFolder``.
     ///
     /// ```swift

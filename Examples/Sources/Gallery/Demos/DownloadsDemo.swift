@@ -3,8 +3,9 @@ import SwiftUI
 
 /// `browser.downloads` lists a browser's downloads; each ``CefDownload`` is
 /// observable, with its progress and state, and `pause()`, `resume()` and
-/// `cancel()`. Where one is saved follows the profile's `downloadPolicy`
-/// unless the delegate decides, as here: a folder of the app's own.
+/// `cancel()`. Downloads belong to the profile: where one is saved follows
+/// the profile's `downloadPolicy` unless the profile's delegate decides, as
+/// here: a folder of the app's own.
 struct DownloadsDemo: Demo {
     let title = "Downloads"
     let summary = "Files the page downloads, saved where the app decides, with their progress and controls."
@@ -31,14 +32,21 @@ private struct DownloadsView: View {
     }
 }
 
-/// The browser's delegate saves into a folder of the app's own in the
-/// temporary directory, which needs no permission, instead of asking.
+/// The profile's delegate saves into a folder of the app's own in the
+/// temporary directory, which needs no permission, instead of asking. The
+/// demo's page has a profile of its own, so the decision is the demo's alone.
 @MainActor
-private final class DownloadsModel: CefBrowserDelegate {
+private final class DownloadsModel: CefProfileDelegate {
     let folder = FileManager.default.temporaryDirectory.appending(path: "Gallery Downloads")
-    lazy var browser = CefBrowser(url: Self.page.localURL, delegate: self)
+    let profile = CefProfile.incognito()
+    lazy var browser: CefBrowser = {
+        profile.delegate = self
+        var configuration = CefBrowser.Configuration()
+        configuration.profile = profile
+        return CefBrowser(url: Self.page.localURL, configuration: configuration)
+    }()
 
-    func browser(_ browser: CefBrowser, decideDestinationFor download: CefDownload) async -> CefDownloadDecision {
+    func profile(_ profile: CefProfile, decideDestinationFor download: CefDownload) async -> CefDownloadDecision {
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         return .saveInFolder(folder)
     }

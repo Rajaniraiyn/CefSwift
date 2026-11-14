@@ -49,19 +49,21 @@ final class PageScripting: CefRendererExtension {
 
     struct Script {
         var source: String
-        var urlPattern: String?
+        var matches: [String] = []
+        var excludeMatches: [String] = []
         var atDocumentEnd: Bool
         var mainFrameOnly: Bool
 
         func applies(to url: String, isMainFrame: Bool) -> Bool {
             if mainFrameOnly, !isMainFrame { return false }
-            return urlPattern.map { PageScripting.matches(url, pattern: $0) } ?? true
+            if !matches.isEmpty, !matches.contains(where: { PageScripting.matches(url, pattern: $0) }) { return false }
+            return !excludeMatches.contains { PageScripting.matches(url, pattern: $0) }
         }
 
         /// A scoped script runs inside a function, so its top-level
         /// declarations stay out of the page's globals.
         var runnableSource: String {
-            urlPattern == nil ? source : "(() => {\n\(source)\n})();"
+            matches.isEmpty && excludeMatches.isEmpty ? source : "(() => {\n\(source)\n})();"
         }
     }
 
@@ -91,7 +93,9 @@ final class PageScripting: CefRendererExtension {
             scripts = (json["scripts"]?.array ?? []).compactMap { script in
                 guard let source = script["source"]?.string else { return nil }
                 return Script(
-                    source: source, urlPattern: script["urlPattern"]?.string,
+                    source: source,
+                    matches: (script["matches"]?.array ?? []).compactMap(\.string),
+                    excludeMatches: (script["excludeMatches"]?.array ?? []).compactMap(\.string),
                     atDocumentEnd: script["atDocumentEnd"]?.bool ?? false,
                     mainFrameOnly: script["mainFrameOnly"]?.bool ?? false)
             }
@@ -169,12 +173,15 @@ final class PageScripting: CefRendererExtension {
     // MARK: Contexts
 
     func contextCreated(_ context: V8Context, in frame: CefRendererFrame) {
-        guard let configuration = configurations[frame.browserID] else { return }
         // A renderer process that joins a browser later than its
-        // configuration changed learns of the change from the reply.
+        // configuration changed learns of the change from the reply, and
+        // so does one of a browser Chromium created without `extra_info`
+        // (it reports -1), from its next document on.
         if reportedBrowsers.insert(frame.browserID).inserted {
-            frame.send(CefProcessMessage(CefPageScriptingMessage.sync, [.int(Int32(configuration.generation))]))
+            let generation = configurations[frame.browserID]?.generation ?? -1
+            frame.send(CefProcessMessage(CefPageScriptingMessage.sync, [.int(Int32(clamping: generation))]))
         }
+        guard let configuration = configurations[frame.browserID] else { return }
         guard !configuration.isEmpty, let mainWorld = frame.mainWorldContext, mainWorld.isSame(context),
               let global = context.global
         else { return }
@@ -228,9 +235,13 @@ final class PageScripting: CefRendererExtension {
 
     // MARK: User scripts
 
+    /// Runs a user script. An exception it throws is reported on the
+    /// page's console, which the browser process hears as any console
+    /// message (``CefBrowserDelegate/browser(_:didLog:)``), named as a
+    /// user script's with its line.
     private func run(_ script: Script, in context: V8Context) {
         if case .failure(let error) = context.run(script.runnableSource) {
-            report(error.message, in: context)
+            report("CefUserScript: \(error.message) (line \(error.line))", in: context)
         }
     }
 

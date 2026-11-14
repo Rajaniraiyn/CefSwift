@@ -8,6 +8,9 @@ import Darwin
 ///
 /// - `requests`: 500 small responses and one 200 MB response through a
 ///   scheme handler, with a request filter on every request.
+/// - `filters`: 500 small requests of a page with no request filter, a
+///   profile filter that wants every request, and one whose hosts no
+///   request matches, alternating.
 /// - `lifecycle`: CPU use of an animated page in each host and state.
 /// - `frames`: offscreen animation frames, pacing, input latency and CPU.
 /// - `compositor`: what `CefOffscreenBrowserView` presents, at three sizes.
@@ -19,6 +22,7 @@ enum Benchmarks {
     static func run(_ name: String) async {
         switch name {
         case "requests": await requests()
+        case "filters": await requestFilters()
         case "lifecycle": await lifecycleCPU()
         case "visibility": await windowedVisibility()
         case "probes": await probes()
@@ -31,6 +35,45 @@ enum Benchmarks {
     }
 
     // MARK: Requests
+
+    /// What a profile's request filter costs a page's requests: none, one
+    /// that decides every request, and one whose declarative match rules
+    /// every request out before Swift runs.
+    static func requestFilters() async {
+        let kinds = ["none", "every", "miss"]
+        for run in 1...(4 * kinds.count) {
+            let kind = kinds[(run - 1) % kinds.count]
+            let profile = CefProfile.incognito()
+            switch kind {
+            case "every": profile.requestFilter = CefRequestFilter { _ in .allow }
+            case "miss": profile.requestFilter = CefRequestFilter(hosts: ["nothing.example"]) { _ in .block }
+            default: break
+            }
+            var configuration = CefBrowser.Configuration()
+            configuration.profile = profile
+            let browser = CefBrowser(url: URL(string: "selftest://bench/page.html?big=/small/end")!, configuration: configuration)
+            let view = CefWindowedBrowserView(browser: browser)
+            view.frame = SelfTest.window.contentView!.bounds
+            let meter = MainThreadMeter()
+            CefDiagnostics.isEnabled = true
+            CefDiagnostics.reset()
+            meter.start()
+            SelfTest.window.contentView!.addSubview(view)
+            _ = await SelfTest.waitUntil(timeout: .seconds(60)) { browser.title.hasPrefix("done") }
+            meter.stop()
+            let match = CefDiagnostics.counter(.requestFilterMatch)
+            let overhead = CefDiagnostics.counter(.requestFilterOverhead)
+            let filter = CefDiagnostics.counter(.requestFilter)
+            print(String(
+                format: "bench filters run %d (%@): %@; main thread %.0f ms; match %.2f µs each (%d); around the filter %.2f µs each (%d); filter %.2f µs each (%d)",
+                run, kind, browser.title, meter.busy.benchMilliseconds, match.microsecondsEach, match.count,
+                overhead.microsecondsEach, overhead.count, filter.microsecondsEach, filter.count))
+            browser.close(force: true)
+            _ = await SelfTest.waitUntil { browser.state == .closed }
+            view.removeFromSuperview()
+            try? await Task.sleep(for: .seconds(1))
+        }
+    }
 
     static func requests() async {
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("cefswift-bench-\(getpid()).bin")
@@ -45,7 +88,7 @@ enum Benchmarks {
         for run in 1...(3 * kinds.count) {
             let kind = kinds[(run - 1) % kinds.count]
             var configuration = CefBrowser.Configuration()
-            configuration.requestFilter = { request in
+            configuration.requestFilter = CefRequestFilter { request in
                 if request.url?.path == "/blocked" { return .block }
                 return .setHeaders(["X-Bench": "1"])
             }

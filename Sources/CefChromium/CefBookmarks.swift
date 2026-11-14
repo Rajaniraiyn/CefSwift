@@ -267,7 +267,7 @@ public final class CefBookmarks {
             """)
 
     private var bookmarksFileURL: URL? {
-        profile.directory?.appendingPathComponent("Bookmarks")
+        profile.storageDirectory?.appendingPathComponent("Bookmarks")
     }
 
     /// Chromium's `Bookmarks` file, when it can stand in for the service:

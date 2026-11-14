@@ -334,7 +334,7 @@ public final class CefExtensions {
 
     /// Which configured extensions CefChromium has accepted in this profile.
     private var acceptedLedgerURL: URL? {
-        profile.directory?.appendingPathComponent("CefSwift Accepted Extensions")
+        profile.storageDirectory?.appendingPathComponent("CefSwift Accepted Extensions")
     }
 
     // MARK: Observing
@@ -346,7 +346,7 @@ public final class CefExtensions {
         liveEvents = Task { [weak self] in
             for await _ in events { self?.scheduleRefresh() }
         }
-        if let directory = profile.directory {
+        if let directory = profile.storageDirectory {
             for name in ["Extensions", "Preferences", "Secure Preferences"] {
                 watches.append(CefFileWatch(url: directory.appendingPathComponent(name)) { [weak self] in
                     self?.scheduleRefresh()

@@ -238,9 +238,27 @@ extension CefBrowser {
         withHost { Int($0.pointee.get_windowless_frame_rate($0)) }
     }
 
-    /// Marks the whole view as needing to be repainted. The repaint arrives
-    /// with the next frame, at the browser's frame rate
-    /// (``CefBrowser/Rendering/offscreen(frameRate:)``).
+    /// How many frames a second Chromium draws this offscreen browser at:
+    /// the rate of its ``CefBrowser/Rendering/offscreen(frameRate:)`` until
+    /// changed here, from 1 to 240. A change applies at once, to a browser
+    /// not created yet when it is. A game's menu can draw at 30 and its
+    /// play at 120, for instance. While Low Power Mode or the Mac's heat
+    /// lowers offscreen rates (``CefRuntime/energyPolicy``), the lower of
+    /// the two applies. Windowed and Chrome-style browsers ignore it.
+    public var offscreenFrameRate: Int {
+        get {
+            if let preferredOffscreenFrameRate { return preferredOffscreenFrameRate }
+            if case .offscreen(let rate) = configuration.rendering { return rate }
+            return 60
+        }
+        set {
+            preferredOffscreenFrameRate = min(max(newValue, 1), 240)
+            CefRuntime.shared.lifecycleCoordinator.setNeedsUpdate()
+        }
+    }
+
+    /// Marks the whole view as needing to be repainted (`invalidate`). The
+    /// repaint arrives with the next frame, at ``offscreenFrameRate``.
     public func setNeedsDisplay() {
         withHost { $0.pointee.invalidate($0, PET_VIEW) }
     }

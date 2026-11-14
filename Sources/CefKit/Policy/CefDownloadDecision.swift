@@ -1,7 +1,7 @@
 import Foundation
 
 /// Whether and where to save a download: the answer to
-/// ``CefBrowserDelegate/browser(_:decideDestinationFor:)``.
+/// ``CefProfileDelegate/profile(_:decideDestinationFor:)``.
 public enum CefDownloadDecision: Sendable, Equatable {
     /// Save the download as `file`, exactly: the name is not numbered.
     case save(to: URL)

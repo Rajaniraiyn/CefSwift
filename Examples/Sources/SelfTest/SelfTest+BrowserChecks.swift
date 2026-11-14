@@ -29,7 +29,7 @@ extension SelfTest {
     /// call. Installed at start-up so that each group also runs by itself.
     static func installBridgeHandlers() {
         bridge.handle("greet") { (person: Person, call: CefBridge.Call) in
-            "Hello, \(person.name) from \(call.isMainFrame ? "main" : "sub")!"
+            "Hello, \(person.name) from \(call.frame.isMain ? "main" : "sub")!"
         }
         bridge.handle("fail") { (_: CefJSON) -> String in throw CefError.operationFailed("nope") }
     }
@@ -38,7 +38,7 @@ extension SelfTest {
         var configuration = CefBrowser.Configuration()
         configuration.bridges = [bridge]
         configuration.userScripts = [CefUserScript(source: "window.__injected = 42;")]
-        configuration.requestFilter = { request in
+        configuration.requestFilter = CefRequestFilter { request in
             request.url?.path == "/blocked" ? .block : .allow
         }
         // The page calls the bridge from an inline script: it must already exist.
@@ -263,9 +263,9 @@ extension SelfTest {
     static func windowChecks() async {
         var configuration = CefBrowser.Configuration()
         configuration.userScripts = [
-            CefUserScript(source: "window.__scoped = 1", matching: "chrome://version/*"),
-            CefUserScript(source: "window.__elsewhere = 1", matching: "https://*"),
-            .styleSheet("body { --cefswift-probe: 7 }", matching: "chrome://*"),
+            CefUserScript(source: "window.__scoped = 1", matching: ["chrome://version/*"]),
+            CefUserScript(source: "window.__elsewhere = 1", matching: ["https://*"]),
+            .styleSheet("body { --cefswift-probe: 7 }", matching: ["chrome://*"]),
         ]
         let browser = CefBrowser(url: URL(string: "chrome://version")!, configuration: configuration)
         let browserWindow = CefWindow(browser: browser)

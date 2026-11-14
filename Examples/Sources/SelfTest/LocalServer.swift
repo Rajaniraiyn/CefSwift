@@ -189,6 +189,13 @@ final class LocalServer: Sendable {
             }
         case let path where path.hasPrefix("/passkeys"):
             html(PasskeyChecks.page)
+        case let path where path.hasPrefix("/policy/"):
+            if let (type, content, extra) = ProfilePolicyPages.content(for: String(path.dropFirst("/policy/".count))) {
+                headers = [("Content-Type", type)] + extra
+                body = content
+            } else {
+                status = "404 Not Found"
+            }
         case let path where path.hasSuffix(".txt"):
             headers = [("Content-Type", "text/plain"),
                        ("Content-Disposition", "attachment; filename=\"\(path.dropFirst())\"")]

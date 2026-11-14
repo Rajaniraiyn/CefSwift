@@ -38,6 +38,7 @@ public final class CefWindowedBrowserView: NSView {
     }
 
     private var swipeMonitor: Any?
+    private var dragMonitor: Any?
 
     /// Whether ``tearDown()`` closes the browser. `CefWebView(url:)` sets
     /// this for the browser it owns.
@@ -64,6 +65,7 @@ public final class CefWindowedBrowserView: NSView {
         layer?.backgroundColor = browser?.hostBackgroundColor
         hostBrowserIfPossible()
         updateSwipeMonitor()
+        updateDragMonitor()
     }
 
     public override func viewDidMoveToWindow() {
@@ -73,6 +75,34 @@ public final class CefWindowedBrowserView: NSView {
         if window == nil { browser?.cancelDeferredCreation(in: self) }
         hostBrowserIfPossible()
         updateSwipeMonitor()
+        updateDragMonitor()
+    }
+
+    /// Chromium's view takes mouse-downs directly, so a drag that starts
+    /// in a region the page marks `-webkit-app-region: drag` is claimed
+    /// before it sees it, and moves the window.
+    private func updateDragMonitor() {
+        let wantsMonitor = !isTornDown && window != nil && browser != nil
+        guard wantsMonitor != (dragMonitor != nil) else { return }
+        if let dragMonitor {
+            NSEvent.removeMonitor(dragMonitor)
+            self.dragMonitor = nil
+            return
+        }
+        dragMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown]) { [weak self] event in
+            nonisolated(unsafe) let event = event
+            let claimed = MainActor.assumeIsolated { () -> Bool in
+                guard let self, let browser = self.browser, !browser.draggableRegions.isEmpty,
+                      let window = self.window, event.window === window, !self.isHiddenOrHasHiddenAncestor
+                else { return false }
+                let point = self.convert(event.locationInWindow, from: nil)
+                guard self.bounds.contains(point) else { return false }
+                // Regions are in the page's coordinates, top-left origin.
+                let pagePoint = CGPoint(x: point.x, y: self.isFlipped ? point.y : self.bounds.height - point.y)
+                return browser.handleWindowDrag(event, at: pagePoint)
+            }
+            return claimed ? nil : event
+        }
     }
 
     /// Chromium's view takes scroll events directly, so swipes are claimed
@@ -154,6 +184,7 @@ public final class CefWindowedBrowserView: NSView {
         guard !isTornDown else { return }
         isTornDown = true
         updateSwipeMonitor()
+        updateDragMonitor()
         if closesBrowserOnTeardown {
             browser?.close(force: true)
         }

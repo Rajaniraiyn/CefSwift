@@ -53,7 +53,7 @@ extension SelfTest {
         CefRuntime.shared.registerSchemeHandler(scheme: "selftest", domain: "main-actor", handler: MainActorPages(title: "from the main actor"))
 
         var configuration = CefBrowser.Configuration()
-        configuration.requestFilter = { request in
+        configuration.requestFilter = CefRequestFilter { request in
             // On macOS 15 and later this asks the executor's checkIsolated(),
             // since the filter runs inside a CEF callback, not an actor job.
             CefIOActor.preconditionIsolated()

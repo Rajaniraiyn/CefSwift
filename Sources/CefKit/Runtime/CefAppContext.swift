@@ -43,6 +43,10 @@ final class CefAppContext: @unchecked Sendable {
         // thread actors start sending their jobs to Chromium.
         process.pointee.on_context_initialized = { _ in
             CefThreadExecutor.all.forEach { $0.start() }
+            // The default profile's pages use a context sharing the global
+            // one's storage; made once the global one exists, it has
+            // initialized before the first browser needs it.
+            MainActor.assumeIsolated { _ = CefProfile.default.requestContext() }
         }
         process.pointee.on_schedule_message_pump_work = { s, delayMS in
             cefOwner(CefAppContext.self, s)?.pump.scheduleWork(delayMilliseconds: delayMS)
@@ -71,6 +75,12 @@ final class CefAppContext: @unchecked Sendable {
         }
         process.pointee.get_default_client = { s in
             cefRetained(cefOwner(CefAppContext.self, s)?.defaultClient)
+        }
+        // A request context Chromium creates itself, for a window it opens
+        // from its own UI, gets a handler that finds its profile once the
+        // context is ready, so the profile's request filter applies there.
+        process.pointee.get_default_request_context_handler = { _ in
+            CefProfileContextHandler(policy: nil).makeHandler()
         }
         browserProcessHandler = process
 

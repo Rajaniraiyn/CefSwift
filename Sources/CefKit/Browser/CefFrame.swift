@@ -30,19 +30,34 @@ public struct CefFrame: Sendable, Hashable, Identifiable {
     /// The identifier of the frame that contains this one; `nil` for the
     /// main frame.
     public let parentID: String?
+    /// The origin of the frame's document (`"https://example.com"`), as the
+    /// browser process establishes it from its own record of the frame's
+    /// address, as ``CefBridge`` does for its callers: the address's
+    /// origin; for `about:blank` and `about:srcdoc`, the nearest parent
+    /// frame's; for `blob:https://example.com/…`, the one it names;
+    /// `"file://"` for a top-level `file:` page. `nil` when the address
+    /// gives an opaque origin (`data:`, a top-level `about:blank`, a
+    /// `file:` subframe). A sandboxed document's origin is opaque although
+    /// its address has one; ``CefBridge/Call/origin`` tells that case apart
+    /// with the renderer's report.
+    public internal(set) var origin: String?
 
-    public init(id: String, url: URL?, name: String = "", isMain: Bool, parentID: String? = nil) {
+    public init(id: String, url: URL?, name: String = "", isMain: Bool, parentID: String? = nil, origin: String? = nil) {
         self.id = id
         self.url = url
         self.name = name
         self.isMain = isMain
         self.parentID = parentID
+        self.origin = origin
     }
 
-    /// Reads a frame CEF passed in, without taking its reference.
+    /// Reads a frame CEF passed in, without taking its reference. Any
+    /// thread.
     init(reading frame: UnsafeMutablePointer<cef_frame_t>) {
         id = CefStringUtil.takingUserFree(frame.pointee.get_identifier(frame)) ?? ""
-        url = CefStringUtil.takingUserFree(frame.pointee.get_url(frame)).flatMap { $0.isEmpty ? nil : URL(string: $0) }
+        let address = CefStringUtil.takingUserFree(frame.pointee.get_url(frame))
+        url = address.flatMap { $0.isEmpty ? nil : URL(string: $0) }
+        origin = CefBridge.addressOrigin(ofFrame: frame, url: address)
         name = CefStringUtil.takingUserFree(frame.pointee.get_name(frame)) ?? ""
         isMain = frame.pointee.is_main(frame) != 0
         if let parent = frame.pointee.get_parent(frame) {
@@ -88,10 +103,12 @@ extension CefBrowser {
         }
     }
 
-    /// A frame started or finished loading, or changed its address.
+    /// A frame started or finished loading, or changed its address, which
+    /// gives it a new origin.
     func frameDidUpdate(_ id: CefFrame.ID, url: URL?) {
         guard let index = frames.firstIndex(where: { $0.id == id }), frames[index].url != url else { return }
         frames[index].url = url
+        withFrame(id) { frames[index].origin = CefBridge.addressOrigin(ofFrame: $0, url: url?.absoluteString) }
     }
 
     /// Runs `body` with the live frame `id`, if there is one.
@@ -141,9 +158,12 @@ extension CefBrowserClient {
         let h = cefAllocate(cef_frame_handler_t.self, owner: self)
         h.pointee.on_frame_attached = { s, browser, frame, _ in
             let value = frame.map(CefFrame.init(reading:))
-            cefRelease(frame)
+            defer { cefRelease(frame) }
+            nonisolated(unsafe) let raw = frame
+
             CefBrowserClient.run(s, browser, default: ()) { _, b in
                 if let value { b.frameDidAttach(value) }
+                if let raw { b.pageScripting.frameDidAttach(raw) }
             }
         }
         h.pointee.on_frame_detached = { s, browser, frame in

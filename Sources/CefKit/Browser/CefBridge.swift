@@ -1,3 +1,4 @@
+import os
 import CCef
 import CefBase
 import Foundation
@@ -177,6 +178,24 @@ public final class CefBridge {
         }
     }
 
+    /// Delivers an event to listeners registered with `<name>.on(event, fn)`
+    /// in one frame of `page`, such as the frame a call came from
+    /// (``Call/frame``). Nothing happens when the frame is gone, or its
+    /// document has no bridge (``access``).
+    public func emit(_ event: String, _ payload: some Encodable = CefJSON.null, to frame: CefFrame, in page: CefBrowser) {
+        guard browsers.contains(where: { $0 === page }), !page.isDiscarded else { return }
+        let encoder = CefWireEncoder(header: CefWireHeader())
+        encoder.buffer.append(name)
+        encoder.buffer.append(event)
+        do {
+            try encoder.encode(payload)
+        } catch {
+            CefLog.error("CefBridge.emit(\(event)): payload cannot be encoded: \(error)")
+            return
+        }
+        page.withFrame(frame.id) { encoder.buffer.send(CefPageScriptingMessage.emit, from: $0, to: PID_RENDERER) }
+    }
+
     // MARK: Installation
 
     /// Attaches the bridge to a browser whose options list it, as the
@@ -225,7 +244,9 @@ public final class CefBridge {
         let established = Self.establishedOrigin(
             claimed: origin, url: url, isMainFrame: isMainFrame, localSchemes: Self.localSchemes
         ) { Self.ancestorURLs(of: frame.pointer) }
-        let call = CefBridge.Call(browser: browser, method: method, origin: established.origin ?? "null", isMainFrame: isMainFrame)
+        let call = CefBridge.Call(
+            browser: browser, method: method, origin: established.origin ?? "null",
+            frame: CefFrame(reading: frame.pointer))
         guard established != .inconsistent, isPermitted(call, origin: established) else {
             fail("\(name).\(method): caller is not permitted to use this bridge")
             return
@@ -257,7 +278,7 @@ public final class CefBridge {
 
     private func isPermitted(_ call: CefBridge.Call, origin: EstablishedOrigin) -> Bool {
         switch access {
-        case .mainFrame: return call.isMainFrame
+        case .mainFrame: return call.frame.isMain
         case .origins(let allowed):
             // An opaque or unconfirmed origin never matches, even if
             // `"null"` is listed.
@@ -372,15 +393,36 @@ public final class CefBridge {
         return claimed == "null" ? .opaque : .inconsistent
     }
 
-    /// `file` and the custom schemes registered with `.local`.
-    private static var localSchemes: Set<String> {
-        Set(["file"] + (CefRuntime.shared.configuration?.customSchemes ?? [])
-            .filter { $0.options.contains(.local) }.map { $0.name.lowercased() })
+    /// `file` and the custom schemes registered with `.local`, which the
+    /// runtime sets as it starts. Any thread reads it.
+    nonisolated static var localSchemes: Set<String> {
+        get { localSchemeList.withLock { $0 } }
+        set { localSchemeList.withLock { $0 = newValue } }
+    }
+
+    private nonisolated static let localSchemeList = OSAllocatedUnfairLock<Set<String>>(initialState: ["file"])
+
+    /// The origin `frame`'s address gives its document, with `about:blank`
+    /// and `about:srcdoc` taking their nearest ancestor's, as
+    /// ``establishedOrigin(claimed:url:isMainFrame:localSchemes:ancestors:)``
+    /// establishes it, but without the renderer's report: `nil` for an
+    /// opaque one. Any thread; does not consume `frame`.
+    nonisolated static func addressOrigin(ofFrame frame: UnsafeMutablePointer<cef_frame_t>, url: String?) -> String? {
+        let isMainFrame = frame.pointee.is_main(frame) != 0
+        let schemes = localSchemes
+        var origin = addressOrigin(url, isMainFrame: isMainFrame, localSchemes: schemes)
+        if origin == .inherited {
+            origin = ancestorURLs(of: frame).lazy
+                .map { addressOrigin($0, isMainFrame: false, localSchemes: schemes) }
+                .first { $0 != .inherited } ?? .opaque
+        }
+        guard case .tuple(let value) = origin else { return nil }
+        return value
     }
 
     /// The addresses of `frame`'s ancestors, nearest first, as the browser
     /// process knows them.
-    private static func ancestorURLs(of frame: UnsafeMutablePointer<cef_frame_t>) -> [String?] {
+    private nonisolated static func ancestorURLs(of frame: UnsafeMutablePointer<cef_frame_t>) -> [String?] {
         var urls: [String?] = []
         var current = frame.pointee.get_parent(frame)
         // Frames nest only so deep; the bound guards against a cycle.
@@ -416,7 +458,8 @@ extension CefBridge {
         /// `data:` documents, sandboxed documents, and a top-level
         /// `about:blank` such as a new popup's, whose opener CEF does not say.
         public let origin: String
-        /// Whether the caller is the top-level document.
-        public let isMainFrame: Bool
+        /// The calling frame: the main frame or a subframe. Pass it to
+        /// ``CefBridge/emit(_:_:to:in:)`` to answer that frame alone.
+        public let frame: CefFrame
     }
 }

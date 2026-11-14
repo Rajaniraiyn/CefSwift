@@ -144,7 +144,7 @@ public final class CefRuntime {
         let pump = CefMessagePump()
         // Browsers created through Chrome's own UI have no CefBrowser asking
         // for them; this client adopts them as they appear.
-        let defaultClient = CefBrowserClient(browser: nil, requestFilter: nil, chromeToolbar: configuration.chromeToolbar)
+        let defaultClient = CefBrowserClient(browser: nil, chromeToolbar: configuration.chromeToolbar)
         let context = CefAppContext(
             configuration: configuration, pump: pump, defaultClient: defaultClient.makeClient())
         let frameworkDirectory = frameworkBinary.deletingLastPathComponent()
@@ -170,6 +170,8 @@ public final class CefRuntime {
 
         appContext = context
         settings = mapped
+        CefBridge.localSchemes = Set(["file"] + configuration.customSchemes
+            .filter { $0.options.contains(.local) }.map { $0.name.lowercased() })
         self.locale = locale ?? "en-US"
         self.configuration = configuration
         messagePump = pump
@@ -218,9 +220,12 @@ public final class CefRuntime {
     /// scheme must also be declared in ``CefRuntime/Configuration/customSchemes``.
     /// Registering again for the same scheme/domain replaces the handler.
     ///
-    /// The handler serves every profile: the default one, and the
-    /// ``CefProfile/incognito()`` and ``CefProfile/persistent(id:displayName:)``
-    /// profiles, whose request contexts Chromium keeps separately.
+    /// The handler serves every profile, present and future: the default
+    /// one, and the ``CefProfile/incognito()`` and
+    /// ``CefProfile/persistent(id:displayName:)`` profiles, whose request
+    /// contexts Chromium keeps separately. A profile's own handler for the
+    /// same scheme and domain (``CefProfile/registerSchemeHandler(scheme:domain:handler:)``)
+    /// takes its place in that profile.
     public func registerSchemeHandler(scheme: String, domain: String? = nil, handler: some CefSchemeHandler) {
         precondition(
             isRunning,
@@ -243,6 +248,29 @@ public final class CefRuntime {
         schemeHandlers.removeAll { $0.scheme == scheme && $0.domain == domain }
         schemeHandlers.append(RegisteredSchemeHandler(scheme: scheme, domain: domain, factory: factory))
         CefProfile.registerSchemeHandler(schemeHandlers[schemeHandlers.count - 1])
+        // The default profile's context shares the global context's
+        // registrations, so its own handler goes back in place.
+        if let own = CefProfile.default.schemeHandlers.first(where: { $0.scheme == scheme && $0.domain == domain }) {
+            CefProfile.default.register(own)
+        }
+    }
+
+    /// Removes the handler ``registerSchemeHandler(scheme:domain:handler:)``
+    /// registered for `scheme` and `domain`, from every profile that has
+    /// no handler of its own for them.
+    public func removeSchemeHandler(scheme: String, domain: String? = nil) {
+        guard isRunning, schemeHandlers.contains(where: { $0.scheme == scheme && $0.domain == domain }) else { return }
+        schemeHandlers.removeAll { $0.scheme == scheme && $0.domain == domain }
+        if !CefProfile.default.schemeHandlers.contains(where: { $0.scheme == scheme && $0.domain == domain }) {
+            CefStringUtil.withCefString(scheme) { cefScheme in
+                if let domain {
+                    _ = CefStringUtil.withCefString(domain) { cef_register_scheme_handler_factory(cefScheme, $0, nil) }
+                } else {
+                    _ = cef_register_scheme_handler_factory(cefScheme, nil, nil)
+                }
+            }
+        }
+        CefProfile.unregisterSchemeHandler(scheme: scheme, domain: domain)
     }
 
     /// A scheme handler registered with ``registerSchemeHandler(scheme:domain:handler:)``.
@@ -540,6 +568,12 @@ public final class CefRuntime {
     /// Marks `browser` as a service browser. Call before it is created.
     func registerServiceBrowser(_ browser: CefBrowser) {
         serviceBrowserIDs.insert(browser.id)
+    }
+
+    /// Whether `browser` is one of CefKit's hidden service browsers, which
+    /// get none of their profile's page policy.
+    func isServiceBrowser(_ browser: CefBrowser) -> Bool {
+        serviceBrowserIDs.contains(browser.id)
     }
 
     /// Whether the app is quitting, so no new service browsers should start.

@@ -262,3 +262,16 @@ extension CefBrowser {
         }
     }
 }
+
+extension CefBrowser {
+    /// What a page captures; see ``CefBrowser/mediaCapture``.
+    public struct MediaCapture: OptionSet, Sendable, Hashable {
+        public let rawValue: Int
+        public init(rawValue: Int) { self.rawValue = rawValue }
+
+        /// A camera, or the screen, a window or a tab.
+        public static let video = MediaCapture(rawValue: 1 << 0)
+        /// A microphone, or the sound the Mac plays.
+        public static let audio = MediaCapture(rawValue: 1 << 1)
+    }
+}

@@ -162,9 +162,11 @@ public final class CefBrowser: Identifiable {
     @ObservationIgnored public weak var delegate: CefBrowserDelegate?
     /// The creation-time settings the browser was made with.
     @ObservationIgnored public let configuration: Configuration
-    /// The profile the browser browses with: its configuration's, or the
-    /// default profile.
-    var effectiveProfile: CefProfile { configuration.profile ?? .default }
+    /// The profile the page browses with: its configuration's, or the
+    /// default profile. The profile's request filter, scheme handlers,
+    /// user scripts, bridges, attachments and delegate apply to the page
+    /// unless its own configuration or delegate overrides them.
+    public var profile: CefProfile { configuration.profile ?? .default }
     /// Chromium's identifier for this browser; `-1` until created.
     @ObservationIgnored public internal(set) var identifier: Int32 = -1
     /// The browser that opened this one, for popups.
@@ -234,11 +236,39 @@ public final class CefBrowser: Identifiable {
     /// Commands that arrived while the browser was discarded, run once its
     /// page has loaded again.
     @ObservationIgnored var commandsAfterRestore: [@MainActor () -> Void] = []
-    /// Scripts added with ``addUserScript(_:)``, installed again when a
-    /// browser discarded by closing it is created anew.
-    @ObservationIgnored private var addedUserScripts: [CefUserScript] = []
+    /// The page's own user scripts: its configuration's, then those added
+    /// with ``addUserScript(_:)``, less those removed. Installed again
+    /// when a browser discarded by closing it is created anew.
+    @ObservationIgnored private lazy var ownUserScripts: [CefUserScript] = configuration.userScripts
+    /// The attachments that set this page up: its profile's, then its
+    /// configuration's, as they were when it was first created.
+    @ObservationIgnored lazy var attachments: [any CefBrowserAttachment] =
+        (usesProfileDefaults ? profile.attachments : []) + configuration.attachments
+    /// What the page captures now: video (a camera, or the screen, a
+    /// window or a tab) and audio (a microphone, or the sound the Mac
+    /// plays), as Chromium reports it (`on_media_access_change`). Empty
+    /// when it captures nothing. Observable; show a recording indicator
+    /// from it, as Safari and Chrome do in the tab.
+    ///
+    /// ```swift
+    /// if browser.mediaCapture.contains(.video) { Image(systemName: "video.fill") }
+    /// ```
+    public internal(set) var mediaCapture: MediaCapture = []
+
+    /// The parts of the page that move its window when dragged, as the page
+    /// declares them with `-webkit-app-region: drag` and `no-drag`, for a
+    /// title bar drawn in web content (a window with
+    /// `.fullSizeContentView` and a transparent title bar). Empty for a
+    /// page that declares none. Observable.
+    ///
+    /// ``CefWindowedBrowserView`` and ``CefOffscreenBrowserView`` move
+    /// their window when a drag starts in a draggable region, and zoom it
+    /// on a double click, as a title bar does; the page does not get those
+    /// clicks. A host of your own asks ``isDraggable(at:)``.
+    public internal(set) var draggableRegions: [DraggableRegion] = []
+
     /// Whether the page uses the camera, microphone or screen capture.
-    @ObservationIgnored var isCapturingMedia = false
+    var isCapturingMedia: Bool { !mediaCapture.isEmpty }
     /// The view hosting this browser: the parent of a windowed browser's
     /// native view, or the offscreen host.
     @ObservationIgnored public internal(set) weak var hostView: NSView?
@@ -252,6 +282,9 @@ public final class CefBrowser: Identifiable {
     /// The offscreen frame rate the lifecycle coordinator last set; `nil`
     /// for the rate the browser was created with.
     @ObservationIgnored var appliedOffscreenFrameRate: Int?
+    /// The rate set through ``offscreenFrameRate``; `nil` for the
+    /// configuration's.
+    @ObservationIgnored var preferredOffscreenFrameRate: Int?
 
     /// Whether Chromium is building the page's accessibility tree for an
     /// offscreen browser. See ``CefBrowser/Configuration/offscreenAccessibility``.
@@ -279,14 +312,20 @@ public final class CefBrowser: Identifiable {
     }
 
     /// Wraps a browser Chromium created on its own (popup, Chrome UI tab).
-    init(adopting raw: CefRef<cef_browser_t>, client: CefBrowserClient, opener: CefBrowser?, profile: CefProfile?) {
-        var configuration = opener?.configuration ?? CefBrowser.Configuration()
+    /// It takes the configuration of `origin`: the opener of a popup, or
+    /// the first browser of the window a tab opened in, whose client and
+    /// `extra_info` Chromium gives it.
+    init(
+        adopting raw: CefRef<cef_browser_t>, client: CefBrowserClient, opener: CefBrowser?,
+        configurationOf origin: CefBrowser?, profile: CefProfile?
+    ) {
+        var configuration = origin?.configuration ?? CefBrowser.Configuration()
         configuration.profile = profile
         self.configuration = configuration
         self.client = client
         self.opener = opener
         self.isChromeStyle = opener?.isChromeStyle ?? true
-        configuration.bridges.forEach { $0.attach(to: self) }
+        bridges.forEach { $0.attach(to: self) }
         adopt(raw)
     }
 
@@ -458,12 +497,38 @@ public final class CefBrowser: Identifiable {
     /// navigation to another site) learns of it as that process's first
     /// document of the browser starts, and runs it from its next document.
     public func addUserScript(_ script: CefUserScript) {
-        addedUserScripts.append(script)
+        ownUserScripts.append(script)
         pageScripting.configurationDidChange()
     }
 
-    /// The user scripts of the options and those added at runtime.
-    var userScripts: [CefUserScript] { configuration.userScripts + addedUserScripts }
+    /// Stops injecting `script`, one of the page's own: from its
+    /// configuration or added with ``addUserScript(_:)``. Documents that
+    /// start loading afterwards no longer run it; a document already
+    /// loaded keeps what it did until it is reloaded. Remove a profile's
+    /// script from ``CefProfile/userScripts``.
+    public func removeUserScript(_ script: CefUserScript) {
+        let count = ownUserScripts.count
+        ownUserScripts.removeAll { $0 == script }
+        if ownUserScripts.count != count { pageScripting.configurationDidChange() }
+    }
+
+    /// Whether the profile's page defaults (user scripts, bridges,
+    /// attachments) apply: everywhere but CefKit's hidden service pages.
+    var usesProfileDefaults: Bool { !CefRuntime.shared.isServiceBrowser(self) }
+
+    /// The scripts the page's documents run: its profile's, then its own.
+    var userScripts: [CefUserScript] {
+        (usesProfileDefaults ? profile.userScripts : []) + ownUserScripts
+    }
+
+    /// The bridges the page's documents get: its own, then its profile's
+    /// whose names none of its own has.
+    var bridges: [CefBridge] {
+        let own = configuration.bridges
+        guard usesProfileDefaults else { return own }
+        let names = Set(own.map(\.name))
+        return own + profile.bridges.filter { !names.contains($0.name) }
+    }
 
     // MARK: Lifetime
 

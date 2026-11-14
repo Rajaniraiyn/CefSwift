@@ -154,9 +154,12 @@ import Testing
     }
 
     @Test func userScriptsDescribeWhenAndWhereTheyRun() {
-        let script = CefUserScript(source: "x", matching: "https://*", injectionTime: .documentEnd, frames: .mainFrame)
+        let script = CefUserScript(
+            source: "x", matching: ["https://*"], excluding: ["https://login.example/*"], injectionTime: .documentEnd,
+            frames: .mainFrame)
         #expect(script.rendererConfiguration == [
-            "source": "x", "urlPattern": "https://*", "atDocumentEnd": true, "mainFrameOnly": true,
+            "source": "x", "matches": ["https://*"], "excludeMatches": ["https://login.example/*"],
+            "atDocumentEnd": true, "mainFrameOnly": true,
         ])
         #expect(CefUserScript(source: "y").rendererConfiguration == [
             "source": "y", "atDocumentEnd": false, "mainFrameOnly": false,

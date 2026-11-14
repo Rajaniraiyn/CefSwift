@@ -216,9 +216,10 @@ implemented, each replaceable. Everything else belongs to the app.
 | SwiftUI and AppKit views, windowed or offscreen | `CefWebView`, `CefWindowedBrowserView`, `CefOffscreenBrowserView` | [Showing a browser](docs/guide.md#showing-a-browser) |
 | JavaScript evaluation with timeouts, user scripts and style sheets | `evaluateJavaScript(_:timeout:)`, `CefUserScript` | [JavaScript](docs/guide.md#javascript) |
 | Typed calls between JavaScript and Swift | `CefBridge` | [Bridge](docs/guide.md#bridge) |
-| Asynchronous decisions: permissions, dialogs, downloads, certificate errors | `CefBrowserDelegate` | [Decisions](docs/guide.md#decisions) |
+| Asynchronous decisions: permissions, dialogs, certificate errors | `CefBrowserDelegate` | [Decisions](docs/guide.md#decisions) |
+| Policy for every page of a profile, Chromium's own included: request filter with declarative matching, scheme handlers, user scripts, bridges, attachments, permission and download decisions, Chromium settings and proxy | `CefProfile`, `CefProfileDelegate`, `CefRequestFilter`, `CefProfile.Configuration` | [What is configured where](docs/guide.md#what-is-configured-where) |
 | Native default sheets, localizable and each replaceable | `CefDialogPresenter`, `CefDownloadPresenter`, … | [Built-in sheets](docs/guide.md#built-in-sheets) |
-| Downloads: a profile policy, a save panel, observable downloads for a download manager | `CefProfile.downloadPolicy`, `CefProfile.downloads`, `CefDownload` | [Downloads](docs/guide.md#downloads) |
+| Downloads: a profile policy and delegate, a save panel, observable downloads for a download manager | `CefProfile.downloadPolicy`, `CefProfileDelegate`, `CefProfile.downloads`, `CefDownload` | [Downloads](docs/guide.md#downloads) |
 | The back/forward list, and going to any entry in one navigation | `backForwardList`, `go(to:)` | [Back and forward](docs/guide.md#back-and-forward) |
 | Links to other apps (`mailto:`, `zoommtg:`), decided by the app | `browser(_:decideExternalProtocolFor:)`, `CefExternalProtocolPresenter` | [Links to other apps](docs/guide.md#links-to-other-apps) |
 | Page tooltips, observable and replaceable | `tooltip`, `tooltipPolicy` | [Tooltips](docs/guide.md#tooltips) |

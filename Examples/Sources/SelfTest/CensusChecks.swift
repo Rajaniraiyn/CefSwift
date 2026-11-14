@@ -25,10 +25,12 @@ extension SelfTest {
 
     /// What may stay until shutdown: the request contexts of the global
     /// profile and of named profiles, which `CefProfile` keeps for the
-    /// process (with their `ContextHandler`s), and the scheme handler
-    /// factories registered with CEF, which it keeps until `cef_shutdown()`.
+    /// process (with their `CefProfileContextHandler`s), the scheme handler
+    /// factories registered with CEF, which it keeps until `cef_shutdown()`,
+    /// and the one resource request handler navigations share.
     static let processLifetimeCensus: Set<String> = [
-        "CefRef<_cef_request_context_t>", "implemented ContextHandler", "implemented SchemeHandlerFactory",
+        "CefRef<_cef_request_context_t>", "implemented CefProfileContextHandler", "implemented SchemeHandlerFactory",
+        "implemented NavigationHandlerOwner",
     ]
 
     /// What an open service host holds: a hidden Chrome-style browser in a

@@ -62,8 +62,7 @@ extension CefBrowserClient {
                 // A popup gets its opener's bridges and user scripts, like
                 // the CefBrowser that wraps it.
                 if !isHandled, let extraInfo, extraInfo.pointee == nil {
-                    extraInfo.pointee = CefPageScripting.makeExtraInfo(CefPageScripting.configuration(
-                        bridges: b.configuration.bridges, scripts: b.configuration.userScripts, generation: 0))
+                    extraInfo.pointee = b.pageScripting.makeExtraInfoForPopup()
                 }
                 return isHandled ? 1 : 0
             }

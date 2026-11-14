@@ -50,14 +50,23 @@ extension CefBrowser {
         /// The profile (cookies, storage, cache, preferences) to browse with.
         /// `nil` uses ``CefProfile/default``.
         public var profile: CefProfile?
-        /// JavaScript bridges exposed to pages in this browser.
+        /// JavaScript bridges exposed to pages in this browser, besides its
+        /// profile's (``CefProfile/bridges``); one of the same name takes
+        /// the place of the profile's.
         public var bridges: [CefBridge] = []
-        /// Scripts injected into every document before its own scripts run.
+        /// Scripts injected into every document before its own scripts
+        /// run, after its profile's (``CefProfile/userScripts``).
         public var userScripts: [CefUserScript] = []
         /// Shapes the context menu: hide built-in entries, add your own.
         public var contextMenu = CefBrowser.Configuration.ContextMenu()
-        /// Inspects — and may block, redirect or amend — every network request.
+        /// Inspects — and may block, redirect or amend — the page's network
+        /// requests, instead of its profile's ``CefProfile/requestFilter``.
+        /// `nil`, the default, leaves them to the profile's. Popups and tabs
+        /// Chromium opens from the page share the page's.
         public var requestFilter: CefRequestFilter?
+        /// What the page may run and load (JavaScript, images, WebGL,
+        /// storage, the clipboard) and its fonts and default encoding.
+        public var content = Content()
         /// Whether horizontal swipes navigate back and forward, as the system's
         /// "Swipe between pages" setting allows: two-finger scrolls that start
         /// sideways, and the dedicated navigation swipe. Chrome-style browsers
@@ -75,7 +84,8 @@ extension CefBrowser {
         /// translating gestures natively.
         public var forwardsRawTouchEvents = false
         /// Code that sets up each browser made with this configuration, in
-        /// order; see ``CefBrowserAttachment``. Popups get their opener's.
+        /// order, after its profile's (``CefProfile/attachments``); see
+        /// ``CefBrowserAttachment``. Popups get their opener's.
         public var attachments: [any CefBrowserAttachment] = []
         /// (Offscreen only) When Chromium builds the page's accessibility tree,
         /// which VoiceOver and other assistive apps read. Building it costs

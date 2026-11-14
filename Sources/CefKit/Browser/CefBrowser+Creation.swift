@@ -25,7 +25,7 @@ extension CefBrowser {
 
         let client = CefBrowserClient(
             browser: self,
-            requestFilter: configuration.requestFilter,
+            requestFiltering: requestFiltering,
             chromeToolbar: CefRuntime.shared.configuration?.chromeToolbar ?? .init())
         client.offscreenHost = offscreenHost
         client.isOffscreen = offscreenHost != nil
@@ -39,13 +39,14 @@ extension CefBrowser {
         // always opaque, unless an offscreen page is to be see-through.
         settings.background_color = offscreenHost != nil && !configuration.drawsBackground
             ? 0 : canvasColor.opaqueCefColor
+        configuration.content.apply(to: &settings)
 
         // Bridges and user scripts reach the renderer with the browser
         // itself (extra_info). Attachments that must prepare before any
         // page runs do so before the first real document, so such
         // browsers start blank and navigate once set up, as does every
         // browser created again after a discard.
-        configuration.bridges.forEach { $0.attach(to: self) }
+        bridges.forEach { $0.attach(to: self) }
         isBootstrapping = attachmentsPrepareBeforeFirstDocument || isDiscarded
         let url = isBootstrapping ? "about:blank" : (initialURL?.absoluteString ?? "about:blank")
 
@@ -55,6 +56,13 @@ extension CefBrowser {
             url: url,
             requestContext: (configuration.profile ?? .default).makeRequestContext(),
             extraInfo: pageScripting.makeExtraInfo())
+    }
+
+    /// Whose filter decides this browser's requests: its own, none for
+    /// CefKit's hidden service hosts, otherwise its profile's.
+    private var requestFiltering: CefRequestFiltering {
+        if let filter = configuration.requestFilter { return .page(CefCompiledRequestFilter(filter)) }
+        return CefRuntime.shared.isServiceBrowser(self) ? .unfiltered : .profile
     }
 
     /// ``Configuration/backgroundColor`` as an opaque color, in the app's
@@ -199,6 +207,7 @@ extension CefBrowser {
             cef_browser_host_create_browser_sync(
                 &windowInfo, blueprint.client, $0, &blueprint.settings, blueprint.extraInfo, blueprint.requestContext)
         }
+        Configuration.Content.clearStrings(of: &blueprint.settings)
         cefRelease(created)
         if created == nil { creationFailed() }
     }
@@ -229,6 +238,7 @@ extension CefBrowser {
             cef_browser_host_create_browser(
                 &windowInfo, blueprint.client, $0, &blueprint.settings, blueprint.extraInfo, blueprint.requestContext)
         }
+        Configuration.Content.clearStrings(of: &blueprint.settings)
         if started == 0 { creationFailed() }
     }
 
@@ -241,6 +251,7 @@ extension CefBrowser {
         isChromeStyle = true
         if !showsStatusBubble { blueprint.settings.chrome_status_bubble = STATE_DISABLED }
         if !showsZoomBubble { blueprint.settings.chrome_zoom_bubble = STATE_DISABLED }
+        defer { Configuration.Content.clearStrings(of: &blueprint.settings) }
         return CefStringUtil.withCefString(blueprint.url) {
             cef_browser_view_create(blueprint.client, $0, &blueprint.settings, blueprint.extraInfo, blueprint.requestContext, delegate)
         }
@@ -263,6 +274,7 @@ extension CefBrowser {
             cef_browser_host_create_browser(
                 &windowInfo, blueprint.client, $0, &blueprint.settings, blueprint.extraInfo, blueprint.requestContext)
         }
+        Configuration.Content.clearStrings(of: &blueprint.settings)
         if started == 0 { creationFailed() }
     }
 
@@ -363,7 +375,7 @@ extension CefBrowser {
         }
         if isBootstrapping {
             Task { await bootstrap() }
-        } else if !configuration.attachments.isEmpty {
+        } else if !attachments.isEmpty {
             // Nothing waits for these. A browser Chromium created by itself
             // with attachments that prepare first is not a page's popup,
             // which `route(_:)` opens bootstrapped instead, but a popup
@@ -371,7 +383,7 @@ extension CefBrowser {
             // before this.
             Task {
                 // An attachment told after the close would never hear of it.
-                for attachment in configuration.attachments where state == .live {
+                for attachment in attachments where state == .live {
                     await attachment.browserDidCreate(self)
                 }
             }
@@ -381,7 +393,7 @@ extension CefBrowser {
     /// Whether an attachment needs the browser set up before its first
     /// document; see ``CefBrowserAttachment/preparesBeforeFirstDocument``.
     var attachmentsPrepareBeforeFirstDocument: Bool {
-        configuration.attachments.contains { $0.preparesBeforeFirstDocument }
+        attachments.contains { $0.preparesBeforeFirstDocument }
     }
 
     /// Sets up what needs the DevTools protocol before the first real
@@ -400,7 +412,7 @@ extension CefBrowser {
                 reassertAccessibilityState()
             }
             // An attachment told after the close would never hear of it.
-            for attachment in configuration.attachments where state == .live {
+            for attachment in attachments where state == .live {
                 if isRestoring {
                     await attachment.browserDidRestore(self)
                 } else {
