@@ -56,7 +56,7 @@ final class WebKitTabs: BrowserFeature {
         controller.showTab(tab.window, page: tab.browser)
         if let source, !source.canGoBack { controller.window(of: source)?.close() }
         Task {
-            await tab.browser.importCookies(from: profile, for: url)
+            _ = try? await tab.browser.importCookies(from: profile, for: url)
             tab.browser.load(url)
         }
     }

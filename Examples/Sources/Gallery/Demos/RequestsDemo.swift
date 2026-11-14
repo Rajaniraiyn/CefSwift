@@ -44,9 +44,7 @@ private struct RequestsView: View {
     /// A cookie set in the profile is sent with the profile's request.
     private func fetchJSON() async throws {
         let url = server.url(path: "echo.json")
-        _ = profile.setCookie(HTTPCookie(properties: [
-            .name: "flavor", .value: "oatmeal", .domain: url.host()!, .path: "/",
-        ])!)
+        try await profile.setCookie(CefProfile.Cookie(name: "flavor", value: "oatmeal"), for: url)
         let (data, response) = try await profile.data(for: URLRequest(url: url))
         let echo = try JSONDecoder().decode(Echo.self, from: data)
         log.append("\(response.statusCode) \(echo.method) echo.json, Cookie: \(echo.headers["cookie"] ?? "none")")

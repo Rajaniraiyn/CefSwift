@@ -130,11 +130,14 @@ extension CefBrowser {
     }
 
     /// Renders the page to a PDF file at `destination`, replacing it.
+    ///
+    /// A cancelled task stops waiting and throws `CancellationError`;
+    /// Chromium may still write the file.
     public func printToPDF(at destination: URL, configuration: PDFConfiguration? = nil) async throws {
         try await ready()
         let configuration = configuration ?? PDFConfiguration()
-        let succeeded: Bool = await withCheckedContinuation { continuation in
-            let callback = PDFPrintCallback(continuation: continuation).makeCallback()
+        let succeeded = try await CefResumeOnce<Bool>.cancellable(fallback: false) { once in
+            let callback = PDFPrintCallback(once).makeCallback()
             var settings = configuration.makeSettings()
             defer {
                 ccef_string_clear(&settings.page_ranges)
@@ -161,8 +164,8 @@ extension CefBrowser {
 private final class PDFPrintCallback: Sendable {
     private let continuation: CefResumeOnce<Bool>
 
-    init(continuation: CheckedContinuation<Bool, Never>) {
-        self.continuation = CefResumeOnce(continuation, fallback: false)
+    init(_ continuation: CefResumeOnce<Bool>) {
+        self.continuation = continuation
     }
 
     func makeCallback() -> UnsafeMutablePointer<cef_pdf_print_callback_t> {

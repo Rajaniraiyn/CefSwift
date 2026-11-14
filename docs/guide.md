@@ -2409,9 +2409,9 @@ try profile.preferences.set(false, for: .savesPasswords)
 let fontSize = profile.preferences[.defaultFontSize]
 profile.setColorScheme(.dark, accentColor: .systemIndigo)
 
-let cookies = await profile.cookies(for: url)
-profile.setCookie(cookie)                        // an HTTPCookie
-profile.deleteCookies(for: url, named: "session")
+let cookies = try await profile.cookies(for: url)   // [CefProfile.Cookie]
+try await profile.setCookie(CefProfile.Cookie(name: "theme", value: "dark", domain: "example.com", sameSite: .lax))
+try await profile.deleteCookies(for: url, named: "session")
 ```
 
 A profile's `id` is its identity and names its storage in both engines;
@@ -2424,6 +2424,30 @@ in `<root>` itself (`Default`, `Local State`, `Profile 1`). CefChromium's
 `CefProfile.incognito().autocomplete` keeps its profile alive while you
 use it; the profile does not hold them back, so neither keeps the other
 alive forever.
+
+A `CefProfile.Cookie` carries everything CEF stores: `name`, `value`,
+`domain` (a leading dot for a domain cookie), `path`, `isSecure`,
+`isHTTPOnly`, `expirationDate` (nil for a session cookie), `sameSite`,
+`priority`, and Chromium's `creationDate` and `lastAccessDate`. CEF 156
+reports no partition key, so a partitioned (CHIPS) cookie is listed
+without the site it is keyed to. Every cookie call returns once Chromium
+has finished:
+
+| Call | Returns |
+|---|---|
+| `cookies(for:)` | The cookies a request to the URL carries, HTTP-only included; all of them with `nil`. |
+| `enumerateCookies(for:using:)` | Hands them over one at a time, on the main actor, until the closure sets `stop`. |
+| `setCookie(_:for:)` | Nothing; throws `CefError.operationFailed` when Chromium refuses the cookie (a domain that does not match the URL, characters a cookie cannot hold, `SameSite=None` without `isSecure`). Without a URL, the cookie's domain and path make one. |
+| `deleteCookies(for:named:)` | How many Chromium deleted: the named one, every host cookie of the URL, or with both `nil` every cookie. |
+| `deleteCookies(for:where:)` | How many the predicate picked. |
+| `flushCookies()` | Nothing, once the store is on disk. |
+
+A cancelled task stops waiting at once and throws `CancellationError`;
+Chromium finishes what it had started, and its answer is dropped. The
+same holds for the network maintenance calls below, `resolveHost(_:)`,
+`printToPDF(at:configuration:)`, `cast(_:to:)` (a route Chromium creates
+after the caller stopped waiting is ended) and
+`CefRuntime.shared.installWidevine()`.
 
 `preferences.allValues(includingDefaults:)` returns every preference as one JSON
 object. `setColorScheme(_:accentColor:)` themes Chrome-style UI and sets the
@@ -2439,7 +2463,7 @@ and what does not:
 | Called while the profile loads | What happens |
 |---|---|
 | Browsers, in every host (`CefWebView`, the AppKit views, `CefWindow`, `openChromeWindow`) and their popups | Wait, and are created once it is loaded. The browser stays `.pending`, and `load(_:)`, `ready()` and `waitUntilLoaded(timeout:)` work as for any browser being created. A `CefWindow` opens at once and gets its page when the browser comes. A view given another browser, or none, meanwhile does not get this one later. Quitting closes the browsers still waiting: their `ready()` throws `CefError.browserClosed`, and the profile's `ready()` throws `CefError.shutDown`. |
-| `cookies(for:)`, `setCookie(_:)`, `deleteCookies(for:named:)` | Chromium queues them until the profile is loaded. |
+| `cookies(for:)`, `enumerateCookies(for:using:)`, `setCookie(_:for:)`, the `deleteCookies` calls, `flushCookies()` | Chromium queues them until the profile is loaded. |
 | `data(for:)`, `bytes(for:)`, `download(for:to:)`, `resolveHost(_:)`, the `clear…` calls | Wait for the profile. |
 | `siteSettings.set(…)`, `setDefaultSetting(_:for:)`, `setColorScheme(_:accentColor:)` | Apply once it is loaded. |
 | `preferences`, and `siteSettings` reads | Have nothing yet: reads return `nil` or `.default`, and `preferences.set` throws. Await `profile.ready()` first. |
@@ -2476,13 +2500,13 @@ early at the next launch, before `CefRuntime.initialize`.
 ### Network maintenance
 
 A profile clears what Chromium keeps for its connections, each `async`
-and done when it returns:
+and done when it returns; each throws only `CancellationError`:
 
 ```swift
-await profile.clearHTTPCache()                       // cookies and site data stay
-await profile.clearCertificateExceptions()           // certificate errors the user accepted
-await profile.clearHTTPAuthenticationCredentials()
-await profile.closeAllConnections()
+try await profile.clearHTTPCache()                   // cookies and site data stay
+try await profile.clearCertificateExceptions()       // certificate errors the user accepted
+try await profile.clearHTTPAuthenticationCredentials()
+try await profile.closeAllConnections()
 let addresses = try await profile.resolveHost("example.com")   // ["93.184.215.14", …]
 ```
 
@@ -3080,7 +3104,7 @@ var configuration = CefRuntime.Configuration.embedded
 configuration.services.protectedMedia = .automatic
 
 // Later, for example before showing a player:
-switch await CefRuntime.shared.installWidevine() {
+switch try await CefRuntime.shared.installWidevine() {
 case .installed(let version): print("Widevine \(version)")
 case .failed: print("Could not fetch Widevine; offline?")
 default: break

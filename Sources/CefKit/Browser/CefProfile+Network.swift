@@ -3,9 +3,12 @@ import CefBase
 import Foundation
 
 extension CefProfile {
+    // Each call below waits for Chromium to finish; a cancelled task stops
+    // waiting and throws `CancellationError`, and Chromium still finishes.
+
     /// Empties the profile's HTTP cache. Cookies and site data stay.
-    public func clearHTTPCache() async {
-        await completing { context, callback in
+    public func clearHTTPCache() async throws {
+        try await completing { context, callback in
             guard let clear = context.pointee.clear_http_cache else { return cefRelease(callback) }
             clear(context, callback)
         }
@@ -15,32 +18,33 @@ extension CefProfile {
     /// (``CefBrowserDelegate/browser(_:shouldProceedDespite:)``), so the
     /// delegate is asked again. Call ``closeAllConnections()`` too, or a
     /// connection still open keeps the exception in use.
-    public func clearCertificateExceptions() async {
-        await completing { context, callback in context.pointee.clear_certificate_exceptions(context, callback) }
+    public func clearCertificateExceptions() async throws {
+        try await completing { context, callback in context.pointee.clear_certificate_exceptions(context, callback) }
     }
 
     /// Forgets the HTTP authentication credentials sites were given.
-    public func clearHTTPAuthenticationCredentials() async {
-        await completing { context, callback in context.pointee.clear_http_auth_credentials(context, callback) }
+    public func clearHTTPAuthenticationCredentials() async throws {
+        try await completing { context, callback in context.pointee.clear_http_auth_credentials(context, callback) }
     }
 
     /// Closes every open and idle connection. Requests already started
     /// fail; later ones connect again.
-    public func closeAllConnections() async {
-        await completing { context, callback in context.pointee.close_all_connections(context, callback) }
+    public func closeAllConnections() async throws {
+        try await completing { context, callback in context.pointee.close_all_connections(context, callback) }
     }
 
     /// The IP addresses Chromium resolves `host` to, with the profile's DNS
     /// settings (Secure DNS included).
     ///
     /// Throws ``CefError/operationFailed(_:)`` with Chromium's network
-    /// error when the name does not resolve.
+    /// error when the name does not resolve, and `CancellationError` at
+    /// once when the task is cancelled.
     public func resolveHost(_ host: String) async throws -> [String] {
         try await ready()
         guard let context = requestContext() else { throw CefError.notInitialized }
         let url = host.contains("://") ? host : "https://\(host)"
-        let result: (Int32, [String]) = await withCheckedContinuation { continuation in
-            let callback = ResolveCallback(continuation: continuation).makeCallback()
+        let result = try await CefResumeOnce<(Int32, [String])>.cancellable(fallback: (-2, [])) { once in
+            let callback = ResolveCallback(once).makeCallback()
             CefStringUtil.withCefString(url) { context.pointer.pointee.resolve_host(context.pointer, $0, callback) }
         }
         guard result.0 == 0, !result.1.isEmpty else {
@@ -50,14 +54,23 @@ extension CefProfile {
     }
 
     /// Runs a request-context call that reports completion through a
-    /// `cef_completion_callback_t`, and waits for it.
+    /// `cef_completion_callback_t`, and waits for it. A cancelled task
+    /// stops waiting and throws `CancellationError`; Chromium finishes the
+    /// call.
     private func completing(
         _ call: (UnsafeMutablePointer<cef_request_context_t>, UnsafeMutablePointer<cef_completion_callback_t>) -> Void
-    ) async {
-        // A profile Chromium could not load has nothing to clear.
-        guard (try? await ready()) != nil, let context = requestContext() else { return }
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            call(context.pointer, CompletionCallback(continuation: continuation).makeCallback())
+    ) async throws {
+        do {
+            try await ready()
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            // A profile Chromium could not load has nothing to clear.
+            return
+        }
+        guard let context = requestContext() else { return }
+        try await CefResumeOnce<Void>.cancellable(fallback: ()) { once in
+            call(context.pointer, CompletionCallback(once).makeCallback())
         }
     }
 }
@@ -67,8 +80,8 @@ extension CefProfile {
 private final class CompletionCallback: Sendable {
     private let continuation: CefResumeOnce<Void>
 
-    init(continuation: CheckedContinuation<Void, Never>) {
-        self.continuation = CefResumeOnce(continuation, fallback: ())
+    init(_ continuation: CefResumeOnce<Void>) {
+        self.continuation = continuation
     }
 
     /// The returned +1 reference is consumed by the call it is passed to.
@@ -84,8 +97,8 @@ private final class CompletionCallback: Sendable {
 private final class ResolveCallback: Sendable {
     private let continuation: CefResumeOnce<(Int32, [String])>
 
-    init(continuation: CheckedContinuation<(Int32, [String]), Never>) {
-        self.continuation = CefResumeOnce(continuation, fallback: (-2, []))
+    init(_ continuation: CefResumeOnce<(Int32, [String])>) {
+        self.continuation = continuation
     }
 
     func makeCallback() -> UnsafeMutablePointer<cef_resolve_callback_t> {

@@ -108,15 +108,14 @@ extension SelfTest {
         systemEngineHelperChecks()
 
         let cookieSite = URL(string: "https://cookies.selftest.invalid/")!
-        CefProfile.default.setCookie(HTTPCookie(properties: [
-            .name: "handoff", .value: "1", .domain: "cookies.selftest.invalid", .path: "/", .secure: "TRUE",
-        ])!)
-        let copied = await browser.importCookies(from: .default, for: cookieSite)
+        try? await CefProfile.default.setCookie(
+            CefProfile.Cookie(name: "handoff", value: "1", domain: "cookies.selftest.invalid", isSecure: true))
+        let copied = (try? await browser.importCookies(from: .default, for: cookieSite)) ?? -1
         let webKitCookies = await browser.nativeView.configuration.websiteDataStore.httpCookieStore.allCookies()
         check("system engine: imports a Chromium profile's cookies for a site",
               copied >= 1 && webKitCookies.contains { $0.name == "handoff" && $0.domain.hasSuffix("cookies.selftest.invalid") },
               detail: "copied \(copied); WebKit has \(webKitCookies.map { "\($0.name)@\($0.domain)" })")
-        CefProfile.default.deleteCookies(for: cookieSite)
+        _ = try? await CefProfile.default.deleteCookies(for: cookieSite)
         await browser.nativeView.configuration.websiteDataStore.removeData(
             ofTypes: [WKWebsiteDataTypeCookies], modifiedSince: .distantPast)
 
@@ -135,15 +134,14 @@ extension SelfTest {
 
     /// SystemBrowser's pure helpers, which need no page.
     static func systemEngineHelperChecks() {
-        let hostOnly = HTTPCookie(properties: [
-            .name: "a", .value: "1", .domain: "www.example.com", .path: "/", .secure: "TRUE",
-        ])!
+        let hostOnly = CefProfile.Cookie(name: "a", value: "1", domain: "www.example.com", isSecure: true, sameSite: .strict)
         let converted = SystemBrowser.webKitCookie(hostOnly)
-        let domain = HTTPCookie(properties: [.name: "b", .value: "2", .domain: ".example.com", .path: "/"])!
+        let domain = CefProfile.Cookie(name: "b", value: "2", domain: ".example.com")
         check("system engine: host-only cookies stay host-only",
-              converted.domain == "www.example.com" && converted.isSecure
-                  && SystemBrowser.webKitCookie(domain).domain == ".example.com",
-              detail: "\(converted.domain)")
+              converted?.domain == "www.example.com" && converted?.isSecure == true
+                  && converted?.sameSitePolicy == .sameSiteStrict
+                  && SystemBrowser.webKitCookie(domain)?.domain == ".example.com",
+              detail: "\(converted?.domain ?? "none")")
 
         let ids = ["Work", "work", "Home", "a/b", "a_b", "..", "é", "e\u{301}"]
         check("system engine: data store identifiers are stable and distinct",

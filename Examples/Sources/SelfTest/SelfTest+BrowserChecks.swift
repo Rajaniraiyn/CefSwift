@@ -4,6 +4,11 @@ import AppKit
 import CefPasskeys
 import CefSwiftUI
 
+private extension Date {
+    /// Whole seconds, as a cookie's expiry is compared.
+    var rounded: Date { Date(timeIntervalSince1970: timeIntervalSince1970.rounded()) }
+}
+
 extension SelfTest {
     /// What the bundle's signature allows, as CefKit reads it.
     static func capabilityChecks() {
@@ -159,21 +164,10 @@ extension SelfTest {
         }
         check("profile: unknown preference is nil", profile.preferences.value(named: "cefswift.no.such.pref") == nil)
 
-        let cookie = HTTPCookie(properties: [
-            .name: "selftest", .value: "yes", .domain: "example.com", .path: "/", .secure: "TRUE",
-        ])!
-        check("profile: setCookie", profile.setCookie(cookie))
-        let url = URL(string: "https://example.com/")!
-        check("profile: cookie readable", await waitUntilAsync {
-            await profile.cookies(for: url).contains { $0.name == "selftest" && $0.value == "yes" }
-        })
-        profile.deleteCookies(for: url, named: "selftest")
-        check("profile: cookie deleted", await waitUntilAsync {
-            await !profile.cookies(for: url).contains { $0.name == "selftest" }
-        })
+        await cookieChecks(profile)
 
         let isolated = CefProfile.incognito()
-        check("profile: incognito is isolated", await isolated.cookies().isEmpty)
+        check("profile: incognito is isolated", (try? await isolated.cookies())?.isEmpty == true)
         check("profile: configured preference reaches new profiles", await waitUntil {
             isolated.preferences.value(named: "webkit.webprefs.default_font_size")?.intValue == 21
         })
@@ -187,6 +181,83 @@ extension SelfTest {
               await loaded(privateWindow.browser, title: "second"), detail: privateWindow.browser.title)
         privateWindow.close()
         _ = await waitUntil { privateWindow.isClosed }
+    }
+
+    /// Cookies: everything CEF stores comes back, refusals throw, counts
+    /// are Chromium's, and a cancelled call stops waiting.
+    static func cookieChecks(_ profile: CefProfile) async {
+        let url = URL(string: "https://example.com/")!
+        let expires = Date(timeIntervalSinceNow: 86_400).rounded
+        let cookie = CefProfile.Cookie(
+            name: "selftest", value: "yes", domain: "example.com", isSecure: true, isHTTPOnly: true,
+            expirationDate: expires, sameSite: .strict, priority: .high)
+        await expect("profile: setCookie stores it, with what CEF keeps") {
+            try await profile.setCookie(cookie)
+            guard let stored = try await profile.cookies(for: url).first(where: { $0.name == "selftest" }) else {
+                return (false, "not listed")
+            }
+            let same = stored.value == "yes" && stored.isSecure && stored.isHTTPOnly && stored.sameSite == .strict
+                && stored.priority == .high && stored.expirationDate.map { abs($0.timeIntervalSince(expires)) < 1 } == true
+                && stored.creationDate != nil
+            return (same, "\(stored)")
+        }
+        await expect("profile: setCookie throws when Chromium refuses the cookie") {
+            do {
+                // SameSite=None needs Secure.
+                try await profile.setCookie(CefProfile.Cookie(name: "refused", value: "1", sameSite: .none),
+                                            for: URL(string: "http://example.com/")!)
+                return false
+            } catch CefError.operationFailed {
+                return true
+            }
+        }
+        await expect("profile: enumerateCookies stops when asked") {
+            for name in ["a", "b", "c"] {
+                try await profile.setCookie(CefProfile.Cookie(name: "many-\(name)", value: name, domain: "example.com"))
+            }
+            var seen = 0
+            try await profile.enumerateCookies(for: url) { _, stop in
+                seen += 1
+                stop = seen == 2
+            }
+            return seen == 2
+        }
+        await expect("profile: deleteCookies(where:) deletes those it picks and counts them") {
+            let deleted = try await profile.deleteCookies(for: url) { $0.name.hasPrefix("many-") }
+            let left = try await profile.cookies(for: url).map(\.name)
+            return (deleted == 3 && !left.contains { $0.hasPrefix("many-") }, "deleted \(deleted), left \(left)")
+        }
+        await expect("profile: deleteCookies(for:named:) returns Chromium's count") {
+            let deleted = try await profile.deleteCookies(for: url, named: "selftest")
+            let left = try await profile.cookies(for: url).contains { $0.name == "selftest" }
+            return (deleted == 1 && !left, "deleted \(deleted)")
+        }
+        await expect("profile: flushCookies") { try await profile.flushCookies(); return true }
+        await expect("profile: a cancelled cookie read throws CancellationError at once") {
+            let read = Task { try await profile.cookies() }
+            read.cancel()
+            do {
+                _ = try await read.value
+                return false
+            } catch is CancellationError {
+                return true
+            }
+        }
+        await expect("profile: a cancelled DNS resolution throws CancellationError at once") {
+            let lookup = Task { try await profile.resolveHost("cancelled.selftest.invalid") }
+            try? await Task.sleep(for: .milliseconds(1))
+            lookup.cancel()
+            let start = ContinuousClock.now
+            do {
+                _ = try await lookup.value
+                return (false, "resolved")
+            } catch is CancellationError {
+                return (ContinuousClock.now - start < .milliseconds(200), "\(ContinuousClock.now - start)")
+            } catch {
+                // Chromium answered before the cancellation reached it.
+                return (true, "\(error)")
+            }
+        }
     }
 
     static func windowChecks() async {

@@ -90,7 +90,7 @@ extension SelfTest {
               await waitUntil { !CefRuntime.shared.registeredComponents.isEmpty },
               detail: "\(CefRuntime.shared.registeredComponents)")
         check("protected media .disabled: CefSwift does not ask for Widevine",
-              await CefRuntime.shared.installWidevine() == .unavailable)
+              (try? await CefRuntime.shared.installWidevine()) == .unavailable)
         let profile = CefProfile.default
         check("third-party cookies .block", profile.preferences.value(named: "profile.cookie_controls_mode") == 1,
               detail: "\(String(describing: profile.preferences.value(named: "profile.cookie_controls_mode")))")

@@ -36,10 +36,10 @@ extension SelfTest {
         }
         // SelfTest runs on CefRuntime.Configuration.embedded, whose protectedMedia
         // is .disabled.
-        let installResult = await CefRuntime.shared.installWidevine()
+        let installResult = try? await CefRuntime.shared.installWidevine()
         check("protected media: .disabled reports Widevine unavailable",
               CefRuntime.shared.widevine == .unavailable && installResult == .unavailable,
-              detail: "\(CefRuntime.shared.widevine), \(installResult)")
+              detail: "\(CefRuntime.shared.widevine), \(String(describing: installResult))")
         await expect("protected media: .disabled refuses Widevine") {
             try await requestKeySystem("com.widevine.alpha", in: browser) == "NotSupportedError"
         }
@@ -76,7 +76,7 @@ extension SelfTest {
         var result: CefRuntime.WidevineState?
         // Chromium's update service fetches nothing until the first browser
         // exists, so ask only now.
-        Task { result = await CefRuntime.shared.installWidevine() }
+        Task { result = try? await CefRuntime.shared.installWidevine() }
         _ = await waitUntil(timeout: widevineDownloadLimit) { result != nil }
         guard let state = result, state.isInstalled else {
             skip("the CDM arrives within \(widevineDownloadLimit)",

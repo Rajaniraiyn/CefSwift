@@ -45,7 +45,7 @@ private struct ProfilePane: View {
     let browser: CefBrowser
     let name: String
     let symbol: String
-    @State private var cookies: [HTTPCookie] = []
+    @State private var cookies: [CefProfile.Cookie] = []
     @State private var failure: String?
 
     var body: some View {
@@ -62,8 +62,10 @@ private struct ProfilePane: View {
             .frame(height: 120)
             .overlay { if cookies.isEmpty { Text("No cookies").foregroundStyle(.secondary) } }
             Button("Delete Cookies", role: .destructive) {
-                browser.configuration.profile?.deleteCookies(for: ProfilesPages.page.localURL)
-                browser.reload()
+                Task {
+                    _ = try? await browser.configuration.profile?.deleteCookies(for: ProfilesPages.page.localURL)
+                    browser.reload()
+                }
             }
             .padding(8)
         }
@@ -78,7 +80,7 @@ private struct ProfilePane: View {
         // The profile's cookies for the page, read again after every load.
         .task(id: browser.isLoading) {
             guard !browser.isLoading, let profile = browser.configuration.profile else { return }
-            cookies = await profile.cookies(for: ProfilesPages.page.localURL)
+            cookies = (try? await profile.cookies(for: ProfilesPages.page.localURL)) ?? []
         }
     }
 }

@@ -389,7 +389,7 @@ extension SelfTest {
                         document.cookie = 'who=\(name); max-age=86400; path=/; secure';
                         localStorage.setItem('who', '\(name)'); 0
                         """)
-                    let cookies = await profile.cookies(for: page(name))
+                    let cookies = (try? await profile.cookies(for: page(name))) ?? []
                     return (cookies.contains { $0.name == "who" && $0.value == name }, cookies.map(\.value).joined(separator: ","))
                 }
                 window.close()
@@ -398,7 +398,7 @@ extension SelfTest {
             await expect("first launch: profiles share nothing") {
                 var values: [[String]] = []
             for (name, profile) in profiles {
-                values.append(await profile.cookies(for: page(name)).filter { $0.name == "who" }.map(\.value))
+                values.append(((try? await profile.cookies(for: page(name))) ?? []).filter { $0.name == "who" }.map(\.value))
             }
                 return (values == [["alpha"], ["beta"], ["default"]], "\(values)")
             }
@@ -416,7 +416,7 @@ extension SelfTest {
                 _ = try? await browser.evaluateJavaScript(
                     "document.cookie = 'incognito=1; max-age=86400; path=/; secure'; localStorage.setItem('incognito', '1'); 0")
                 check("first launch: incognito sees its own cookie only",
-                      await incognito.cookies(for: page("incognito")).map(\.name) == ["incognito"])
+                      ((try? await incognito.cookies(for: page("incognito"))) ?? []).map(\.name) == ["incognito"])
             } else {
                 check("first launch: incognito page loads", false)
             }
@@ -436,7 +436,7 @@ extension SelfTest {
         await expect("second launch: the profiles' cookies are read back before any browser") {
             var values: [[String]] = []
             for (name, profile) in profiles {
-                values.append(await profile.cookies(for: page(name)).filter { $0.name == "who" }.map(\.value))
+                values.append(((try? await profile.cookies(for: page(name))) ?? []).filter { $0.name == "who" }.map(\.value))
             }
             return (values == [["alpha"], ["beta"], ["default"]], "\(values)")
         }
@@ -468,7 +468,7 @@ extension SelfTest {
         }
         await expect("second launch: nothing of the incognito profile is left") {
             var names: [String] = []
-            for (_, profile) in profiles { names += await profile.cookies(for: page("incognito")).map(\.name) }
+            for (_, profile) in profiles { names += ((try? await profile.cookies(for: page("incognito"))) ?? []).map(\.name) }
             return (!names.contains("incognito"), names.joined(separator: ","))
         }
     }

@@ -137,8 +137,10 @@ public final class CefMediaRouter: CefShutdownParticipant {
         guard let router, let sinkObject = sinkObjects[sink.id],
               let sourceObject = mediaSource(source, router: router)
         else { throw CefMediaRouteError(message: "No such device or source") }
-        let (result, error, route) = await withCheckedContinuation { continuation in
-            let callback = RouteCreated(continuation).makeCallback()
+        let (result, error, route) = try await CefResumeOnce<RouteCreated.Outcome>.cancellable(
+            fallback: (CEF_MRCR_UNKNOWN_ERROR, "", nil)
+        ) { once in
+            let callback = RouteCreated(once).makeCallback()
             router.pointer.pointee.create_route(router.pointer, sourceObject.retainedPointer(), sinkObject.retainedPointer(), callback)
         }
         guard let route, result == CEF_MRCR_OK else {
@@ -245,15 +247,18 @@ private final class RouteCreated: Sendable {
     typealias Outcome = (cef_media_route_create_result_t, String, CefRef<cef_media_route_t>?)
     private let continuation: CefResumeOnce<Outcome>
 
-    init(_ continuation: CheckedContinuation<Outcome, Never>) {
-        self.continuation = CefResumeOnce(continuation, fallback: (CEF_MRCR_UNKNOWN_ERROR, "", nil))
+    init(_ continuation: CefResumeOnce<Outcome>) {
+        self.continuation = continuation
     }
 
     func makeCallback() -> UnsafeMutablePointer<cef_media_route_create_callback_t> {
         let c = cefAllocate(cef_media_route_create_callback_t.self, owner: self)
         c.pointee.on_media_route_create_finished = { s, result, error, route in
             let outcome = (result, CefStringUtil.string(from: error), CefRef(adopting: route))
-            cefOwner(RouteCreated.self, s)?.continuation.resume(returning: outcome)
+            // A route made for a caller that stopped waiting is ended.
+            if cefOwner(RouteCreated.self, s)?.continuation.resume(returning: outcome) != true, let route = outcome.2 {
+                route.pointer.pointee.terminate(route.pointer)
+            }
         }
         return c
     }

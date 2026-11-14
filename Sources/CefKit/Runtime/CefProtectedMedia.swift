@@ -176,14 +176,17 @@ extension CefRuntime {
     /// nothing until a browser exists, so before that the request waits.
     /// The download takes from a few seconds to tens of seconds. Pages that asked for Widevine earlier and were refused need
     /// to ask again (usually a reload).
+    ///
+    /// A cancelled task stops waiting and throws `CancellationError`;
+    /// Chromium goes on fetching the CDM.
     @discardableResult
-    public func installWidevine() async -> CefRuntime.WidevineState {
+    public func installWidevine() async throws -> CefRuntime.WidevineState {
         guard isRunning, let configuration, configuration.services.protectedMedia != .disabled,
               configuration.runsComponentUpdater, let updater = Self.componentUpdater
         else { return .unavailable }
         let current = widevine
         if current.isInstalled { return current }
-        if let widevineInstallation { return await widevineInstallation.value }
+        if let widevineInstallation { return try await Self.waitCancellably(for: widevineInstallation) }
         let installation = Task { @MainActor in
             let error = await withCheckedContinuation {
                 (continuation: CheckedContinuation<cef_component_update_error_t, Never>) in
@@ -201,9 +204,21 @@ extension CefRuntime {
             return state
         }
         widevineInstallation = installation
-        let state = await installation.value
-        widevineInstallation = nil
-        return state
+        Task { @MainActor in
+            _ = await installation.value
+            if widevineInstallation == installation { widevineInstallation = nil }
+        }
+        return try await Self.waitCancellably(for: installation)
+    }
+
+    /// The installation's state, or `CancellationError` at once when the
+    /// waiting task is cancelled; the installation goes on.
+    private static func waitCancellably(for installation: Task<CefRuntime.WidevineState, Never>) async throws
+        -> CefRuntime.WidevineState
+    {
+        try await CefResumeOnce<CefRuntime.WidevineState>.cancellable(fallback: .failed) { once in
+            Task { once.resume(returning: await installation.value) }
+        }
     }
 }
 
