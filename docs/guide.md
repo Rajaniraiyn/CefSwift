@@ -492,7 +492,7 @@ when it is first shown.
 |---|---|
 | State | `url`, `title`, `isLoading`, `estimatedProgress`, `canGoBack`, `canGoForward`, `favicon`, `faviconURL`, `zoomLevel`, `isFullscreen`, `statusText`, `downloads`, `findResult`, `state` (`.pending`, `.live`, `.closed`) |
 | Navigation | `load(_:)` (returns a `CefNavigation`), `goBack()`, `goForward()`, `backForwardList`, `go(to:)` ([back/forward list](#back-and-forward)), `reload(ignoringCache:)`, `stopLoading()`, `waitUntilLoaded(timeout:)` ([waiting for a load](#waiting-for-a-load)) |
-| Page | `isAudioMuted`, `find(_:backwards:caseSensitive:)`, `stopFinding(clearingSelection:)`, `findSession` (an observable find-bar model), `print()` (Chromium's printing, which in Chrome style is Chrome's print preview, not the system dialog), `pdf(configuration:)`, `printToPDF(at:configuration:)` ([PDF](#pdf)), `snapshot()` |
+| Page | `isAudioMuted`, `zoom(_:)`, `canZoom(_:)`, `defaultZoomLevel`, `exitFullscreen()`, `replaceMisspelling(with:)`, `learnSpelling(_:)`, `text(of:)`, `source(of:)`, `find(_:backwards:caseSensitive:)` (its `findResult` has the match's `selectionRect`), `stopFinding(clearingSelection:)`, `findSession` (an observable find-bar model), `print()` (Chromium's printing, which in Chrome style is Chrome's print preview, not the system dialog), `pdf(configuration:)`, `printToPDF(at:configuration:)` ([PDF](#pdf)), `snapshot()` |
 | JavaScript | `evaluateJavaScript(_:timeout:)`, `evaluateJavaScript(_:as:timeout:)`, `executeJavaScript(_:)`, `addUserScript(_:)` |
 | DevTools | `devTools`, `showDevTools(inspecting:)`, `closeDevTools()`, `isShowingDevTools` |
 | Lifetime | `ready()`, `close(force:)` |
@@ -546,7 +546,25 @@ each site, restored as the browser moves between sites, and Chrome's zoom
 commands. CEF does not report zoom changes, so CefKit reads the level back
 after navigations, zoom commands and changes made through `zoomLevel`; other
 changes show up at the next navigation. In a windowed browser, pinching
-magnifies the page without changing `zoomLevel`.
+magnifies the page without changing `zoomLevel`. A level set before the
+browser exists applies to its first page, as `isAudioMuted` set early
+applies once it exists.
+
+`zoom(.zoomIn)`, `zoom(.zoomOut)` and `zoom(.reset)` step through Chrome's
+preset factors (90%, 100%, 110%, 125%, …) as the View menu does, and
+`canZoom(_:)` says whether a step can be taken, for enabling menu items.
+`defaultZoomLevel` is the level a page opens at with no site-specific one.
+The level stays CEF's logarithmic one; a factor is `pow(1.2, zoomLevel)`.
+
+`exitFullscreen()` takes the page out of fullscreen, for an app's own
+command: a Chrome-style browser leaves on Escape and the window's green
+button by itself, an Alloy-style one needs the app to ask.
+
+`CefRuntime.shared.securityDisplayString(for:)` formats a URL as Chromium
+shows a site to people deciding whether to trust it: scheme and host
+only, no default port, and an internationalized domain in Unicode only
+where that is safe from look-alikes (otherwise Punycode). Use it for an
+address bar's security view or a permission prompt, never to parse.
 
 A browser holds its `delegate` weakly, as `WKWebView` does. Keep a strong
 reference to the delegate for as long as the browser lives; a delegate
@@ -1995,7 +2013,8 @@ browserConfiguration.contextMenu.customize { menu, _ in
   `sourceURL` and `mediaType` (image, video, audio, canvas…), `mediaState`,
   `pageURL`, `frameURL` (in a subframe), `titleText`, `selectedText`,
   `isEditable`, `editing` (what the field allows), `misspelledWord` and
-  `spellingSuggestions`.
+  `spellingSuggestions`. A menu of your own acts on them with
+  `browser.replaceMisspelling(with:)` and `browser.learnSpelling(_:)`.
 - `showsInspectElement` adds Inspect where Chromium has none (Alloy
   style). `isEnabled = false` shows no menu.
 

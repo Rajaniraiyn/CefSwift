@@ -164,6 +164,7 @@ enum SelfTest {
         ("externalProtocols", externalProtocolChecks),
         ("backForward", backForwardChecks),
         ("frameContents", frameContentChecks),
+        ("browserControls", browserControlsChecks),
         ("threads", threadChecks),
         ("lifecycle", lifecycleChecks),
         ("frames", frameChecks),

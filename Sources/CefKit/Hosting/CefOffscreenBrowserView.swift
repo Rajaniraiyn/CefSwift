@@ -316,6 +316,10 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
     }
 
     private func windowKeyStateDidChange(isKey: Bool) {
+        // A drag or selection in progress loses its pointer with the window.
+        if !isKey, NSEvent.pressedMouseButtons != 0, let browser, browser.hostView === self {
+            browser.sendCaptureLostEvent()
+        }
         guard window?.firstResponder === self else { return }
         if isKey { browser?.hostViewDidBecomeKey() } else { browser?.hostViewDidResignKey() }
     }

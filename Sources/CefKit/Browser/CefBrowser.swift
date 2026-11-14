@@ -12,12 +12,16 @@ extension CefBrowser {
         public var activeMatchIndex: Int
         /// Whether the search has finished counting.
         public var isFinal: Bool
+        /// Where the highlighted match is, in the page's view points
+        /// (top-left origin); nil when Chromium did not say.
+        public var selectionRect: CGRect?
 
         /// Creates a value of your own, for previews and tests.
-        public init(matchCount: Int, activeMatchIndex: Int, isFinal: Bool = true) {
+        public init(matchCount: Int, activeMatchIndex: Int, isFinal: Bool = true, selectionRect: CGRect? = nil) {
             self.matchCount = matchCount
             self.activeMatchIndex = activeMatchIndex
             self.isFinal = isFinal
+            self.selectionRect = selectionRect
         }
     }
 }
