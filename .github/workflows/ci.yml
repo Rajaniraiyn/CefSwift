@@ -185,6 +185,28 @@ jobs:
             cef bundle --product Gallery --configuration release --output dist
           ./Examples/dist/Gallery.app/Contents/MacOS/Gallery -smoke
 
+      # Idle footprint of the Minimal and Browser examples (relaunch on an
+      # existing profile, a static local page), written to the run summary.
+      # A virtual machine's numbers differ from a Mac's and drift, so the
+      # bounds are wide: about 1.5 times what an Apple M3 measures (Minimal
+      # about 100 MiB, Browser about 180 MiB) and today's process counts.
+      # They catch a gross regression, such as a page or a host process kept
+      # alive at idle; compare smaller changes on a Mac (CONTRIBUTING.md).
+      - name: Footprint
+        run: |
+          for product in Minimal Browser; do
+            swift package --package-path Examples \
+              --allow-writing-to-package-directory \
+              --allow-network-connections all \
+              cef bundle --product "$product" --configuration release --output dist
+          done
+          status=0
+          Scripts/measure-footprint.py Examples/dist/Minimal.app --kinds relaunch --runs 3 \
+            --markdown "$GITHUB_STEP_SUMMARY" --max-mib 160 --max-processes 5 || status=1
+          Scripts/measure-footprint.py Examples/dist/Browser.app --kinds relaunch --runs 3 \
+            --markdown "$GITHUB_STEP_SUMMARY" --max-mib 280 --max-processes 7 || status=1
+          exit "$status"
+
       # On failure: the full log, the results, and any crash reports from
       # this run (Chromium's helpers report under their own names).
       - name: Collect SelfTest diagnostics

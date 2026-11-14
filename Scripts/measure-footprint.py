@@ -25,6 +25,13 @@ Runs come in two kinds:
 Neither kind clears the system's file cache, which needs root, so every run
 after the first reads the framework from memory. Arguments after `--` go to
 the app, which passes Chromium switches through to Chromium.
+
+`--markdown <file>` appends the medians and the per-process breakdown as a
+Markdown table (CI passes `$GITHUB_STEP_SUMMARY`). `--max-mib` and
+`--max-processes` make the script exit with status 1 when a kind's median
+footprint or process count is above them; CI uses wide bounds that only a
+gross regression crosses, since a virtual machine's numbers differ from a
+Mac's and drift between runs.
 """
 
 import argparse
@@ -203,6 +210,12 @@ def main():
     parser.add_argument("--kinds", choices=["first", "relaunch", "both"], default="both")
     parser.add_argument("--timeout", type=float, default=60)
     parser.add_argument("--json", type=pathlib.Path, help="also write every run to this file")
+    parser.add_argument("--markdown", type=pathlib.Path,
+                        help="append the medians as a Markdown table to this file")
+    parser.add_argument("--max-mib", type=float,
+                        help="fail when a kind's median total footprint is above this (MiB)")
+    parser.add_argument("--max-processes", type=int,
+                        help="fail when a kind's median process count is above this")
     arguments = sys.argv[1:]
     extra = arguments[arguments.index("--") + 1:] if "--" in arguments else []
     options = parser.parse_args(arguments[:arguments.index("--")] if "--" in arguments else arguments)
@@ -235,10 +248,12 @@ def main():
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
         # Helpers exit shortly after the app; Chromium's code-sign clone
-        # cleanup process outlives it by design.
+        # cleanup process outlives it by design. Only executables inside the
+        # app count: this script's own command line names the app too.
         for _ in range(10):
             leftovers = [f"{pid} {kind(args)}" for pid, (_, args) in process_table().items()
-                         if str(options.app.resolve()) in args and "code-sign-clone-cleanup" not in args]
+                         if args.startswith(str(options.app.resolve()) + "/")
+                         and "code-sign-clone-cleanup" not in args]
             if not leftovers:
                 break
             time.sleep(0.5)
@@ -248,6 +263,39 @@ def main():
     if options.json:
         options.json.write_text(json.dumps(
             {"app": str(options.app), "url": url, "extra": options.extra, "results": results}, indent=2))
+
+    failures = []
+    for result in results:
+        if options.max_mib is not None and result["total_mib_median"] > options.max_mib:
+            failures.append(f"{result['label']}: median footprint {result['total_mib_median']:.1f} MiB "
+                            f"is above {options.max_mib:g} MiB")
+        if options.max_processes is not None and result["processes_median"] > options.max_processes:
+            failures.append(f"{result['label']}: median {result['processes_median']:g} processes "
+                            f"is above {options.max_processes}")
+    if options.markdown:
+        with open(options.markdown, "a") as file:
+            file.write(markdown(exe.name, options, results, failures))
+    for failure in failures:
+        print(f"FAIL {exe.name} {failure}", file=sys.stderr)
+    if failures:
+        sys.exit(1)
+
+
+def markdown(name, options, results, failures):
+    lines = [f"### Footprint: {name}", ""]
+    bounds = [f"{options.max_mib:g} MiB" if options.max_mib is not None else None,
+              f"{options.max_processes} processes" if options.max_processes is not None else None]
+    bounds = [bound for bound in bounds if bound]
+    if bounds:
+        lines += [f"Fails above {' and '.join(bounds)}.", ""]
+    lines += ["| Runs | Processes | Total | Per process | Launch |", "|---|---|---|---|---|"]
+    for result in results:
+        kinds = ", ".join(f"{kind} {mib:.1f}" for kind, mib in sorted(
+            result["per_kind_mib_median"].items(), key=lambda item: item[0] != "browser"))
+        lines.append(f"| {result['label']} ({len(result['runs'])}) | {result['processes_median']:g} "
+                     f"| {result['total_mib_median']:.1f} MiB | {kinds} | {result['launch_ms_median']:.0f} ms |")
+    lines += [""] + [f"**FAIL** {failure}" for failure in failures] + [""]
+    return "\n".join(lines) + "\n"
 
 
 if __name__ == "__main__":
