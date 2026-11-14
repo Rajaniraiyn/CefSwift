@@ -290,7 +290,10 @@ enum ChromeAccessibilityFilter {
     }
 
     private static func replaceChildren(of nodeClass: AnyClass, selector: Selector) {
+        // Only a method the class itself defines: one it inherits is its
+        // superclass's, shared with every other class.
         guard let method = class_getInstanceMethod(nodeClass, selector),
+              method != class_getSuperclass(nodeClass).flatMap({ class_getInstanceMethod($0, selector) }),
               method_getTypeEncoding(method).map({ String(cString: $0) })?.hasPrefix("@") == true
         else { return }
         typealias Original = @convention(c) (AnyObject, Selector) -> NSArray?

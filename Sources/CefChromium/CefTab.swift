@@ -48,10 +48,16 @@ public final class CefTab: Identifiable {
     public internal(set) var window: CefChromeWindow?
     /// The tab's position in its window, pinned tabs first.
     public internal(set) var index = 0
-    /// The page's title as Chromium reports it.
-    public internal(set) var title = ""
-    /// The page's address.
-    public internal(set) var url: URL?
+    /// The page's title: its browser's, as it changes, or Chromium's
+    /// report of it while the browser is not known.
+    public var title: String {
+        guard let browser, !browser.title.isEmpty else { return reportedTitle }
+        return browser.title
+    }
+    /// The page's address: its browser's, or Chromium's report.
+    public var url: URL? { browser?.url ?? reportedURL }
+    var reportedTitle = ""
+    var reportedURL: URL?
     /// Whether the tab is its window's active tab, the one shown.
     public internal(set) var isActive = false
     /// Whether the tab is selected, alone or with others (Chromium's
@@ -66,7 +72,8 @@ public final class CefTab: Identifiable {
     /// Whether the tab's sound is muted.
     public internal(set) var isMuted = false
     /// Whether the page is loading.
-    public internal(set) var isLoading = false
+    public var isLoading: Bool { browser?.isLoading ?? reportedLoading }
+    var reportedLoading = false
     /// The tab group the tab is in.
     public internal(set) var group: CefTabGroup?
     /// What the tab shows it is doing: playing sound, recording, sharing

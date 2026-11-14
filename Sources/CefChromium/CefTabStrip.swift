@@ -183,14 +183,24 @@ public final class CefTabStrip {
         var version: Int?
         while isLive {
             do {
+                // Woken by the internal page's reports of changes to tab
+                // strips; what it does not report (a new window, a tab's
+                // title, sound and loading) is read every second as well.
+                var arguments: [String: CefJSON] = ["idle": .number(1_000)]
+                if let version { arguments["since"] = .number(Double(version)) }
                 let next = try await services.call(
-                    Self.tabsModule, "(s, a, c) => s.read(a.since, c.signal)",
-                    .object(version.map { ["since": .number(Double($0))] } ?? [:]),
+                    Self.tabsModule, "(s, a, c) => s.read(a.since, c.signal, a.idle)", .object(arguments),
                     as: TabsSnapshot.self, timeout: .seconds(40), isIdempotent: true)
                 version = next.version
                 tabsSnapshot = next
                 lastError = nil
+                let groupsBefore = Set(groupsByID.keys)
                 rebuild()
+                // A new group: read its name and colour from the internal
+                // page at once.
+                if !Set(groupsByID.keys).subtracting(groupsBefore).isEmpty {
+                    Task { _ = try? await internalsServices.call(Self.internalsModule, "s => s.bump()", as: Int.self) }
+                }
                 await bindBrowsers()
                 let ready = readWaiters.filter { $0.version <= next.version }
                 readWaiters.removeAll { $0.version <= next.version }
@@ -215,13 +225,20 @@ public final class CefTabStrip {
         let services = internalsServices
         while isLive {
             do {
+                // Chromium does not tell the internal page when a group is
+                // renamed, recoloured or collapsed (an extension's
+                // chrome.tabGroups.update), so while there are groups it
+                // reads every two seconds as well.
+                var arguments: [String: CefJSON] = ["idle": .number(groupsByID.isEmpty ? 30_000 : 2_000)]
+                if let version { arguments["since"] = .number(Double(version)) }
                 let next = try await services.call(
-                    Self.internalsModule, "(s, a, c) => s.read(a.since, c.signal)",
-                    .object(version.map { ["since": .number(Double($0))] } ?? [:]),
+                    Self.internalsModule, "(s, a, c) => s.read(a.since, c.signal, a.idle)", .object(arguments),
                     as: InternalsSnapshot.self, timeout: .seconds(40), isIdempotent: true)
                 version = next.version
                 internalsSnapshot = next
                 rebuild()
+                // A change to a tab strip: read chrome.tabs at once.
+                _ = try? await self.services.call(Self.tabsModule, "s => s.bump()", as: Int.self)
             } catch {
                 guard isLive else { break }
                 lastError = "tab-strip-internals: \(error)"
@@ -376,17 +393,16 @@ public final class CefTabStrip {
                         internalWindow: InternalsSnapshot.Window?) {
         if tab.window !== window { tab.window = window }
         if tab.index != listed.index { tab.index = listed.index }
-        let title = listed.title
-        if tab.title != title { tab.title = title }
+        if tab.reportedTitle != listed.title { tab.reportedTitle = listed.title }
         let url = URL(string: listed.url)
-        if tab.url != url { tab.url = url }
+        if tab.reportedURL != url { tab.reportedURL = url }
         if tab.isActive != listed.active { tab.isActive = listed.active }
         if tab.isSelected != listed.highlighted { tab.isSelected = listed.highlighted }
         if tab.isPinned != listed.pinned { tab.isPinned = listed.pinned }
         if tab.isDiscarded != listed.discarded { tab.isDiscarded = listed.discarded }
         if tab.isAudible != listed.audible { tab.isAudible = listed.audible }
         if tab.isMuted != listed.muted { tab.isMuted = listed.muted }
-        if tab.isLoading != listed.loading { tab.isLoading = listed.loading }
+        if tab.reportedLoading != listed.loading { tab.reportedLoading = listed.loading }
         let opener = listed.opener >= 0 ? CefTab.ID(rawValue: listed.opener) : nil
         if tab.openerID != opener { tab.openerID = opener }
         let favicon = listed.favicon.isEmpty ? nil : URL(string: listed.favicon)
@@ -756,23 +772,22 @@ public final class CefTabStrip {
             async emit => {
               const t = chrome.tabs, w = chrome.windows;
               if (!t || !w) throw new Error('chrome.tabs is not available on this page');
+              // No chrome.tabs or chrome.windows event listeners: with one
+              // on this WebUI page, Chromium (CEF 156) crashes later, when an
+              // extension is disabled or an incognito window opens. Reads
+              // are woken by the internal page's updates instead (bump).
               let version = 0, waiters = [];
               const bump = () => { version++; for (const f of waiters.splice(0)) f(); return version; };
-              for (const e of [t.onCreated, t.onUpdated, t.onMoved, t.onActivated, t.onHighlighted, t.onDetached,
-                               t.onAttached, t.onRemoved, t.onReplaced, w.onCreated, w.onRemoved, w.onFocusChanged,
-                               w.onBoundsChanged]) {
-                try { e && e.addListener(bump); } catch (error) {}
-              }
               const tab = x => ({id: x.id, index: x.index, url: x.url || x.pendingUrl || '', title: x.title || '',
                 active: !!x.active, highlighted: !!x.highlighted, pinned: !!x.pinned, group: x.groupId ?? -1,
                 audible: !!x.audible, muted: !!(x.mutedInfo && x.mutedInfo.muted), discarded: !!x.discarded,
                 loading: x.status == 'loading', favicon: x.favIconUrl || '', opener: x.openerTabId ?? -1});
-              const read = async (since, signal) => {
+              const read = async (since, signal, idle) => {
                 if (since != null && since == version) {
                   await new Promise(resolve => {
                     waiters.push(resolve);
                     signal.addEventListener('abort', resolve);
-                    setTimeout(resolve, 30000);
+                    setTimeout(resolve, idle ?? 30000);
                   });
                 }
                 const seen = version;
@@ -845,12 +860,12 @@ public final class CefTabStrip {
                 visit(entry, '', 0);
                 return found;
               };
-              const read = async (since, signal) => {
+              const read = async (since, signal, idle) => {
                 if (since != null && since == version) {
                   await new Promise(resolve => {
                     waiters.push(resolve);
                     signal.addEventListener('abort', resolve);
-                    setTimeout(resolve, 30000);
+                    setTimeout(resolve, idle ?? 30000);
                   });
                 }
                 const seen = version;

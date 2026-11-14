@@ -146,6 +146,7 @@ extension SelfTest {
         await extensionMenuChecks(browser: browser, window: window)
         await extensionToolbarChecks(window: window)
         await extensionTabChecks(base: base)
+        await extensionTabStripChecks(base: base)
 
         // Changing it.
         await expect("setEnabled(false) disables it and its content script stops") {
