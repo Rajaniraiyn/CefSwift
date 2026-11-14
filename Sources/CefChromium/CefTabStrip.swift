@@ -967,9 +967,16 @@ public final class CefTabStrip {
         return CefTab.ID(rawValue: id)
     }
 
-    /// Closes `window`'s tabs through CEF.
+    /// Closes `window` as Chrome's Close Window does (`IDC_CLOSE_WINDOW`),
+    /// so Chromium keeps it as one entry with all its tabs, which
+    /// ``reopen(_:)`` and ⌘⇧T bring back whole; through CEF, tab by tab,
+    /// when none of its browsers is known.
     func close(_ window: CefChromeWindow) {
-        close(window.tabs)
+        if let browser = window.activeTab?.browser ?? window.tabs.lazy.compactMap(\.browser).first {
+            browser.execute(.closeWindow)
+        } else {
+            close(window.tabs)
+        }
     }
 
     func focus(_ window: CefChromeWindow) async throws {

@@ -139,8 +139,10 @@ public final class CefChromeWindow: Identifiable {
         try await strip.chromiumTab(url, in: self, at: index, isActive: isActive)
     }
 
-    /// Closes every tab, and so the window. Pages' `beforeunload` handlers
-    /// may keep their tabs open.
+    /// Closes the window with all its tabs, as Chrome's Close Window does:
+    /// Chromium keeps it in ``CefTabStrip/recentlyClosed`` as one entry,
+    /// which ``CefTabStrip/reopen(_:)`` brings back whole. Pages'
+    /// `beforeunload` handlers may keep it open.
     public func close() {
         strip.close(self)
     }
