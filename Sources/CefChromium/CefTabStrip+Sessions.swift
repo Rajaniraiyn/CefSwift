@@ -177,7 +177,7 @@ extension CefTabStrip {
     /// Where CefChromium keeps the profile's windows between runs: a small
     /// file in the profile's directory. `nil` for an incognito profile.
     var sessionFile: URL? {
-        profile.isIncognito ? nil : profile.directory?.appendingPathComponent("CefSwift Windows.json")
+        profile.isIncognito ? nil : profile.storageDirectory?.appendingPathComponent("CefSwift Windows.json")
     }
 
     struct SessionRecord: Codable {
