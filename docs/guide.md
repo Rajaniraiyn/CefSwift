@@ -30,6 +30,7 @@ The runtime, browser, window and profile APIs are `@MainActor`.
   - [Background](#background)
   - [In AppKit](#in-appkit)
   - [Offscreen rendering](#offscreen-rendering)
+  - [Tooltips](#tooltips)
   - [Swipe navigation](#swipe-navigation)
   - [Offscreen accessibility](#offscreen-accessibility)
   - [Keyboard focus](#keyboard-focus)
@@ -848,7 +849,51 @@ In return the host drives the browser as AppKit drives a view:
 
 The page's tooltips (a `title` under the mouse) reach the host through
 `offscreenDidChangeToolTip(_:)`; `CefOffscreenBrowserView` shows them as
-its own `toolTip`, as AppKit does for any view.
+its own `toolTip`, as AppKit does for any view (see [Tooltips](#tooltips)).
+
+### Tooltips
+
+`browser.tooltip` is the page's tooltip while one shows: its `text` (a
+`title` attribute's, which can run over several lines) and the pointer's
+`location` in the host view (top-left origin; Chromium gives no anchor of
+its own). It is observable, and goes when the pointer moves off, the page
+navigates, the browser closes or is discarded, and, in an offscreen
+browser, when the user scrolls or types or the view loses key status.
+
+`browser.tooltipPolicy` says who shows it:
+
+| Policy | Offscreen (`CefOffscreenBrowserView`) | Windowed and Chrome style |
+|---|---|---|
+| `.automatic` (default) | The view's own `toolTip`, with AppKit's look, delay and placement. | Chromium's own tooltip. |
+| `.custom` | Nothing: the app shows `browser.tooltip`. | Nothing: `on_tooltip` answers that the app shows it. |
+
+With `.custom`, draw the tooltip yourself, for example over an offscreen
+`CefWebView`, where SwiftUI content can sit above the page; keep it out of
+hit testing so the page still gets the pointer:
+
+```swift
+CefWebView(browser)
+    .overlay(alignment: .topLeading) {
+        if let tooltip = browser.tooltip {
+            Text(tooltip.text)
+                .font(.callout)
+                .padding(6)
+                .background(.regularMaterial, in: .rect(cornerRadius: 6))
+                .offset(x: tooltip.location.x, y: tooltip.location.y + 18)
+                .allowsHitTesting(false)
+        }
+    }
+    .onAppear { browser.tooltipPolicy = .custom }
+```
+
+Only `title` text comes this way. A page's own tooltips (a `popover`, an
+`interestfor` target, CSS) are page content and already show in the page;
+the tooltips of Chromium's own interface, such as a `CefWindow`'s toolbar
+buttons, are Chromium's. A windowed browser's native view sits above
+SwiftUI content, so a custom tooltip for one needs a view or window of
+your own above it. SelfTest measures the offscreen cases; the windowed
+and Chrome-style ones need the real pointer, which an unattended run does
+not move.
 
 When the browser moves to another host, or `stopHosting(in:)` withdraws it,
 the host hears `offscreenDidStopHosting(_:)`: stop calling the browser
@@ -1447,6 +1492,7 @@ for some cases by calling its presenter:
 | File chooser | `browser(_:runFileDialog:)` | `CefFileDialogPresenter` |
 | Download save panel | `browser(_:decideDestinationFor:)` | `CefDownloadPresenter` |
 | Opening another app (`mailto:`, `zoommtg:`) | `browser(_:decideExternalProtocolFor:)` | `CefExternalProtocolPresenter` |
+| Page tooltip (not a sheet) | `browser.tooltipPolicy = .custom`, then show `browser.tooltip` | The offscreen view's `toolTip`; Chromium's own elsewhere. See [Tooltips](#tooltips) |
 | Context menu | `browser(_:runContextMenu:for:)` | `CefContextMenuPresenter` |
 | Passkeys | `CefPasskeyDelegate.browser(_:decidePasskeyFor:)` | `CefPasskeyPresenter` |
 

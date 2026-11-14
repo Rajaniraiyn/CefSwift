@@ -359,6 +359,7 @@ extension CefBrowser {
         isFullscreen = false
         statusText = ""
         findResult = nil
+        tooltip = nil
         isCapturingMedia = false
         for download in downloads { download.control = nil }
         cancelDecisions { _ in true }

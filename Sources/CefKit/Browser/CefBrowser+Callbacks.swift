@@ -14,6 +14,7 @@ extension CefBrowser {
         // or the reload it asked for, was about.
         endUnresponsiveEpisode()
         pageScripting.mainFrameDidStartLoading()
+        hideTooltip()
         let wasDiscarded = isDiscarded
         // The document has committed, so a level set before the browser
         // existed applies to its site.
@@ -307,6 +308,7 @@ extension CefBrowser {
 
     func handleClosed() {
         guard state != .closed else { return }
+        hideTooltip()
         if discardPhase == .closing {
             browserDidCloseForDiscard()
             return

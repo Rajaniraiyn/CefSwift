@@ -299,6 +299,20 @@ public final class CefBrowser: Identifiable {
     /// Chromium creates it.
     @ObservationIgnored var pendingAudioMuted: Bool?
 
+    /// The page's tooltip while one shows; nil otherwise. Observable. It
+    /// goes when the pointer moves off, and when the user scrolls or types
+    /// in an offscreen browser, the page navigates, the browser loses
+    /// focus, closes or is discarded. See ``TooltipPolicy``.
+    public internal(set) var tooltip: Tooltip?
+
+    /// Who shows ``tooltip``: ``TooltipPolicy/automatic`` (the default)
+    /// leaves it to Chromium or the offscreen view, ``TooltipPolicy/custom``
+    /// to the app. Takes effect with the next tooltip.
+    @ObservationIgnored public var tooltipPolicy = TooltipPolicy.automatic
+
+    /// The last point sent to an offscreen browser, for its tooltip.
+    @ObservationIgnored var lastPointerLocation = CGPoint.zero
+
     @ObservationIgnored var lastFindText: String?
 
     /// Whether this browser's DevTools window is open.

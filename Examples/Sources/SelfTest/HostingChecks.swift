@@ -8,7 +8,6 @@ extension SelfTest {
         await offscreenTransferChecks()
         await windowedTransferChecks()
         await settersBeforeCreationChecks()
-        await offscreenToolTipChecks()
     }
 
     /// Zoom and mute set before Chromium creates the browser apply once it
@@ -36,7 +35,7 @@ extension SelfTest {
         await closeHosted(browser, view)
     }
 
-    private static let transferPage = URL(string: "selftest://app/transfer.html")!
+    static let transferPage = URL(string: "selftest://app/transfer.html")!
 
     private static func offscreenTransferChecks() async {
         var configuration = CefBrowser.Configuration()

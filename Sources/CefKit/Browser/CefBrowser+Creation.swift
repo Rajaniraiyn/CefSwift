@@ -175,6 +175,7 @@ extension CefBrowser {
             hostView = nil
             stoppedWindowed = host as? CefWindowedBrowserView
         }
+        if stoppedOffscreen != nil || stoppedWindowed != nil { hideTooltip() }
         // Told once the browser has let go, so their own clean-up finds
         // nothing to withdraw.
         stoppedOffscreen?.offscreenDidStopHosting(self)

@@ -95,3 +95,25 @@ struct CancellationTests {
         #expect(CefProfile.Cookie(name: "a", value: "1").defaultURL == nil)
     }
 }
+
+/// The page's tooltip: what the browser reports, and who shows it.
+@MainActor
+struct TooltipTests {
+    @Test func theCustomPolicySuppressesChromiumsTooltip() {
+        let browser = CefBrowser()
+        #expect(browser.tooltipDidChange("Hello") == false)
+        #expect(browser.tooltip?.text == "Hello")
+        browser.tooltipPolicy = .custom
+        #expect(browser.tooltipDidChange("Again") == true)
+        #expect(browser.tooltip?.text == "Again")
+        #expect(browser.tooltipDidChange("") == true)
+        #expect(browser.tooltip == nil)
+    }
+
+    @Test func navigatingHidesIt() {
+        let browser = CefBrowser()
+        _ = browser.tooltipDidChange("Hello")
+        browser.mainFrameDidStartLoading(URL(string: "https://example.com/"))
+        #expect(browser.tooltip == nil)
+    }
+}
