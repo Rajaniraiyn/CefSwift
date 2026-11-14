@@ -187,6 +187,8 @@ private final class ChromeFindBar: NSView {
         }
         let wasHidden = isHidden
         isHidden = !isActive
+        // The window lays the bar out over the page again.
+        if wasHidden != isHidden { chromeWindow?.host?.update() }
         if isActive, wasHidden || focusing {
             DispatchQueue.main.async { [weak self] in
                 guard let self, let field = Self.firstTextField(in: self) else { return }

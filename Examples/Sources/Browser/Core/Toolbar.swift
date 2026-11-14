@@ -7,9 +7,9 @@ struct NavigationButtons: View {
 
     var body: some View {
         HStack(spacing: 2) {
-            Button("Back", systemImage: "chevron.left", action: browser.goBack)
+            Button("Back", systemImage: "chevron.backward", action: browser.goBack)
                 .disabled(!browser.canGoBack)
-            Button("Forward", systemImage: "chevron.right", action: browser.goForward)
+            Button("Forward", systemImage: "chevron.forward", action: browser.goForward)
                 .disabled(!browser.canGoForward)
         }
         .buttonStyle(ToolbarIconButtonStyle())

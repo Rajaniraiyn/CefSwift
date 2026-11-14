@@ -37,9 +37,9 @@ struct FindBar: BrowserFeature {
                 .padding(.horizontal, 8)
                 .frame(width: 280, height: 24)
                 .background(.quaternary.opacity(0.8), in: .rect(cornerRadius: 6))
-                Button("Previous", systemImage: "chevron.left", action: session.previous)
+                Button("Previous", systemImage: "chevron.backward", action: session.previous)
                     .disabled(session.matchCount == 0)
-                Button("Next", systemImage: "chevron.right", action: session.next)
+                Button("Next", systemImage: "chevron.forward", action: session.next)
                     .disabled(session.matchCount == 0)
                 Button("Done", action: session.end)
             }

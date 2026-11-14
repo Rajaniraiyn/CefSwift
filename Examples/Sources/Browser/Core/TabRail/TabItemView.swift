@@ -39,7 +39,11 @@ struct TabItemView: View {
         .background {
             shape.fill(.background.opacity(tab.isActive ? 1 : 0))
                 .shadow(color: .black.opacity(tab.isActive ? 0.12 : 0), radius: 1, y: 0.5)
-            shape.fill(.primary.opacity(!tab.isActive && (isHovered || tab.isSelected) ? 0.06 : style == .pinnedTile ? 0.04 : 0))
+            shape.fill(.primary.opacity(!tab.isActive && (isHovered || tab.isSelected) ? 0.08 : style == .tab || style == .row ? 0 : 0.05))
+            // A pinned tab is a compact tile of its own, active or not.
+            if style == .pinned, !tab.isActive {
+                shape.strokeBorder(.separator, lineWidth: 0.5)
+            }
         }
         .overlay(alignment: .bottom) { groupBar }
         .overlay(alignment: .leading) {

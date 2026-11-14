@@ -102,11 +102,17 @@ final class ChromeWindowHost {
         let pageRect = contentView.isFlipped
             ? pageInContent
             : CGRect(x: pageInContent.minX, y: height - pageInContent.maxY, width: pageInContent.width, height: pageInContent.height)
-        let isRightToLeft = nsWindow.windowTitlebarLayoutDirection == .rightToLeft
         let top = max(0, pageRect.minY)
-        let leading = isRightToLeft ? max(0, contentView.bounds.width - pageRect.maxX) : max(0, pageRect.minX)
-        // Chrome's vertical tabs are at the leading edge; the side panel,
-        // at the trailing edge, stays Chromium's.
+        // Chrome's vertical tabs are at Chromium's leading edge, which
+        // follows Chromium's language, not AppKit's layout direction (a
+        // right-to-left AppKit app in an English Chromium has them on the
+        // left); the side panel, at Chromium's trailing edge, stays
+        // Chromium's. The strip is on the side the page leaves free, or
+        // Chromium's leading side when both are.
+        let leftGap = max(0, pageRect.minX), rightGap = max(0, contentView.bounds.width - pageRect.maxX)
+        let chromiumIsRightToLeft = Locale.Language(identifier: Locale.preferredLanguages.first ?? "en").characterDirection == .rightToLeft
+        let isRightToLeft = rightGap > 0.5 && (leftGap <= 0.5 || chromiumIsRightToLeft)
+        let leading = isRightToLeft ? rightGap : leftGap
         let sidebarWidth = Self.isVertical(window.strip.layout) ? leading : 0
         if window.contentFrame != pageRect { window.contentFrame = pageRect }
         if window.topBarHeight != top { window.topBarHeight = top }

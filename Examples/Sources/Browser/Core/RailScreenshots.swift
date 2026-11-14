@@ -19,12 +19,12 @@ enum RailScreenshots {
             URL(string: "data:text/html,<title>\(title)</title><h1>\(title)</h1>")!
         }
         func settle() async { try? await Task.sleep(for: .milliseconds(900)) }
-        func shoot(_ name: String) async {
+        func shoot(_ name: String, extra: CGFloat = 0) async {
             await settle()
             guard let cover = window.topBar?.superview else { return }
             cover.layoutSubtreeIfNeeded()
             let bounds = cover.bounds
-            let height = controller.tabsAtTheSide ? bounds.height : window.topBarHeight
+            let height = controller.tabsAtTheSide ? bounds.height : window.topBarHeight + extra
             let rect = CGRect(x: 0, y: 0, width: bounds.width, height: min(bounds.height, max(height, 1)))
             guard let bitmap = cover.bitmapImageRepForCachingDisplay(in: rect) else { return }
             cover.cacheDisplay(in: rect, to: bitmap)
@@ -58,6 +58,13 @@ enum RailScreenshots {
             _ = await controller.openTabNow(url: page("Article \(index)"), inBackground: true)
         }
         await shoot("4-overflow")
+
+        // The find bar along the top of the page, in place of Chromium's.
+        window.activeTab?.browser?.execute(.find)
+        await settle()
+        window.activeTab?.browser?.findSession.text = "Article"
+        await shoot("4b-find-bar", extra: window.pageBar?.fittingSize.height ?? 0)
+        window.activeTab?.browser?.findSession.end()
 
         NSApp.appearance = NSAppearance(named: .darkAqua)
         await shoot("5-dark")
