@@ -3020,9 +3020,29 @@ window itself. `strip.layout = .vertical(width:)` turns on Chrome's
 vertical tabs, which the `sidebar` covers.
 
 ```swift
-window.showsChromeUI = false
-window.setTopBar { MyTabBar(window: window) }
-window.setPageOverlay { StatusText(window: window) }
+import CefChromium
+import SwiftUI
+
+/// A tab bar drawn from the window's tabs: each button is a command to
+/// Chromium, and the bar redraws when Chromium reports the change.
+struct TabBar: View {
+    let window: CefChromeWindow
+
+    var body: some View {
+        HStack {
+            ForEach(window.tabs) { tab in
+                Button(tab.title) { Task { try? await tab.select() } }
+                    .fontWeight(tab.isActive ? .semibold : .regular)
+            }
+        }
+        .padding(.leading, 80)  // the window buttons
+    }
+}
+
+func dress(_ window: CefChromeWindow) {
+    window.showsChromeUI = false
+    window.setTopBar { TabBar(window: window) }
+}
 ```
 
 **Tabs and browsers.** Each tab is matched with its `CefBrowser` exactly:
