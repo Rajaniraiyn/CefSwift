@@ -44,6 +44,8 @@ The runtime, browser, window and profile APIs are `@MainActor`.
   - [Built-in sheets](#built-in-sheets)
   - [HTTP authentication](#http-authentication)
   - [Navigation and new windows](#navigation-and-new-windows)
+  - [Back and forward](#back-and-forward)
+  - [Links to other apps](#links-to-other-apps)
   - [Downloads](#downloads)
   - [File choosers](#file-choosers)
   - [Passkeys](#passkeys)
@@ -1248,6 +1250,28 @@ for frame in browser.frames where !frame.isMain {
 one frame, cross-site frames in other renderer processes included, as the
 main-frame versions do. An evaluation in a frame that is gone, or that
 goes while the script runs, throws `CefError.frameDetached`.
+
+`text(of:)` and `source(of:)` read a frame's text (as `innerText` renders
+it) and its HTML (the document as it is now, serialized) natively from
+the renderer, without running script in the page; with no frame, the main
+frame's:
+
+```swift
+let words = try await browser.text().split(whereSeparator: \.isWhitespace).count
+```
+
+`load(_:)` also takes a `URLRequest`, to send a method, headers and a
+body (`httpBody`), as a form posting would. CEF allows it only from a
+page of the request's own origin (otherwise Chromium ends the renderer),
+so the navigation fails at once, sending nothing, unless the main frame
+is already on that origin:
+
+```swift
+var request = URLRequest(url: URL(string: "https://example.com/search")!)
+request.httpMethod = "POST"
+request.httpBody = Data("q=chromium".utf8)
+try await browser.load(request).waitUntilLoaded()
+```
 
 ### User scripts and style sheets
 

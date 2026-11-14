@@ -194,10 +194,11 @@ extension CefBrowser {
         loads.renderProcessDidTerminate(reason)
     }
 
-    /// Registers a navigation ``load(_:)`` is about to start.
-    func requestNavigation(to url: URL) -> CefNavigation {
+    /// Registers a navigation ``load(_:)`` is about to start;
+    /// `isLoadRequest` for ``load(_:)-(URLRequest)``'s.
+    func requestNavigation(to url: URL, isLoadRequest: Bool = false) -> CefNavigation {
         let shown = raw != nil && !isBootstrapping && !isDiscarded ? self.url : nil
-        return loads.request(url, shownURL: shown)
+        return loads.request(url, shownURL: shown, isLoadRequest: isLoadRequest)
     }
 }
 
@@ -262,11 +263,22 @@ final class CefLoadTracker {
 
     /// Registers a navigation about to be asked of Chromium. A previous
     /// one that has not started is superseded.
-    func request(_ url: URL, shownURL: URL?) -> CefNavigation {
+    func request(_ url: URL, shownURL: URL?, isLoadRequest: Bool = false) -> CefNavigation {
         let navigation = CefNavigation(url: url, isSameDocumentCandidate: Self.differOnlyInFragment(url, shownURL))
         requested?.finish(.failure(CefError.navigationSuperseded))
         requested = navigation
+        requestedByLoadRequest = isLoadRequest
         return navigation
+    }
+
+    /// Whether ``requested`` was started with `load_request`, which Chromium
+    /// does not mark as a direct load: it is recognized by its address.
+    private var requestedByLoadRequest = false
+
+    /// Whether a navigation to `url` with `transition` is the one asked for.
+    private func isRequested(_ url: URL?, _ transition: Transition) -> Bool {
+        guard let requested else { return false }
+        return transition.isDirectLoad || requestedByLoadRequest && url == requested.url
     }
 
     /// Suspends until nothing is asked for or under way, and returns how
@@ -285,7 +297,7 @@ final class CefLoadTracker {
         }
         if isRedirect, ongoing != nil {
             ongoing?.url = url
-        } else if transition.isDirectLoad, let requested {
+        } else if isRequested(url, transition), let requested {
             // The navigation `load(_:)` asked for.
             self.requested = nil
             replaceOngoing(with: Ongoing(navigation: requested, url: url))
@@ -306,7 +318,7 @@ final class CefLoadTracker {
         isClosing = false
         if ongoing == nil {
             // No `on_before_browse` came for it.
-            if transition.isDirectLoad, let requested {
+            if isRequested(url, transition), let requested {
                 self.requested = nil
                 ongoing = Ongoing(navigation: requested)
             } else {

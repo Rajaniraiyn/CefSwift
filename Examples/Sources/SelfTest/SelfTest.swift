@@ -162,6 +162,7 @@ enum SelfTest {
         ("popups", popupBlockingChecks),
         ("externalProtocols", externalProtocolChecks),
         ("backForward", backForwardChecks),
+        ("frameContents", frameContentChecks),
         ("threads", threadChecks),
         ("lifecycle", lifecycleChecks),
         ("frames", frameChecks),
