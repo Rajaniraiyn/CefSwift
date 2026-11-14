@@ -157,6 +157,75 @@ Measured and left alone:
   consistent only between Chromium's transactions, which nothing outside
   Chromium can tell, so a read-only snapshot is not sound either.
 
+## Extensions: Chromium's own, through `chrome://extensions`
+
+Measured with SelfTest's survey (`SELFTEST_ONLY=extensions
+SELFTEST_EXTENSIONS_DUMP=1`, `=2` for Chrome's windows, `=3` for a
+`CefWindow` with Chrome's toolbar, `SELFTEST_EXTENSIONS_STORE=<id>` for the
+store) on CEF 156.0.28.
+
+- **CEF's C API has none.** `cef_extension_t` and the extension handler went
+  with the Alloy runtime's extension system; CEF 156's headers keep only
+  `cef_browser_t::get_identifier` ("also used as the tabId for extension
+  APIs", which in Chrome style it is not: tab ids are Chromium's session
+  ids), the `IDC_*EXTENSIONS*` commands and `CEF_TASK_TYPE_EXTENSION`.
+  Chrome style runs Chrome's whole extension system, so the route is the
+  one Chrome's own `chrome://extensions` uses: `chrome.developerPrivate`
+  and `chrome.management`, which Chromium grants that host. Nothing is
+  read from pages, and nothing is injected into extensions.
+- **Rejected:** the DevTools `Extensions` domain (`loadUnpacked`,
+  `uninstall`, `triggerAction`) answers "Method not allowed": it needs
+  `--remote-debugging-pipe` and `--enable-unsafe-extension-debugging`,
+  which an app should not ship. Policies (`ExtensionInstallForcelist`,
+  `ExtensionSettings`) set as recommended values (`defaults write`, what an
+  app can write) show in `chrome://policy` as errors: Chromium accepts
+  them only as mandatory, from an administrator. `"was_installed_by_default"`
+  in an external extension's file does not keep Chromium from installing
+  it disabled. `fetch` of `chrome://extension-icon` from the host is
+  refused by its CSP; `developerPrivate` gives icons as `data:` URLs anyway.
+- **What runs where.** Content scripts, `declarativeNetRequest` and
+  `webRequest` apply in every browser of the profile, Alloy-style views
+  included; extension pages, popups and Chrome's extension UI need Chrome
+  style. CEF makes each `CefWindow` its own Chromium `Browser` of type
+  `popup` with one tab (`chrome.windows.getAll()` → `"popup"`), so
+  `tabs.group`/`tabs.move` refuse its tabs ("Tabs can only be moved to and
+  from normal windows") and `chrome.action.openPopup()` answers "Browser
+  window has no toolbar", with or without Chrome's toolbar view; Chrome's
+  extensions menu opens in such a window but its actions' popups do not.
+  `openChromeWindow` windows are `normal`: there tabs, groups and popups
+  are Chrome's. `tabs.create` and `windows.create` from a `CefWindow`'s
+  extension page, and `runtime.openOptionsPage()`, open a Chrome window,
+  which reaches `onChromeTab`.
+- **Per-tab action state** (badge text and colour, title, icon an extension
+  sets) lives in the browser process for Chromium's toolbar; no WebUI, Mojo
+  interface or C API reads it, and asking the extension
+  (`chrome.action.getBadgeText`) would mean running code in the extension's
+  service worker through DevTools. `CefExtension.Action` is therefore the
+  manifest's declared action.
+- **The Web Store** works: its page has `chrome.webstorePrivate`, Add to
+  Chrome shows Chromium's `ExtensionInstallDialogView` (a top-level widget
+  window, not a child of the `CefWindow`), and accepting it installs. The
+  banner "Switch to Chrome to install extensions" follows the brand in
+  `navigator.userAgentData` (`Chromium`); no user-agent change is needed,
+  so none is made.
+- **Installing by identifier.** The external extensions directory is the
+  one route that installs from the store without the user: Chromium
+  downloads from `external_update_url` at start-up (about a minute in
+  SelfTest), and installs an `external_crx` with no download. Both arrive
+  disabled until accepted; enabling them once is the app's acceptance.
+  An `--load-extension` directory loads in CEF 156 (Chrome's branded builds
+  refuse the switch since Chrome 137), with no developer-mode warning in
+  SelfTest's windows, in every profile.
+- **Incognito.** Opening `chrome://extensions` in a `CefProfile.incognito()`
+  ends the browser process, as `chrome://history` does, so the service
+  host is the default profile's. An extension allowed in incognito did not
+  run its content script in CEF's in-memory profile.
+- **Uninstalling** confirms through Chromium's own bubble, whatever
+  `showConfirmDialog` says, and wants a user activation; the library gives
+  the host page one and accepts the bubble (see architecture.md). Not
+  verified: that Chromium uninstalls an external extension whose file
+  CefKit removed.
+
 ## Tab discarding: the capability, not a policy
 
 CefKit discards a browser only when asked (`CefBrowser.discard()`) and

@@ -15,6 +15,14 @@ import SwiftUI
 /// action popups only in its own windows, so this feature shows the popup
 /// page in a small Chrome-style window of its own (``ExtensionPopup``).
 struct Extensions: BrowserFeature {
+    /// Held for the app's lifetime: a profile keeps its `CefExtensions`
+    /// only while someone uses it, and the toolbar of every tab reads it.
+    @MainActor private static var extensions: CefExtensions?
+
+    func start(_ controller: BrowserController) {
+        Self.extensions = CefProfile.default.extensions
+    }
+
     func commands(for controller: BrowserController) -> some Commands {
         CommandGroup(after: .windowList) {
             Button("Extensions") { ManageExtensionsWindow.show(controller: controller) }

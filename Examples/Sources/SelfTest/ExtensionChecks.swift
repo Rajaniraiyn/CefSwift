@@ -82,7 +82,7 @@ extension SelfTest {
     static func extensionProbeChecks() async {
         CefChromiumTesting.activate()
         guard let server = try? await LocalServer.start() else {
-            check("extensions: local server starts", false)
+            check("local server starts", false)
             return
         }
         defer { server.stop() }
@@ -99,46 +99,46 @@ extension SelfTest {
     static func extensionFirstRunChecks(base: URL) async {
         let extensions = CefProfile.default.extensions
         let fixtureID = CefExtension.ID(ExtensionFixture.id)
-        await expect("extensions: profile.extensions lists the configured unpacked extension") {
+        await expect("profile.extensions lists the configured unpacked extension") {
             let fixture = try await extensions.refresh().first { $0.id == fixtureID }
             return (fixture?.name == ExtensionFixture.name && fixture?.installSource == .unpacked && fixture?.isEnabled == true,
                     "\(String(describing: fixture))")
         }
         let fixture = extensions.installed.first { $0.id == fixtureID }
-        check("extensions: an extension's values: version, icon, options page, commands",
+        check("an extension's values: version, icon, options page, commands",
               fixture?.version == "1.0" && fixture?.icon != nil
                   && fixture?.optionsURL?.absoluteString == "chrome-extension://\(fixtureID)/options.html"
                   && fixture?.commands.contains { $0.isAction && $0.shortcut == "⌃⇧Y" } == true,
               detail: "\(String(describing: fixture))")
-        check("extensions: its toolbar action as its manifest declares it",
+        check("its toolbar action as its manifest declares it",
               fixture?.action?.title == "CefSwift Test" && fixture?.action?.popupURL?.lastPathComponent == "popup.html"
                   && fixture?.action?.icon != nil,
               detail: "\(String(describing: fixture?.action))")
-        check("extensions: the pages it replaces (new tab)",
+        check("the pages it replaces (new tab)",
               fixture?.replacedPages[.newTab]?.lastPathComponent == "newtab.html",
               detail: "\(String(describing: fixture?.replacedPages))")
-        check("extensions: site access and permission warnings",
+        check("site access and permission warnings",
               fixture?.siteAccess == .onAllSites && fixture?.hosts.contains { $0.pattern == "http://127.0.0.1/*" && $0.isGranted } == true
                   && fixture?.permissionWarnings.isEmpty == false,
               detail: "\(String(describing: fixture?.siteAccess)) \(String(describing: fixture?.hosts))")
-        check("extensions: incognito is off by default", fixture?.isAllowedInIncognito == false)
+        check("incognito is off by default", fixture?.isAllowedInIncognito == false)
 
         // Running in browsers.
         let (window, browser) = await extensionWindow(base.appendingPathComponent("page"), toolbar: .chrome)
         defer { window.close() }
-        await expect("extensions: its content script runs in a Chrome-style browser") {
+        await expect("its content script runs in a Chrome-style browser") {
             let value = try await browser.evaluateJavaScript("document.documentElement.dataset.cefswiftFixture ?? 'absent'")
             return (value == "ran", value.text)
         }
         let alloy = CefBrowser(url: base.appendingPathComponent("page"))
         let alloyView = hostWindowed(alloy)
         _ = await loaded(alloy)
-        await expect("extensions: its content script runs in an Alloy-style view too") {
+        await expect("its content script runs in an Alloy-style view too") {
             let value = try await alloy.evaluateJavaScript("document.documentElement.dataset.cefswiftFixture ?? 'absent'")
             return (value == "ran", value.text)
         }
         await closeHosted(alloy, alloyView)
-        await expect("extensions: its declarativeNetRequest rule blocks a request") {
+        await expect("its declarativeNetRequest rule blocks a request") {
             let value = try await browser.evaluateJavaScript(
                 "fetch('/dnr-blocked').then(r => 'fetched ' + r.status, e => 'blocked')")
             return (value == "blocked", value.text)
@@ -148,14 +148,14 @@ extension SelfTest {
         await extensionTabChecks(base: base)
 
         // Changing it.
-        await expect("extensions: setEnabled(false) disables it and its content script stops") {
+        await expect("setEnabled(false) disables it and its content script stops") {
             try await extensions.setEnabled(false, for: fixtureID)
             let disabled = extensions.installed.first { $0.id == fixtureID }?.state == .disabled
             _ = await load(base.appendingPathComponent("page"), in: browser)
             let value = try await browser.evaluateJavaScript("document.documentElement.dataset.cefswiftFixture ?? 'absent'")
             return (disabled && value == "absent", "disabled \(disabled), content script \(value.text)")
         }
-        await expect("extensions: setEnabled(true) enables it again") {
+        await expect("setEnabled(true) enables it again") {
             try await extensions.setEnabled(true, for: fixtureID)
             return (extensions.installed.first { $0.id == fixtureID }?.isEnabled == true, "")
         }
@@ -177,19 +177,19 @@ extension SelfTest {
                 $0["declarative_net_request"] = nil
             }
         }
-        await expect("extensions: loadUnpacked(at:) loads a directory, in developer mode") {
+        await expect("loadUnpacked(at:) loads a directory, in developer mode") {
             try await extensions.setDeveloperModeEnabled(true)
             let loaded = try await extensions.loadUnpacked(at: copy)
             return (loaded.name == "CefSwift Unpacked Copy" && loaded.installSource == .unpacked, "\(loaded)")
         }
-        await expect("extensions: pack(_:) writes a .crx and a key") {
+        await expect("pack(_:) writes a .crx and a key") {
             let result = try await extensions.pack(packed.directory)
             let exists = FileManager.default.fileExists(atPath: result.package.path)
                 && FileManager.default.fileExists(atPath: result.privateKey.path)
             let id = try? CRXHeader.identifier(ofPackageAt: result.package)
             return (exists && result.package == packed.package && id != nil, "\(result) id \(String(describing: id))")
         }
-        await expect("extensions: uninstall(_:) removes an extension") {
+        await expect("uninstall(_:) removes an extension") {
             guard let loaded = extensions.installed.first(where: { $0.name == "CefSwift Unpacked Copy" }) else {
                 return (false, "not loaded")
             }
@@ -201,7 +201,7 @@ extension SelfTest {
         if isOnline {
             await webStorePageInstallChecks(window: window, browser: browser, extensions: extensions)
         } else {
-            skip("extensions: installing from the Chrome Web Store's page", because: "no network", .environment)
+            skip("installing from the Chrome Web Store's page", because: "no network", .environment)
         }
     }
 
@@ -266,18 +266,18 @@ extension SelfTest {
         }
         _ = await waitUntil(timeout: .seconds(5)) { delegate.menu != nil }
         let item = delegate.menu.flatMap { findItem("CefSwift Test Item", in: $0) }
-        check("extensions: the context-menu item it adds is in CefContextMenu, with Chromium's command",
+        check("the context-menu item it adds is in CefContextMenu, with Chromium's command",
               item != nil && item?.command != nil,
               detail: "\(delegate.menu?.items.map(\.title) ?? [])")
         let clicked = await waitUntilAsync(timeout: .seconds(5)) { await fixtureStorage("menuClicked") == "cefswift-item" }
-        check("extensions: choosing it runs the extension's handler", clicked)
+        check("choosing it runs the extension's handler", clicked)
     }
 
     // MARK: Chrome's toolbar
 
     static func extensionToolbarChecks(window: CefWindow) async {
         guard let nsWindow = window.window else { return }
-        check("extensions: a CefWindow with toolbar .chrome shows Chrome's toolbar", window.hasChromeToolbar)
+        check("a CefWindow with toolbar .chrome shows Chrome's toolbar", window.hasChromeToolbar)
         nsWindow.makeKeyAndOrderFront(nil)
         var menu: CefChromiumSurface?
         window.onChromiumSurface = { if $0.kind == .extensionsMenu { menu = $0 } }
@@ -285,11 +285,11 @@ extension SelfTest {
         SurfaceInventory.press(in: nsWindow) {
             $0.accessibilityRole() == .popUpButton && ($0.accessibilityTitle() ?? $0.accessibilityLabel() ?? "") == "Extensions"
         }
-        check("extensions: Chrome's extensions menu opens from its toolbar, as surface .extensionsMenu",
+        check("Chrome's extensions menu opens from its toolbar, as surface .extensionsMenu",
               await waitUntil(timeout: .seconds(5)) { menu != nil },
               detail: "\(window.chromiumSurfaces.map(\.kind))")
         menu?.dismiss()
-        skip("extensions: an action popup in a CefWindow",
+        skip("an action popup in a CefWindow",
              because: "Chromium makes a CefWindow's browser a popup-type window, which has no toolbar for "
                  + "action popups (chrome.action.openPopup: \"Browser window has no toolbar\"); they open in Chrome's own windows",
              .limitation)
@@ -308,11 +308,11 @@ extension SelfTest {
         _ = await waitUntil { CefRuntime.shared.browsers.contains(where: isNewTab) }
         let tab = CefRuntime.shared.browsers.last(where: isNewTab)
         guard let tab else {
-            check("extensions: a new tab in Chrome's window reaches the app", false)
+            check("a new tab in Chrome's window reaches the app", false)
             first.close(force: true)
             return
         }
-        check("extensions: the new tab page the extension replaces opens in a new tab",
+        check("the new tab page the extension replaces opens in a new tab",
               await waitUntil(timeout: .seconds(5)) { tab.url?.lastPathComponent == "newtab.html" },
               detail: tab.url?.absoluteString ?? "-")
         let tabsPage = URL(string: "chrome-extension://\(ExtensionFixture.id)/tabs.html")!
@@ -327,21 +327,21 @@ extension SelfTest {
             return (try? JSONSerialization.jsonObject(with: data)) as? [[Any]] ?? []
         }
         let current = rows(await run("op=current"))
-        check("extensions: chrome.tabs sees the tabs of Chrome's window, with indices",
+        check("chrome.tabs sees the tabs of Chrome's window, with indices",
               current.count == 2 && current.map { $0[2] as? Int } == [0, 1], detail: "\(current)")
         let windows = await run("op=windows")
-        check("extensions: chrome.windows sees Chrome's window as normal, with its tabs",
+        check("chrome.windows sees Chrome's window as normal, with its tabs",
               windows.contains("\"normal\",true,2]") || windows.contains("\"normal\",false,2]"), detail: windows)
         let firstTabID = (current.first?.first as? Int).map(String.init) ?? ""
         let grouped = await run("op=group&tabs=\(firstTabID)&title=CefSwift&color=blue")
         let groups = await run("op=groups")
-        check("extensions: chrome.tabs.group and chrome.tabGroups work in Chrome's window",
+        check("chrome.tabs.group and chrome.tabGroups work in Chrome's window",
               grouped.hasPrefix("ok ") && groups.contains("CefSwift"), detail: "\(grouped) \(groups)")
         let created = await run("op=create&url=chrome-extension://\(ExtensionFixture.id)/options.html")
         let afterCreate = rows(await run("op=current"))
-        check("extensions: chrome.tabs.create adds a tab to Chrome's window",
+        check("chrome.tabs.create adds a tab to Chrome's window",
               created.hasPrefix("ok ") && afterCreate.count == 3, detail: "\(created) \(afterCreate.count) tabs")
-        await expect("extensions: an action popup opens in Chrome's window (chrome.action.openPopup)") {
+        await expect("an action popup opens in Chrome's window (chrome.action.openPopup)") {
             let started = try await tab.evaluateJavaScript("""
                 (chrome.windows.getCurrent().then(w => chrome.windows.update(w.id, {focused: true}))
                   .then(() => chrome.action.openPopup()).then(() => { document.title = 'popup opened'; },
@@ -364,13 +364,13 @@ extension SelfTest {
         let (window, page) = await extensionWindow(tabsPage.appendingQuery("op=windows"), toolbar: .none)
         defer { window.close() }
         _ = await waitUntil { page.title.hasPrefix("ok ") || page.title.hasPrefix("error ") }
-        check("extensions: a CefWindow is a popup-type window of one tab to chrome.windows",
+        check("a CefWindow is a popup-type window of one tab to chrome.windows",
               page.title.contains("\"popup\""), detail: page.title)
         _ = page.load(tabsPage.appendingQuery("op=create&url=\(base.appendingPathComponent("page").absoluteString)"))
-        check("extensions: chrome.tabs.create from a CefWindow reaches onChromeTab",
+        check("chrome.tabs.create from a CefWindow reaches onChromeTab",
               await waitUntil(timeout: .seconds(5)) { requests.contains { $0.path == "/page" } }, detail: "\(requests)")
         _ = try? await page.evaluateJavaScript("chrome.runtime.openOptionsPage()")
-        check("extensions: chrome.runtime.openOptionsPage() reaches onChromeTab with the options page",
+        check("chrome.runtime.openOptionsPage() reaches onChromeTab with the options page",
               await waitUntil(timeout: .seconds(5)) { requests.contains { $0.lastPathComponent == "options.html" } },
               detail: "\(requests)")
     }
@@ -379,30 +379,30 @@ extension SelfTest {
 
     static func extensionIncognitoChecks(base: URL, extensions: CefExtensions, fixtureID: CefExtension.ID) async {
         let incognito = CefProfile.incognito()
-        check("extensions: an incognito profile's extensions are the default profile's",
+        check("an incognito profile's extensions are the default profile's",
               incognito.extensions === CefProfile.default.extensions)
         let (window, browser) = await extensionWindow(base.appendingPathComponent("page"), toolbar: .none, profile: incognito)
-        await expect("extensions: an extension does not run in incognito by default") {
+        await expect("an extension does not run in incognito by default") {
             let value = try await browser.evaluateJavaScript("document.documentElement.dataset.cefswiftFixture ?? 'absent'")
             return (value == "absent", value.text)
         }
         do {
             try await extensions.setAllowedInIncognito(true, for: fixtureID)
             let allowed = extensions.installed.first { $0.id == fixtureID }?.isAllowedInIncognito == true
-            check("extensions: setAllowedInIncognito(true) records the choice", allowed)
+            check("setAllowedInIncognito(true) records the choice", allowed)
             // Chromium reloads the extension to apply it.
             try? await Task.sleep(for: .seconds(2))
             _ = await load(base.appendingPathComponent("page"), in: browser)
             let value = try await browser.evaluateJavaScript("document.documentElement.dataset.cefswiftFixture ?? 'absent'")
             if value == "ran" {
-                check("extensions: an extension allowed in incognito runs in CefProfile.incognito()", true)
+                check("an extension allowed in incognito runs in CefProfile.incognito()", true)
             } else {
-                skip("extensions: an extension allowed in incognito runs in CefProfile.incognito()",
+                skip("an extension allowed in incognito runs in CefProfile.incognito()",
                      because: "CEF's in-memory request context is not the default profile's own off-the-record profile, "
                          + "so its content scripts do not run there even when allowed (\(value.text))", .limitation)
             }
         } catch {
-            check("extensions: setAllowedInIncognito(true)", false, detail: "\(error)")
+            check("setAllowedInIncognito(true)", false, detail: "\(error)")
         }
         try? await extensions.setAllowedInIncognito(false, for: fixtureID)
         window.close()
@@ -414,7 +414,7 @@ extension SelfTest {
         let (window, _) = await extensionWindow(base.appendingPathComponent("page"), toolbar: .none, profile: profile)
         defer { window.close() }
         let other = profile.extensions
-        await expect("extensions: a persistent profile has extensions of its own") {
+        await expect("a persistent profile has extensions of its own") {
             try await CefProfile.default.extensions.setEnabled(false, for: fixtureID)
             defer { Task { try? await CefProfile.default.extensions.setEnabled(true, for: fixtureID) } }
             let mine = try await other.refresh().first { $0.id == fixtureID }
@@ -429,7 +429,7 @@ extension SelfTest {
     static func webStorePageInstallChecks(window: CefWindow, browser: CefBrowser, extensions: CefExtensions) async {
         let id = CefExtension.ID(storeExtensionByPage)
         guard await load(URL(string: "https://chromewebstore.google.com/detail/\(id)")!, in: browser, timeout: .seconds(30)) else {
-            skip("extensions: installing from the Chrome Web Store's page", because: "the store did not load", .environment)
+            skip("installing from the Chrome Web Store's page", because: "the store did not load", .environment)
             return
         }
         try? await Task.sleep(for: .seconds(2))
@@ -445,18 +445,18 @@ extension SelfTest {
             }
             return dialog != nil
         }
-        check("extensions: Add to Chrome on the store's page shows Chromium's install dialog",
+        check("Add to Chrome on the store's page shows Chromium's install dialog",
               dialog != nil, detail: "button \(clicked?.text ?? "-")")
         guard let dialog else { return }
         // Chromium builds the dialog's views after showing its window.
         try? await Task.sleep(for: .seconds(1))
-        check("extensions: the install dialog is recognized as .extensionInstallPrompt",
+        check("the install dialog is recognized as .extensionInstallPrompt",
               CefChromiumTesting.describe(dialog).kind == "\(CefChromiumSurface.Kind.extensionInstallPrompt)")
         SurfaceInventory.press(in: dialog) { $0.accessibilityRole() == .button && ($0.accessibilityTitle() ?? "") == "Add extension" }
         let installed = await waitUntilAsync(timeout: .seconds(40)) {
             (try? await extensions.refresh())?.contains { $0.id == id && $0.installSource == .webStore && $0.isEnabled } == true
         }
-        check("extensions: accepting it installs the extension from the store", installed,
+        check("accepting it installs the extension from the store", installed,
               detail: "\(extensions.installed.map { "\($0.name) \($0.installSource)" })")
         try? await extensions.uninstall(id)
     }
@@ -466,19 +466,19 @@ extension SelfTest {
     static func extensionRelaunchChecks(base: URL) async {
         let extensions = CefProfile.default.extensions
         _ = try? await extensions.refresh()
-        check("extensions (relaunch): an unpacked extension loaded before is still installed",
+        check("an unpacked extension loaded before is still installed",
               extensions.installed.contains { $0.name == "CefSwift Unpacked Copy" },
               detail: "\(extensions.installed.map(\.name))")
         let packed = await waitUntilAsync(timeout: .seconds(20)) {
             (try? await extensions.refresh())?.contains { $0.name == "CefSwift Packed Copy" && $0.isEnabled } == true
         }
-        check("extensions (relaunch): a .package the configuration names is installed and enabled", packed,
+        check("a .package the configuration names is installed and enabled", packed,
               detail: "\(extensions.installed.map { "\($0.name) \($0.installSource) \($0.state)" })")
         let packedSource = extensions.installed.first { $0.name == "CefSwift Packed Copy" }?.installSource
-        check("extensions (relaunch): it is an external install", packedSource == .external,
+        check("it is an external install", packedSource == .external,
               detail: "\(String(describing: packedSource))")
         guard isOnline else {
-            skip("extensions (relaunch): installing a Chrome Web Store extension by identifier", because: "no network", .environment)
+            skip("installing a Chrome Web Store extension by identifier", because: "no network", .environment)
             return
         }
         let id = CefExtension.ID(storeExtensionByID)
@@ -487,11 +487,11 @@ extension SelfTest {
             (try? await extensions.refresh())?.contains { $0.id == id && $0.isEnabled } == true
         }
         if installed {
-            check("extensions (relaunch): a .webStore(id) extension is downloaded, installed and enabled without the user",
+            check("a .webStore(id) extension is downloaded, installed and enabled without the user",
                   pendingFirst && extensions.pendingInstallations.isEmpty,
                   detail: "pending \(extensions.pendingInstallations)")
         } else {
-            skip("extensions (relaunch): installing a Chrome Web Store extension by identifier",
+            skip("installing a Chrome Web Store extension by identifier",
                  because: "not installed within 110 s (the store's download did not arrive): "
                      + "\(extensions.installed.map { "\($0.id) \($0.state)" }), pending \(extensions.pendingInstallations)",
                  .environment)

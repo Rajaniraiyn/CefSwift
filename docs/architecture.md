@@ -981,6 +981,7 @@ Chromium locks a WebUI renderer to its host, and neither
 | `chrome://new-tab-page-third-party` | `most_visited.mojom.MostVisitedPageHandlerFactory` | `CefHistory.topSites` |
 | `chrome://omnibox` | `mojom.OmniboxPageHandler` | `CefAutocomplete` |
 | `chrome://discards` | `discards.mojom.DetailsProvider`, `discards.mojom.GraphDump` | Discarding: Chrome-style tabs, and audio and form input of Alloy-style pages |
+| `chrome://extensions` | `chrome.developerPrivate`, `chrome.management` | `CefExtensions` (not in incognito: Chromium ends the process when an incognito profile opens it) |
 
 `chrome://new-tab-page` binds most-visited and the search box's
 `searchbox.mojom.PageHandlerFactory` too, and the search box answers
@@ -1104,6 +1105,50 @@ profile keeps no history, so `CefHistory` throws there instead of starting
 a host. An incognito profile's bookmarks are the default profile's
 `CefBookmarks`, since Chromium shares the original profile's bookmarks
 with its incognito profile.
+
+### Extensions
+
+`CefExtensions` reads `developerPrivate.getExtensionsInfo()` (each
+extension's state, location, permissions, commands, its icon as a `data:`
+URL) and reads what that does not report, the toolbar action and the pages
+an extension replaces, from the `manifest.json` in the directory Chromium
+runs the extension from. Changes go through `management.setEnabled`,
+`developerPrivate.updateExtensionConfiguration` (incognito, site access,
+pinning), `reload`, `autoUpdate`, `updateProfileConfiguration` (developer
+mode), `packDirectory` and `loadUnpacked`. Two need what a page's user
+gives Chrome's own:
+
+- `loadUnpacked` asks for the directory with a file dialog of the calling
+  page. CEF routes a Chrome-style browser's file dialogs to its client, so
+  the service host's delegate answers it: `CefServiceHosts.fileDialogAnswers`
+  holds the answer for the next dialog of a host.
+- `management.uninstall` runs only with a user activation and always
+  confirms, even with `showConfirmDialog: false` when the caller is not the
+  extension itself. `CefServiceHosts.grantUserActivation(to:)` gives the
+  host's page one (`Runtime.evaluate` with `userGesture`, the only DevTools
+  call a service host makes), and `CefExtensions` presses the accepting
+  button of Chromium's "Remove “…”?" bubble through accessibility; the app
+  asks the user first.
+
+`developerPrivate.onItemStateChanged` reports changes while the host runs;
+otherwise `CefExtensions` watches the profile's `Extensions` directory and
+`Preferences` files and reads again, so it starts no host to stay current.
+
+`CefRuntime.Configuration.extensions` is CefKit's: `.unpacked` adds
+`--load-extension`, and `.webStore` and `.package` are written to
+`<root>/External Extensions/<id>.json` before `cef_initialize`, Chromium's
+user-level external extensions directory (`chrome::DIR_USER_EXTERNAL_EXTENSIONS`,
+the user data directory's), read at start-up by every regular profile.
+CefKit keeps a ledger of the files it wrote and removes its own when the
+configuration drops them. Chromium installs these disabled (an external
+install, `ExternalInstallManager`); `CefExtensions` enables each configured
+one once and records it in the profile's `CefSwift Accepted Extensions`.
+
+CefKit adds Chrome's toolbar to a `CefWindow` that asks for one: CEF
+creates it with the browser view (`get_chrome_toolbar_type`) but leaves it
+to the window to place (`cef_browser_view_t::get_chrome_toolbar`), hidden.
+`CefWindow` adds it above the page once the view is in the window
+(`on_window_changed`), shows it, and keeps its height in the box layout.
 
 ## Passkeys
 
