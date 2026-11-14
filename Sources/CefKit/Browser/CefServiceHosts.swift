@@ -101,7 +101,7 @@ package final class CefServiceHosts: CefShutdownParticipant {
 
     /// Whether `url` is a service page's address — one Chromium reopened
     /// from a previous session, when it does not belong to a live service.
-    nonisolated static func isServicePage(_ url: URL) -> Bool {
+    package nonisolated static func isServicePage(_ url: URL) -> Bool {
         // A host closed before it was marked shows its bare document, which
         // no one opens otherwise.
         url.scheme == "chrome" && (url.fragment == addressMarker || url.path == "/strings.m.js")

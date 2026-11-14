@@ -310,6 +310,15 @@ public final class CefRuntime {
 
     @ObservationIgnored private var shutdownParticipants: [WeakShutdownParticipant] = []
 
+    /// Called once as the app starts to quit, before the runtime closes
+    /// the browsers: a module built on CefKit closes what it keeps its own
+    /// way first. Chromium is still fully running.
+    package func whenQuitStarts(_ observer: @escaping @MainActor () -> Void) {
+        terminationObservers.append(observer)
+    }
+
+    @ObservationIgnored private var terminationObservers: [@MainActor () -> Void] = []
+
     // MARK: Browser registry / termination
 
     func register(_ browser: CefBrowser) {
@@ -460,6 +469,13 @@ public final class CefRuntime {
         // no list below, and their profile could load during the quit:
         // they close now, and their ready() throws browserClosed.
         closeBrowsersAwaitingProfiles()
+        if !isTerminationRequested {
+            // Modules close what they keep their own way first: CefChromium
+            // closes Chromium's windows as windows, which Chromium records.
+            let observers = terminationObservers
+            terminationObservers = []
+            observers.forEach { $0() }
+        }
         isTerminationRequested = true
         // Browsers discarded by closing them have nothing left in Chromium.
         for browser in browsers where browser.isDiscarded && browser.raw == nil {

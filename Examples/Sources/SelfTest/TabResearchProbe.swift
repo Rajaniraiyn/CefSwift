@@ -135,6 +135,19 @@ extension SelfTest {
                 note("killing")
                 kill(getpid(), SIGKILL)
             }
+            if ProcessInfo.processInfo.environment["CEFSWIFT_CLOSE_WINDOWS"] != nil {
+                // Each window closed as a window, as Chrome's quit would record them.
+                for window in CefProfile.default.tabStrip.windows { window.tabs.first?.browser?.execute(.closeWindow) }
+                _ = await waitUntil(timeout: .seconds(5)) { CefRuntime.shared.browsers.isEmpty }
+                let closed = await CefProfile.default.tabStrip.refreshRecentlyClosed()
+                note("closed at quit: \(closed.map { "\($0.id) \($0.kind) tabs \($0.tabCount) at \($0.closedAt.map { "\($0.timeIntervalSince1970)" } ?? "-")" })")
+                return
+            }
+            if ProcessInfo.processInfo.environment["CEFSWIFT_QUIT_WITH_WINDOWS"] != nil {
+                // Quit as an app does, the windows still open.
+                note("quitting with windows open")
+                return
+            }
         case "session2", "crash2":
             // Second launch: what Chromium opened by itself.
             note("at start: browsers \(CefRuntime.shared.browsers.map { $0.url?.absoluteString ?? "-" })")
@@ -150,10 +163,25 @@ extension SelfTest {
                 let children = (window.childWindows ?? []).map { CefChromiumTesting.describe($0) }
                 note("window \(type(of: window)) '\(window.title)' children \(children.map { "\($0.kind ?? "-") '\($0.title)' \($0.classes.prefix(12))" })")
             }
+            let closedAtStart = await strip.refreshRecentlyClosed()
+            note("closed at start: \(closedAtStart.map { "\($0.id) \($0.kind) tabs \($0.tabCount) at \($0.closedAt.map { "\($0.timeIntervalSince1970)" } ?? "-")" })")
             if experiment == "crash2" {
                 // Chromium's own restore, if offered: IDC_RESTORE_TAB on a new window.
                 let window = try? await CefChromeWindow.open(url: page("after"))
                 try? await Task.sleep(for: .seconds(2))
+                let closedAfterOpen = await strip.refreshRecentlyClosed()
+                note("closed after a window opened: \(closedAfterOpen.map { "\($0.id) \($0.kind) tabs \($0.tabCount)" })")
+                let search = CefBrowser(url: URL(string: "chrome://tab-search.top-chrome/")!)
+                let searchWindow = CefWindow(browser: search)
+                _ = await loaded(search, timeout: .seconds(5))
+                _ = await run(search, "tab search closed", """
+                    const m = await import('chrome://tab-search.top-chrome/tab_search.js');
+                    const {profileData} = await m.TabSearchApiProxyImpl.getInstance().getProfileData();
+                    return JSON.stringify(profileData.recentlyClosedTabs.map(t => [t.tabId, t.title]));
+                    """)
+                searchWindow.close()
+                let closedLater = await strip.refreshRecentlyClosed()
+                note("closed after tab search: \(closedLater.map { "\($0.id) \($0.kind) tabs \($0.tabCount)" })")
                 for nsWindow in NSApp.windows where nsWindow.isVisible {
                     let children = (nsWindow.childWindows ?? []).map { CefChromiumTesting.describe($0) }
                     note("after open: window '\(nsWindow.title)' children \(children.map { "\($0.kind ?? "-") '\($0.title)' \($0.classes.prefix(16))" })")
@@ -163,6 +191,44 @@ extension SelfTest {
                 await strip.refresh()
                 note("after IDC_RESTORE_TAB: \(strip.windows.map { $0.tabs.map { $0.url?.absoluteString ?? "-" } })")
             }
+        case "restore":
+            // Reopening a given entry: tab search's openRecentlyClosedEntry,
+            // and closing a whole window (IDC_CLOSE_WINDOW).
+            let strip = CefProfile.default.tabStrip
+            func layout() -> String { "\(strip.windows.map { "\($0.id): " + $0.tabs.map { "\($0.url?.query ?? $0.title)" }.joined(separator: ",") })" }
+            let one = try? await CefChromeWindow.open(url: URL(string: "chrome://version/?a")!)
+            _ = try? await one?.openChromiumTab(URL(string: "chrome://version/?b")!)
+            if let b = one?.tabs.last { _ = await waitUntil { b.browser != nil }; b.browser?.load(URL(string: "chrome://version/?b2")!) }
+            try? await Task.sleep(for: .seconds(1))
+            _ = try? await one?.openChromiumTab(URL(string: "chrome://version/?c")!)
+            let two = try? await CefChromeWindow.open(url: URL(string: "chrome://version/?w2a")!)
+            _ = try? await two?.openChromiumTab(URL(string: "chrome://version/?w2b")!)
+            try? await Task.sleep(for: .seconds(1))
+            let bBrowser = one?.tabs.first { $0.url?.query == "b2" }?.browser
+            note("before: \(layout())")
+            one?.tabs.first { $0.url?.query == "b2" }?.close()
+            try? await Task.sleep(for: .seconds(1))
+            two?.tabs.first?.browser?.execute(.closeWindow)
+            try? await Task.sleep(for: .seconds(2))
+            let closed = await strip.refreshRecentlyClosed()
+            note("closed: \(closed.map { "\($0.id) \($0.kind) '\($0.title)' tabs \($0.tabCount)" }) layout \(layout())")
+            let search = CefBrowser(url: URL(string: "chrome://tab-search.top-chrome/")!)
+            let searchWindow = CefWindow(browser: search)
+            _ = await loaded(search, timeout: .seconds(5))
+            for item in closed where item.kind == .tab || item.kind == .window {
+                _ = await run(search, "reopen \(item.kind) \(item.id)", """
+                    const m = await import('chrome://tab-search.top-chrome/tab_search.js');
+                    m.TabSearchApiProxyImpl.getInstance().openRecentlyClosedEntry(\(item.id), false, false, 0);
+                    return 'sent';
+                    """)
+                try? await Task.sleep(for: .seconds(2))
+                await strip.refresh()
+                note("after reopening \(item.kind): \(layout()) browsers \(CefRuntime.shared.browsers.map { $0.url?.query ?? "-" }) visible windows \(NSApp.windows.filter(\.isVisible).map { "\(type(of: $0)) '\($0.title)'" })")
+            }
+            if let restored = strip.windows.flatMap(\.tabs).first(where: { $0.url?.query == "b2" }) {
+                note("restored b: same browser \(restored.browser === bBrowser) canGoBack \(restored.browser?.canGoBack ?? false) index \(restored.index) in \(restored.window?.id.rawValue ?? -1)")
+            }
+            searchWindow.close()
         case "audio":
             // What the NSWindow title says while the active tab plays sound,
             // and what tab search's page router offers.

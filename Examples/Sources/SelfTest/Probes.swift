@@ -28,6 +28,7 @@ extension SelfTest {
         "extensionSurvey": extensionSurveyProbe,
         "extensions": extensionProbeChecks,
         "tabResearch": tabResearchProbe,
+        "sessionRestore": sessionRestoreProbe,
     ]
 
     /// Changes the configuration for the probe `name`.

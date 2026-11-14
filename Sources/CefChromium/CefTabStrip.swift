@@ -96,6 +96,10 @@ public final class CefTabStrip {
         public var tabCount: Int
         /// When it closed.
         public var closedAt: Date?
+        /// For a tab, the window it was in (which may have closed since)
+        /// and its place there: where ``CefTabStrip/reopen(_:)`` puts it back.
+        public var windowID: CefChromeWindow.ID?
+        public var index: Int?
 
         public init(id: Int, kind: Kind, title: String, url: URL?, tabCount: Int = 1, closedAt: Date? = nil) {
             self.id = id
@@ -125,6 +129,18 @@ public final class CefTabStrip {
     /// Why the last read failed — an internal page moved or changed in a
     /// Chromium update — or `nil`.
     public private(set) var lastError: String?
+
+    /// What the previous run of the app left for this profile — how it
+    /// ended and the windows it had open — until
+    /// ``restorePreviousSession(configuration:delegate:)`` or
+    /// ``discardPreviousSession()``; `nil` on a first launch, for an
+    /// incognito profile, and when the previous run closed every window
+    /// before quitting. CefChromium saves the profile's windows (their
+    /// tabs' addresses, a small file in the profile's directory) as they
+    /// change, and marks a quit; Chromium restores nothing by itself in
+    /// CEF.
+    public internal(set) var previousSession: PreviousSession?
+    @ObservationIgnored var isSavingSoon = false
 
     /// Called once for each window as soon as its `NSWindow` is known:
     /// the windows the app opens and those Chromium opens itself (a tab
@@ -228,6 +244,8 @@ public final class CefTabStrip {
                 }
             }
             setNeedsRead(internals: true)
+            loadPreviousSession()
+            followSessionChanges()
         }
         updateListening()
     }
@@ -615,10 +633,18 @@ public final class CefTabStrip {
     }
 
     private func updateRecentlyClosed() {
-        let closed = (internalsSnapshot?.closed ?? []).map { item in
-            ClosedItem(id: item.id, kind: item.itemKind, title: item.title, url: URL(string: item.url),
-                       tabCount: max(item.tabs, item.itemKind == .tab ? 1 : 0),
-                       closedAt: item.time > 0 ? Date(timeIntervalSince1970: item.time / 1_000_000 - 11_644_473_600) : nil)
+        let closed = (internalsSnapshot?.closed ?? []).compactMap { item -> ClosedItem? in
+            let url = URL(string: item.url)
+            // A hidden service host's page, closed as the app quit.
+            if let url, CefServiceHosts.isServicePage(url) { return nil }
+            var made = ClosedItem(id: item.id, kind: item.itemKind, title: item.title, url: url,
+                                  tabCount: max(item.tabs, item.itemKind == .tab ? 1 : 0),
+                                  closedAt: item.time > 0 ? Date(timeIntervalSince1970: item.time / 1_000_000 - 11_644_473_600) : nil)
+            if item.itemKind == .tab {
+                made.windowID = item.window >= 0 ? CefChromeWindow.ID(rawValue: item.window) : nil
+                made.index = item.index >= 0 ? item.index : nil
+            }
+            return made
         }
         if closed != recentlyClosed { recentlyClosed = closed }
     }
@@ -1071,7 +1097,8 @@ public final class CefTabStrip {
                 const groupTitle = kind == 'group' ? text((v.visualData || v.groupVisualData || {}).title) : '';
                 const time = (v.restoreEntry && v.restoreEntry.timestamp && Number(v.restoreEntry.timestamp.internalValue)) || 0;
                 return {id: Number((v.id && v.id.nodeId) ?? -1), kind, title: groupTitle || text(first.title), url: url(first.url),
-                        tabs: kind == 'tab' ? 1 : tabs.length, time};
+                        tabs: kind == 'tab' ? 1 : tabs.length, time,
+                        window: Number((v.browserId && v.browserId.id) ?? -1), index: v.tabstripIndex ?? -1};
               };
               const read = async () => {
                 const {data} = await handler.getTabStripData();
@@ -1147,6 +1174,8 @@ struct InternalsSnapshot: Decodable, Sendable {
         var url: String
         var tabs: Int
         var time: Double
+        var window: Int
+        var index: Int
 
         var itemKind: CefTabStrip.ClosedItem.Kind {
             switch kind {
