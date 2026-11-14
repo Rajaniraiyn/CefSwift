@@ -16,7 +16,10 @@ public enum CefContextMenuPresenter {
         guard !Task.isCancelled, let view = contentView(of: browser), let window = view.window else { return nil }
         let nsMenu = makeMenu(for: menu)
         guard !nsMenu.items.isEmpty else { return nil }
-        let point = view.convert(viewPoint(of: target.location, in: view), to: nil)
+        // An offscreen page's points follow the frame as the view shows it.
+        let offscreen = view as? CefOffscreenBrowserView
+        let point = offscreen.map { $0.windowPoint(fromView: $0.viewPoint(fromPage: target.location)) }
+            ?? view.convert(viewPoint(of: target.location, in: view), to: nil)
         let event = NSEvent.mouseEvent(
             with: .rightMouseDown, location: point, modifierFlags: [],
             timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
@@ -32,7 +35,7 @@ public enum CefContextMenuPresenter {
             if let event {
                 NSMenu.popUpContextMenu(nsMenu, with: event, for: view)
             } else {
-                nsMenu.popUp(positioning: nil, at: viewPoint(of: target.location, in: view), in: view)
+                nsMenu.popUp(positioning: nil, at: view.convert(point, from: nil), in: view)
             }
         } onCancel: {
             CefDialogPresenter.dismissOnMain { presented.menu.cancelTrackingWithoutAnimation() }

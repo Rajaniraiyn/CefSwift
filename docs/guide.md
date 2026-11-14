@@ -744,8 +744,8 @@ goes away.
 
 | Rendering | How it draws | Use |
 |---|---|---|
-| `.windowed` (default) | Chromium's own `NSView` inside yours. Chromium handles input, IME and accessibility. | Most embedding. Nothing can be drawn over the page. |
-| `.offscreen` or `.offscreen(frameRate:)` | Frames composited in a layer. | SwiftUI content over the page, clipping, animation. |
+| `.windowed` (default) | Chromium's own `NSView` inside yours. Chromium handles input, IME and accessibility. | Most embedding. The app cannot read or redraw the page's pixels. |
+| `.offscreen` or `.offscreen(frameRate:)` | Frames composited in a layer of the app's. | SwiftUI content and effects over the page, transforms with input that follows, thumbnails; see [Animating a page](#animating-a-page). |
 
 Views embed browsers in the Alloy runtime style, which has no `chrome://`
 pages, extensions or history. For those, use a
@@ -890,6 +890,113 @@ The page's tooltips (a `title` under the mouse) reach the host through
 `offscreenDidChangeToolTip(_:)`; `CefOffscreenBrowserView` shows them as
 its own `toolTip`, as AppKit does for any view (see [Tooltips](#tooltips)).
 
+### Animating a page
+
+A page animates with SwiftUI's springs and transitions and AppKit's
+animator like any view: SwiftUI sets the view's frame and its containers'
+transforms, opacity, masks and filters on every display refresh, and the
+page follows. What differs between the renderings is what the page can do
+while that happens ([how it works](architecture.md#animating-pages)).
+
+| Animation | Offscreen | Windowed |
+|---|---|---|
+| Size (`frame`, a split view's divider, a window's live resize) | Lays out once per refresh by default; the last frame, stretched, covers the view until the next arrives | Lays out live, as `WKWebView` does; where Chromium's frame is smaller than the view, the browser's `backgroundColor` shows for a frame or two |
+| `scaleEffect`, `rotationEffect`, `offset` | Exact; clicks land where the page shows them | Applied to Chromium's layers by the window server; clicks land (macOS 27, which converts them through the transform) |
+| `rotation3DEffect` | Exact; clicks that reach the view land on the page point under them | Applied to Chromium's layers; clicks land at the untransformed point |
+| `opacity`, `clipShape`, corner radius, `shadow`, `blur` | Exact, on the app's own layer | Applied to Chromium's layers by the window server |
+| Moving between containers (`matchedGeometryEffect`), `.transition` | Arrives showing its last frame; the view it leaves keeps that frame while it animates out | Chromium's view moves; the page is not drawn twice |
+| SwiftUI content over the page | Drawn above it, and takes its clicks | Takes its clicks; placed above the page's layers, which Chromium's GPU process draws |
+
+Which rendering for which interface:
+
+| Interface | Rendering |
+|---|---|
+| A page that fills a window or a pane, an app whose interface is web content | Windowed: no copy, Chromium's own input and accessibility |
+| A page under transforms, 3D, blur, masks, or SwiftUI effects you need exact | Offscreen |
+| Thumbnails, an overview grid, live previews, a zoomable canvas of pages | Offscreen, with `offscreenPageSize` |
+| A card that expands to fill the window, a page that moves between layouts | Offscreen, so it never shows blank and can lay out once at the final size |
+| A page whose transparent parts show the app behind it | Offscreen with `drawsBackground = false` |
+
+While an offscreen page's size animates, `offscreenResizePolicy` says when
+it lays out. `.live`, the default, lays out at every size, once per run-loop
+pass. `.scaleThenSettle` keeps the layout and stretches the last frame
+while the size keeps changing, and lays out once it has been still for a
+few refreshes (and at most four times a second until then): the choice for
+heavy pages, many pages animating at once, or a size that springs back and
+forth.
+
+```swift
+struct ExpandingPage: View {
+    @State private var browser: CefBrowser = {
+        var configuration = CefBrowser.Configuration()
+        configuration.rendering = .offscreen
+        return CefBrowser(url: URL(string: "https://swift.org")!, configuration: configuration)
+    }()
+    @State private var expanded = false
+
+    var body: some View {
+        CefWebView(browser)
+            .offscreenResizePolicy(.scaleThenSettle)
+            .frame(width: expanded ? 720 : 360, height: expanded ? 520 : 240)
+            .clipShape(.rect(cornerRadius: 16, style: .continuous))
+            .onTapGesture { withAnimation(.spring(duration: 0.5)) { expanded.toggle() } }
+    }
+}
+```
+
+`offscreenPageSize` lays the page out at a size of its own, whatever its
+view's size, and `offscreenFramePlacement` places the frame in the view:
+`.stretch` (the default), `.aspectFit`, `.aspectFill` or `.topLeading`.
+Clicks, scrolling, the IME candidate window, `<select>` popups, context
+menus and accessibility frames all follow the placed frame. A grid of live
+previews lays every page out at a desktop size and fits it to its card:
+
+```swift
+CefWebView(browser)
+    .offscreenPageSize(CGSize(width: 1280, height: 800))
+    .offscreenFramePlacement(.aspectFit)
+    .aspectRatio(1.6, contentMode: .fit)
+    .clipShape(.rect(cornerRadius: 12, style: .continuous))
+```
+
+For a card that expands to the full window, set the page size to the
+final size and the placement to `.topLeading` before the animation: the
+page lays out once, and the growing card reveals it. Clear both when it
+ends. The Gallery's Animation demo shows each of these, with the policy
+to toggle and a graph of the time between refreshes.
+
+In AppKit the same properties are on `CefOffscreenBrowserView`, and the
+view's layer takes a corner radius and a continuous corner curve like any
+layer-backed view's:
+
+```swift
+import AppKit
+import CefKit
+
+@MainActor
+func makePreview(of browser: CefBrowser) -> NSView {
+    let view = CefOffscreenBrowserView(browser: browser)
+    view.pageSize = CGSize(width: 1280, height: 800)
+    view.framePlacement = .aspectFit
+    view.resizePolicy = .scaleThenSettle
+    view.layer?.cornerRadius = 12
+    view.layer?.cornerCurve = .continuous
+    return view
+}
+```
+
+A page has one host. When an offscreen page moves to another
+`CefOffscreenBrowserView`, the new view shows the frame the old one
+showed until the page paints there; with `keepsLastFrameWhenMoved` (which
+`CefWebView` turns on) the old view keeps that frame too, inert, until it
+is given another browser, so a cross-fade between the two never shows a
+blank view. A windowed page's frames cannot be kept: its view moves.
+
+A windowed page shows the browser's `backgroundColor` wherever Chromium's
+frame does not yet cover its view, as when the view grows faster than
+Chromium lays out. Set it to the colour of your page's background, as a
+dark web interface would, and that edge does not show.
+
 ### Title bars in web content
 
 An app whose window chrome is web content, a music player's or a chat
@@ -957,9 +1064,11 @@ CefWebView(browser)
 Only `title` text comes this way. A page's own tooltips (a `popover`, an
 `interestfor` target, CSS) are page content and already show in the page;
 the tooltips of Chromium's own interface, such as a `CefWindow`'s toolbar
-buttons, are Chromium's. A windowed browser's native view sits above
-SwiftUI content, so a custom tooltip for one needs a view or window of
-your own above it. SelfTest measures the offscreen cases; the windowed
+buttons, are Chromium's. A windowed browser's page is drawn by Chromium's
+GPU process into layers SwiftUI's overlays are placed above; clicks on
+such an overlay reach it, not the page, but SelfTest cannot read a
+windowed page's pixels to check what shows, so for a windowed browser
+prefer a view or window of your own above it. SelfTest measures the offscreen cases; the windowed
 and Chrome-style ones need the real pointer, which an unattended run does
 not move.
 

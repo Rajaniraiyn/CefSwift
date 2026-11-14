@@ -214,6 +214,7 @@ implemented, each replaceable. Everything else belongs to the app.
 | Observable browser model | `CefBrowser` | [Browsers](docs/guide.md#browsers) |
 | Waiting for a navigation to load, with its outcome | `load(_:)` → `CefNavigation`, `waitUntilLoaded(timeout:)` | [Waiting for a load](docs/guide.md#waiting-for-a-load) |
 | SwiftUI and AppKit views, windowed or offscreen | `CefWebView`, `CefWindowedBrowserView`, `CefOffscreenBrowserView` | [Showing a browser](docs/guide.md#showing-a-browser) |
+| Pages under SwiftUI and AppKit animations and transforms, with input that follows; live thumbnails laid out at their own size | `offscreenResizePolicy(_:)`, `offscreenPageSize(_:)`, `offscreenFramePlacement(_:)` | [Animating a page](docs/guide.md#animating-a-page) |
 | JavaScript evaluation with timeouts, user scripts and style sheets | `evaluateJavaScript(_:timeout:)`, `CefUserScript` | [JavaScript](docs/guide.md#javascript) |
 | Typed calls between JavaScript and Swift | `CefBridge` | [Bridge](docs/guide.md#bridge) |
 | Asynchronous decisions: permissions, dialogs, certificate errors | `CefBrowserDelegate` | [Decisions](docs/guide.md#decisions) |

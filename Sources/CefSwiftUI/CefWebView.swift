@@ -110,10 +110,20 @@ protocol CefBrowserHostView: NSView {
     var browser: CefBrowser? { get set }
     var closesBrowserOnTeardown: Bool { get set }
     func tearDown()
+    func apply(_ environment: EnvironmentValues)
 }
 
-extension CefWindowedBrowserView: CefBrowserHostView {}
-extension CefOffscreenBrowserView: CefBrowserHostView {}
+extension CefWindowedBrowserView: CefBrowserHostView {
+    func apply(_ environment: EnvironmentValues) {}
+}
+
+extension CefOffscreenBrowserView: CefBrowserHostView {
+    func apply(_ environment: EnvironmentValues) {
+        resizePolicy = environment.offscreenResizePolicy
+        framePlacement = environment.offscreenFramePlacement
+        pageSize = environment.offscreenPageSize
+    }
+}
 
 private struct BrowserRepresentable<HostView: CefBrowserHostView>: NSViewRepresentable {
     let browser: CefBrowser
@@ -122,14 +132,53 @@ private struct BrowserRepresentable<HostView: CefBrowserHostView>: NSViewReprese
     func makeNSView(context: Context) -> HostView {
         let view = HostView(browser: browser)
         view.closesBrowserOnTeardown = ownsBrowser
+        // A page moving to another CefWebView, as in a matched-geometry
+        // transition, leaves its last frame here while this view animates
+        // out, rather than a blank view.
+        (view as? CefOffscreenBrowserView)?.keepsLastFrameWhenMoved = true
+        view.apply(context.environment)
         return view
     }
 
     func updateNSView(_ view: HostView, context: Context) {
+        view.apply(context.environment)
         view.browser = browser
     }
 
     static func dismantleNSView(_ view: HostView, coordinator: ()) {
         view.tearDown()
+    }
+}
+
+// MARK: - Offscreen geometry
+
+extension EnvironmentValues {
+    @Entry var offscreenResizePolicy: CefOffscreenBrowserView.ResizePolicy = .live
+    @Entry var offscreenFramePlacement: CefOffscreenBrowserView.FramePlacement = .stretch
+    @Entry var offscreenPageSize: CGSize? = nil
+}
+
+extension View {
+    /// When offscreen pages in this view lay out again while their
+    /// `CefWebView`'s size changes, as it does on every display refresh of
+    /// a size animation; see ``CefOffscreenBrowserView/resizePolicy``.
+    /// Windowed pages always lay out live.
+    public func offscreenResizePolicy(_ policy: CefOffscreenBrowserView.ResizePolicy) -> some View {
+        environment(\.offscreenResizePolicy, policy)
+    }
+
+    /// Where offscreen pages in this view draw a frame whose size differs
+    /// from their `CefWebView`'s; see ``CefOffscreenBrowserView/framePlacement``.
+    public func offscreenFramePlacement(_ placement: CefOffscreenBrowserView.FramePlacement) -> some View {
+        environment(\.offscreenFramePlacement, placement)
+    }
+
+    /// Lays offscreen pages in this view out at `size`, in points, shown
+    /// in their `CefWebView` as ``offscreenFramePlacement(_:)`` places
+    /// them, with input mapped back to the page: thumbnails and live
+    /// previews. `nil` follows the view's size. See
+    /// ``CefOffscreenBrowserView/pageSize``.
+    public func offscreenPageSize(_ size: CGSize?) -> some View {
+        environment(\.offscreenPageSize, size)
     }
 }

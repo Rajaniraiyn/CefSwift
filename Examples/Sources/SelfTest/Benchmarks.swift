@@ -14,6 +14,7 @@ import Darwin
 /// - `lifecycle`: CPU use of an animated page in each host and state.
 /// - `frames`: offscreen animation frames, pacing, input latency and CPU.
 /// - `compositor`: what `CefOffscreenBrowserView` presents, at three sizes.
+/// - `animation`: pages under SwiftUI and AppKit animations, per host.
 /// - `services`: latency, cost and load behaviour of the service-host calls.
 @MainActor
 enum Benchmarks {
@@ -28,6 +29,7 @@ enum Benchmarks {
         case "probes": await probes()
         case "frames": await frames()
         case "compositor": await compositor()
+        case "animation": await animation()
         case "services": await services()
         case "bridge", "evaluate", "codec", "axingest", "devtools": await transport(name)
         default: print("bench error: unknown benchmark \(name)")
@@ -157,6 +159,8 @@ struct BenchmarkPages: CefSchemeHandler {
             return CefSchemeResponse(mimeType: "text/html", body: Data(TransportBench.largeAccessibilityPage.utf8))
         case "/damage.html":
             return CefSchemeResponse(mimeType: "text/html", body: Data(CompositorStage.damagePage.utf8))
+        case "/animation.html":
+            return CefSchemeResponse(mimeType: "text/html", body: Data(AnimationStage.page.utf8))
         case "/compositor.html":
             return CefSchemeResponse(mimeType: "text/html", body: Data(CompositorStage.page.utf8))
         case "/big-data":

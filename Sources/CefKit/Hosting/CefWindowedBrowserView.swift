@@ -52,6 +52,9 @@ public final class CefWindowedBrowserView: NSView {
         // The canvas until Chromium's view paints, and where a resize
         // uncovers the view before Chromium's catches up.
         wantsLayer = true
+        // Chromium's frame, a frame or two behind an animated size, never
+        // draws over the view's neighbours.
+        layer?.masksToBounds = true
         browserDidChange(from: nil)
     }
 

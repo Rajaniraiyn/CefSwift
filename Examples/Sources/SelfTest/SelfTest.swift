@@ -169,6 +169,7 @@ enum SelfTest {
         ("lifecycle", lifecycleChecks),
         ("frames", frameChecks),
         ("compositor", compositorChecks),
+        ("animation", animationChecks),
         ("graphics", graphicsChecks),
         ("accessibility", offscreenAccessibilityChecks),
         ("profile", profileChecks),

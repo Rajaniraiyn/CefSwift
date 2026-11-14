@@ -81,10 +81,10 @@ extension CefOffscreenBrowserView: @preconcurrency NSTextInputClient {
     /// last composition's caret, or the view's top-left corner if there has
     /// been none.
     public func firstRect(forCharacterRange range: NSRange, actualRange: NSRangePointer?) -> NSRect {
-        guard let window else { return .zero }
+        guard window != nil else { return .zero }
         let caret = lastKnownCaretRect ?? CGRect(x: 4, y: 4, width: 1, height: 16)
         let rect = NSRect(x: caret.minX, y: caret.maxY, width: max(caret.width, 1), height: max(caret.height, 1))
-        return window.convertToScreen(convert(rect, to: nil))
+        return screenRect(fromPage: rect)
     }
 
     public func characterIndex(for point: NSPoint) -> Int {

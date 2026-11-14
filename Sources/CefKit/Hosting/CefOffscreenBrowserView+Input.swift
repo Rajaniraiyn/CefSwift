@@ -20,49 +20,49 @@ extension CefOffscreenBrowserView {
     // MARK: Mouse
 
     public override func mouseMoved(with event: NSEvent) {
-        browser?.sendMouseMove(to: viewPoint(for: event), modifiers: modifiers)
+        browser?.sendMouseMove(to: pagePoint(for: event), modifiers: modifiers)
     }
 
     public override func mouseDragged(with event: NSEvent) {
-        browser?.sendMouseMove(to: viewPoint(for: event), modifiers: modifiers)
+        browser?.sendMouseMove(to: pagePoint(for: event), modifiers: modifiers)
     }
 
     public override func rightMouseDragged(with event: NSEvent) {
-        browser?.sendMouseMove(to: viewPoint(for: event), modifiers: modifiers)
+        browser?.sendMouseMove(to: pagePoint(for: event), modifiers: modifiers)
     }
 
     public override func otherMouseDragged(with event: NSEvent) {
-        browser?.sendMouseMove(to: viewPoint(for: event), modifiers: modifiers)
+        browser?.sendMouseMove(to: pagePoint(for: event), modifiers: modifiers)
     }
 
     public override func mouseEntered(with event: NSEvent) {
-        browser?.sendMouseMove(to: viewPoint(for: event), modifiers: modifiers)
+        browser?.sendMouseMove(to: pagePoint(for: event), modifiers: modifiers)
     }
 
     public override func mouseExited(with event: NSEvent) {
-        browser?.sendMouseExit(at: viewPoint(for: event), modifiers: modifiers)
+        browser?.sendMouseExit(at: pagePoint(for: event), modifiers: modifiers)
     }
 
     public override func mouseDown(with event: NSEvent) {
         // A page's `-webkit-app-region: drag` moves the window instead.
-        if let browser, browser.handleWindowDrag(event, at: viewPoint(for: event)) { return }
+        if let browser, browser.handleWindowDrag(event, at: pagePoint(for: event)) { return }
         // `makeFirstResponder` does nothing when this view already is first
         // responder, so the browser is focused explicitly as well.
         window?.makeFirstResponder(self)
         browser?.hostViewDidBecomeKey()
-        browser?.sendMouseDown(at: viewPoint(for: event), button: .left, clickCount: event.clickCount, modifiers: modifiers)
+        browser?.sendMouseDown(at: pagePoint(for: event), button: .left, clickCount: event.clickCount, modifiers: modifiers)
     }
 
     public override func mouseUp(with event: NSEvent) {
-        browser?.sendMouseUp(at: viewPoint(for: event), button: .left, clickCount: event.clickCount, modifiers: modifiers)
+        browser?.sendMouseUp(at: pagePoint(for: event), button: .left, clickCount: event.clickCount, modifiers: modifiers)
     }
 
     public override func rightMouseDown(with event: NSEvent) {
-        browser?.sendMouseDown(at: viewPoint(for: event), button: .right, clickCount: event.clickCount, modifiers: modifiers)
+        browser?.sendMouseDown(at: pagePoint(for: event), button: .right, clickCount: event.clickCount, modifiers: modifiers)
     }
 
     public override func rightMouseUp(with event: NSEvent) {
-        browser?.sendMouseUp(at: viewPoint(for: event), button: .right, clickCount: event.clickCount, modifiers: modifiers)
+        browser?.sendMouseUp(at: pagePoint(for: event), button: .right, clickCount: event.clickCount, modifiers: modifiers)
     }
 
     /// What an `otherMouse` button does. Buttons 3 and 4 are the back and
@@ -85,13 +85,13 @@ extension CefOffscreenBrowserView {
         case .forward:
             browser?.goForward()
         case .middle:
-            browser?.sendMouseDown(at: viewPoint(for: event), button: .middle, clickCount: event.clickCount, modifiers: modifiers)
+            browser?.sendMouseDown(at: pagePoint(for: event), button: .middle, clickCount: event.clickCount, modifiers: modifiers)
         }
     }
 
     public override func otherMouseUp(with event: NSEvent) {
         guard Self.otherMouseAction(forButtonNumber: event.buttonNumber) == .middle else { return }
-        browser?.sendMouseUp(at: viewPoint(for: event), button: .middle, clickCount: event.clickCount, modifiers: modifiers)
+        browser?.sendMouseUp(at: pagePoint(for: event), button: .middle, clickCount: event.clickCount, modifiers: modifiers)
     }
 
     public override func scrollWheel(with event: NSEvent) {
@@ -115,7 +115,7 @@ extension CefOffscreenBrowserView {
         let sendY = totalY.rounded(.towardZero)
         scrollResidual = CGPoint(x: totalX - sendX, y: totalY - sendY)
         if sendX == 0 && sendY == 0 { return }
-        browser?.sendScrollWheel(at: viewPoint(for: event), delta: CGVector(dx: sendX, dy: sendY), modifiers: modifiers)
+        browser?.sendScrollWheel(at: pagePoint(for: event), delta: CGVector(dx: sendX, dy: sendY), modifiers: modifiers)
     }
 
     // MARK: Keyboard

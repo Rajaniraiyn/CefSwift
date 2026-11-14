@@ -180,6 +180,7 @@ extension CefBrowser {
     /// Tells Chromium the host view's size changed, so it reads
     /// ``CefOffscreenHost/offscreenViewInfo`` and repaints.
     public func hostViewDidResize() {
+        resizeNotificationCount += 1
         withHost { $0.pointee.was_resized($0) }
     }
 

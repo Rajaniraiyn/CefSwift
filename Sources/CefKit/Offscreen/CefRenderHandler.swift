@@ -34,10 +34,23 @@ public struct CefOffscreenPaintDetails: Sendable, Equatable {
     /// means frames were not delivered, so ``damage`` does not cover what
     /// changed since the last frame seen: treat the whole frame as damaged.
     public var sequence: UInt64?
+    /// The part of the surface the page's content fills, in pixels with a
+    /// top-left origin, when it does not fill all of it (viz's
+    /// `content_rect`). While a resize is in flight Chromium captures the
+    /// page, still at its old size, into a surface of the new size,
+    /// letterboxed: the rest of the surface is black. Show only this part.
+    public var contentRect: CGRect?
+    /// The size of the page's frame Chromium captured, in pixels (viz's
+    /// `source_size`), when known. Chromium scales the capture into the
+    /// surface when the two differ, so the frame's page size is this one,
+    /// not the surface's.
+    public var sourceSize: CGSize?
 
-    public init(damage: CGRect, sequence: UInt64? = nil) {
+    public init(damage: CGRect, sequence: UInt64? = nil, contentRect: CGRect? = nil, sourceSize: CGSize? = nil) {
         self.damage = damage
         self.sequence = sequence
+        self.contentRect = contentRect
+        self.sourceSize = sourceSize
     }
 }
 
@@ -332,9 +345,13 @@ extension CefOffscreenPaintDetails {
         let bounds = CGRect(origin: .zero, size: size)
         let rects = CGRect.array(dirtyRects, count: count)
         let union = rects.reduce(CGRect.null) { $0.union($1) }.intersection(bounds)
+        let content = CGRect(info.extra.content_rect).intersection(bounds)
         self.init(
             damage: union.isNull || union.isEmpty && rects.isEmpty ? bounds : union,
-            sequence: info.extra.has_capture_counter != 0 ? info.extra.capture_counter : nil)
+            sequence: info.extra.has_capture_counter != 0 ? info.extra.capture_counter : nil,
+            contentRect: content.isNull || content.isEmpty || content == bounds ? nil : content,
+            sourceSize: info.extra.has_source_size != 0 && info.extra.source_size.width > 0 && info.extra.source_size.height > 0
+                ? CGSize(width: CGFloat(info.extra.source_size.width), height: CGFloat(info.extra.source_size.height)) : nil)
     }
 }
 
