@@ -344,8 +344,14 @@ extension SelfTest {
             _ = try? await browser.devTools.send(
                 "Runtime.evaluate", ["expression": .string(script), "userGesture": true, "awaitPromise": false])
         }
-        await gesture("navigator.usb.requestDevice({filters: []}).catch(() => {})")
-        if let chooser = await nativeSurface(.deviceChooser, in: window) {
+        // A request made before the page counts the gesture shows nothing:
+        // ask again, a few times at most.
+        var usbChooser: CefChromiumSurface?
+        for _ in 0..<3 where usbChooser == nil {
+            await gesture("navigator.usb.requestDevice({filters: []}).catch(() => {})")
+            usbChooser = await nativeSurface(.deviceChooser, in: window)
+        }
+        if let chooser = usbChooser {
             check("surface kinds: the USB chooser is a device chooser that hangs from the toolbar",
                   chooser.kind.hangsFromToolbar && chooser.kind.capabilities.contains(.dismiss))
             chooser.dismiss()

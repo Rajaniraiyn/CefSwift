@@ -79,9 +79,15 @@ extension SelfTest {
 
         if window.occlusionState.contains(.visible) {
             let painted = await waitUntil { second.layer?.sublayers?.first?.contents != nil }
-            let png = try? await browser.snapshot()
-            let image = png.flatMap { NSBitmapImageRep(data: $0) }
+            // The first frame at the new size can trail the transfer on a
+            // slow machine: take snapshots until one has it.
             let scale = window.backingScaleFactor
+            var image: NSBitmapImageRep?
+            _ = await waitUntilAsync(timeout: .seconds(5)) {
+                image = (try? await browser.snapshot()).flatMap { NSBitmapImageRep(data: $0) }
+                return image?.pixelsWide == Int(second.bounds.width * scale)
+                    && image?.pixelsHigh == Int(second.bounds.height * scale)
+            }
             check("hosting: offscreen transfer — frames reach the new view, in full",
                   painted && first.layer?.sublayers?.first?.contents == nil
                       && image?.pixelsWide == Int(second.bounds.width * scale)
