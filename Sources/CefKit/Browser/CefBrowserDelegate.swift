@@ -108,13 +108,6 @@ public protocol CefBrowserDelegate: AnyObject {
     /// ``CefProfile/downloadPolicy``: the Downloads folder unless the app
     /// set another.
     func browser(_ browser: CefBrowser, decideDestinationFor download: CefDownload) async -> CefDownloadDecision
-
-    // MARK: Downloads
-
-    /// A download's progress or state changed. The ``CefDownload`` itself
-    /// is observable, and ``CefBrowser/downloads`` and
-    /// ``CefProfile/downloads`` list it.
-    func browser(_ browser: CefBrowser, downloadDidUpdate download: CefDownload)
 }
 
 extension CefBrowserDelegate {
@@ -171,7 +164,6 @@ extension CefBrowserDelegate {
         .default(for: download)
     }
 
-    public func browser(_ browser: CefBrowser, downloadDidUpdate download: CefDownload) {}
 }
 
 /// Stands in when a browser has no delegate, so every decision still gets

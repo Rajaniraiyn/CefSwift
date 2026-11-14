@@ -146,7 +146,6 @@ extension CefBrowser {
         download.apply(snapshot)
         // Kept while the download can go on, paused or interrupted included.
         download.control = download.state.isFinished ? nil : control
-        delegate?.browser(self, downloadDidUpdate: download)
     }
 
     /// Routes a window-open request. Returns `true` when CEF must not create

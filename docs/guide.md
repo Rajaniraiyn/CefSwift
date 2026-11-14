@@ -1381,9 +1381,10 @@ sheets dismiss themselves.
 Events: `browserDidCreate(_:)`, `browserDidClose(_:)`, `browser(_:didOpen:)`
 (a popup or DevTools browser opened on this browser's behalf, which inherits
 the delegate), `browser(_:didFinishLoadWithStatus:)`,
-`browser(_:didFailLoad:)`, `browser(_:didLog:)`,
-`browser(_:renderProcessDidTerminate:)` and
-`browser(_:downloadDidUpdate:)`.
+`browser(_:didFailLoad:)`, `browser(_:didLog:)` and
+`browser(_:renderProcessDidTerminate:)`. Downloads have no event: each
+`CefDownload` is observable, and the profile and browser list them
+([Downloads](#downloads)).
 
 `CefDialogPresenter` provides the native sheets behind the defaults, so your
 delegate can keep them for some cases.
@@ -1550,7 +1551,8 @@ the suggested name, numbered when taken, `.ask` shows the save panel and
 is the stock panel, for a delegate that keeps it for some downloads.
 
 Each download is one observable `CefDownload` for its whole life, updated
-as it goes: `url`, `suggestedFilename`, `mimeType`, `fileURL` (the file
+as it goes: `url` (after redirects; `originalURL` before), `startDate`,
+`endDate` (once completed or cancelled), `suggestedFilename`, `mimeType`, `fileURL` (the file
 being written, then the finished file), `receivedBytes`, `expectedBytes`
 (`nil` when the server gives no size), `fractionCompleted`,
 `bytesPerSecond`, `estimatedTimeRemaining`, the `browser` that started it,
@@ -1584,9 +1586,16 @@ struct DownloadsList: View {
 
 The lists last as long as the app runs, an incognito profile's as long as
 the profile. CefSwift keeps no download history across launches; an app
-that wants one saves what it needs from `profile.downloads`. The delegate's
-`browser(_:downloadDidUpdate:)` reports each change too, for code that
-does not observe.
+that wants one saves what it needs from `profile.downloads`.
+`profile.removeDownloads(where:)` takes entries out of the profile's list
+and their browsers', and `profile.removeFinishedDownloads()` takes out
+every one that cannot go on any more, as a download manager's Clear does;
+a download that can still go on (in progress, or paused or interrupted
+while its browser is open) stays, and no file is deleted.
+
+Code that does not use SwiftUI follows a download with Observation's
+`withObservationTracking(_:onChange:)`, or by reading the lists when it
+needs them; there is no delegate event for download progress.
 
 ### File choosers
 

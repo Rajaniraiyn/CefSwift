@@ -37,6 +37,36 @@ extension CefProfile {
     /// start, and each ``CefDownload`` as it progresses.
     public var downloads: [CefDownload] { downloadStore.downloads }
 
+    /// Removes the downloads `shouldRemove` picks from ``downloads`` and
+    /// from the ``CefBrowser/downloads`` of the browser that started each,
+    /// as a download manager's "Clear" does. A download that can still go
+    /// on — in progress, or paused or interrupted while its browser is
+    /// open — stays, whatever `shouldRemove` says. Files are never
+    /// touched: a completed download's file stays where it is.
+    ///
+    /// ```swift
+    /// profile.removeDownloads { $0.state == .cancelled }
+    /// ```
+    public func removeDownloads(where shouldRemove: (CefDownload) throws -> Bool) rethrows {
+        var removed: Set<ObjectIdentifier> = []
+        for download in downloadStore.downloads where !download.canGoOn {
+            if try shouldRemove(download) { removed.insert(ObjectIdentifier(download)) }
+        }
+        guard !removed.isEmpty else { return }
+        for download in downloadStore.downloads where removed.contains(ObjectIdentifier(download)) {
+            downloadStore.byID[download.chromiumID] = nil
+            download.browser?.downloads.removeAll { $0 === download }
+        }
+        downloadStore.downloads.removeAll { removed.contains(ObjectIdentifier($0)) }
+    }
+
+    /// Removes every download that cannot go on any more: completed,
+    /// cancelled, or stopped with no browser to resume it. See
+    /// ``removeDownloads(where:)``.
+    public func removeFinishedDownloads() {
+        removeDownloads { _ in true }
+    }
+
     /// The download Chromium identifies as `id` in this profile, made from
     /// `snapshot` if it is new, and listed in `browser`'s downloads too.
     func trackDownload(_ snapshot: CefDownload.Snapshot, startedBy browser: CefBrowser) -> CefDownload {

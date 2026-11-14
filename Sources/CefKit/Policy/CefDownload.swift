@@ -75,6 +75,12 @@ public final class CefDownload: Identifiable {
 
     /// The address the file comes from, after redirects.
     public private(set) var url: URL?
+    /// The address the download was asked for, before redirects.
+    public private(set) var originalURL: URL?
+    /// When the download started.
+    public private(set) var startDate: Date?
+    /// When the download completed or was cancelled; nil before.
+    public private(set) var endDate: Date?
     /// The file name the server or the page suggests, from
     /// `Content-Disposition`, the `download` attribute or the URL.
     public private(set) var suggestedFilename: String
@@ -116,6 +122,12 @@ public final class CefDownload: Identifiable {
         return .seconds(Double(expectedBytes - receivedBytes) / Double(bytesPerSecond))
     }
 
+    /// Whether the download can still go on: in progress, or paused or
+    /// interrupted with a control to resume it.
+    var canGoOn: Bool {
+        state == .inProgress || canResume
+    }
+
     /// Whether ``resume()`` can continue the download: it is paused or
     /// interrupted, and the browser that started it is open.
     public var canResume: Bool {
@@ -143,6 +155,9 @@ public final class CefDownload: Identifiable {
     init(_ snapshot: Snapshot, browser: CefBrowser?, profile: CefProfile?) {
         chromiumID = snapshot.id
         url = snapshot.url
+        originalURL = snapshot.originalURL
+        startDate = snapshot.startDate
+        endDate = snapshot.endDate
         suggestedFilename = snapshot.suggestedFilename
         mimeType = snapshot.mimeType
         fileURL = snapshot.fileURL
@@ -158,6 +173,9 @@ public final class CefDownload: Identifiable {
     /// observers see only what moved.
     func apply(_ snapshot: Snapshot) {
         if url != snapshot.url { url = snapshot.url }
+        if let original = snapshot.originalURL, originalURL != original { originalURL = original }
+        if let start = snapshot.startDate, startDate != start { startDate = start }
+        if endDate != snapshot.endDate { endDate = snapshot.endDate }
         if !snapshot.suggestedFilename.isEmpty, suggestedFilename != snapshot.suggestedFilename {
             suggestedFilename = snapshot.suggestedFilename
         }
@@ -176,6 +194,9 @@ extension CefDownload {
     struct Snapshot: Sendable, Equatable {
         var id: UInt32
         var url: URL?
+        var originalURL: URL?
+        var startDate: Date?
+        var endDate: Date?
         var suggestedFilename = ""
         var mimeType = ""
         var fileURL: URL?
@@ -201,11 +222,16 @@ extension CefDownload.Snapshot {
     /// Reads a borrowed `cef_download_item_t`.
     init(item: UnsafeMutablePointer<cef_download_item_t>) {
         let urlString = CefStringUtil.takingUserFree(item.pointee.get_url(item)) ?? ""
+        let originalString = CefStringUtil.takingUserFree(item.pointee.get_original_url(item)) ?? ""
+        let start = item.pointee.get_start_time(item), end = item.pointee.get_end_time(item)
         let path = CefStringUtil.takingUserFree(item.pointee.get_full_path(item)) ?? ""
         let total = item.pointee.get_total_bytes(item)
         self.init(
             id: item.pointee.get_id(item),
             url: URL(string: urlString),
+            originalURL: originalString.isEmpty ? nil : URL(string: originalString),
+            startDate: start.val == 0 ? nil : start.date,
+            endDate: end.val == 0 ? nil : end.date,
             suggestedFilename: CefStringUtil.takingUserFree(item.pointee.get_suggested_file_name(item)) ?? "",
             mimeType: CefStringUtil.takingUserFree(item.pointee.get_mime_type(item)) ?? "",
             fileURL: path.isEmpty ? nil : URL(fileURLWithPath: path),
