@@ -43,6 +43,8 @@ struct BundleFacts: Sendable {
     var isStapled: Bool?
     var isQuarantined = false
     var footprint: Footprint?
+    /// Chrome extensions in `Contents/Resources/Extensions`.
+    var bundledExtensions: [BundledExtensions.Inspection] = []
 
     /// What the bundle's parts weigh, in logical bytes.
     struct Footprint: Sendable {
@@ -485,7 +487,8 @@ enum Doctor {
                 .init(name: "Provisioning profile", checks: profileChecks),
                 .init(name: "Distribution", checks: distribution),
                 .init(name: "Features", checks: features),
-            ] + (facts.footprint.map { [.init(name: "Footprint", checks: footprintChecks($0))] } ?? []))
+            ] + (facts.bundledExtensions.isEmpty ? [] : [.init(name: "Extensions", checks: BundledExtensions.checks(facts.bundledExtensions))])
+              + (facts.footprint.map { [.init(name: "Footprint", checks: footprintChecks($0))] } ?? []))
     }
 
     /// Sizes, and the locale packs against the app's localizations.

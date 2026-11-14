@@ -2,6 +2,7 @@
 // in the page's address and shows its result in the title, for checks that
 // load `chrome-extension://<id>/tabs.html?op=<op>&…` and read the title:
 //   op=query                         every tab: [id, windowId, index, active, pinned, groupId, url]
+//   op=current                       the tabs of this page's window, as op=query
 //   op=windows                       every window: [id, type, focused, tabCount]
 //   op=groups                        every group: [id, windowId, title, color, collapsed]
 //   op=create&url=U[&windowId=W]     tabs.create
@@ -20,6 +21,7 @@ const number = name => Number(query.get(name));
 const numbers = name => (query.get(name) ?? '').split(',').filter(Boolean).map(Number);
 const operations = {
   query: async () => (await chrome.tabs.query({})).map(t => [t.id, t.windowId, t.index, t.active, t.pinned, t.groupId, t.url]),
+  current: async () => (await chrome.tabs.query({ currentWindow: true })).map(t => [t.id, t.windowId, t.index, t.active, t.pinned, t.groupId, t.url]),
   windows: async () => (await chrome.windows.getAll({ populate: true })).map(w => [w.id, w.type, w.focused, (w.tabs ?? []).length]),
   groups: async () => (await chrome.tabGroups.query({})).map(g => [g.id, g.windowId, g.title, g.color, g.collapsed]),
   create: async () => {

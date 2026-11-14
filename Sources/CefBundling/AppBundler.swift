@@ -32,6 +32,8 @@ struct AppBundler {
     let signingKeychain: String?
     /// Where the entitlements files passed to codesign are written.
     let workDirectory: URL
+    /// Chrome extensions the app ships (cefapp.json `extensions`).
+    var extensions: [URL] = []
 
     var appURL: URL { outputDirectory.appendingPathComponent("\(appName).app") }
 
@@ -94,7 +96,7 @@ struct AppBundler {
             executableName: appName, bundleIdentifier: bundleIdentifier,
             minimumSystemVersion: minimumSystemVersion, version: version, build: build, helper: helper,
             frameworkSource: frameworkSource, identity: identity, plan: plan, trim: trim,
-            signingKeychain: signingKeychain, workDirectory: workDirectory)
+            signingKeychain: signingKeychain, workDirectory: workDirectory, extensions: extensions)
         let signer = try embedder.embed(into: contents, appInfoPlist: infoPlist,
                                         architectures: product.architectures).signer
 

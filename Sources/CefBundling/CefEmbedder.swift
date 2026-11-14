@@ -24,6 +24,8 @@ struct CefEmbedder {
     let signingKeychain: String?
     /// Where the entitlements files passed to codesign are written.
     let workDirectory: URL
+    /// Chrome extensions to put in `Contents/Resources/Extensions`.
+    var extensions: [URL] = []
 
     /// What `embed` printed about the framework, for the caller's log.
     struct Result {
@@ -39,6 +41,8 @@ struct CefEmbedder {
         let fm = FileManager.default
         let frameworks = contents.appendingPathComponent("Frameworks")
         try fm.createDirectory(at: frameworks, withIntermediateDirectories: true)
+        // Resources the app's signature seals.
+        try BundledExtensions.copy(extensions, into: contents)
 
         let framework = frameworks.appendingPathComponent(BuiltProduct.cefFrameworkName)
         if let frameworkSource {

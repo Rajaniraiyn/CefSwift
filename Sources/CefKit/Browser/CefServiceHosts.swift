@@ -295,6 +295,29 @@ package final class CefServiceHosts: CefShutdownParticipant {
         hosts[host] != nil
     }
 
+    /// What file dialogs a host's page opens are answered with, by host
+    /// name, once each; a dialog with no answer here is cancelled. For
+    /// WebUI calls that ask for a file, such as `chrome://extensions`'
+    /// "Load unpacked".
+    package var fileDialogAnswers: [String: [URL]] = [:]
+
+    /// Gives the page of `module`'s running host, starting it if needed, a
+    /// user activation, as a click would: some WebUI calls Chromium allows
+    /// only in answer to one (`chrome.management.uninstall`). It lasts a few
+    /// seconds, so make the call right after.
+    package func grantUserActivation(to module: CefServiceHost.Module) async throws {
+        _ = try await call(module, "async () => true", timeout: .seconds(15))
+        guard let browser = module.hosts.lazy.compactMap({ self.hosts[$0]?.liveBrowserIfRunning }).first else {
+            throw CefError.operationFailed("\(module.name): no running host")
+        }
+        _ = try await browser.devTools.send(
+            "Runtime.evaluate", ["expression": "0", "userGesture": true, "returnByValue": true])
+    }
+
+    fileprivate func takeFileDialogAnswer(for host: CefServiceHost) -> [URL]? {
+        fileDialogAnswers.removeValue(forKey: host.name)
+    }
+
     /// The names of the hosts open or opening.
     var runningHostNames: [String] {
         hosts.keys.map(\.name).sorted()
@@ -401,6 +424,7 @@ final class CefServiceHostBrowser {
         self.services = services
         self.profile = services.profile
         delegate.onTerminated = { [weak self] in self?.stop() }
+        delegate.answerFileDialog = { [weak services] in services?.takeFileDialogAnswer(for: host) }
         eventBridge.handle("event") { [weak self] (event: ModuleEvent) in
             self?.services?.deliver(module: event.module, name: event.name, payload: event.payload ?? .null)
         }
@@ -586,6 +610,11 @@ final class CefServiceHostBrowser {
 /// would otherwise never finish.
 private final class ServiceBrowserDelegate: CefBrowserDelegate {
     fileprivate var onTerminated: (() -> Void)?
+    fileprivate var answerFileDialog: (@MainActor () -> [URL]?)?
+
+    func browser(_ browser: CefBrowser, runFileDialog dialog: CefFileDialog) async -> [URL]? {
+        answerFileDialog?()
+    }
 
     func browser(_ browser: CefBrowser, renderProcessDidTerminate reason: CefTerminationReason) {
         onTerminated?()

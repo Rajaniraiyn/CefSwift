@@ -136,11 +136,17 @@ extension CefRuntime {
         /// macOS.
         public var acceptLanguages: [String] = []
 
-        /// Unpacked extension directories (each containing a `manifest.json`)
-        /// to load at startup. Extensions run in Chrome-style browsers
-        /// (``CefWindow``); more can be installed at runtime from
-        /// `chrome://extensions` or the Chrome Web Store.
-        public var extensions: [URL] = []
+        /// Extensions the app installs, besides those users install from
+        /// the Chrome Web Store or `chrome://extensions`: from the store by
+        /// identifier, downloaded in the background; packed ones the app
+        /// ships; unpacked directories. Every profile but incognito ones gets
+        /// them, and users can disable or remove them; an extension the user
+        /// removed is not installed again (an unpacked one is). Chromium
+        /// installs extensions from the store and packages disabled, as
+        /// another program's, until accepted; CefChromium's
+        /// `CefProfile.extensions` accepts the configured ones once.
+        /// See ``Extension``.
+        public var extensions: [Extension] = []
 
         /// How many helper processes Chromium keeps running, trading memory for
         /// speed and resilience. See ``CefRuntime/ProcessPolicy``.

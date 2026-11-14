@@ -664,32 +664,19 @@ extension SelfTest {
 }
 
 extension SelfTest {
-    /// The test extension loaded at start-up, with Chrome's services as
-    /// the `.chrome` preset has them.
-    static func configureExtensionProbe(_ configuration: inout CefRuntime.Configuration) {
-        if let directory = ExtensionFixture.directory { configuration.extensions = [directory] }
-        for name in ["disable-background-networking", "disable-default-apps", "disable-sync", "disable-domain-reliability"] {
-            configuration.extraCommandLineSwitches[name] = nil
-        }
-        configuration.services.componentUpdates = .automatic
-        if ProcessInfo.processInfo.environment[extensionDumpEnvironmentKey] != nil {
-            configuration.enterprisePolicy = .domain(surveyPolicyDomain)
-        }
-    }
-
     static let surveyExternalID = "ddkjiahejlhfcafbddmgiahcphecmpfh"   // uBlock Origin Lite
     static let surveyPolicyID = "eimadpbcbfnmbkopoojfekhnkhdbieeh"     // Dark Reader
     static let surveyForcedID = "fmkadmapgofadopljbjfkapdkoienihi"     // React Developer Tools
     static let surveyPolicyDomain = "dev.rajaniraiyn.cefswift.selftest.extensions"
 
-    static func extensionChecks() async {
-        if ProcessInfo.processInfo.environment[extensionDumpEnvironmentKey] != nil {
+    static func runExtensionSurvey() async {
+        do {
             let root = FileManager.default.temporaryDirectory.appendingPathComponent("cefswift-survey-\(UUID().uuidString)")
             defer { try? FileManager.default.removeItem(at: root) }
             let external = root.appendingPathComponent("External Extensions")
             try? FileManager.default.createDirectory(at: external, withIntermediateDirectories: true)
             let update = "https://clients2.google.com/service/update2/crx"
-            try? Data("{\"external_update_url\": \"\(update)\"}".utf8)
+            try? Data("{\"external_update_url\": \"\(update)\", \"was_installed_by_default\": true}".utf8)
                 .write(to: external.appendingPathComponent("\(surveyExternalID).json"))
             let defaults = UserDefaults(suiteName: surveyPolicyDomain)
             defaults?.set([surveyPolicyID: ["installation_mode": "normal_installed", "update_url": update]], forKey: "ExtensionSettings")

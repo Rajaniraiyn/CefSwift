@@ -22,6 +22,7 @@ struct BrowserApp: CefSwiftApp {
         SwipeIndicator()
         Appearance()
         Downloads()
+        Extensions()
         TabDiscarding()
         ChromiumPanels()
         ChromiumPages()

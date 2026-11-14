@@ -220,7 +220,7 @@ extension SelfTest {
         "security": .seconds(120),
         "nativeUI": ProcessInfo.processInfo.environment["SELFTEST_SURFACE_DUMP"] == nil ? .seconds(60) : .seconds(1200),
         "surfaces": .seconds(180),
-        "extensions": ProcessInfo.processInfo.environment["SELFTEST_EXTENSIONS_DUMP"] == nil ? .seconds(240) : .seconds(500),
+        "extensions": ProcessInfo.processInfo.environment["SELFTEST_EXTENSIONS_DUMP"] == nil ? .seconds(420) : .seconds(500),
         "contextMenu": ProcessInfo.processInfo.environment["SELFTEST_MENU_DUMP"] == nil ? .seconds(420) : .seconds(1500),
     ]
     static let defaultGroupDeadline: Duration = .seconds(60)

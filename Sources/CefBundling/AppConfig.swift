@@ -38,6 +38,9 @@ struct CefAppConfig: Decodable, Sendable {
     /// What the app keeps of the CEF framework: locale packs and the
     /// software GPU fallback.
     var cef: CefFrameworkOptions?
+    /// Chrome extensions the app ships, `.crx` packages or unpacked
+    /// directories, copied into `Contents/Resources/Extensions`.
+    var extensions: [String]?
 
     struct Notarization: Decodable, Sendable {
         /// A `notarytool store-credentials` profile name.
@@ -53,7 +56,7 @@ struct CefAppConfig: Decodable, Sendable {
     private enum CodingKeys: String, CodingKey, CaseIterable {
         case bundleIdentifier, displayName, minimumSystemVersion, version, build, signingIdentity,
              teamIdentifier, signingKeychain, hardenedRuntime, timestamp, capabilities, usageDescriptions,
-             infoPlist, entitlements, helperEntitlements, provisioningProfile, notarization, cef
+             infoPlist, entitlements, helperEntitlements, provisioningProfile, notarization, cef, extensions
     }
 
     static let fileName = "cefapp.json"

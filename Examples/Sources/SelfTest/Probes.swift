@@ -24,6 +24,7 @@ extension SelfTest {
         "launchPrompts": launchPromptsProbeChecks,
         "quitWhilePending": quitWhilePendingProbeChecks,
         "extensionSurvey": extensionSurveyProbe,
+        "extensions": extensionProbeChecks,
     ]
 
     /// Changes the configuration for the probe `name`.
@@ -41,7 +42,7 @@ extension SelfTest {
             configuration.services.protectedMedia = .automatic
         case "launchPrompts":
             configureLaunchPromptsProbe(&configuration)
-        case "extensionSurvey":
+        case "extensionSurvey", "extensions":
             configureExtensionProbe(&configuration)
         default:
             break
