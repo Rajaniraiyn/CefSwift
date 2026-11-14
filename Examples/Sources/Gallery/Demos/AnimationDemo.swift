@@ -63,6 +63,7 @@ private struct AnimationView: View {
         .padding(16)
         .onChange(of: scene) { toggled = false }
         .reportReady { try await smokeRun() }
+        .task { if AnimationShots.isEnabled { await shotsRun() } }
         .onDisappear {
             windowed.close(force: true)
             offscreen.close(force: true)
@@ -138,12 +139,63 @@ private struct AnimationView: View {
         }
     }
 
+    /// For `Gallery -animationShots`: each scene forward and back, with
+    /// pictures of the window before, during and after each spring, then
+    /// the first two scenes again, which must show their pages again.
+    private func shotsRun() async {
+        _ = try? await windowed.waitUntilLoaded(timeout: .seconds(30))
+        _ = try? await offscreen.waitUntilLoaded(timeout: .seconds(30))
+        try? await Task.sleep(for: .seconds(1))
+        guard let window = windowed.hostView?.window ?? NSApp.windows.first(where: { $0.isVisible }) else { return }
+        let instants = [40, 80, 130, 200, 300, 450]
+        func play(_ strip: AnimationShots.Strip, _ value: Bool, _ prefix: String) async {
+            let start = ContinuousClock.now
+            withAnimation(spring) { toggled = value }
+            for instant in instants {
+                try? await Task.sleep(until: start + .milliseconds(instant))
+                strip.shoot("\(prefix)\(instant)ms")
+            }
+            try? await Task.sleep(until: start + .milliseconds(800))
+            strip.shoot("\(prefix)end")
+            try? await Task.sleep(until: start + .milliseconds(1800))
+            strip.shoot("\(prefix)rest")
+        }
+        var order = Scene.allCases.map { ($0, $0.rawValue.replacingOccurrences(of: " ", with: "")) }
+        order.append((.resize, "SpringResizeAgain"))
+        order.append((.transform, "TransformAgain"))
+        for (each, name) in order {
+            scene = each
+            try? await Task.sleep(for: .milliseconds(800))
+            // First without pictures, which take the main thread: how long
+            // the refreshes of the springs alone take.
+            for value in [true, false] {
+                let before = frameTimes.recorded
+                withAnimation(spring) { toggled = value }
+                try? await Task.sleep(for: .milliseconds(900))
+                let during = frameTimes.intervals.suffix(min(240, frameTimes.recorded - before))
+                print(String(format: "animationShots: %@ %@ refreshes %d, longest %.0f ms, over 25 ms %d",
+                             name, value ? "forward" : "back", during.count, during.max() ?? 0, during.filter { $0 > 25 }.count))
+            }
+            let strip = AnimationShots.Strip(name: name, window: window)
+            strip.shoot("start")
+            if let view = windowed.hostView { strip.note("layers-start", WindowCapture.describeLayers(of: view)) }
+            if let data = try? await windowed.snapshot() { strip.save(data, as: "chromium-start") }
+            await play(strip, true, "fwd")
+            if let view = windowed.hostView { strip.note("layers-fwd", WindowCapture.describeLayers(of: view)) }
+            await play(strip, false, "back")
+            if let view = windowed.hostView { strip.note("layers-back", WindowCapture.describeLayers(of: view)) }
+            strip.finish(columns: 5)
+            print("animationShots: \(name) done; windowed host \(windowed.hostView.map { "\(type(of: $0))" } ?? "none"), state \(windowed.state)")
+        }
+        NSApp.terminate(nil)
+    }
+
     /// For `Gallery -smoke`: each scene once, then a click on the offscreen
     /// page, which must land on it.
     private func smokeRun() async throws {
         try await windowed.waitUntilLoaded(timeout: .seconds(30))
         try await offscreen.waitUntilLoaded(timeout: .seconds(30))
-        guard readiness != nil else { return }
+        guard Smoke.isEnabled else { return }
         for each in Scene.allCases where each != .grid {
             scene = each
             try await Task.sleep(for: .milliseconds(300))
@@ -190,6 +242,7 @@ private struct AnimationView: View {
     }
 
     static let pageStyle = """
+        :root { color-scheme: light; }
         body { margin: 0; padding: 16px 20px; background: linear-gradient(160deg, #e8f0ff, #ffe8f0); color: #222; }
         h1 { font-size: 22px; margin: 0 0 8px; }
         """
@@ -251,12 +304,15 @@ private struct PreviewGrid: View {
 @MainActor @Observable
 private final class FrameTimes {
     private(set) var intervals: [Double] = []
+    /// How many intervals were recorded in all.
+    @ObservationIgnored private(set) var recorded = 0
     @ObservationIgnored private var last: Date?
 
     func record(_ date: Date) {
         defer { last = date }
         guard let last else { return }
         intervals.append(date.timeIntervalSince(last) * 1000)
+        recorded += 1
         if intervals.count > 240 { intervals.removeFirst(intervals.count - 240) }
     }
 }

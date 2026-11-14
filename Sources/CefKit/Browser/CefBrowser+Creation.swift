@@ -109,8 +109,14 @@ extension CefBrowser {
             native.removeFromSuperview()
             parentView.addSubview(native)
         }
-        native.frame = parentView.bounds
-        native.autoresizingMask = [.width, .height]
+        if let windowedView = parentView as? CefWindowedBrowserView {
+            // Sized in whole points by the view; see layoutChromiumView().
+            native.autoresizingMask = []
+            windowedView.layoutChromiumView(native)
+        } else {
+            native.frame = parentView.bounds
+            native.autoresizingMask = [.width, .height]
+        }
         parkedNativeView = nil
         hostView = parentView
         if let previous, previous !== parentView {

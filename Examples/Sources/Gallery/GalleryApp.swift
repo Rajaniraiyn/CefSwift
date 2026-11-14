@@ -13,6 +13,9 @@ import SwiftUI
 /// - `-demo <Type>` opens a demo, such as `-demo BridgeDemo`.
 /// - `-smoke` (or `GALLERY_SMOKE=1`) opens every demo in turn and quits;
 ///   see `Support/Smoke.swift`.
+/// - `-animationShots <directory>` plays the Animation demo's scenes and
+///   saves pictures of the window during them, then quits; see
+///   `Support/AnimationShots.swift`.
 @main
 struct GalleryApp: CefSwiftApp {
     static var runtimeConfiguration: CefRuntime.Configuration {
@@ -26,7 +29,7 @@ struct GalleryApp: CefSwiftApp {
         configuration.services.componentUpdates = .disabled
         configuration.services.protectedMedia = .disabled
         configuration.preferences["browser.confirm_to_quit"] = false
-        if let directory = Smoke.cacheDirectory {
+        if let directory = Smoke.cacheDirectory ?? AnimationShots.cacheDirectory {
             configuration.rootCacheDirectory = directory
         }
         return configuration
@@ -39,6 +42,7 @@ struct GalleryApp: CefSwiftApp {
         // demo loads one.
         CefRuntime.shared.registerSchemeHandler(scheme: "gallery", domain: "pages", handler: SamplePages())
         Smoke.prepare()
+        AnimationShots.prepare()
     }
 
     var body: some Scene {

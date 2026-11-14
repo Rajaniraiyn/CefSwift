@@ -12,7 +12,7 @@ final class GalleryModel {
     private(set) var readiness = DemoReadiness()
 
     init() {
-        let requested = UserDefaults.standard.string(forKey: "demo")
+        let requested = AnimationShots.isEnabled ? "AnimationDemo" : UserDefaults.standard.string(forKey: "demo")
         selection = Demos.all.first { $0.id == requested }?.id ?? Demos.all.first?.id
     }
 

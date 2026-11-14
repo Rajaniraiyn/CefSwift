@@ -19,6 +19,17 @@ final class CefAppContext: @unchecked Sendable {
     /// ``CefRuntime/Configuration/disabledFeatures`` turns it off.
     static let webContentsDiscardFeature = "WebContentsDiscard"
 
+    /// How Chromium's GPU process hands its frames to the window: through
+    /// the remote Core Animation API rather than a `CALayerHost` of its
+    /// own context. Off by default: with it, the frames of every page
+    /// Chromium draws itself (windowed views, `CefWindow`,
+    /// `CefChromeWindow`) never reach the screen on macOS 27.2, though the
+    /// page renders (`Page.captureScreenshot` has it), so the view shows
+    /// only its background. Offscreen pages, whose frames CefKit copies,
+    /// draw either way. Listing it in
+    /// ``CefRuntime/Configuration/enabledFeatures`` turns it back on.
+    static let remoteCoreAnimationFeature = "RemoteCoreAnimationAPI"
+
     private var browserProcessHandler: UnsafeMutablePointer<cef_browser_process_handler_t>?
     private var resourceBundleHandler: UnsafeMutablePointer<cef_resource_bundle_handler_t>?
 
@@ -142,6 +153,9 @@ final class CefAppContext: @unchecked Sendable {
         // one opening.
         if !disabledFeatures.contains(Self.webContentsDiscardFeature) {
             enabledFeatures.insert(Self.webContentsDiscardFeature)
+        }
+        if !enabledFeatures.contains(Self.remoteCoreAnimationFeature) {
+            disabledFeatures.insert(Self.remoteCoreAnimationFeature)
         }
         commandLine.appendValues(enabledFeatures, toListSwitch: "enable-features")
         commandLine.appendValues(disabledFeatures, toListSwitch: "disable-features")

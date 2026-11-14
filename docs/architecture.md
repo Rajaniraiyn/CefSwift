@@ -761,7 +761,8 @@ that need them in the app's process (sampling, snapshots of what is on
 screen, compositing it into an image) need offscreen rendering, and
 nothing in the process can check what the window server drew over it.
 
-Three things were wrong and are fixed:
+Three things were wrong and are fixed (more in
+[Presenting pages](#presenting-pages), below):
 
 - **Per-refresh screen changes under a transform.** AppKit's
   `viewDidChangeBackingProperties` on every refresh of a `scaleEffect` or
@@ -781,6 +782,56 @@ Three things were wrong and are fixed:
 the main run loop rather than on each of SwiftUI's frame changes, halving
 `was_resized` during a spring, and a page moving to another offscreen
 view arrives with the frame it last showed, so it is never blank there.
+
+### Presenting pages
+
+What Chromium renders and what the window shows are different things, and
+the checks once looked only at the first: loads, Chromium's own
+screenshots (`Page.captureScreenshot`, rendered on demand) and the app's
+own layers all looked right while windowed views, `CefWindow` and
+`CefChromeWindow` showed no page at all. SelfTest's `visibility` group
+now takes a picture of its own window (`CGWindowListCreateImage` of a
+window of the process, which needs no screen-recording permission) and
+checks a two-colour page fills its view edge to edge on every hosting
+path, and the Gallery's `-animationShots` and the Browser's
+`-railScreenshots` save such pictures. Three defects showed:
+
+- **Frames handed over through the remote Core Animation API.** On
+  macOS 27.2 with CEF 156 every frame Chromium's GPU process presents
+  with its `RemoteCoreAnimationAPI` feature on, its default, reaches the
+  window empty: the `CALayerHost` is in place, sized and unhidden,
+  Chromium's screenshot has the page, and the window shows only the
+  background behind it. Turning the feature off brings the pages back
+  and keeps the rest of the GPU pipeline as it is. (Turning Skia's
+  Graphite backend off also shows the page, but takes offscreen pages off
+  their shared textures, which the `frames` and `compositor` checks
+  catch; `--use-angle=gl` shows it on Chromium's deprecated OpenGL
+  backend; `--disable-remote-core-animation`, `--disable-mac-overlays`
+  and turning the GPU sandbox off do not help.)
+  Offscreen pages, whose frames CefSwift copies itself, were not
+  affected. CefKit turns `RemoteCoreAnimationAPI` off unless
+  `enabledFeatures` lists it.
+- **Chromium's frame layer drifting from its view.** Chromium keeps the
+  layer that holds its frames (inside `RenderWidgetHostViewCocoa`'s layer)
+  sized with Core Animation's autoresizing, which rounds each change of
+  size. SwiftUI gives a view a fractional size on every refresh of an
+  animation, and the rounding added up: after a 0.6 s spring the layer was
+  7 points larger than the view, after a few springs 30, and the page
+  showed shifted up by that much, cut off at the top, its canvas along the
+  bottom. `CefWindowedBrowserView` now sizes Chromium's view in whole
+  points (rounded up, the fraction clipped), which Core Animation resizes
+  exactly.
+- **`CefChromeWindow` covering its own page.** With `showsChromeUI` off,
+  the opaque view behind the app's top bar and sidebar was sized to the
+  union of the two areas; with no sidebar (an empty rectangle at the
+  leading edge) or with one, that union is the whole window, so the
+  window's background covered the page. Each area now has a view of its
+  own.
+
+Where Chromium's frame has not caught up with a growing view, Chromium's
+view shows its own background, the page's canvas color as the renderer
+reports it: white, or `#121212` for a page that opts into a dark color
+scheme, as the Gallery's sample pages do.
 
 ### Measurements
 
