@@ -73,12 +73,32 @@ public struct CefWebView: View {
         let ownsBrowser: Bool
 
         var body: some View {
-            switch browser.configuration.rendering {
-            case .windowed:
-                BrowserRepresentable<CefWindowedBrowserView>(browser: browser, ownsBrowser: ownsBrowser)
-            case .offscreen:
-                BrowserRepresentable<CefOffscreenBrowserView>(browser: browser, ownsBrowser: ownsBrowser)
+            // Before Chromium starts, as in Xcode's SwiftUI previews, where
+            // it never does: a placeholder, replaced by the page once it runs.
+            if CefRuntime.shared.state == .notStarted {
+                Placeholder(url: browser.url)
+            } else {
+                switch browser.configuration.rendering {
+                case .windowed:
+                    BrowserRepresentable<CefWindowedBrowserView>(browser: browser, ownsBrowser: ownsBrowser)
+                case .offscreen:
+                    BrowserRepresentable<CefOffscreenBrowserView>(browser: browser, ownsBrowser: ownsBrowser)
+                }
             }
+        }
+    }
+
+    private struct Placeholder: View {
+        let url: URL?
+
+        var body: some View {
+            ContentUnavailableView {
+                Label(url?.host() ?? "Web content", systemImage: "globe")
+            } description: {
+                Text("The page shows when Chromium runs, in the app.")
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(.background)
         }
     }
 }

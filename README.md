@@ -13,39 +13,75 @@ enough for a full web browser; the Browser example below is one.
 
 CefSwift is pre-1.0; its API can change between releases.
 
-## Quick start
+## Getting started
 
-### Add the package
+An app that embeds Chromium is an app bundle with Chromium's framework and
+five helper apps inside. Build it with SwiftPM or with Xcode: both run the
+same `cefswift` tool to put the framework and helpers in, sign them and
+check the result, so the bundles are the same. [Bundling](docs/bundling.md)
+covers each track in depth.
 
-```swift
-// swift-tools-version: 6.0
-// Package.swift
-import PackageDescription
+### With SwiftPM
 
-let package = Package(
-    name: "MyApp",
-    platforms: [.macOS(.v14)],
-    dependencies: [
-        .package(url: "https://github.com/Rajaniraiyn/CefSwift", branch: "main"),
-    ],
-    targets: [
-        .executableTarget(name: "MyApp", dependencies: [
-            .product(name: "CefSwiftUI", package: "CefSwift"),
-        ]),
-    ]
-)
-```
+1. Depend on CefSwift:
 
-`CefSwiftUI` re-exports `CefKit`, the core library. An AppKit app depends on
-`CefKit` alone: its `CefWindowedBrowserView` and `CefOffscreenBrowserView`
-host a browser without SwiftUI (see [In AppKit](docs/guide.md#in-appkit)).
-Optional features are libraries of their own on top of `CefKit`: add
-`CefPasskeys` for passkeys the app answers, and `CefChromium` for Chromium's
-own browser features: its bookmarks, history and address-bar suggestions,
-and its bubbles, find bar and status bubble in Chrome-style windows, anchored,
-replaced with your own interface or hidden. `CefChromium` is bound to
-Chromium-private interfaces of the pinned CEF, so it is the part most likely
-to need attention when CEF updates.
+   ```swift
+   // swift-tools-version: 6.0
+   // Package.swift
+   import PackageDescription
+
+   let package = Package(
+       name: "MyApp",
+       platforms: [.macOS(.v14)],
+       dependencies: [
+           .package(url: "https://github.com/Rajaniraiyn/CefSwift", branch: "main"),
+       ],
+       targets: [
+           .executableTarget(name: "MyApp", dependencies: [
+               .product(name: "CefSwiftUI", package: "CefSwift"),
+           ]),
+       ]
+   )
+   ```
+
+2. Write the app ([below](#show-a-web-page)) in `Sources/MyApp/MyApp.swift`.
+3. Bundle and run it with the package's `cef` command plugin:
+
+   ```sh
+   swift package --allow-writing-to-package-directory --allow-network-connections all \
+       cef bundle --product MyApp
+   open dist/MyApp.app
+   ```
+
+The first run downloads the pinned CEF build (about 135 MB) into `.cef/`;
+add `.cef/` and `dist/` to `.gitignore`. `swift run` cannot start Chromium,
+which runs only from the bundle. Settings go in a `cefapp.json` beside the
+sources.
+
+### With Xcode
+
+1. In an app project (File › New › Project › macOS › App, SwiftUI), add the
+   package: File › Add Package Dependencies…, enter
+   `https://github.com/Rajaniraiyn/CefSwift`, and add `CefSwiftUI` to the
+   app target.
+2. In the target's Signing & Capabilities, remove App Sandbox: Chromium
+   cannot run in it ([why](docs/bundling.md#app-sandbox)).
+3. Copy [`Examples/Xcode/CefSwift.xcconfig`](Examples/Xcode/CefSwift.xcconfig)
+   into the project and choose it as the target's configuration file
+   (Project › Info › Configurations). For a local package, set its
+   `CEFSWIFT_PACKAGE_DIR` to the package's path.
+4. In Build Phases, add a Run Script phase at the end, turn off "Based on
+   dependency analysis", and run:
+
+   ```sh
+   "$CEFSWIFT_PACKAGE_DIR/Scripts/xcode-embed.sh"
+   ```
+
+5. Write the app ([below](#show-a-web-page)), then Run.
+
+The first build downloads CEF into `.cef/` beside the project. Settings are
+build settings: Xcode's own, and `CEF_…` ones for what only CefSwift has.
+[`Examples/Xcode`](Examples/Xcode) is a project set up this way.
 
 ### Show a web page
 
@@ -64,7 +100,19 @@ struct MyApp: CefSwiftApp {
 ```
 
 `CefSwiftApp` takes the place of `App`: it starts Chromium before SwiftUI
-runs.
+runs. In Xcode's SwiftUI previews, which cannot start Chromium, a
+`CefWebView` shows a placeholder.
+
+`CefSwiftUI` re-exports `CefKit`, the core library. An AppKit app depends on
+`CefKit` alone: its `CefWindowedBrowserView` and `CefOffscreenBrowserView`
+host a browser without SwiftUI (see [In AppKit](docs/guide.md#in-appkit)).
+Optional features are libraries of their own on top of `CefKit`: add
+`CefPasskeys` for passkeys the app answers, and `CefChromium` for Chromium's
+own browser features: its bookmarks, history and address-bar suggestions,
+and its bubbles, find bar and status bubble in Chrome-style windows, anchored,
+replaced with your own interface or hidden. `CefChromium` is bound to
+Chromium-private interfaces of the pinned CEF, so it is the part most likely
+to need attention when CEF updates.
 
 ### Use Chrome-style windows
 
@@ -135,22 +183,6 @@ struct PageTitle: View {
 The toolbar views are separate `View` types so that they read the
 browser's state in their `body` and update when it changes.
 
-### Build and run
-
-Chromium runs only from an app bundle that contains its framework and five
-helper apps. The package's `cef` command plugin builds one:
-
-```sh
-swift package --allow-writing-to-package-directory --allow-network-connections all \
-    cef bundle --product MyApp
-open dist/MyApp.app
-```
-
-The first run downloads the pinned CEF build (about 135 MB) into `.cef/`.
-Add `.cef/` and `dist/` to `.gitignore`. [Bundling](docs/bundling.md)
-covers identifiers, signing, entitlements, notarization and the bundle layout;
-`swift package cef doctor <App.app>` reports what a built bundle can do.
-
 ## Two starting points
 
 | | Your own or trusted content | Arbitrary sites, with Chrome's services |
@@ -215,10 +247,14 @@ or Chromium limit. Everything else belongs to the app.
   for the web-compatibility matrix (`Scripts/compat-matrix.py`).
 - **SelfTest**: end-to-end checks against the real Chromium runtime, run by CI.
 
+[`Examples/Xcode`](Examples/README.md#xcode) is an Xcode project instead:
+one `CefWebView`, built by Xcode with CefSwift's build phase.
+
 ## Requirements
 
 - macOS 14 or later (the examples need macOS 15), Apple silicon or Intel.
-- Swift 6 toolchain. The Command Line Tools are enough; Xcode is optional.
+- Swift 6 toolchain. The Command Line Tools are enough for SwiftPM; an
+  Xcode project needs Xcode 16 or later.
 
 The CEF version is pinned in `CEF_VERSION.json` and updated by
 [automation](docs/automation.md).

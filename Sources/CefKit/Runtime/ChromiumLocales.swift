@@ -1,10 +1,10 @@
 import Foundation
 
-// Shared by CefKit, which picks the locale Chromium starts with, and the
-// cef plugin, which decides which locale packs an app bundle keeps
-// (Plugins/CefPlugin/Distribution/ChromiumLocales.swift is a link to this
-// file). Both map localizations to packs the same way, so the runtime only
-// asks for packs the bundle has.
+// Shared by CefKit, which picks the locale Chromium starts with, and
+// CefBundling, which decides which locale packs an app bundle keeps
+// (Sources/CefBundling/ChromiumLocales.swift is a link to this file). Both
+// map localizations to packs the same way, so the runtime only asks for
+// packs the bundle has.
 
 /// Chromium's UI string packs, `<pack>.lproj/locale.pak` in the framework's
 /// `Resources`, and how macOS localization identifiers map onto them.

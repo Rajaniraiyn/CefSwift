@@ -9,4 +9,7 @@ xcuserdata/
 DerivedData/
 .swiftpm/
 *.xcodeproj
+!/Examples/Xcode/XcodeExample.xcodeproj
+/Examples/Xcode/build/
+.newcomer/
 .claude/

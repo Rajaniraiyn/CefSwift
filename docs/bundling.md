@@ -1,9 +1,21 @@
 # Bundling
 
 Chromium does not run from a bare executable. It needs an app bundle with
-its framework and five helper apps, laid out as it expects. The `cef`
-command plugin builds that bundle, signs it, and checks what a signed
-bundle can do.
+its framework and five helper apps, laid out as it expects, each part
+signed. CefSwift builds that bundle in either of two ways, and both run one
+implementation, the package's `cefswift` tool (`Sources/CefBundling`):
+
+| | SwiftPM | Xcode |
+|---|---|---|
+| Who builds the app | `swift package cef bundle`, the `cef` command plugin, with SwiftPM | Xcode, as for any app target |
+| Who adds the framework and helpers | The plugin, through `cefswift bundle` | A Run Script phase, through `cefswift embed` ([Xcode](#xcode)) |
+| Who signs the app | `cefswift`, last | Xcode, last; `cefswift` signs the parts inside first, with the build's identity |
+| Settings | [`cefapp.json`](#per-product-settings) and options | Xcode's build settings, and `CEF_…` ones ([Settings](#settings)) |
+| CEF download and cache | `.cef/` in the package | `.cef/` beside the project (`CEF_CACHE_DIR`) |
+| Checks | `swift package cef doctor` | The phase runs `cef doctor`'s checks on every build, as Xcode errors and warnings |
+
+What goes in the bundle, how it is signed and what each feature needs is
+the same either way, and the rest of this page applies to both.
 
 ## The `cef` command
 
@@ -71,6 +83,198 @@ app fails to start with `CefError.apiHashMismatch` or `CefError.loadFailed`.
 The cache lives in the invoking package's `.cef/`. Add `.cef/` and `dist/`
 to `.gitignore`.
 
+The plugin finds the product in the package graph, builds it, the helper
+and the helper's startup library with SwiftPM, and runs `cefswift` for the
+rest: it checks the settings before building, downloads CEF, then
+assembles and signs the bundle.
+
+## Xcode
+
+An Xcode app target builds, embeds and signs the app as it always does. A
+Run Script phase at the end of its build phases adds what Chromium needs,
+before Xcode signs the app:
+
+1. Add the package (File › Add Package Dependencies…, or Add Local… for a
+   local copy) and its `CefSwiftUI` product (or `CefKit`) to the app
+   target. Xcode builds CefSwift and copies its resource bundles
+   (`CefSwift_CefKit.bundle`) into the app, where `Bundle.module` finds
+   them.
+2. Remove App Sandbox in Signing & Capabilities (see
+   [App Sandbox](#app-sandbox)). Keep the hardened runtime.
+3. Give the target CefSwift's settings: copy
+   [`Examples/Xcode/CefSwift.xcconfig`](../Examples/Xcode/CefSwift.xcconfig)
+   into the project and choose it as the target's configuration file
+   (Project › Info › Configurations), or set them yourself:
+
+   | Setting | Value | Why |
+   |---|---|---|
+   | `ENABLE_USER_SCRIPT_SANDBOXING` | `NO` | The phase runs SwiftPM on the package and writes the helper apps into the app; a sandboxed script can do neither. |
+   | `ARCHS` | `$(NATIVE_ARCH_ACTUAL)` | A CEF distribution holds one architecture; Release builds otherwise build for both. See [Universal apps](#universal-apps). |
+   | `CEFSWIFT_PACKAGE_DIR` | `$(BUILD_DIR)/../../SourcePackages/checkouts/CefSwift` | Where Xcode put the package, to find the phase's script. For a local package, its path. |
+   | `RUNTIME_EXCEPTION_DISABLE_LIBRARY_VALIDATION` | `YES`, only while the target signs ad hoc | See [Signing in Xcode](#signing-in-xcode). |
+
+   A setting in the target's Build Settings wins over the file, so remove
+   the target's own `ENABLE_APP_SANDBOX` (step 2 does) if it is there.
+4. In Build Phases, add a Run Script phase after all the others, turn off
+   "Based on dependency analysis" (the phase decides for itself what is
+   out of date), and set it to run:
+
+   ```sh
+   "$CEFSWIFT_PACKAGE_DIR/Scripts/xcode-embed.sh"
+   ```
+
+5. Make the app's `@main` type a `CefSwiftApp` instead of an `App`, and
+   Run.
+
+[`Examples/Xcode`](../Examples/Xcode) is a project set up this way; see
+[Examples](../Examples/README.md#xcode).
+
+The phase (`Scripts/xcode-embed.sh`, then `cefswift embed`):
+
+- builds `cefswift`, `cefswift-helper` and its startup library with
+  SwiftPM, in release, into `$(OBJROOT)/CefSwift` (about a minute, the
+  first time; later, only when their sources change), with a clean
+  environment so that Xcode's settings do not reach that build;
+- downloads the pinned CEF distribution into `CEF_CACHE_DIR` on first use;
+- adds `LSEnvironment` (`MallocNanoZone = 0`) and `NSPrincipalClass` to the
+  app's Info.plist and, from `CEF_CAPABILITIES`, the capabilities' keys;
+  Xcode's own keys win;
+- copies the framework, trimmed ([locale packs](#locale-packs),
+  [SwiftShader](#software-gpu-fallback)), the startup library and the five
+  [helper apps](#helper-apps) into `Contents/Frameworks`, and signs them
+  inside out with the build's identity (`EXPANDED_CODE_SIGN_IDENTITY`),
+  hardened runtime (`ENABLE_HARDENED_RUNTIME`) and keychain
+  (`OTHER_CODE_SIGN_FLAGS`), giving each helper what it needs of the app's
+  entitlements: get-task-allow (so a debugger can attach), camera and
+  microphone access for the base helper, and `allow-jit` for the renderer
+  and GPU helpers;
+- runs `cef doctor`'s checks of the helpers, the framework, linking and
+  features on the app as Xcode is about to sign it, as Xcode errors and
+  warnings in the Issue navigator (`CEF_DOCTOR = NO` turns them off).
+
+When nothing that decides these parts has changed, an incremental build
+leaves them as they are, without running SwiftPM, and the phase takes
+about 2 seconds, most of it `cef doctor`'s checks (measured with the Xcode
+example on an M3; the whole incremental build took 3.7 s). Xcode then signs the app, sealing everything inside.
+
+The app's own entitlements stay Xcode's (`CODE_SIGN_ENTITLEMENTS` and the
+entitlement build settings). When a capability or the signature needs one
+the app lacks, the phase stops the build and names the setting, such as
+`ENABLE_RESOURCE_ACCESS_CAMERA = YES`.
+
+The app executable is not linked to the framework, as `cef bundle` links
+it (the helpers are): CefKit loads the framework with `dlopen`, so the app
+process holds the framework's 12 MB of fixed-up pointers privately (see
+[architecture](architecture.md#loading-the-framework-at-launch)). Linking
+the app needs the framework before the target links, which a binary
+framework product gives Xcode ([Where CEF comes from](#where-cef-comes-from)).
+
+### Signing in Xcode
+
+Xcode signs with "Sign to Run Locally" (ad hoc) until the target has a
+team. Library validation, part of the hardened runtime, loads a library
+only when it carries the process's team identifier, and an ad hoc
+signature has none, so an ad hoc, hardened app cannot load CEF's framework
+(nor Xcode's own `.debug.dylib`: "mapping process and mapped file
+(non-platform) have different Team IDs"). Xcode 27 turns the hardened
+runtime off for Debug builds signed ad hoc, so they run; Release builds
+keep it, and need `RUNTIME_EXCEPTION_DISABLE_LIBRARY_VALIDATION = YES`
+until the target signs with a team. The phase stops a build that would
+fail this way. With a team (Apple Development, Developer ID), every part
+carries the team, and no exception is needed.
+
+### Debugging and previews
+
+Run in Xcode starts the app, Chromium's browser process, under the
+debugger. Renderers, the GPU process and utilities are the helper
+processes; to debug one, use Debug › Attach to Process by PID or Name with
+`<App> Helper (Renderer)` (or another helper) and "Wait for the next
+launch", then do what starts it, such as opening a page. The helpers have
+get-task-allow whenever the app does, as in Debug builds. Chromium's
+switches go in the scheme's arguments: `--renderer-startup-dialog` pauses
+each renderer until a debugger attaches, and `--no-sandbox` runs without
+Chromium's sandbox once.
+
+SwiftUI previews run the app's code inside a process of Xcode's, where
+Chromium cannot start its helpers. `CefSwiftApp` does not start Chromium in
+previews (`XCODE_RUNNING_FOR_PREVIEWS`), and a `CefWebView` shows a
+placeholder until Chromium runs, so a `#Preview` of a view that contains
+one renders the rest of the view. Run the app to see the page. An AppKit
+host view (`CefWindowedBrowserView`) needs a running runtime; keep it out
+of previews.
+
+### Universal apps
+
+A CEF distribution, and so the framework the phase embeds, holds one
+architecture, so the target builds for the Mac it builds on
+(`ARCHS = $(NATIVE_ARCH_ACTUAL)`); `swift package cef bundle` does the
+same. An app for both Apple silicon and Intel needs a universal framework,
+which the XCFramework of [pull request #27](#where-cef-comes-from) is.
+
+## Settings
+
+Each setting has one place in each track: Xcode's own build setting where
+Xcode has one, a `CEF_…` build setting where only CefSwift does, and a key
+of [`cefapp.json`](#per-product-settings) (or an option of `cef bundle`) for
+SwiftPM. `CEF_APP_CONFIG` names a `cefapp.json` for an Xcode build to read
+as well, so a project built both ways keeps CefSwift's settings in one
+file: a `CEF_…` setting wins over it, and for the keys Xcode owns, the
+phase warns, at the key's line, when the file disagrees with Xcode.
+
+| Setting | Xcode | `cefapp.json` (option) |
+|---|---|---|
+| Bundle identifier (helpers: `<id>.helper…`) | `PRODUCT_BUNDLE_IDENTIFIER` | `bundleIdentifier` (`--bundle-id`) |
+| App and executable name (helpers: `<name> Helper…`) | `PRODUCT_NAME` | The product name (`--name`) |
+| Display name | `INFOPLIST_KEY_CFBundleDisplayName` | `displayName` |
+| Version, build | `MARKETING_VERSION`, `CURRENT_PROJECT_VERSION` | `version`, `build` |
+| Minimum macOS | `MACOSX_DEPLOYMENT_TARGET` | `minimumSystemVersion` |
+| Info.plist keys | `INFOPLIST_KEY_…`, `INFOPLIST_FILE` | `infoPlist` (`--info-plist`) |
+| Usage descriptions | `INFOPLIST_KEY_NSCameraUsageDescription`, … | `usageDescriptions` |
+| Capabilities ([features](#features)) | `CEF_CAPABILITIES`; camera and microphone also follow from `ENABLE_RESOURCE_ACCESS_CAMERA` and `…_AUDIO_INPUT` | `capabilities` (`--capability`) |
+| App entitlements | `CODE_SIGN_ENTITLEMENTS`, `ENABLE_RESOURCE_ACCESS_…`, `RUNTIME_EXCEPTION_…` | `entitlements` (`--entitlements`) |
+| Helper entitlements | `CEF_HELPER_ENTITLEMENTS_HELPER`, `…_ALERTS`, `…_GPU`, `…_PLUGIN`, `…_RENDERER` | `helperEntitlements` |
+| Signing identity, team | `CODE_SIGN_IDENTITY`, `DEVELOPMENT_TEAM` | `signingIdentity`, `teamIdentifier` (`--sign`, `--team-id`) |
+| Keychain | `OTHER_CODE_SIGN_FLAGS = --keychain <file>` | `signingKeychain` (`--keychain`) |
+| Hardened runtime | `ENABLE_HARDENED_RUNTIME` | `hardenedRuntime` (`--[no-]hardened-runtime`) |
+| Secure timestamp | `OTHER_CODE_SIGN_FLAGS = --timestamp`; Xcode's Developer ID export adds one | `timestamp` (`--[no-]timestamp`) |
+| Provisioning profile | Signing & Capabilities (`PROVISIONING_PROFILE_SPECIFIER`) | `provisioningProfile` |
+| Locale packs kept | `CEF_LOCALIZATIONS` (`application`, `all`, or a list: `en fr`) | `cef.localizations` (`--localizations`) |
+| SwiftShader | `CEF_SOFTWARE_GPU_FALLBACK` (`include`, `exclude`) | `cef.softwareGPUFallback` (`--software-gpu-fallback`) |
+| CEF version | `CEF_MANIFEST` (a `CEF_VERSION.json`) | `--manifest` |
+| CEF flavor | `CEF_FLAVOR` | `--flavor` |
+| CEF cache | `CEF_CACHE_DIR`, default `$(PROJECT_DIR)/.cef` | `.cef/` in the package |
+| Notarization | The Organizer, or `xcrun notarytool` ([Distribution](#distribution)) | `notarization` (`--notarize`) |
+| `cef doctor` | Every build (`CEF_DOCTOR = NO` turns it off), and `cefswift doctor <App.app>` | `swift package cef doctor` |
+
+Helper names and bundle identifiers derive from the app's, because
+Chromium finds the helpers by name; neither is a setting.
+
+For CI and offline builds, keep the cache between runs: `.cef/downloads`
+holds the archive (about 135 MB) and `.cef/dist` the prepared framework.
+With the archive there, nothing is downloaded; a clone of another `.cef`
+(`cp -Rc`) works as well.
+
+## Where CEF comes from
+
+Both tracks download the official CEF distribution that `CEF_VERSION.json`
+pins (the minimal flavor, for the build machine's architecture) from
+`cef-builds.spotifycdn.com`, check its size and SHA-1, convert the
+framework to the versioned layout, and keep it in the cache: `.cef/` in the
+package for SwiftPM, `CEF_CACHE_DIR` for Xcode. An app that depends on
+CefSwift uses the version CefSwift pins.
+
+[Pull request #27](https://github.com/Rajaniraiyn/CefSwift/pull/27), not
+merged, packages the same official framework, both architectures, as an
+XCFramework binary target that SwiftPM and Xcode fetch and verify
+themselves (`ChromiumEmbeddedFramework`). With it, an Xcode target adds
+that product, so Xcode embeds and signs the framework (Embed & Sign), links
+the app to it, and builds universal apps; the build phase then sets
+`CEF_EMBED_FRAMEWORK = NO`, keeps Xcode's copy, and adds the startup
+library and helpers, which no binary target can provide: their names and
+bundle identifiers derive from the app's, and the helper must link the
+startup library before the framework. The SwiftPM track would take the
+framework from the same binary target instead of `.cef/`.
+
 ## Per-product settings
 
 A `cefapp.json` beside the sources of the product's executable target (the
@@ -118,6 +322,9 @@ a misspelled key does not go unnoticed.
 | `notarization.keychainProfile`, `notarization.format` | None, `zip` | Defaults of `cef notarize` and `bundle --notarize`. |
 | `cef.localizations` | `"application"` | Which of Chromium's locale packs the app keeps: `"application"`, `"all"`, or a list of localizations. As `--localizations`. See [Locale packs](#locale-packs). |
 | `cef.softwareGPUFallback` | `"include"` | `"exclude"` leaves out SwiftShader. As `--software-gpu-fallback`. See [Software GPU fallback](#software-gpu-fallback). |
+
+An Xcode target takes these from its build settings instead, or reads a
+`cefapp.json` named by `CEF_APP_CONFIG`: see [Settings](#settings).
 
 If you keep `cefapp.json` and entitlements files in the target's directory,
 exclude them in `Package.swift` (`exclude: ["cefapp.json",
@@ -291,19 +498,17 @@ app of its own, with its own bundle identifier and `Info.plist`. All five
 contain the same binary, copied and renamed.
 
 That binary is CefSwift's `cefswift-helper` product, a Swift executable
-(`Sources/CefHelper`), which `cef bundle` builds with SwiftPM alongside the
-app, together with the `cefswift_helper_startup` library. The helper links
-`libcefswift_helper_startup.dylib` and then the framework, so dyld loads
-both at launch, and the app product is built with a weak link to the
-framework (`-weak_framework`). Libraries loaded at launch
-keep the framework's 12 MB of fixed-up pointers as shared, clean memory in
-every process; see [architecture](architecture.md#loading-the-framework-at-launch).
-An app bundled another way, for example by an Xcode project, builds the
-same two products with the same link order (see `HelperBuilder.swift` in
-the plugin for the exact linker flags). Its app
-executable runs without the link to the framework, since CefKit loads the
-framework with `dlopen` if dyld has not, but that process then holds the
-12 MB privately.
+(`Sources/CefHelper`) with no code of the app's, which both tracks build
+with SwiftPM, together with the `cefswift_helper_startup` library. The
+helper links `libcefswift_helper_startup.dylib` and then the framework, so
+dyld loads both at launch (`HelperLink.swift` has the linker flags), and
+`cef bundle` builds the app product with a weak link to the framework
+(`-weak_framework`). Libraries loaded at launch keep the framework's 12 MB
+of fixed-up pointers as shared, clean memory in every process; see
+[architecture](architecture.md#loading-the-framework-at-launch). An app
+executable without the link, as an Xcode target's is, runs as well, since
+CefKit loads the framework with `dlopen` if dyld has not, but that process
+then holds the 12 MB privately.
 
 The names matter. Chromium derives helper paths from the main executable's
 name, so each helper executable is named `<executable> Helper` or
@@ -370,6 +575,10 @@ organizational unit (the parenthesized identifier in an Apple Development
 certificate's name is the person's, not the team's). Finding the identity
 and reading the certificate do not touch its private key; `codesign` does,
 and macOS may ask once for access to it.
+
+In Xcode, the identity is the build's, `EXPANDED_CODE_SIGN_IDENTITY`, and
+the team `DEVELOPMENT_TEAM`: the phase signs the parts inside the app with
+what Xcode then signs the app with ([Signing in Xcode](#signing-in-xcode)).
 
 ### Order and options
 
@@ -529,6 +738,35 @@ bundle identifier with the capabilities enabled.
   Browser example's `browser://playground/widevine.html` plays and says
   "Playing with com.widevine.alpha". (Not yet run with a team signature.)
 
+### With Xcode
+
+Signing with a team, archiving and exporting are Xcode's, as for any app;
+the build phase signs the parts inside with the archive's identity. Not
+yet run with a team signature or against Apple's notary service:
+
+- [ ] Choose the team in Signing & Capabilities; remove
+  `RUNTIME_EXCEPTION_DISABLE_LIBRARY_VALIDATION` if the target has it.
+- [ ] Product › Archive (`xcodebuild archive -scheme MyApp -archivePath
+  MyApp.xcarchive`).
+- [ ] Organizer › Distribute App › Direct Distribution, which exports with
+  the Developer ID identity, notarizes and staples; or
+  `xcodebuild -exportArchive -archivePath MyApp.xcarchive -exportPath out
+  -exportOptionsPlist options.plist` with `method` `developer-id`, then
+  `swift package … cef notarize out/MyApp.app --keychain-profile notary`
+  (or `xcrun notarytool submit` and `xcrun stapler staple` yourself).
+  Xcode's export signs the app again with the Developer ID identity and a
+  secure timestamp, nested code first; whether it re-signs the helper apps
+  in `Contents/Frameworks` itself is unverified, so check the result.
+- [ ] `cefswift doctor out/MyApp.app` (the tool the phase built, in
+  `$(OBJROOT)/CefSwift`) or `swift package … cef doctor` from a package
+  reports no errors, and `spctl --assess --type execute -vv out/MyApp.app`
+  prints `source=Notarized Developer ID`.
+
+Without a team, `Examples/Xcode/ExportOptions.plist` (`method`
+`mac-application`) exports the archived app as it is signed, ad hoc; it
+runs on the Mac that built it. Mac App Store distribution is not possible:
+see [App Sandbox](#app-sandbox).
+
 ### SwiftPM's plugin sandbox
 
 `swift package` runs the plugin in a sandbox. Inside it:
@@ -585,15 +823,30 @@ Other features:
 
 ### App Sandbox
 
-CefSwift does not support the App Sandbox (`com.apple.security.app-sandbox`),
-so it cannot ship in the Mac App Store. Chromium's own signing never uses it;
-CEF documents only Developer ID distribution; and Chromium's processes talk
-over Mach services and use interfaces the App Sandbox denies, which Electron,
-the one Chromium-based framework with an App Store build, patches out of
-Chromium for it. If the entitlements claim it, the plugin gives every helper
-`com.apple.security.app-sandbox` and `com.apple.security.inherit`, as App
-Sandbox child processes require, and warns. Chromium's own sandbox is
-separate and supported: see [Sandbox](sandbox.md).
+Chromium, as official CEF builds ship it, does not run in the App Sandbox
+(`com.apple.security.app-sandbox`), so a CefSwift app cannot ship in the Mac
+App Store. Measured with the Xcode example (CEF 156.0.28, macOS 27.2): with
+App Sandbox on, and every helper given `com.apple.security.app-sandbox` and
+`com.apple.security.inherit` as App Sandbox child processes require, the
+browser process stops at launch:
+
+```
+FATAL:base/apple/mach_port_rendezvous_mac.cc:159] Check failed: kr == KERN_SUCCESS.
+bootstrap_check_in <bundle ID>.MachPortRendezvousServer.<pid>: Permission denied (1100)
+```
+
+Chromium's processes find each other through a Mach service the browser
+process registers under the app's bundle identifier, and the App Sandbox
+lets an app register only services named after one of its application
+groups. Electron, the one Chromium-based framework with a Mac App Store
+build, patches Chromium for this and more (its own builds of Chromium);
+Chromium's signing never uses the App Sandbox, and CEF documents Developer
+ID distribution only. So `cef bundle` and the Xcode build phase refuse
+entitlements that claim it, and name the fix: remove App Sandbox in
+Signing & Capabilities (Xcode's app template turns it on), or the key from
+the entitlements file. Chromium's own sandbox, which confines the
+renderers and other helpers, is separate and on by default: see
+[Sandbox](sandbox.md).
 
 ## cef doctor
 
@@ -601,6 +854,12 @@ separate and supported: see [Sandbox](sandbox.md).
 swift package --allow-writing-to-package-directory --allow-network-connections all \
     cef doctor dist/MyApp.app [--json]
 ```
+
+For an app built any other way, such as an Xcode archive's export, the
+`cefswift` tool takes the same arguments: `cefswift doctor MyApp.app`
+(`swift run --package-path <CefSwift> cefswift doctor …`, or the copy the
+Xcode phase built in `$(OBJROOT)/CefSwift`). The Xcode phase runs the checks
+of the helpers, framework, linking and features on every build.
 
 It reads the bundle with `codesign`, `security`, `spctl`, `stapler` and
 `xattr`, and prints:
@@ -662,6 +921,14 @@ line at start-up naming what the signature leaves out. See
 | Notarization `Invalid` | Missing hardened runtime or timestamp, `get-task-allow`, or an unsigned nested binary | `cef notarize` prints the notary log; `cef doctor` names the part. |
 | Camera, microphone or location requests fail without a prompt | A missing usage description or, under the hardened runtime, entitlement | Add the capability. |
 | Phones are not offered as passkeys | No `NSBluetoothAlwaysUsageDescription`, or the app was started from a terminal, which becomes the responsible process | Add `bluetooth`; launch with `open`. |
+| `CefError.frameworkNotFound` when the app starts | The app runs without the framework and helpers: `swift run`, `.build/…`, or an Xcode target without the CefSwift phase | Run the bundle from `cef bundle`, or add the phase ([Xcode](#xcode)). |
+| The app stops at launch with `bootstrap_check_in …MachPortRendezvousServer…: Permission denied (1100)` | The App Sandbox | Remove App Sandbox; both tracks refuse it ([App Sandbox](#app-sandbox)). |
+| Xcode: `Sandbox: … deny(1) file-read-data …` or `deny(1) file-write-create …` in the CefSwift phase | User Script Sandboxing | `ENABLE_USER_SCRIPT_SANDBOXING = NO` for the target. |
+| Xcode: `…/xcode-embed.sh: No such file or directory` | `CEFSWIFT_PACKAGE_DIR` does not point at the package | Set it: `$(BUILD_DIR)/../../SourcePackages/checkouts/CefSwift` for a remote package, the path of a local one; with `xcodebuild -clonedSourcePackagesDirPath <dir>`, `<dir>/checkouts/CefSwift`. |
+| Xcode: "This build is for arm64 and x86_64, but CEF's distributions hold one architecture each" | A Release build's default `ARCHS` | `ARCHS = $(NATIVE_ARCH_ACTUAL)` ([Universal apps](#universal-apps)). |
+| Xcode: "The app lacks the entitlement com.apple.security.cs.disable-library-validation" | A Release build signed ad hoc keeps the hardened runtime | Sign with a team, or set `RUNTIME_EXCEPTION_DISABLE_LIBRARY_VALIDATION = YES` until then ([Signing in Xcode](#signing-in-xcode)). |
+| `dyld: Library not loaded: @rpath/MyApp.debug.dylib … different Team IDs` | An ad hoc, hardened Debug build (hardened runtime forced on) | As above, or leave `ENABLE_HARDENED_RUNTIME` to Xcode for ad hoc Debug builds. |
+| A SwiftUI preview of a view with a `CefWebView` shows a globe | Previews cannot start Chromium | Expected: run the app to see the page ([Debugging and previews](#debugging-and-previews)). |
 
 ## Flavors
 
