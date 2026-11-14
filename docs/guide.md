@@ -143,7 +143,7 @@ Start from a preset and change what you need:
 
 | Preset | Use |
 |---|---|
-| `CefRuntime.Configuration.embedded` | Showing your own or trusted web content. Turns off background networking, component updates, Widevine, sync, translation, preloading, hyperlink auditing, password saving and autofill, first-run and default-browser prompts, and starts renderer processes only when a page needs one. |
+| `CefRuntime.Configuration.embedded` | Showing your own or trusted web content. Turns off background networking, component updates, Widevine, sync, translation, preloading, hyperlink auditing, password saving and autofill, first-run and default-browser prompts, and starts renderer processes only when a page needs one. With component updates off, CRLSets and the Certificate Transparency log list go stale, so an app that shows arbitrary sites should turn `services.componentUpdates` back on. |
 | `CefRuntime.Configuration.chrome` | Arbitrary sites with Chrome's services. Keeps session cookies across launches and skips first-run and default-browser prompts; everything else is as Chromium has it and as users set it in `chrome://settings`, Widevine included. |
 | `CefRuntime.Configuration()` | Chromium's defaults. |
 
@@ -399,7 +399,7 @@ if !capabilities.webAuthnAuthenticators.contains(.iCloudKeychain) {
 | `isAppSandboxed` | From the entitlements. Diagnostic only: the App Sandbox is not supported with official CEF builds and bundling refuses it, so a bundled app never reports `true` ([App Sandbox](bundling.md#app-sandbox)). |
 | `entitlements`, `keychainAccessGroups` | The entitlements the signature grants. |
 | `usageDescriptions` | The `NS…UsageDescription` keys in the Info.plist. |
-| `webAuthnAuthenticators` | `.securityKey`, `.hybrid`, `.touchID`, `.iCloudKeychain`: Chromium's native WebAuthn authenticators the app has. |
+| `webAuthnAuthenticators` | `.securityKey`, `.hybrid`, `.iCloudKeychain`: Chromium's native WebAuthn authenticators the app's signature and configuration make it eligible for. Not proof that one is attached or that the user will authorize it. |
 | `canLoadWidevine` | Whether the base helper can load Google's Widevine CDM: false for a team-signed hardened helper without `disable-library-validation` (the `protectedMedia` capability). |
 | `resolvedSafeStorage(_:)` | The safe-storage policy Chromium gets for a configured one. |
 

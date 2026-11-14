@@ -434,12 +434,10 @@ enum Doctor {
         var authenticators = ["security keys (USB/NFC)"]
         let hybrid = usage("NSBluetoothAlwaysUsageDescription") && (!runtime || granted("com.apple.security.device.bluetooth"))
         if hybrid { authenticators.append("phones (hybrid)") }
-        // Chromium checks for its compiled-in group exactly; see
+        // Chromium checks for its compiled-in group exactly, which no
+        // provisioning profile can authorize; see
         // Capability.cefWebAuthnKeychainGroup.
         let group = Capability.cefWebAuthnKeychainGroup
-        let groups = entitlements["keychain-access-groups"]?.strings ?? []
-        let touchID = hasTeam && groups.contains(group) && authorized("keychain-access-groups")
-        if touchID { authenticators.append("Touch ID (Chromium profile)") }
         let iCloud = hasTeam && granted(Capability.publicKeyCredentialEntitlement)
             && authorized(Capability.publicKeyCredentialEntitlement)
         if iCloud { authenticators.append("iCloud Keychain") }
@@ -450,9 +448,7 @@ enum Doctor {
             : .init(status: .info, title: "passkeys: phones (hybrid)",
                     detail: "unavailable: needs NSBluetoothAlwaysUsageDescription" + (runtime ? " and com.apple.security.device.bluetooth." : "."),
                     fix: "add \"passkeys\" or \"bluetooth\" to capabilities."))
-        features.append(touchID
-            ? .init(status: .ok, title: "passkeys: Touch ID", detail: "available (keychain group \(group)).")
-            : .init(status: .info, title: "passkeys: Touch ID",
+        features.append(.init(status: .info, title: "passkeys: Touch ID",
                     detail: "unavailable: CEF 156 looks for the keychain group \"\(group)\", which has no team " +
                         "prefix, so no provisioning profile can authorize it. Use CefBrowser.PasskeyPolicy.app with " +
                         "CefKeychainPasskeyStore for passkeys verified with Touch ID."))
