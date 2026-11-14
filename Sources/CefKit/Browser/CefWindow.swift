@@ -25,10 +25,14 @@ import CefBase
 /// For a window drawn entirely by Chrome, tab strip included, use
 /// ``CefRuntime/openChromeWindow(url:frame:configuration:delegate:)`` instead.
 ///
-/// Each window holds one browser. To present several as tabs, give the
-/// windows the same ``Configuration/tabbingIdentifier`` and macOS groups
-/// them under a native tab bar; or keep one window per tab and show the
-/// selected one.
+/// Each window holds one browser: CEF refuses a second Chrome-style
+/// browser view in a window, and Chromium counts every `CefWindow` as a
+/// popup window of one tab. To present several as tabs, give the windows
+/// the same ``Configuration/tabbingIdentifier`` and macOS groups them under
+/// a native tab bar; or keep one window per tab and show the selected one.
+/// Tabs that are Chromium's own, which `chrome.tabs` and tab groups see,
+/// live in the windows ``CefRuntime/openChromeWindow(url:frame:configuration:delegate:)``
+/// opens (CefChromium's `CefTabStrip` mirrors them).
 @MainActor
 @Observable
 public final class CefWindow: Identifiable {
@@ -488,6 +492,26 @@ public final class CefWindow: Identifiable {
         if notifying { window.pointee.theme_changed(window) }
     }
 
+    /// Adds a Chrome-style view for `browser` beside the window's own, for
+    /// SelfTest's check that CEF still allows one Chrome-style browser per
+    /// window: CEF 156 leaves the second view empty and never creates its
+    /// browser ("Cannot add multiple Chrome style BrowserViews").
+    @_spi(Testing) public func addBrowserViewForTesting(_ browser: CefBrowser) {
+        guard let window = cefWindow?.pointer,
+              let view = CefRef(adopting: browser.createBrowserView(
+                  delegate: BrowserViewDelegate(toolbar: .none, window: nil).makeDelegate(),
+                  showsStatusBubble: true, showsZoomBubble: true))
+        else { return }
+        extraViewsForTesting.append(view)
+        cefAddRef(view.pointer)
+        window.withMemoryRebound(to: cef_panel_t.self, capacity: 1) { panel in
+            view.pointer.withMemoryRebound(to: cef_view_t.self, capacity: 1) { panel.pointee.add_child_view(panel, $0) }
+            panel.pointee.layout(panel)
+        }
+    }
+
+    @ObservationIgnored private var extraViewsForTesting: [CefRef<cef_browser_view_t>] = []
+
     /// The color Chromium paints behind the page, from the window's theme.
     @_spi(Testing) public var webContentsBackgroundColor: UInt32? {
         browserView.map { view in
@@ -530,6 +554,7 @@ public final class CefWindow: Identifiable {
         windowWaiters = []
         cefWindow = nil
         browserView = nil
+        extraViewsForTesting = []
         isClosed = true
         // Closed before its profile loaded: the browser never came.
         if browser.state == .pending { browser.close() }

@@ -23,6 +23,8 @@ extension SelfTest {
         "profilePersistence": profilePersistenceProbeChecks,
         "launchPrompts": launchPromptsProbeChecks,
         "quitWhilePending": quitWhilePendingProbeChecks,
+        "tabHosting": tabHostingProbe,
+        "chromeTabStrip": chromeTabStripProbe,
     ]
 
     /// Changes the configuration for the probe `name`.

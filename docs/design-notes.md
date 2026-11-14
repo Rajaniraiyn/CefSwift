@@ -406,6 +406,68 @@ session on every Chrome-style page, which pages can notice
 ([guide](guide.md#features-that-use-the-devtools-protocol)); it was not
 adopted or tried. SelfTest keeps its two limitation skips.
 
+## Tabs: Chromium's tab strip under the app's own
+
+A tabbed browser on CefSwift wants its own tab interface over Chromium's
+own tab model, so that `chrome.tabs`, `chrome.tabGroups`, recently closed
+tabs and moving tabs between windows behave as in Chrome. Five ways to
+host many tabs in one window were tried on CEF 156 (SelfTest's
+`tabHosting` group, and the exploratory probe
+`CEFSWIFT_SELFTEST_PROBE=chromeTabStrip`):
+
+| Hosting | What Chromium sees | Result |
+|---|---|---|
+| (a) Several Chrome-style `cef_browser_view_t` in one `cef_window_t` | — | CEF refuses: `CefBrowserViewImpl::AddedToWidget` logs "Cannot add multiple Chrome style BrowserViews" and never creates the second browser; the first keeps working. Chromium's `BrowserWidget` holds one `BrowserView`. |
+| (b) One `CefWindow` per tab, attached as borderless child windows over the page area of one app window | One popup window of one tab per app tab | Works as AppKit (frame tracking, full screen, minimizing, the page taking the keyboard while the app window stays main, with an override of Chromium's `canBecomeMainWindow`), but Chromium's model is N one-tab windows: no indices, no groups. Built, measured and removed. |
+| (c) Native window tabbing with the system tab bar hidden | As (b) | macOS keeps the tab bar of a group of two or more tabs shown; `toggleTabBar(_:)` does nothing. No custom rail can replace it. |
+| (d) Alloy-style views in an ordinary `NSWindow` | Not tabs at all | `chrome.tabs` does not list Alloy browsers; no `chrome://` pages, extensions UI or history recording. |
+| (e) The window Chrome draws (`openChromeWindow`) | A normal window with a real `TabStripModel` | Real tabs, pinning, groups, moves between windows. Chrome draws its own tab strip and toolbar. |
+
+Every Chrome-style `CefWindow` is its own Chromium `Browser` with one tab
+(`canExecute(.selectNextTab)` stays false even while macOS shows two of
+them as one tab group; CEF's `ChromeBrowserHostImpl` says views-hosted
+browsers hold a single tab), and `chrome.windows` reports it as a
+`popup`, so `chrome.tabs.group` and `move` refuse its tabs. Only (e) makes
+the app's tabs Chromium's.
+
+In a window Chrome draws, measured:
+
+- `chrome.tabs.create({windowId})` adds tabs to it; each reaches the app
+  as a `CefBrowser` (`onBrowserCreated`).
+- From the `chrome://bookmarks` WebUI, which Chromium grants `chrome.tabs`
+  and `chrome.windows` (not `chrome.tabGroups`): `update` (active,
+  pinned), `move` (within and between windows), `group` (with
+  `createProperties.windowId`: the default target is the caller's window,
+  a popup), `ungroup`, `duplicate` and `windows.create({tabId})` work. A
+  move between windows keeps the `CefBrowser`, its identifier and its
+  page.
+- `chrome.tabs.remove` and `update({muted})` from that page ended the
+  browser process (status 70, nothing logged); `CefTabStrip` closes tabs
+  through CEF instead and leaves muting to `CefBrowser.isAudioMuted`.
+- `chrome://tab-strip-internals` loads, and `tab_strip_internals.mojom`'s
+  `GetTabStripData()` returns every window's tree: pinned and unpinned
+  collections, groups with their title, colour and collapsed state, tabs
+  with title, address, activity and alert states, and `OnTabStripUpdated`
+  on changes; its window identifiers are `chrome.windows`'. It does not
+  report a new window by itself, so `follow()` also reads every 1.5 s.
+- `chrome://tab-strip.top-chrome` (the WebUI tab strip) is not built on
+  macOS; `chrome://tab-search.top-chrome` loads, but its Mojo modules are
+  bundled into the app; `tabs_api.mojom.TabStripService` is bound only to
+  the experimental WebUI browser window.
+- Chrome's tab strip and toolbar take the top of the window (121 of 1006
+  points in the probe; the page is the `WebContentsViewCocoa`). Chromium's
+  `BridgedContentView` answers every hit test inside itself, so a view
+  added to it gets no clicks; a view added to the window's frame view
+  above the content view does, and the window buttons still work. An app
+  can cover Chrome's strip and toolbar with its own this way; Chrome's
+  views stay in the accessibility tree and keyboard loop beneath.
+
+`CefTabStrip` (CefChromium) is the result: a mirror read from
+`tab_strip_internals.mojom`, changed through `chrome.tabs`. Chromium's tab
+identifiers are not visible to CEF, so `browser(for:)` matches a tab with
+the browsers by window and address, and same-address tabs by creation
+order. Group names and colours have no WebUI route to change them.
+
 ## Memory settings measured and not used
 
 These were measured on the Minimal example and are not used: they saved

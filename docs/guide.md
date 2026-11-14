@@ -2738,6 +2738,51 @@ page whose tiles come from `topSites()` and `bookmarks.recent()` through a
 `CefBridge` (`Features/StartPage`). It
 reads history when the menu bar opens, so at launch it starts no host.
 
+### Chromium's tab strip
+
+Tabs that are Chromium's own — what `chrome.tabs`, `chrome.tabGroups`,
+recently closed tabs and session restore see — live in the windows Chrome
+draws (`CefRuntime.shared.openChromeWindow(url:)`). A `CefWindow` is always a
+Chromium window of one tab, which Chromium counts as a popup window, and
+CEF refuses a second Chrome-style browser view in one window. CefChromium's
+`profile.tabStrip` mirrors the profile's Chrome windows and drives them, so
+your own tab interface can draw Chromium's model rather than keep one:
+
+```swift
+import CefChromium
+
+let strip = CefProfile.default.tabStrip
+Task { await strip.follow() }                    // `windows` follows Chromium
+for window in strip.windows {
+    for tab in window.tabs {
+        print(tab.title, tab.isPinned, tab.group as Any, tab.alerts)
+    }
+}
+if let window = strip.windows.first, let tab = window.tabs.last {
+    try await strip.pin(tab)
+    let group = try await strip.group([tab])
+    print(window.groups.first { $0.id == group }?.color as Any)
+    try await strip.moveToNewWindow(tab)
+}
+```
+
+`windows` lists each window's tabs in the strip's order (pinned first),
+with their title, address, activity, pinning, group and alerts (audio,
+muted, recording, capture, devices), and its groups with their title,
+colour and collapsed state. `follow()` reads again whenever Chromium
+reports a change, whoever made it: your code, Chrome's commands, an
+extension. `select`, `move(_:to:in:)` (to another window too, keeping the
+page, its history and its `CefBrowser`), `pin`, `group`, `ungroup`,
+`duplicate`, `moveToNewWindow`, `newTab(_:in:at:isActive:)`, `close` and
+`reopenClosedTab(in:)` change Chromium's tab strip. `browser(for:)` is the
+`CefBrowser` of a tab, matched by window and address.
+
+Group names, colours and collapsing are read only: Chromium grants
+`chrome.tabGroups` to extensions alone. Chrome's own tab strip and toolbar
+stay in the window; to show your own instead, cover them. The
+[design notes](design-notes.md#tabs-chromiums-tab-strip-under-the-apps-own)
+record the measurements.
+
 ## DevTools
 
 `browser.devTools` speaks the
