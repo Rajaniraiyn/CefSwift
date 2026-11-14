@@ -785,9 +785,18 @@ final class BrowserWindowController: NSWindowController {
 Chromium creates the browser once its view is in a window. A view never
 closes its browser: call `close(force:)` when you are done with it.
 Assigning another browser to `browser` shows that one instead, and moving a
-live browser to another view keeps its page. To draw frames or host a
-windowed browser in a view of your own, see
+live browser to another view keeps its page. A browser shows in one view at
+a time: the view it leaves sets its own `browser` to nil, and no longer
+hosts it, resizes it, forwards input or answers accessibility for it. To
+draw frames or host a windowed browser in a view of your own, see
 [Offscreen rendering](#offscreen-rendering) and `browser.host(windowedIn:)`.
+
+`browser.stopHosting(in: host)` withdraws a browser from a host without
+closing it: a creation waiting for the profile to load is dropped, a
+windowed browser's native view leaves the host, and an offscreen browser
+stops painting. It does nothing unless `host` is the browser's current
+host, so a host that has been replaced cannot take the browser from the
+newer one. Host it again to show it.
 
 ### Offscreen rendering
 
@@ -834,6 +843,10 @@ In return the host drives the browser as AppKit drives a view:
   `draggingUpdated(at:modifiers:allowedOperations:)`, `draggingExited()`,
   `performDrop(at:modifiers:)` and `draggingSessionEnded(at:operation:)`,
   which mirror `NSDraggingDestination` and `NSDraggingSource`.
+
+When the browser moves to another host, or `stopHosting(in:)` withdraws it,
+the host hears `offscreenDidStopHosting(_:)`: stop calling the browser
+from then on. The new host gets the whole page painted again.
 
 `CefOffscreenBrowserView` is the reference implementation.
 

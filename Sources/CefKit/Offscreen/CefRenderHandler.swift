@@ -146,6 +146,13 @@ public protocol CefOffscreenHost: AnyObject {
     /// it. The default returns `nil`, and the snapshot comes from the
     /// DevTools Protocol instead.
     func offscreenSnapshot() -> CGImage?
+    /// `browser` no longer shows in this host: it moved to another one
+    /// (``CefBrowser/host(offscreenIn:size:)``) or was withdrawn
+    /// (``CefBrowser/stopHosting(in:)``). Stop forwarding input, geometry
+    /// and accessibility to it; nothing more reaches the host from it. The
+    /// default does nothing. ``CefOffscreenBrowserView`` sets its
+    /// ``CefOffscreenBrowserView/browser`` to nil.
+    func offscreenDidStopHosting(_ browser: CefBrowser)
 }
 
 extension CefOffscreenHost {
@@ -156,6 +163,7 @@ extension CefOffscreenHost {
     public func offscreenBeginDraggingSession(_ data: CefDragData, allowedOperations: CefDragOperation, at point: CGPoint) -> Bool { false }
     public func offscreenDragOperationDidChange(_ operation: CefDragOperation) {}
     public func offscreenAccessibilityTreeDidChange(_ changes: CefAccessibilityChanges) {}
+    public func offscreenDidStopHosting(_ browser: CefBrowser) {}
 }
 
 extension CefBrowserClient {
@@ -287,12 +295,15 @@ extension CefBrowserClient {
         return handler
     }
 
-    /// The host's geometry, or a 1×1 placeholder once the host is gone.
+    /// The host's geometry; while no host shows the browser, the last
+    /// host's, or a 1×1 placeholder.
     private nonisolated static func offscreenViewInfo(
         _ handler: UnsafeMutablePointer<cef_render_handler_t>?
     ) -> CefOffscreenViewInfo {
         guard let client = cefOwner(CefBrowserClient.self, handler) else { return CefOffscreenViewInfo() }
-        return MainActor.assumeIsolated { client.offscreenHost?.offscreenViewInfo ?? CefOffscreenViewInfo() }
+        return MainActor.assumeIsolated {
+            client.offscreenHost?.offscreenViewInfo ?? client.detachedOffscreenViewInfo ?? CefOffscreenViewInfo()
+        }
     }
 
     /// Runs `body` with the offscreen host, if the client and host still exist.

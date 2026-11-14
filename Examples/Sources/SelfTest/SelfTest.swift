@@ -158,6 +158,7 @@ enum SelfTest {
         ("sandbox", sandboxChecks),
         ("windowed", windowedBrowserChecks),
         ("offscreen", offscreenBrowserChecks),
+        ("hosting", hostingChecks),
         ("threads", threadChecks),
         ("lifecycle", lifecycleChecks),
         ("frames", frameChecks),
@@ -356,6 +357,14 @@ struct StaticPage: CefSchemeHandler {
                   window.__webdriver = navigator.webdriver;
                 </script>
                 <h1>compat</h1>
+                """
+        case "/transfer.html":
+            html = """
+                <title>transfer</title>
+                <h1>Transfer</h1>
+                <script>
+                  addEventListener('mousedown', e => { document.title = 'down ' + e.clientX + ',' + e.clientY; });
+                </script>
                 """
         case "/history-probe.html":
             html = "<title>CefSwift History Probe</title><h1>history</h1>"

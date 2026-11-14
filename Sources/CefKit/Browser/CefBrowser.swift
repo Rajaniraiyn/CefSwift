@@ -197,7 +197,7 @@ public final class CefBrowser: Identifiable {
     /// The creation to run once the browser's profile is loaded, and the
     /// host it creates the browser in; see `profileAllowsCreation(for:_:)`.
     /// It is the token the profile's loading checks: a host that lets go of
-    /// the browser (`hostDidRelease(_:)`), a close or a quit clears it, and
+    /// the browser (``stopHosting(in:)``), a close or a quit clears it, and
     /// nothing is created then.
     @ObservationIgnored var creationAwaitingProfile: DeferredCreation?
 
@@ -551,7 +551,7 @@ public final class CefBrowser: Identifiable {
     }
 
     /// Whether this browser renders offscreen.
-    public var isOffscreen: Bool { client?.offscreenHost != nil }
+    public var isOffscreen: Bool { client?.isOffscreen ?? false }
 }
 
 // MARK: - Host / frame access

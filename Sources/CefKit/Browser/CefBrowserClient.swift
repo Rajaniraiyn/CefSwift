@@ -20,8 +20,15 @@ final class CefBrowserClient {
     private(set) weak var primary: CefBrowser?
     /// The explicitly created browser awaiting `on_after_created`.
     private var pending: CefBrowser?
-    /// Set for offscreen browsers; presence enables the render handler.
+    /// The host an offscreen browser shows in now; nil while none does
+    /// (``CefBrowser/stopHosting(in:)``).
     weak var offscreenHost: CefOffscreenHost?
+    /// Whether the browser renders offscreen, which installs the render
+    /// handler. Set at creation; it outlives the host.
+    var isOffscreen = false
+    /// The geometry of the last host, which Chromium reads while no host
+    /// shows the browser.
+    var detachedOffscreenViewInfo: CefOffscreenViewInfo?
 
     let requestFilter: CefRequestFilter?
     let chromeToolbar: CefRuntime.Configuration.ChromeToolbar
@@ -172,7 +179,7 @@ final class CefBrowserClient {
         handlers.set(makeFrameHandler())
         handlers.set(makeDialogHandler())
         handlers.set(makeFocusHandler())
-        if offscreenHost != nil {
+        if isOffscreen {
             handlers.set(makeRenderHandler())
             handlers.set(makeAccessibilityHandler())
         }

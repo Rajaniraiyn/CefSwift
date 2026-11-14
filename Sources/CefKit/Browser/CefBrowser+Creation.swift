@@ -28,6 +28,7 @@ extension CefBrowser {
             requestFilter: configuration.requestFilter,
             chromeToolbar: CefRuntime.shared.configuration?.chromeToolbar ?? .init())
         client.offscreenHost = offscreenHost
+        client.isOffscreen = offscreenHost != nil
         self.client = client
 
         var settings = cef_browser_settings_t()
@@ -75,6 +76,11 @@ extension CefBrowser {
     /// Shows the browser as a native child view of `parentView`: creates it
     /// on first use, and afterwards moves its view there. `CefWebView` calls
     /// this; call it yourself to host a browser in AppKit.
+    ///
+    /// A browser shows in one host at a time. The host it showed in before
+    /// lets go of it: a ``CefWindowedBrowserView`` that showed it sets its
+    /// ``CefWindowedBrowserView/browser`` to nil. ``stopHosting(in:)``
+    /// withdraws the browser without showing it elsewhere.
     public func host(windowedIn parentView: NSView) {
         guard state != .closed else { return }
         CefRuntime.shared.lifecycleCoordinator.setNeedsUpdate()
@@ -90,6 +96,7 @@ extension CefBrowser {
             createWindowed(in: parentView)
         }
         guard let native = nativeView else { return }
+        let previous = hostView
         if native.superview !== parentView {
             native.removeFromSuperview()
             parentView.addSubview(native)
@@ -97,10 +104,20 @@ extension CefBrowser {
         native.frame = parentView.bounds
         native.autoresizingMask = [.width, .height]
         hostView = parentView
+        if let previous, previous !== parentView {
+            (previous as? CefWindowedBrowserView)?.browserDidStopHosting(self)
+        }
     }
 
     /// Shows the browser through an offscreen host: creates it on first
     /// use, and afterwards redirects its frames and input to `host`.
+    ///
+    /// A browser shows in one host at a time. Moved to `host`, it repaints
+    /// there in full, and the host it showed in before hears
+    /// ``CefOffscreenHost/offscreenDidStopHosting(_:)`` and gets nothing
+    /// more from it (a ``CefOffscreenBrowserView`` sets its
+    /// ``CefOffscreenBrowserView/browser`` to nil). ``stopHosting(in:)``
+    /// withdraws the browser without showing it elsewhere.
     public func host(offscreenIn host: CefOffscreenHost, size: CGSize) {
         guard state != .closed else { return }
         restoringOffscreenHost = host
@@ -117,10 +134,52 @@ extension CefBrowser {
             return
         }
         guard client.offscreenHost !== host else { return }
+        let previous = client.offscreenHost
         client.offscreenHost = host
+        client.detachedOffscreenViewInfo = nil
         hostView = host as? NSView
+        // The new host may be at another scale or on another screen, and
+        // has none of the page yet: everything is painted again.
+        hostViewDidChangeBackingProperties()
         hostViewDidResize()
         setNeedsDisplay()
+        previous?.offscreenDidStopHosting(self)
+    }
+
+    /// Withdraws the browser from `host`, a view given to
+    /// ``host(windowedIn:)`` or a host given to ``host(offscreenIn:size:)``,
+    /// without closing it: a creation deferred for `host` until the
+    /// profile loads is dropped, a windowed browser's native view leaves
+    /// `host`, and an offscreen browser stops painting and sends `host`
+    /// nothing more (``CefOffscreenHost/offscreenDidStopHosting(_:)``). A
+    /// browser discarded by closing it is no longer restored there.
+    ///
+    /// Nothing happens unless `host` is the browser's current host, so a
+    /// host that was replaced never withdraws the browser from the newer
+    /// one. The host views call this when their `browser` changes; call it
+    /// yourself from a host of your own. Host the browser again to show it.
+    public func stopHosting(in host: AnyObject) {
+        cancelDeferredCreation(in: host)
+        if restoringOffscreenHost === host { restoringOffscreenHost = nil }
+        var stoppedOffscreen: CefOffscreenHost?
+        if let client, let current = client.offscreenHost, current === host {
+            client.detachedOffscreenViewInfo = current.offscreenViewInfo
+            client.offscreenHost = nil
+            stoppedOffscreen = current
+            // Nothing shows it: Chromium stops painting.
+            hostViewDidHide()
+        }
+        var stoppedWindowed: CefWindowedBrowserView?
+        if hostView === host {
+            if !isOffscreen, let native = nativeView, native.superview === host { native.removeFromSuperview() }
+            hostView = nil
+            stoppedWindowed = host as? CefWindowedBrowserView
+        }
+        // Told once the browser has let go, so their own clean-up finds
+        // nothing to withdraw.
+        stoppedOffscreen?.offscreenDidStopHosting(self)
+        stoppedWindowed?.browserDidStopHosting(self)
+        CefRuntime.shared.lifecycleCoordinator.setNeedsUpdate()
     }
 
     private func createWindowed(in parentView: NSView) {
@@ -209,7 +268,7 @@ extension CefBrowser {
     /// Chromium is still loading the profile, `create` runs once it has
     /// (the last one given, if asked again meanwhile), unless meanwhile the
     /// browser closed or was created, `host` let go of it
-    /// (``hostDidRelease(_:)``), or the app began to quit, which closes
+    /// (``stopHosting(in:)``), or the app began to quit, which closes
     /// it. A browser on a profile Chromium could not load closes, and its
     /// ``ready()`` throws the profile's error. The default profile is
     /// always ready.
@@ -261,17 +320,6 @@ extension CefBrowser {
         guard creationAwaitingProfile != nil else { return }
         creationAwaitingProfile = nil
         CefRuntime.shared.browserStoppedAwaitingProfile(self)
-    }
-
-    /// `host`, a view or window that showed or was to show the browser,
-    /// shows another browser or none now: a creation deferred for it until
-    /// the profile loads is dropped, and a browser that has nothing in
-    /// Chromium (not created yet, or discarded by closing it) is no longer
-    /// restored there. A browser shown in `host` meanwhile is unaffected.
-    func hostDidRelease(_ host: AnyObject) {
-        cancelDeferredCreation(in: host)
-        if restoringOffscreenHost === host { restoringOffscreenHost = nil }
-        if raw == nil, hostView === host { hostView = nil }
     }
 
     /// `host` cannot create the browser for now (it left its window): a
