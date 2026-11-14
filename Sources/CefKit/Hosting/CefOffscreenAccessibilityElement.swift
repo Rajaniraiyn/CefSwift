@@ -263,8 +263,8 @@ extension CefOffscreenAccessibilityElement {
         var selectedRange: NSRange? {
             guard let text, let selection = node?.textSelection else { return nil }
             let length = (text as NSString).length
-            let location = min(selection.location, length)
-            return NSRange(location: location, length: min(selection.length, length - location))
+            let location = min(max(selection.location, 0), length)
+            return NSRange(location: location, length: min(max(selection.length, 0), length - location))
         }
 
         func selectedText() -> String? {
@@ -280,7 +280,8 @@ extension CefOffscreenAccessibilityElement {
         func string(for range: NSRange) -> String? {
             guard let text else { return nil }
             let string = text as NSString
-            guard range.location >= 0, range.length >= 0, range.location + range.length <= string.length else { return nil }
+            guard range.location >= 0, range.length >= 0, range.location <= string.length,
+                  range.length <= string.length - range.location else { return nil }
             return string.substring(with: range)
         }
 

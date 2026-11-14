@@ -186,7 +186,9 @@ public final class CefAccessibilityTree {
         for (run, start) in runs {
             let length = (run.name ?? "").utf16.count
             let lower = max(range.location, start)
-            let upper = min(range.location + max(range.length, 0), start + length)
+            // The range is an accessibility client's: its end saturates.
+            let (end, overflowed) = range.location.addingReportingOverflow(max(range.length, 0))
+            let upper = min(overflowed ? Int.max : end, start + length)
             // An empty range is the caret: place it before the character.
             let isCaret = range.length == 0 && range.location >= start && range.location <= start + length
             guard lower < upper || isCaret, let box = pixelFrame(of: run.id) else { continue }
@@ -568,8 +570,12 @@ public final class CefAccessibilityTree {
 
     /// The node's bounds in its frame's coordinates, offset into the main
     /// frame's, in Chromium's pixels.
-    private func pixelFrame(of id: CefAccessibilityNode.ID) -> CGRect? {
+    ///
+    /// `depth` counts the frames crossed: the hosts come from the
+    /// renderers' trees, which may name each other.
+    private func pixelFrame(of id: CefAccessibilityNode.ID, depth: Int = 0) -> CGRect? {
         if let cached = frameCache[id] { return cached }
+        guard depth < 64 else { return nil }
         guard let tree = trees[id.tree], let node = tree.nodes[id.node] else { return nil }
         var bounds = node.relativeBounds
         var current = node
@@ -590,7 +596,8 @@ public final class CefAccessibilityTree {
             current = container
         }
         // A frame's tree is positioned inside the `<iframe>` hosting it.
-        if id.tree != mainTreeID, let host = hosts[id.tree], host.tree != id.tree, let hostFrame = pixelFrame(of: host) {
+        if id.tree != mainTreeID, let host = hosts[id.tree], host.tree != id.tree,
+           let hostFrame = pixelFrame(of: host, depth: depth + 1) {
             bounds.origin.x += hostFrame.minX
             bounds.origin.y += hostFrame.minY
         }

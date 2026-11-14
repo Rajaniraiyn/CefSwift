@@ -148,10 +148,12 @@ extension CefAccessibilityNode {
     /// Whether the node is a modal dialog.
     public var isModal: Bool { attributes["modal"]?.boolValue == true }
 
-    /// The selection in a text field, as UTF-16 offsets into ``value``.
+    /// The selection in a text field, as UTF-16 offsets into ``value``;
+    /// an offset before the start, as a renderer may send, is the start.
     public var textSelection: NSRange? {
         guard let start = int("textSelStart"), let end = int("textSelEnd") else { return nil }
-        return NSRange(location: min(start, end), length: abs(end - start))
+        let lower = max(0, min(start, end))
+        return NSRange(location: lower, length: max(0, max(start, end) - lower))
     }
 
     /// The current, minimum, maximum and step values of a slider, progress

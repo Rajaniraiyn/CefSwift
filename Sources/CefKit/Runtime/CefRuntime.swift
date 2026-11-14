@@ -273,6 +273,7 @@ public final class CefRuntime {
             return
         }
         state = .stopping
+        closeBrowsersAwaitingProfiles()
         requestsInFlightAtShutdown = URLRequestRegistry.shared.count
         let participants = shutdownParticipants.compactMap(\.participant)
         shutdownParticipants = []
@@ -451,6 +452,10 @@ public final class CefRuntime {
     /// then terminates once the last one is gone.
     func handleTerminationRequest() -> Bool {
         guard isRunning else { return true }
+        // Browsers waiting for a profile Chromium is still loading are in
+        // no list below, and their profile could load during the quit:
+        // they close now, and their ready() throws browserClosed.
+        closeBrowsersAwaitingProfiles()
         isTerminationRequested = true
         // Browsers discarded by closing them have nothing left in Chromium.
         for browser in browsers where browser.isDiscarded && browser.raw == nil {
@@ -484,6 +489,38 @@ public final class CefRuntime {
             browser.close(force: true)
         }
         return false
+    }
+
+    // MARK: Browsers waiting for their profile
+
+    private struct WeakBrowser {
+        weak var browser: CefBrowser?
+    }
+
+    /// Browsers whose creation waits for their profile to load: Chromium
+    /// has nothing of them yet, so they are not in ``browsers``.
+    @ObservationIgnored private var browsersAwaitingProfiles: [WeakBrowser] = []
+
+    func browserAwaitsProfile(_ browser: CefBrowser) {
+        browsersAwaitingProfiles.removeAll { $0.browser == nil }
+        guard !browsersAwaitingProfiles.contains(where: { $0.browser === browser }) else { return }
+        browsersAwaitingProfiles.append(WeakBrowser(browser: browser))
+    }
+
+    func browserStoppedAwaitingProfile(_ browser: CefBrowser) {
+        browsersAwaitingProfiles.removeAll { $0.browser == nil || $0.browser === browser }
+    }
+
+    /// The number of browsers waiting for their profile. For tests.
+    @_spi(Testing) public var browsersAwaitingProfilesCount: Int {
+        browsersAwaitingProfiles.filter { $0.browser != nil }.count
+    }
+
+    private func closeBrowsersAwaitingProfiles() {
+        let waiting = browsersAwaitingProfiles.compactMap(\.browser)
+        browsersAwaitingProfiles = []
+        // Each closes as a browser not created yet does: `handleClosed()`.
+        waiting.forEach { $0.close(force: true) }
     }
 
     // MARK: Service browsers (internal-page data APIs)

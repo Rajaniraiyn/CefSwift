@@ -120,7 +120,7 @@ extension CefBrowser {
     public func sendMouseDown(at point: CGPoint, button: CefMouseButton, clickCount: Int, modifiers: CefEventModifiers = []) {
         withHost { host in
             var event = cef_mouse_event_t(point, modifiers: modifiers)
-            host.pointee.send_mouse_click_event(host, &event, button.cefValue, 0, Int32(clickCount))
+            host.pointee.send_mouse_click_event(host, &event, button.cefValue, 0, Int32(clamping: clickCount))
         }
     }
 
@@ -128,7 +128,7 @@ extension CefBrowser {
     public func sendMouseUp(at point: CGPoint, button: CefMouseButton, clickCount: Int, modifiers: CefEventModifiers = []) {
         withHost { host in
             var event = cef_mouse_event_t(point, modifiers: modifiers)
-            host.pointee.send_mouse_click_event(host, &event, button.cefValue, 1, Int32(clickCount))
+            host.pointee.send_mouse_click_event(host, &event, button.cefValue, 1, Int32(clamping: clickCount))
         }
     }
 
@@ -137,7 +137,7 @@ extension CefBrowser {
     public func sendScrollWheel(at point: CGPoint, delta: CGVector, modifiers: CefEventModifiers = []) {
         withHost { host in
             var event = cef_mouse_event_t(point, modifiers: modifiers)
-            host.pointee.send_mouse_wheel_event(host, &event, Int32(delta.dx.rounded()), Int32(delta.dy.rounded()))
+            host.pointee.send_mouse_wheel_event(host, &event, Int32(saturating: delta.dx), Int32(saturating: delta.dy))
         }
     }
 

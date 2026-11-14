@@ -419,7 +419,8 @@ struct URLRequestPlan: Equatable, Sendable {
         }
         flags = Self.flags(for: request, configuration: configuration)
         idleTimeout = request.timeoutInterval > 0 && request.timeoutInterval.isFinite
-            ? .milliseconds(Int64(request.timeoutInterval * 1000)) : nil
+            // A year is as good as forever, and fits.
+            ? .milliseconds(Int64(min(request.timeoutInterval, 365 * 24 * 3600) * 1000)) : nil
     }
 
     static func flags(for request: URLRequest, configuration: CefProfile.RequestConfiguration) -> Int32 {

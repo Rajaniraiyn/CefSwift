@@ -159,7 +159,7 @@ extension CefBrowser {
             var settings = cef_browser_settings_t()
             settings.size = MemoryLayout<cef_browser_settings_t>.stride
             if let point {
-                var target = cef_point_t(x: Int32(point.x.rounded()), y: Int32(point.y.rounded()))
+                var target = cef_point_t(x: Int32(saturating: point.x), y: Int32(saturating: point.y))
                 host.pointee.show_dev_tools(host, &windowInfo, nil, &settings, &target)
             } else {
                 host.pointee.show_dev_tools(host, &windowInfo, nil, &settings, nil)

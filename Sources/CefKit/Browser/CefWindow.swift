@@ -132,7 +132,7 @@ public final class CefWindow: Identifiable {
         Self.liveCount += 1
         Self.installRuntimeHooks()
 
-        if browser.profileAllowsCreation({ [weak self] _ in self?.addBrowserViewWhenProfileIsReady() }) {
+        if browser.profileAllowsCreation(for: self, { [weak self] _ in self?.addBrowserViewWhenProfileIsReady() }) {
             browserView = makeBrowserView()
         } else {
             browser.isChromeStyle = true
@@ -154,7 +154,7 @@ public final class CefWindow: Identifiable {
     /// Chromium creates the browser now that its view joins the window.
     private func addBrowserViewWhenProfileIsReady() {
         guard !isClosed, browserView == nil, let window = cefWindow?.pointer else { return }
-        guard browser.profileAllowsCreation({ [weak self] _ in self?.addBrowserViewWhenProfileIsReady() }) else {
+        guard browser.profileAllowsCreation(for: self, { [weak self] _ in self?.addBrowserViewWhenProfileIsReady() }) else {
             if browser.state == .closed { close() }
             return
         }
@@ -422,8 +422,8 @@ public final class CefWindow: Identifiable {
         var settings = cef_box_layout_settings_t()
         settings.size = MemoryLayout<cef_box_layout_settings_t>.stride
         settings.inside_border_insets = cef_insets_t(
-            top: Int32(contentInsets.top.rounded()), left: Int32(contentInsets.left.rounded()),
-            bottom: Int32(contentInsets.bottom.rounded()), right: Int32(contentInsets.right.rounded()))
+            top: Int32(saturating: contentInsets.top), left: Int32(saturating: contentInsets.left),
+            bottom: Int32(saturating: contentInsets.bottom), right: Int32(saturating: contentInsets.right))
         settings.cross_axis_alignment = CEF_AXIS_ALIGNMENT_STRETCH
         settings.main_axis_alignment = CEF_AXIS_ALIGNMENT_STRETCH
         settings.default_flex = 1

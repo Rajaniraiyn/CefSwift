@@ -12,6 +12,7 @@ extension SelfTest {
         let idleTimeout = CefProfile.serviceIdleTimeout
         CefProfile.serviceIdleTimeout = .seconds(60)
         defer { CefProfile.serviceIdleTimeout = idleTimeout }
+        await cancelledStartUpChecks(profile)
         // Warm: the checks are about calls, not start-ups.
         _ = try? await profile.history.search(limit: 1)
         _ = try? await profile.autocomplete.suggestions(for: "selftest")
@@ -31,6 +32,33 @@ extension SelfTest {
     }
 
     // MARK: Cancellation
+
+    /// The very first call to a host, cancelled while the host starts: the
+    /// start-up goes on, and the next call finds a host it can use, its
+    /// runtime installed.
+    private static func cancelledStartUpChecks(_ profile: CefProfile) async {
+        profile.stopServiceHosts()
+        _ = await waitUntil { !profile.runningServiceHosts.contains("history") }
+        let first = Task { @MainActor in try await profile.history.search(limit: 1) }
+        let starting = await waitUntil(timeout: .seconds(5)) { profile.runningServiceHosts.contains("history") }
+        first.cancel()
+        let result = await first.result
+        var isCancellation = false
+        if case .failure(let error) = result { isCancellation = error is CancellationError }
+        check("service calls: the first call, cancelled while its host starts, throws CancellationError",
+              starting && isCancellation, detail: "\(result)")
+        // The caller resumed at once; the start-up, and what the cancelled
+        // call does after it, go on. The next call comes after both.
+        try? await Task.sleep(for: .seconds(2))
+        await expect("service calls: … and the next call on that host answers") {
+            _ = try await profile.history.search(limit: 1)
+            return (true, "")
+        }
+        await expect("service calls: … and so does a call of another module") {
+            _ = try await profile.history.favicon(for: URL(string: "https://cefswift.test/never-visited.html")!)
+            return (true, "")
+        }
+    }
 
     private static func cancellationChecks(_ profile: CefProfile) async {
         let pendingBefore = pendingOperations

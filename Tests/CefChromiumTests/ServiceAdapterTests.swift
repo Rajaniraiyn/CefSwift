@@ -105,6 +105,24 @@ struct ServiceAdapterTests {
         #expect(IconRecord(width: 4, height: 4, pixels: pixels).makeImage(size: 16) == nil)
     }
 
+    /// The host's dimensions are the renderer's word: ones whose pixel
+    /// count overflows, is negative, or is past any icon are refused
+    /// rather than multiplied.
+    @Test func iconDimensionsFromTheHostAreBoundedBeforeUse() {
+        let empty = Data()
+        #expect(IconRecord(width: 1 << 62, height: 4, pixels: empty).makeImage(size: 16) == nil)
+        #expect(IconRecord(width: Int.max, height: Int.max, pixels: empty).makeImage(size: 16) == nil)
+        #expect(IconRecord(width: 1 << 31, height: 1 << 31, pixels: empty).makeImage(size: 16) == nil)
+        #expect(IconRecord(width: -2, height: -2, pixels: Data(count: 16)).makeImage(size: 16) == nil)
+        #expect(IconRecord(width: Int.min, height: -1, pixels: empty).makeImage(size: 16) == nil)
+        // Consistent, but larger than an icon can be.
+        let wide = IconRecord.maximumDimension + 1
+        #expect(IconRecord(width: wide, height: 1, pixels: Data(count: wide * 4)).makeImage(size: 16) == nil)
+        // The largest allowed still works.
+        let side = IconRecord.maximumDimension
+        #expect(IconRecord(width: side, height: 1, pixels: Data(count: side * 4)).makeImage(size: 16) != nil)
+    }
+
     @Test func matchesDecodeIntoSuggestions() throws {
         let match = MatchRecord(
             type: "history-url", contents: "swift.org", description: "Swift", url: "https://swift.org/", fill: "swift.org",

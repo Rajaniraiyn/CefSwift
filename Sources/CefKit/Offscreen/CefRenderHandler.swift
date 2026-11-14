@@ -199,8 +199,8 @@ extension CefBrowserClient {
             cefRelease(browser)
             guard let screenX, let screenY else { return 0 }
             let origin = CefBrowserClient.offscreenViewInfo(s).screenOrigin
-            screenX.pointee = Int32((origin.x + CGFloat(viewX)).rounded())
-            screenY.pointee = Int32((origin.y + CGFloat(viewY)).rounded())
+            screenX.pointee = Int32(saturating: origin.x + CGFloat(viewX))
+            screenY.pointee = Int32(saturating: origin.y + CGFloat(viewY))
             return 1
         }
 
@@ -343,20 +343,33 @@ extension CGRect {
 }
 
 extension NSRange {
+    /// CEF's invalid range (`UINT32_MAX`, `gfx::Range::InvalidRange()`) is
+    /// `NSNotFound`; a reversed range, as a renderer may report, is empty
+    /// at its start.
     init(_ range: cef_range_t) {
-        self.init(location: Int(range.from), length: Int(range.to) - Int(range.from))
+        guard range.from != UInt32.max else {
+            self.init(location: NSNotFound, length: 0)
+            return
+        }
+        self.init(location: Int(range.from), length: range.to >= range.from ? Int(range.to) - Int(range.from) : 0)
     }
 }
 
 extension cef_range_t {
+    /// `NSNotFound`, from the text input system, is CEF's invalid range.
     init(_ range: NSRange) {
-        self.init(from: UInt32(clamping: range.location), to: UInt32(clamping: range.location + range.length))
+        guard range.location != NSNotFound else {
+            self.init(from: .max, to: .max)
+            return
+        }
+        let (end, overflowed) = range.location.addingReportingOverflow(max(range.length, 0))
+        self.init(from: UInt32(clamping: range.location), to: UInt32(clamping: overflowed ? Int.max : end))
     }
 }
 
 extension cef_mouse_event_t {
     /// A mouse event at `point`, in view points.
     init(_ point: CGPoint, modifiers: CefEventModifiers) {
-        self.init(x: Int32(point.x.rounded()), y: Int32(point.y.rounded()), modifiers: modifiers.rawValue)
+        self.init(x: Int32(saturating: point.x), y: Int32(saturating: point.y), modifiers: modifiers.rawValue)
     }
 }

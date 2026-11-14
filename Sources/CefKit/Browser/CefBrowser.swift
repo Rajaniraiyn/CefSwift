@@ -194,9 +194,17 @@ public final class CefBrowser: Identifiable {
     @ObservationIgnored weak var restoringOffscreenHost: CefOffscreenHost?
     @ObservationIgnored var initialURL: URL?
     @ObservationIgnored var isBootstrapping = false
-    /// The creation to run once the browser's profile is loaded; see
-    /// `profileAllowsCreation(_:)`.
-    @ObservationIgnored var creationAwaitingProfile: (@MainActor (CefBrowser) -> Void)?
+    /// The creation to run once the browser's profile is loaded, and the
+    /// host it creates the browser in; see `profileAllowsCreation(for:_:)`.
+    /// It is the token the profile's loading checks: a host that lets go of
+    /// the browser (`hostDidRelease(_:)`), a close or a quit clears it, and
+    /// nothing is created then.
+    @ObservationIgnored var creationAwaitingProfile: DeferredCreation?
+
+    struct DeferredCreation {
+        weak var host: AnyObject?
+        var create: @MainActor (CefBrowser) -> Void
+    }
     /// The main frame's navigations, for ``waitUntilLoaded(timeout:)``.
     @ObservationIgnored let loads = CefLoadTracker()
     /// Calls waiting for ``ready()``.
@@ -478,15 +486,23 @@ public final class CefBrowser: Identifiable {
     /// may be showing its own sign-in window for it.
     @ObservationIgnored var signInPromptURL: URL?
 
-    /// Suspends until the browser exists in Chromium and has set up what
-    /// its page relies on (its ``Configuration/attachments``, and after a
-    /// discard the DevTools domains enabled before), restoring it first if
-    /// it is discarded.
+    /// Suspends until the browser exists in Chromium and can be used,
+    /// restoring it first if it is discarded.
+    ///
+    /// When an attachment prepares before the first document
+    /// (``CefBrowserAttachment/preparesBeforeFirstDocument``), and after a
+    /// discard, that includes the set-up before the first page: every
+    /// attachment's ``CefBrowserAttachment/browserDidCreate(_:)`` (or
+    /// ``CefBrowserAttachment/browserDidRestore(_:)``) has returned, and
+    /// after a discard the DevTools domains enabled before are on again.
+    /// Otherwise this does not wait for attachments, which are told of the
+    /// creation as it returns and may still be setting up.
     ///
     /// A browser on a persistent profile Chromium is still loading is
     /// created once it has (``CefProfile/ready()``).
     ///
-    /// Throws ``CefError/browserClosed`` if the browser closes first,
+    /// Throws ``CefError/browserClosed`` if the browser closes first (as
+    /// quitting closes one still waiting for its profile),
     /// ``CefError/profileUnavailable(_:)`` if it closed because Chromium
     /// could not load its profile, and `CancellationError` if the calling
     /// task is cancelled.

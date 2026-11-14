@@ -15,8 +15,67 @@
 /// from them.
 enum CefServiceHostRuntime {
     /// Marks the error an invocation of a function the document does not
-    /// have throws; the engine then defines it again.
+    /// have throws, or one in a document without the runtime; the engine
+    /// then installs both again.
     static let undefinedFunctionMarker = "cefswift: undefined function"
+
+    /// The runtime, or an error with ``undefinedFunctionMarker`` where the
+    /// document lost it, never a bare `ReferenceError`.
+    static let runtimeReference =
+        "(window.__cefswiftServices ?? (() => { throw new Error('\(undefinedFunctionMarker): no runtime'); })())"
+
+    /// What one host document has of the runtime and the functions, as the
+    /// scripts sent to it installed them.
+    ///
+    /// ``script(handle:module:setup:function:arguments:call:eventBridge:)``
+    /// installs what is missing, and ``didSend(_:)`` records it once the
+    /// script has gone to the renderer: a call cancelled or failed before
+    /// that installed nothing. Scripts reach the renderer in order, so a
+    /// later call relies on what an earlier one sent. The runtime and
+    /// `define` are idempotent, so two calls built before either is sent
+    /// both carrying them is harmless.
+    struct Installation: Equatable {
+        private(set) var hasRuntime = false
+        private(set) var definedFunctions: Set<Int> = []
+
+        /// What a script installs.
+        struct Additions: Equatable {
+            var runtime = false
+            var function: Int?
+        }
+
+        /// The script that invokes `handle` with `arguments` as call
+        /// `call`, preceded by the runtime and the function's definition
+        /// where the document has not had them.
+        func script(
+            handle: Int, module: String, setup: String, function: String, arguments: CefJSON, call: Int,
+            eventBridge: String
+        ) -> (script: String, additions: Additions) {
+            var script = ""
+            var additions = Additions()
+            if !hasRuntime {
+                script += CefServiceHostRuntime.bootstrap(eventBridge: eventBridge) + ";\n"
+                additions.runtime = true
+            }
+            if !definedFunctions.contains(handle) {
+                script += "\(runtimeReference).define(\(handle), \(CefJSON.string(module).text), (\(setup)), (\(function)));\n"
+                additions.function = handle
+            }
+            script += "\(runtimeReference).invoke(\(handle), \(arguments.text), \(call))"
+            return (script, additions)
+        }
+
+        /// The script with `additions` reached the renderer.
+        mutating func didSend(_ additions: Additions) {
+            if additions.runtime { hasRuntime = true }
+            if let handle = additions.function { definedFunctions.insert(handle) }
+        }
+
+        /// The document lost what was installed (a reload, a new renderer).
+        mutating func reset() {
+            self = Installation()
+        }
+    }
 
     /// Defines `encode(value)`, which returns an `ArrayBuffer` holding
     /// `value` in the wire format: tags 0 null, 1 false, 2 true, 3 Int32,

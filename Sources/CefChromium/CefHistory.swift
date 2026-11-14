@@ -392,13 +392,23 @@ struct HistoryPage: Decodable {
 }
 
 /// An icon's RGBA pixels, not premultiplied, as a canvas reads them.
+///
+/// The host's renderer says what the dimensions are, so they are checked
+/// before any arithmetic: each within ``maximumDimension``, and the pixels
+/// exactly `width × height × 4` bytes.
 struct IconRecord: Decodable {
     var width: Int
     var height: Int
     var pixels: Data
 
+    /// The widest and tallest icon accepted, in pixels: Chromium keeps
+    /// favicons up to 256 pixels square, and this leaves room for any size
+    /// and scale a caller asks for.
+    static let maximumDimension = 4096
+
     func makeImage(size: Int) -> NSImage? {
-        guard width > 0, height > 0, pixels.count == width * height * 4,
+        guard (1...Self.maximumDimension).contains(width), (1...Self.maximumDimension).contains(height),
+              pixels.count == width * height * 4,
               let provider = CGDataProvider(data: pixels as CFData),
               let image = CGImage(
                 width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: width * 4,

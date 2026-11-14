@@ -20,7 +20,9 @@ import Foundation
 public final class CefWindowedBrowserView: NSView {
 
     /// The browser shown in this view. Assigning a browser that is already
-    /// live moves its native view here; assigning `nil` removes it.
+    /// live moves its native view here; assigning `nil` removes it. The
+    /// browser assigned before, if still waiting for its profile, is not
+    /// created here later.
     public var browser: CefBrowser? {
         didSet {
             guard browser !== oldValue else { return }
@@ -52,6 +54,8 @@ public final class CefWindowedBrowserView: NSView {
         if let previous = oldValue?.nativeView, previous.superview === self {
             previous.removeFromSuperview()
         }
+        // One still waiting for its profile is not created here later.
+        oldValue?.hostDidRelease(self)
         layer?.backgroundColor = browser?.hostBackgroundColor
         hostBrowserIfPossible()
         updateSwipeMonitor()
@@ -59,6 +63,9 @@ public final class CefWindowedBrowserView: NSView {
 
     public override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        // Chromium creates a windowed browser only in a window; back in
+        // one, the view asks again.
+        if window == nil { browser?.cancelDeferredCreation(in: self) }
         hostBrowserIfPossible()
         updateSwipeMonitor()
     }

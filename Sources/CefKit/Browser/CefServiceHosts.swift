@@ -364,11 +364,10 @@ final class CefServiceHostBrowser {
     private var isStopped = false
     private let delegate = ServiceBrowserDelegate()
 
-    /// Whether the document has the runtime (`CefServiceHostRuntime`),
-    /// and the functions it has compiled, by handle. Set as the script
-    /// that installs them is sent: scripts reach the renderer in order.
-    private var hasRuntime = false
-    private var definedFunctions: Set<Int> = []
+    /// What the document has of the runtime (`CefServiceHostRuntime`) and
+    /// the functions it has compiled: recorded once the script that
+    /// installs them has been sent, as scripts reach the renderer in order.
+    private var installation = CefServiceHostRuntime.Installation()
 
     /// Each function's handle, by module and source, for every host.
     private static var handles: [String: Int] = [:]
@@ -441,11 +440,15 @@ final class CefServiceHostBrowser {
             var redefined = false
             while true {
                 let encodeStarted = CefDiagnostics.start()
-                let script = invocation(module, function, arguments, call: call)
+                let (script, additions) = invocation(module, function, arguments, call: call)
                 CefDiagnostics.record(.serviceEncode, since: encodeStarted)
                 CefDiagnostics.record(.serviceRequestBytes, amount: script.utf8.count)
                 do {
-                    let payload = try await browser.pageScripting.evaluatedPayload(script, in: nil)
+                    // A call cancelled before its script is sent installs
+                    // nothing, so the next call still carries the runtime.
+                    let payload = try await browser.pageScripting.evaluatedPayload(script, in: nil) {
+                        self.installation.didSend(additions)
+                    }
                     return try await CefServiceHosts.decode(type, from: payload)
                 } catch is CancellationError {
                     // The caller has resumed already; the host stops the work.
@@ -455,8 +458,7 @@ final class CefServiceHostBrowser {
                     if error.message.contains(CefServiceHostRuntime.undefinedFunctionMarker), !redefined {
                         // The document lost what was installed: install again.
                         redefined = true
-                        hasRuntime = false
-                        definedFunctions = []
+                        installation.reset()
                         continue
                     }
                     if isStopped { throw HostStopped(message: "\(module.name): \(host.document) stopped responding") }
@@ -470,8 +472,10 @@ final class CefServiceHostBrowser {
 
     /// The script that calls `function` with `arguments` as call `call`,
     /// installing the runtime and defining the function first where the
-    /// document has not seen them.
-    private func invocation(_ module: CefServiceHost.Module, _ function: String, _ arguments: CefJSON, call: Int) -> String {
+    /// document has not had them, and what it installs.
+    private func invocation(
+        _ module: CefServiceHost.Module, _ function: String, _ arguments: CefJSON, call: Int
+    ) -> (String, CefServiceHostRuntime.Installation.Additions) {
         let key = "\(module.name)\u{1}\(function)"
         let handle: Int
         if let known = Self.handles[key] {
@@ -480,16 +484,9 @@ final class CefServiceHostBrowser {
             handle = Self.handles.count + 1
             Self.handles[key] = handle
         }
-        var script = ""
-        if !hasRuntime {
-            script += CefServiceHostRuntime.bootstrap(eventBridge: Self.eventBridgeName) + ";\n"
-            hasRuntime = true
-        }
-        if definedFunctions.insert(handle).inserted {
-            script += "__cefswiftServices.define(\(handle), \(CefJSON.string(module.name).text), (\(module.setup)), (\(function)));\n"
-        }
-        script += "__cefswiftServices.invoke(\(handle), \(arguments.text), \(call))"
-        return script
+        return installation.script(
+            handle: handle, module: module.name, setup: module.setup, function: function, arguments: arguments,
+            call: call, eventBridge: Self.eventBridgeName)
     }
 
     private func scheduleIdleStop() {

@@ -6,7 +6,8 @@ import Foundation
 /// the deadline passes first, `operation`'s task is cancelled, `onTimeout`
 /// runs, and the call throws `timeoutError` at once, even if `operation`
 /// stays suspended in an await that ignores cancellation. Cancelling the
-/// calling task cancels `operation` and throws `CancellationError`.
+/// calling task cancels `operation` and throws `CancellationError`; in a
+/// task cancelled already, `operation` never starts.
 @MainActor
 func withDeadline<T>(
     _ timeout: Duration,
@@ -16,7 +17,13 @@ func withDeadline<T>(
 ) async throws -> T {
     let race = DeadlineRace<T>()
     try await withTaskCancellationHandler {
-        try await withCheckedThrowingContinuation { continuation in
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
+            // Cancelled before this ran, `onCancel` found nothing to end:
+            // neither the operation nor the deadline starts.
+            guard !Task.isCancelled else {
+                continuation.resume(throwing: CancellationError())
+                return
+            }
             race.continuation = continuation
             race.work = Task {
                 do {

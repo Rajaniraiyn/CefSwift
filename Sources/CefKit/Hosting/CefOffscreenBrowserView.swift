@@ -33,7 +33,8 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
 
     /// The browser shown in this view. Assigning a browser that is already
     /// live moves it here from wherever it was shown before; assigning `nil`
-    /// stops showing it.
+    /// stops showing it. The browser assigned before, if still waiting for
+    /// its profile or discarded, is not created here later.
     public var browser: CefBrowser? {
         didSet {
             guard browser !== oldValue else { return }
@@ -136,6 +137,9 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
         if let oldValue, oldValue.hostView === self {
             oldValue.hostViewDidHide()
         }
+        // One still waiting for its profile, or discarded, is not created
+        // here later.
+        oldValue?.hostDidRelease(self)
         if let browser { layer?.backgroundColor = browser.hostBackgroundColor }
         hostBrowserIfPossible()
         updateVisibility(notifyingBrowser: true)
@@ -156,6 +160,9 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
             hostBrowserIfPossible()
             updateScale()
             installWindowObservers()
+        } else {
+            // Back in a window, the view asks again.
+            browser?.cancelDeferredCreation(in: self)
         }
         updateVisibility(notifyingBrowser: window != nil)
     }
@@ -349,8 +356,12 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
             contents = copy
         case let .cpu(buffer, width, height, _):
             // The buffer is only valid during this call; the image copies it.
-            guard let image = Self.bgraImage(
-                Data(bytes: buffer, count: width * 4 * height), width: width, height: height, bytesPerRow: width * 4)
+            // Chromium's dimensions are checked before they size a copy.
+            let (bytesPerRow, rowOverflow) = width.multipliedReportingOverflow(by: 4)
+            let (count, countOverflow) = bytesPerRow.multipliedReportingOverflow(by: height)
+            guard width > 0, height > 0, !rowOverflow, !countOverflow,
+                  let image = Self.bgraImage(
+                      Data(bytes: buffer, count: count), width: width, height: height, bytesPerRow: bytesPerRow)
             else { return }
             contents = image
         }

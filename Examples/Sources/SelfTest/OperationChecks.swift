@@ -111,6 +111,53 @@ extension SelfTest {
         _ = await waitUntil { window.isClosed }
         check("operations: the attachment hears the browser close", attachment.closed == 1,
               detail: "\(attachment.closed)")
+        await plainAttachmentReadinessChecks()
+    }
+
+    /// `ready()` means the browser exists and can be used: it does not
+    /// wait for an attachment that does not prepare first, which is told of
+    /// the creation once, after it, and of the close after that. With an
+    /// attachment that prepares first, every attachment is told before the
+    /// first page, and `ready()` waits for all of them.
+    static func plainAttachmentReadinessChecks() async {
+        do {
+            let plain = RecordingAttachment(holdingCreationFor: .milliseconds(500))
+            var configuration = CefBrowser.Configuration()
+            configuration.attachments = [plain]
+            let window = CefWindow(
+                browser: CefBrowser(url: URL(string: "selftest://edge/ready.html")!, configuration: configuration))
+            window.show()
+            await expect("operations: ready() does not wait for an attachment that does not prepare first") {
+                try await window.browser.ready()
+                return (!plain.events.contains("created"), "\(plain.events)")
+            }
+            check("operations: … which is told of the creation once",
+                  await waitUntil(timeout: .seconds(5)) { plain.events == ["create", "created"] }, detail: "\(plain.events)")
+            check("operations: … and its browser loads its page meanwhile", await loaded(window.browser, title: "ready"))
+            window.close()
+            _ = await waitUntil { window.isClosed }
+            check("operations: … and of the close after the creation",
+                  plain.events == ["create", "created", "close"], detail: "\(plain.events)")
+        }
+        do {
+            let preparing = SlowAttachment()
+            let plain = RecordingAttachment(holdingCreationFor: .milliseconds(300))
+            var configuration = CefBrowser.Configuration()
+            configuration.attachments = [preparing, plain]
+            let window = CefWindow(
+                browser: CefBrowser(url: URL(string: "selftest://edge/ready.html")!, configuration: configuration))
+            window.show()
+            await expect("operations: with an attachment that prepares first, ready() waits for every attachment") {
+                try await window.browser.ready()
+                return (preparing.created == 1 && plain.events == ["create", "created"], "\(plain.events)")
+            }
+            check("operations: … and every attachment is told before the first page",
+                  plain.pageDuringCreation == "about:blank", detail: plain.pageDuringCreation ?? "nil")
+            window.close()
+            _ = await waitUntil { window.isClosed }
+            check("operations: … and each hears the close once",
+                  preparing.closed == 1 && plain.events.filter { $0 == "close" }.count == 1, detail: "\(plain.events)")
+        }
     }
 
     /// Two browsers in one renderer number their evaluations alike: a
@@ -334,6 +381,44 @@ final class SlowAttachment: CefBrowserAttachment {
 
     func browserDidClose(_ browser: CefBrowser) {
         closed += 1
+    }
+}
+
+/// An attachment that does not prepare first, written with public API
+/// only, recording what it is told, in order: `create` and `created`
+/// around its set-up, `restore` and `close`.
+@MainActor
+final class RecordingAttachment: CefBrowserAttachment {
+    private(set) var events: [String] = []
+    /// The document the browser had while the attachment set it up, and
+    /// while it restored it.
+    private(set) var pageDuringCreation: String?
+    private(set) var pageDuringRestore: String?
+    private let creationTime: Duration
+
+    init(holdingCreationFor creationTime: Duration = .zero) {
+        self.creationTime = creationTime
+    }
+
+    private func page(of browser: CefBrowser) async -> String? {
+        let page = try? await browser.devTools.send("Runtime.evaluate", ["expression": "location.href", "returnByValue": true])
+        return page?["result"]["value"].stringValue
+    }
+
+    func browserDidCreate(_ browser: CefBrowser) async {
+        events.append("create")
+        pageDuringCreation = await page(of: browser)
+        try? await Task.sleep(for: creationTime)
+        events.append("created")
+    }
+
+    func browserDidRestore(_ browser: CefBrowser) async {
+        pageDuringRestore = await page(of: browser)
+        events.append("restore")
+    }
+
+    func browserDidClose(_ browser: CefBrowser) {
+        events.append("close")
     }
 }
 

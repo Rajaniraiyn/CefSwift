@@ -348,14 +348,18 @@ public final class CefProfile {
     ///
     /// Throws ``CefError/profileUnavailable(_:)`` when Chromium cannot
     /// load the profile from its directory, ``CefError/notInitialized``
-    /// before ``CefRuntime/initialize(configuration:)``, and
-    /// `CancellationError` if the calling task is cancelled.
+    /// before ``CefRuntime/initialize(configuration:)``,
+    /// ``CefError/shutDown`` once Chromium shuts down (a caller still
+    /// waiting then throws it too), and `CancellationError` if the calling
+    /// task is cancelled.
     public func ready() async throws {
         _ = requestContext()
         switch readiness {
         case .ready: return
         case .failed(let reason): throw CefError.profileUnavailable(reason)
-        case .pending: throw CefRuntime.shared.state == .stopped ? CefError.shutDown : CefError.notInitialized
+        case .pending:
+            let state = CefRuntime.shared.state
+            throw state == .stopping || state == .stopped ? CefError.shutDown : CefError.notInitialized
         case .loading: try await readinessWaiters.wait()
         }
     }
@@ -663,8 +667,17 @@ extension cef_basetime_t {
     /// Unix epoch.
     private static let unixEpochOffset: TimeInterval = 11_644_473_600
 
+    /// A date past what Chromium's microseconds hold, such as a cookie's
+    /// expiry from a server's huge `Max-Age`, is the latest it holds.
     init(date: Date) {
-        self.init(val: Int64((date.timeIntervalSince1970 + Self.unixEpochOffset) * 1_000_000))
+        let microseconds = (date.timeIntervalSince1970 + Self.unixEpochOffset) * 1_000_000
+        guard !microseconds.isNaN else {
+            self.init(val: 0)
+            return
+        }
+        // Int64.max is not a Double; the largest Double below it is.
+        let limit = Double(Int64.max).nextDown
+        self.init(val: Int64(min(max(microseconds, -limit), limit)))
     }
 
     var date: Date {
