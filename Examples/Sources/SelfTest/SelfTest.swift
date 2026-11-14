@@ -160,6 +160,8 @@ enum SelfTest {
         ("offscreen", offscreenBrowserChecks),
         ("hosting", hostingChecks),
         ("popups", popupBlockingChecks),
+        ("externalProtocols", externalProtocolChecks),
+        ("backForward", backForwardChecks),
         ("threads", threadChecks),
         ("lifecycle", lifecycleChecks),
         ("frames", frameChecks),

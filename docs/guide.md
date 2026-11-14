@@ -488,7 +488,7 @@ when it is first shown.
 | Kind | Members |
 |---|---|
 | State | `url`, `title`, `isLoading`, `estimatedProgress`, `canGoBack`, `canGoForward`, `favicon`, `faviconURL`, `zoomLevel`, `isFullscreen`, `statusText`, `downloads`, `findResult`, `state` (`.pending`, `.live`, `.closed`) |
-| Navigation | `load(_:)` (returns a `CefNavigation`), `goBack()`, `goForward()`, `reload(ignoringCache:)`, `stopLoading()`, `waitUntilLoaded(timeout:)` ([waiting for a load](#waiting-for-a-load)) |
+| Navigation | `load(_:)` (returns a `CefNavigation`), `goBack()`, `goForward()`, `backForwardList`, `go(to:)` ([back/forward list](#back-and-forward)), `reload(ignoringCache:)`, `stopLoading()`, `waitUntilLoaded(timeout:)` ([waiting for a load](#waiting-for-a-load)) |
 | Page | `isAudioMuted`, `find(_:backwards:caseSensitive:)`, `stopFinding(clearingSelection:)`, `findSession` (an observable find-bar model), `print()` (Chromium's printing, which in Chrome style is Chrome's print preview, not the system dialog), `pdf(configuration:)`, `printToPDF(at:configuration:)` ([PDF](#pdf)), `snapshot()` |
 | JavaScript | `evaluateJavaScript(_:timeout:)`, `evaluateJavaScript(_:as:timeout:)`, `executeJavaScript(_:)`, `addUserScript(_:)` |
 | DevTools | `devTools`, `showDevTools(inspecting:)`, `closeDevTools()`, `isShowingDevTools` |
@@ -1381,6 +1381,7 @@ final class Policy: CefBrowserDelegate {
 | `browser(_:decideDestinationFor:) async` | `CefDownloadDecision.default(for:)`: the profile's `downloadPolicy`, the Downloads folder unless set. See [Downloads](#downloads) |
 | `browser(_:decidePolicyFor:)` | `.allow` |
 | `browser(_:decideWindowOpenFor:)` | `CefWindowOpenDecision.default(for:)` |
+| `browser(_:decideExternalProtocolFor:) async` | Native sheet (`CefExternalProtocolPresenter`); `.deny` when no app handles the scheme. See [Links to other apps](#links-to-other-apps) |
 | `browser(_:handleKeyEvent:isBeforePage:)` | `false` |
 | `browser(_:runContextMenu:for:) async` | Native menu at the click (`CefContextMenuPresenter`); see [Context menu](#context-menu) |
 | `browser(_:handleChromeCommand:disposition:)` | `false`: Chrome runs the command |
@@ -1417,6 +1418,7 @@ for some cases by calling its presenter:
 | Unresponsive page | `browserPageIsUnresponsive(_:)` | `CefUnresponsivePagePresenter` |
 | File chooser | `browser(_:runFileDialog:)` | `CefFileDialogPresenter` |
 | Download save panel | `browser(_:decideDestinationFor:)` | `CefDownloadPresenter` |
+| Opening another app (`mailto:`, `zoommtg:`) | `browser(_:decideExternalProtocolFor:)` | `CefExternalProtocolPresenter` |
 | Context menu | `browser(_:runContextMenu:for:)` | `CefContextMenuPresenter` |
 | Passkeys | `CefPasskeyDelegate.browser(_:decidePasskeyFor:)` | `CefPasskeyPresenter` |
 
@@ -1536,6 +1538,57 @@ profile.siteSettings.set(.allow, for: .popups, origin: URL(string: "https://exam
 `default(for:)` then still denies them in an Alloy-style browser, where
 loading in place would let a script navigate the page away; a Chrome-style
 browser opens them.
+
+### Back and forward
+
+`browser.backForwardList` is a snapshot of Chromium's navigation entries,
+shaped like `WKBackForwardList`: `items` oldest first, `currentIndex`,
+`currentItem`, `backItem`, `forwardItem`, `backList`, `forwardList` and
+`item(at:)`. Each item has its `url`, `displayURL`, `originalURL` (before
+redirects), `title`, `httpStatusCode`, `completionDate`, `hasPostData` and
+`transition` (its `source`, such as `.link`, `.explicit`, `.formSubmit` or
+`.reload`, and whether it `isBackForward`, `isRedirect`, `isDirectLoad`).
+Reading the list in a SwiftUI view updates the view as the browser
+navigates, so a back button's menu is a `ForEach` over `backList`:
+
+```swift
+Menu("Back") {
+    ForEach(browser.backForwardList.backList.reversed()) { item in
+        Button(item.title.isEmpty ? item.url?.absoluteString ?? "" : item.title) { browser.go(to: item) }
+    }
+} primaryAction: {
+    browser.goBack()
+}
+```
+
+`go(to:)` goes to an item however many steps away in one navigation:
+Chromium counts each step from the one still pending, so the pages in
+between are never loaded. It returns `false` and does nothing when the
+list has changed since the item was read.
+
+### Links to other apps
+
+A URL whose scheme Chromium does not load itself, such as `mailto:`,
+`zoommtg:` or `slack:`, reaches
+`browser(_:decideExternalProtocolFor:)` with a
+`CefExternalProtocolRequest`: the `url`, the `frameURL` that asked, and
+whether it `isMainFrame`. Return `.allow` to open it with the app macOS
+has for the scheme (`request.applicationURL`), or `.deny`. In both runtime
+styles Chromium never opens another app itself. The default asks with
+`CefExternalProtocolPresenter`'s sheet ("Open “Zoom”?", naming the site),
+and denies without asking when no app handles the scheme:
+
+```swift
+func browser(_ browser: CefBrowser, decideExternalProtocolFor request: CefExternalProtocolRequest) async
+    -> CefExternalProtocolDecision
+{
+    if request.url.scheme == "mailto" { return .allow }
+    return await CefExternalProtocolPresenter.present(request, in: browser.hostWindow)
+}
+```
+
+The question is cancelled, and its sheet dismissed, when the page
+navigates away.
 
 ### Downloads
 
