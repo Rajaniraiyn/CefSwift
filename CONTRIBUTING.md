@@ -43,8 +43,11 @@ SwiftPM. Everything about the bundle goes in `CefBundling`, so that both
 tracks get it.
 
 The loader tests run only when `CEF_FRAMEWORK_PATH` names a CEF framework,
-either the `.framework` directory or the binary inside it. Download one with
-the plugin and point at it with an absolute path:
+either the `.framework` directory or the binary inside it. They load it in
+`CefLoaderProbe` (`Tests/CefLoaderProbe`), a process of its own: as it
+loads, the framework swaps the default malloc zone, and a free on another
+thread at that moment traps, so no test loads it into the test process.
+Download one with the plugin and point at it with an absolute path:
 
 ```sh
 swift package --allow-writing-to-package-directory --allow-network-connections all cef download

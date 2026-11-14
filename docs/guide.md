@@ -106,7 +106,9 @@ directory, Chromium hands the launch to it and this process exits with
 status 0; see [Relaunching](#relaunching).
 
 An AppKit app initializes the runtime first thing in `main`, before anything
-touches `NSApp`:
+touches `NSApp` and before it starts work on other threads (loading the
+framework makes Chromium's allocator the default malloc zone, and a thread
+freeing memory while the zones are swapped can crash the app):
 
 ```swift
 @main

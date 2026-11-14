@@ -113,6 +113,14 @@ let package = Package(
             ),
             dependencies: ["cefswift"]
         ),
+        // Loads the CEF framework for LoaderTests in a process of its own:
+        // loading it swaps the default malloc zone, which traps a free on
+        // another thread, and a test process has many.
+        .executableTarget(
+            name: "CefLoaderProbe",
+            dependencies: ["CCef"],
+            path: "Tests/CefLoaderProbe"
+        ),
         .testTarget(
             name: "CefKitTests",
             dependencies: ["CefKit", "CefBase", "CefRenderer"]

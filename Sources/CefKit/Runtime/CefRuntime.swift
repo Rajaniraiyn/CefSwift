@@ -108,6 +108,10 @@ public final class CefRuntime {
     /// `NSApp` — CEF needs the application object to be a `CefApplication`,
     /// which this installs.
     ///
+    /// Call it before the app starts work on other threads, too: loading the
+    /// framework makes Chromium's allocator the default malloc zone, and
+    /// memory another thread frees while the zones are swapped traps.
+    ///
     /// Throws ``CefError/alreadyInitialized`` when Chromium is running, and
     /// ``CefError/shutDown`` once it has shut down: Chromium starts once per
     /// process.
