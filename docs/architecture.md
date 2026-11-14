@@ -21,7 +21,9 @@ examples.
 
 The rule: the library holds what an app cannot write against its public
 API, because it calls the CEF C API, hooks Chromium or works around a CEF
-or Chromium limit. Everything else belongs to the app.
+or Chromium limit, plus the defaults an embedder cannot ship without: the
+built-in sheets and presenters that answer a delegate method nobody
+implemented, each replaceable. Everything else belongs to the app.
 
 ## Modules
 

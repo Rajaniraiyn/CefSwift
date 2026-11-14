@@ -23,7 +23,7 @@ difference:
 |---|---|---|---|
 | `CefWebView` with `.embedded` (the Minimal example), before | 6 | 185 MB | 276 ms |
 | The same, after | 5 | 88 MB | 306 ms |
-| Browser example, one tab, `.browser`, before | 8 | 371 MB | 559 ms |
+| Browser example, one tab (`.chrome` with its own name and scheme), before | 8 | 371 MB | 559 ms |
 | The same, after | 7 | 166 MB | 551 ms |
 
 Launch times vary by about 30 ms from run to run, so neither change

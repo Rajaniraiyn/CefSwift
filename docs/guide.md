@@ -489,7 +489,7 @@ when it is first shown.
 |---|---|
 | State | `url`, `title`, `isLoading`, `estimatedProgress`, `canGoBack`, `canGoForward`, `favicon`, `faviconURL`, `zoomLevel`, `isFullscreen`, `statusText`, `downloads`, `findResult`, `state` (`.pending`, `.live`, `.closed`) |
 | Navigation | `load(_:)` (returns a `CefNavigation`), `goBack()`, `goForward()`, `reload(ignoringCache:)`, `stopLoading()`, `waitUntilLoaded(timeout:)` ([waiting for a load](#waiting-for-a-load)) |
-| Page | `isAudioMuted`, `find(_:backwards:caseSensitive:)`, `stopFinding(clearingSelection:)`, `findSession` (an observable find-bar model), `print()`, `pdf(configuration:)`, `printToPDF(at:configuration:)` ([PDF](#pdf)), `snapshot()` |
+| Page | `isAudioMuted`, `find(_:backwards:caseSensitive:)`, `stopFinding(clearingSelection:)`, `findSession` (an observable find-bar model), `print()` (Chromium's printing, which in Chrome style is Chrome's print preview, not the system dialog), `pdf(configuration:)`, `printToPDF(at:configuration:)` ([PDF](#pdf)), `snapshot()` |
 | JavaScript | `evaluateJavaScript(_:timeout:)`, `evaluateJavaScript(_:as:timeout:)`, `executeJavaScript(_:)`, `addUserScript(_:)` |
 | DevTools | `devTools`, `showDevTools(inspecting:)`, `closeDevTools()`, `isShowingDevTools` |
 | Lifetime | `ready()`, `close(force:)` |
@@ -3215,7 +3215,7 @@ network processes and some tens of milliseconds at launch
 |---|---|---|---|
 | `CefWebView` with `.embedded` (the Minimal example) | 5 | 88 MB | 306 ms |
 | The same with `processPolicy = .minimal` | 4 | 82 MB | 284 ms |
-| Browser example, one tab, `.browser` | 7 | 166 MB | 551 ms |
+| Browser example, one tab (`.chrome` with its own name and scheme) | 7 | 166 MB | 551 ms |
 | For comparison: a `WKWebView` app | 4 | 60 MB | 284 ms |
 | For comparison: Chrome 157, empty profile, one tab | 12 | 286 MB | – |
 

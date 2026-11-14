@@ -296,8 +296,11 @@ reading as one.
 - **What an app could write itself stays out of the library**: UI copy
   (names to show for permissions), product defaults, and heuristics for
   when to use a capability belong in the app, or in `Examples` to show
-  how. The library holds what calls the CEF C API, hooks Chromium, or works
-  around a CEF or Chromium limit.
+  how. The library holds what an app cannot write against its public API
+  (what calls the CEF C API, hooks Chromium, or works around a CEF or
+  Chromium limit), plus the defaults an embedder cannot ship without: the
+  built-in sheets and presenters behind delegate methods, which an app
+  replaces by implementing the method.
 - **Booleans** read as assertions: `isRunning`, `isDiscarded`,
   `showsToolbarButtons`, `usesSafeBrowsing`.
 - **No abbreviations** beyond terms of art (`URL`, `PDF`, `DNS`, `HTTPS`,

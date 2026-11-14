@@ -4,7 +4,7 @@ CefSwift embeds Chromium in any macOS app written in Swift, through the
 [Chromium Embedded Framework](https://github.com/chromiumembedded/cef) (CEF).
 It exposes what CEF and Chromium can do as Swift types: browsers in SwiftUI
 and AppKit views, windowed or offscreen; Chrome-style windows with Chrome's
-own pages, settings and extensions; profiles, requests, DevTools, custom
+own pages and settings; profiles, requests, DevTools, custom
 schemes and a JavaScript bridge. Optional libraries add passkeys the app
 answers and Chromium's bookmark, history and suggestion stores. That is
 enough for a full web browser; the Browser example below is one.
@@ -203,7 +203,9 @@ browser's state in their `body` and update when it changes.
 
 The rule: the library holds what an app cannot write against its public
 API, because it calls the CEF C API, hooks Chromium or works around a CEF
-or Chromium limit. Everything else belongs to the app.
+or Chromium limit, plus the defaults an embedder cannot ship without: the
+built-in sheets and presenters that answer a delegate method nobody
+implemented, each replaceable. Everything else belongs to the app.
 
 ## Features
 

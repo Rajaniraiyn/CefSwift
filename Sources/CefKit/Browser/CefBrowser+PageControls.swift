@@ -105,7 +105,12 @@ extension CefBrowser {
         withHost { $0.pointee.stop_finding($0, clearingSelection ? 1 : 0) }
     }
 
-    /// Opens the system print dialog for the page.
+    /// Prints the page with Chromium's own printing interface, as the
+    /// page's `window.print()` does: in a Chrome-style browser, Chrome's
+    /// print preview (CefChromium's `.printPreview` surface), not the
+    /// system print dialog. To print through the system dialog under the
+    /// app's control, render the page with ``pdf(configuration:)`` and
+    /// print the PDF with PDFKit.
     public func print() {
         guard !isDiscarded else {
             whenRestored { [weak self] in self?.print() }

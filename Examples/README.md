@@ -28,7 +28,7 @@ public API; CefSwift itself has no notion of a browser.
 - `BrowserFeature`: the points a feature plugs into, each with a default
   that does nothing.
 - `BrowserScene`: the Settings window and the menu bar, filled with the
-  features' rows and commands; `CefRuntime.Configuration.browser`.
+  features' rows and commands; the example's runtime configuration (`CefRuntime.Configuration.browser`, the library's `.chrome` under the example's name, with its scheme).
 - Back and forward and the New Tab button, the tab's icon, File › New Tab
   and the View menu's reload, zoom and Developer Tools; what typed text
   means (`TypedAddress`: an address, or a search); the `browser://` scheme
