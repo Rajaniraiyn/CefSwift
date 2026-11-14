@@ -20,8 +20,7 @@ import CefSwiftUI
 ///   standard input closes, for `Scripts/measure-footprint.py`.
 ///
 /// Features read their own: `-appearance` (Appearance), `-showTaskManager`
-/// (TaskManager), `-showPageInfo` (PageInfo) and `-customChromiumPanels`
-/// (ChromiumPanels).
+/// (TaskManager) and `-showPageInfo` (PageInfo).
 @MainActor
 struct LaunchOptions {
     var urls: [URL] = []

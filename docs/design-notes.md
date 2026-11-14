@@ -517,8 +517,9 @@ In a window Chrome draws, measured:
   `GetTabStripData()` returns every window's tree: pinned and unpinned
   collections, groups with their title, colour and collapsed state, tabs
   with title, address, activity and alert states, and `OnTabStripUpdated`
-  on changes; its window identifiers are `chrome.windows`'. It does not
-  report a new window by itself, so `follow()` also reads every 1.5 s.
+  on changes; its window identifiers are `chrome.windows`'. It reports
+  neither a new window nor a group renamed or recoloured (an extension's
+  `chrome.tabGroups.update`) by itself.
 - `chrome://tab-strip.top-chrome` (the WebUI tab strip) is not built on
   macOS; `chrome://tab-search.top-chrome` loads, but its Mojo modules are
   bundled into the app; `tabs_api.mojom.TabStripService` is bound only to
@@ -528,14 +529,64 @@ In a window Chrome draws, measured:
   `BridgedContentView` answers every hit test inside itself, so a view
   added to it gets no clicks; a view added to the window's frame view
   above the content view does, and the window buttons still work. An app
-  can cover Chrome's strip and toolbar with its own this way; Chrome's
-  views stay in the accessibility tree and keyboard loop beneath.
+  can cover Chrome's strip and toolbar with its own this way.
 
-`CefTabStrip` (CefChromium) is the result: a mirror read from
-`tab_strip_internals.mojom`, changed through `chrome.tabs`. Chromium's tab
-identifiers are not visible to CEF, so `browser(for:)` matches a tab with
-the browsers by window and address, and same-address tabs by creation
-order. Group names and colours have no WebUI route to change them.
+CefChromium's `CefChromeWindow`, `CefTab`, `CefTabGroup` and `CefTabStrip`
+are the result. Measured further (SelfTest `tabStrip`, and the
+`extensions` probe's "tab strip and extensions" checks):
+
+- **No way to have Chromium leave the strip and toolbar out.** A normal
+  window always has both; popup and app windows have neither but are not
+  tabbed. Chrome's vertical tabs (`vertical_tabs.enabled`, width
+  `vertical_tabs.uncollapsed_width`) move the strip to the side and leave
+  a toolbar of 46 points at the top. So the app's views cover them, at
+  Chromium's height (87 points with tabs at the top).
+- **Covered controls out of the way.** The accessibility tree loses them
+  when `AXPlatformNodeCocoa`'s children leave out elements wholly under
+  the cover (checked: no `AXTabGroup` or `AXToolbar` of Chromium's in the
+  window's tree, the app's top bar in it). Keyboard focus Chromium moves
+  to them (`IDC_FOCUS_LOCATION`, Tab past the page) does not change
+  AppKit's first responder when it is already Chromium's content view, so
+  CefChromium also looks at Chromium's focused accessibility element after
+  each window update and moves focus to the app's views.
+- **Matching tabs with browsers exactly.** Neither `chrome.tabs` ids nor
+  `TabHandle`s are visible to CEF, and CEF's browser identifier is not the
+  tab id. DevTools' `Target.getTargetInfo` gives a target id no tab API
+  shows; `Browser.getWindowForTarget` gives the window, but needs a DevTools
+  session on every tab. What is exact: a browser's view is in its tab's
+  window (`nativeView.window`, background tabs' views included, hidden),
+  shown only for the active tab; and `chrome.tabs` reports `mutedInfo` for
+  every tab, which CEF sets (`set_audio_muted`). So: the active tab is the
+  browser shown in the window, a background tab the one browser in the
+  window with its address, and among background tabs of one address a
+  browser is muted for a moment to see which tab reports it. Matches are
+  kept by `chrome.tabs` id, which survives moves between windows (the
+  `CefBrowser` does too).
+- **No `chrome.tabs` event listeners on the WebUI host.** With
+  `chrome.tabs.onUpdated` and the like listened to on `chrome://bookmarks`,
+  Chromium crashed (`SIGTRAP`, nothing logged) later in the same run, when
+  an extension was disabled and enabled again or an incognito window
+  opened. `CefTabStrip` reads `chrome.windows.getAll({populate: true})` when
+  `OnTabStripUpdated` reports a change, and every second for what that
+  does not report (a new window, titles, sound); with groups present the
+  internal page is read every two seconds for their names and colours.
+- **Group names and colours** change through Chrome's own group editor:
+  the header's `AXShowMenu` opens it, kept transparent, the name is typed
+  through its `NSTextInputClient` and a colour pressed through
+  accessibility. **Collapsing** has no route: the header offers no
+  `AXPress` or expanded state, the editor no collapse item, and neither a
+  click sent through the window at the header (with the cover set aside)
+  nor a Space key collapsed it, with the window key. `setCollapsed` throws
+  `.unsupported`; the Browser example collapses groups in its own rail.
+- **Tabs the app opens keep its configuration.** Chromium adds tabs to its
+  windows only itself (`chrome.tabs.create`, its commands), with CefKit's
+  default client and configuration. `CefChromeWindow.openTab` creates the
+  browser with the app's configuration in a window of its own, kept off
+  screen and transparent, then `chrome.tabs.move`s its tab in: the browser,
+  its bridges and user scripts come along.
+- **Previews.** Chromium's hover-card thumbnails come from
+  `ThumbnailTabHelper`, which only Chrome's views tab strip and the WebUI
+  tab strip (not built on macOS) read; no route was found. Not done.
 
 ## Memory settings measured and not used
 

@@ -32,7 +32,8 @@ import CefBase
 /// a native tab bar; or keep one window per tab and show the selected one.
 /// Tabs that are Chromium's own, which `chrome.tabs` and tab groups see,
 /// live in the windows ``CefRuntime/openChromeWindow(url:frame:configuration:delegate:)``
-/// opens (CefChromium's `CefTabStrip` mirrors them).
+/// opens; CefChromium's `CefChromeWindow` hosts them with the app's own
+/// tab interface over Chrome's. Use `CefWindow` for one page in a window.
 @MainActor
 @Observable
 public final class CefWindow: Identifiable {

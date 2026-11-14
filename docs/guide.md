@@ -2214,8 +2214,11 @@ state read it in their own `body`.
 
 ### Tabs
 
-Each `CefWindow` holds one browser. A tabbed browser is one window per
-tab, grouped by a shared `tabbingIdentifier`. To show the "+" button in the
+Each `CefWindow` holds one browser, a Chromium window of one tab. For
+tabs that are Chromium's own, use `CefChromeWindow`
+([Chromium's tabs](#chromiums-tabs-windows-tabs-and-groups)). With
+`CefWindow`, a tabbed interface is one window per tab, grouped by a shared
+`tabbingIdentifier`. To show the "+" button in the
 native tab bar, implement `newWindowForTab(_:)` in your app delegate. To put
 a new tab in a specific group, call `addTabbedWindow(_:ordered:)` on a window
 of that group with the new `window.window`.
@@ -2965,49 +2968,99 @@ page whose tiles come from `topSites()` and `bookmarks.recent()` through a
 `CefBridge` (`Features/StartPage`). It
 reads history when the menu bar opens, so at launch it starts no host.
 
-### Chromium's tab strip
+### Chromium's tabs: windows, tabs and groups
 
 Tabs that are Chromium's own — what `chrome.tabs`, `chrome.tabGroups`,
-recently closed tabs and session restore see — live in the windows Chrome
-draws (`CefRuntime.shared.openChromeWindow(url:)`). A `CefWindow` is always a
-Chromium window of one tab, which Chromium counts as a popup window, and
-CEF refuses a second Chrome-style browser view in one window. CefChromium's
-`profile.tabStrip` mirrors the profile's Chrome windows and drives them, so
-your own tab interface can draw Chromium's model rather than keep one:
+recently closed tabs and moving tabs between windows see — live in the
+windows Chrome draws. CefChromium models them in three pieces, each
+usable alone, all `@Observable`:
+
+| | Type | What it is |
+|---|---|---|
+| Window | `CefChromeWindow` | One of Chromium's tabbed windows (a `Browser` of type `normal`): its tabs and groups in order, and the regions of the window the app fills |
+| Tab | `CefTab` | A browser's place in Chromium's tab model: its `browser`, title, icon, loading, sound, pinning, group, selection; commands on itself |
+| Group | `CefTabGroup` | A tab group: title, colour, collapsed, tabs |
+
+The profile's `CefTabStrip` (`profile.tabStrip`) lists the windows and
+follows Chromium from first use, so a tab interface draws Chromium's model
+instead of keeping one: changes made by the app, by Chrome's commands and
+by extensions all show up the same way.
 
 ```swift
 import CefChromium
 
-let strip = CefProfile.default.tabStrip
-Task { await strip.follow() }                    // `windows` follows Chromium
-for window in strip.windows {
-    for tab in window.tabs {
-        print(tab.title, tab.isPinned, tab.group as Any, tab.alerts)
-    }
-}
-if let window = strip.windows.first, let tab = window.tabs.last {
-    try await strip.pin(tab)
-    let group = try await strip.group([tab])
-    print(window.groups.first { $0.id == group }?.color as Any)
-    try await strip.moveToNewWindow(tab)
+let window = try await CefChromeWindow.open(url: URL(string: "https://swift.org")!)
+let tab = try await window.openTab(URL(string: "https://developer.apple.com")!)
+try await tab.pin()
+let group = try await window.strip.group([tab])
+try await group?.setTitle("Reading")
+try await tab.move(to: 0, in: window)
+for tab in window.tabs {
+    print(tab.title, tab.isPinned, tab.group?.title ?? "-", tab.browser?.identifier ?? -1)
 }
 ```
 
-`windows` lists each window's tabs in the strip's order (pinned first),
-with their title, address, activity, pinning, group and alerts (audio,
-muted, recording, capture, devices), and its groups with their title,
-colour and collapsed state. `follow()` reads again whenever Chromium
-reports a change, whoever made it: your code, Chrome's commands, an
-extension. `select`, `move(_:to:in:)` (to another window too, keeping the
-page, its history and its `CefBrowser`), `pin`, `group`, `ungroup`,
-`duplicate`, `moveToNewWindow`, `newTab(_:in:at:isActive:)`, `close` and
-`reopenClosedTab(in:)` change Chromium's tab strip. `browser(for:)` is the
-`CefBrowser` of a tab, matched by window and address.
+Each command asks Chromium; the properties change when Chromium reports
+the change, a moment later. Commands: `select`, `close`, `pin`, `move(to:in:)`
+(to another window too: the tab keeps its page, its history and its
+`CefBrowser`), `duplicate`, `moveToNewWindow`, `setMuted`, `discard`; on
+the strip `group`, `ungroup`, `select(_:)` for several tabs (Chromium's
+multiple selection), `pin`/`move`/`close` for several, `reopenClosed(in:)`
+(⌘⇧T); on a group `add`, `ungroup`, `close`, `move`, `moveToNewWindow`,
+`setTitle`, `setColor`. `recentlyClosed` lists what Chromium can reopen.
 
-Group names, colours and collapsing are read only: Chromium grants
-`chrome.tabGroups` to extensions alone. Chrome's own tab strip and toolbar
-stay in the window; to show your own instead, cover them. The
-[design notes](design-notes.md#tabs-chromiums-tab-strip-under-the-apps-own)
+**The app's own tab interface.** Set `showsChromeUI` to `false` and
+Chrome's tab strip and toolbar are covered by the app's `topBar` (and,
+with tabs at the side, `sidebar`): they get no clicks, no keyboard focus
+(focus that reaches them moves to the app's views) and no place in the
+accessibility tree. `contentFrame` is where the page is, as it moves with
+resizing, full screen, the bookmarks bar, infobars and the side panel; the
+covered height is Chromium's (`topBarHeight`), since Chromium lays out its
+window itself. `strip.layout = .vertical(width:)` turns on Chrome's
+vertical tabs, which the `sidebar` covers.
+
+```swift
+window.showsChromeUI = false
+window.setTopBar { MyTabBar(window: window) }
+window.setPageOverlay { StatusText(window: window) }
+```
+
+**Tabs and browsers.** Each tab is matched with its `CefBrowser` exactly:
+a tab the app opens with `openTab` is known from its creation; a window's
+active tab is the browser shown in its window; a background tab is the one
+browser in its window with its address, and when several share one,
+CefChromium mutes one of them through CEF for a moment and asks Chromium
+which tab became muted. `openTab` makes the browser with the app's
+configuration and delegate (it starts in a window of its own, kept off
+screen, and Chromium moves the tab in); tabs Chromium makes itself (an
+extension's `chrome.tabs.create`, a duplicate, a reopened tab) have CefKit's
+default configuration and reach `CefRuntime.onBrowserCreated`.
+
+**Dragging tabs.** `CefTab.Transfer` is `Transferable` (the tab inside the
+app, its address in Finder and other apps) and `tab.pasteboardItem` is the
+same for AppKit dragging; the drop lands with `move(to:in:)` or
+`group.add(_:)`.
+
+**What Chromium does not allow.** Collapsing a group: Chromium grants
+`chrome.tabGroups` to extensions only, and its group header takes no
+accessibility action, click or key press sent to it (`setCollapsed` throws
+`.unsupported`; `isCollapsed` follows an extension's collapsing). Renaming
+and recolouring go through Chrome's own group editor, kept off screen. Tabs
+cannot move between profiles: open the page in the other profile's window
+and close it here. `chrome.tabs.remove` from a WebUI page ended the browser
+process, so tabs close through CEF.
+
+**Which host when.**
+
+| You want | Use |
+|---|---|
+| A page inside your own SwiftUI or AppKit views | `CefWebView` (Alloy style; not a Chromium tab) |
+| One page in a window, Chrome's pages and extensions working | `CefWindow` (a Chromium window of one tab, of type `popup`) |
+| Several tabs Chromium knows, with Chrome's own UI | `CefChromeWindow` (or `CefRuntime.openChromeWindow`) |
+| Your own tab interface over Chromium's tabs | `CefChromeWindow` with `showsChromeUI = false` and a `topBar` |
+| Pages without a window (rendering, automation) | `CefWebView` offscreen |
+
+The [design notes](design-notes.md#tabs-chromiums-tab-strip-under-the-apps-own)
 record the measurements.
 
 ## Extensions

@@ -1,4 +1,5 @@
 import AppKit
+import CefChromium
 import CefSwiftUI
 import SwiftUI
 
@@ -115,6 +116,7 @@ struct TabCommands: Commands {
             .keyboardShortcut("w")
             Button("Reopen Closed Tab") { controller.keyWindow?.chrome.reopenClosedTab() }
                 .keyboardShortcut("t", modifiers: [.command, .shift])
+            RecentlyClosedMenu(controller: controller)
         }
         CommandGroup(before: .windowList) {
             Button("Show Next Tab") { controller.select(.next) }.keyboardShortcut(.tab, modifiers: .control)
@@ -145,5 +147,25 @@ private struct TabLayoutSetting: View {
             Text("Across the Top").tag(false)
             Text("Down the Side").tag(true)
         }
+    }
+}
+
+/// File › Recently Closed: what Chromium can reopen, newest first. Chromium
+/// reopens the newest (⌘⇧T, `IDC_RESTORE_TAB`); the others are listed for
+/// reference, as no route reopens a given entry.
+private struct RecentlyClosedMenu: View {
+    let controller: BrowserController
+
+    var body: some View {
+        let strip = CefProfile.default.tabStrip
+        Menu("Recently Closed") {
+            ForEach(Array(strip.recentlyClosed.prefix(12).enumerated()), id: \.offset) { offset, item in
+                Button(String(menuTitle: item.title, url: item.url) + (item.kind == .window ? " (window)" : "")) {
+                    controller.keyWindow?.chrome.reopenClosedTab()
+                }
+                .disabled(offset > 0)
+            }
+        }
+        .disabled(strip.recentlyClosed.isEmpty)
     }
 }
