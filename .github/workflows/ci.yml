@@ -209,7 +209,7 @@ jobs:
           Scripts/measure-footprint.py Examples/dist/Minimal.app --kinds relaunch --runs 3 \
             --markdown "$GITHUB_STEP_SUMMARY" --max-mib 160 --max-processes 5 || status=1
           Scripts/measure-footprint.py Examples/dist/Browser.app --kinds relaunch --runs 3 \
-            --markdown "$GITHUB_STEP_SUMMARY" --max-mib 620 --max-processes 9 || status=1
+            --markdown "$GITHUB_STEP_SUMMARY" --max-mib 620 --max-processes 10 || status=1
           exit "$status"
 
       # On failure: the full log, the results, and any crash reports from
