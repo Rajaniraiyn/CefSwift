@@ -1,0 +1,10 @@
+{
+  "bundleIdentifier": "dev.rajaniraiyn.cefswift.selftest",
+  "displayName": "CefSwift SelfTest",
+  "minimumSystemVersion": "15.0",
+  // The localization checks start SelfTest in these languages; the
+  // bundle keeps Chromium's packs for them and English.
+  "infoPlist": {
+    "CFBundleLocalizations": ["en", "fr", "de", "pt-BR", "zh-Hans"]
+  }
+}

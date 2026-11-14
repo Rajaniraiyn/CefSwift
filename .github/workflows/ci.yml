@@ -1,11 +1,25 @@
-# CefSwift CI — build, test, bundle the Browser example, and smoke-test a real
-# CEF launch on every push/PR to main.
+# Builds, tests, audits the C bridge, bundles SelfTest and runs it against the
+# real Chromium, then opens every demo of the Gallery example. Also the gate for the auto-merged CEF update pull requests,
+# which start it with workflow_dispatch (docs/automation.md).
 #
 # Cost notes (keep this cheap):
-#   - Single macos-15 job (arm64). macos-latest currently aliases macos-26 and
-#     macos-14 is deprecating, so the runner is pinned explicitly.
+#   - One full macos-15 (arm64) job, `ci`. The label selects the macOS 15
+#     image family; GitHub updates that image (Xcode, tools) in place every
+#     week or two, so a run can change without a commit here. The
+#     "Toolchain" step prints what each run used.
+#   - One short job beside it, in parallel and without CEF: `intel`
+#     compiles everything for x86_64 on the same arm64 runner.
+#   - One more in parallel, `xcode`: the Xcode example built, archived and
+#     run by xcodebuild (about 2.5 minutes on an M3; more on a runner). It
+#     is not a required check, so it never holds up a CEF update.
 #   - Only the minimal arm64 CEF flavor is downloaded, and `.cef/downloads`
-#     (~120 MB) is cached keyed on the pinned CEF version.
+#     (~135 MB) is cached keyed on the pinned CEF version.
+#
+# What this verifies, and what it does not (docs/automation.md#ci):
+#   - Everything compiles against the macOS 14 deployment target that
+#     Package.swift declares. Nothing runs on macOS 14: GitHub no longer
+#     offers a macOS 14 runner. Tests and SelfTest run on macOS 15.
+#   - Everything compiles for Intel; nothing runs on Intel.
 name: CI
 
 on:
@@ -15,35 +29,42 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
-permissions:
-  contents: read
-
 jobs:
   ci:
-    # Job name intentionally just "ci" — docs/automation.md tells users to mark
-    # it as the required status check that gates auto-merged CEF update PRs.
+    # Keep the job name "ci": it is the required status check that gates the
+    # auto-merged CEF update pull requests.
     runs-on: macos-15
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Read pinned CEF version
+      - name: Toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          swift --version
+
+      - name: Read the pinned CEF version
         id: cef
-        run: echo "version=$(jq -r .cef CEF_VERSION.json)" >> "$GITHUB_OUTPUT"
+        run: |
+          version="$(jq -r .cef CEF_VERSION.json)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "framework=$GITHUB_WORKSPACE/.cef/dist/${version}_macosarm64_minimal/Release/Chromium Embedded Framework.framework" >> "$GITHUB_OUTPUT"
 
-      - name: Build (root package)
-        run: swift build
+      # Offline checks of the update logic (release selection, manifest,
+      # archive extraction, API-version handling).
+      - name: Update script self-test
+        run: Scripts/update-cef.py --self-test
 
-      - name: Test
-        run: swift test
-
-      # Cache the downloaded CEF tarball; the key matches the scheme used by
-      # Scripts/cef-update.sh and the CefPlugin: cef-<version>-<platform>-<flavor>.
+      # Same key as the update workflow saves, so an update branch restores
+      # the archive that workflow already downloaded.
       - name: Cache CEF downloads
         uses: actions/cache@v4
         with:
@@ -57,48 +78,160 @@ jobs:
             --allow-network-connections all \
             cef download
 
-      # Audit the dlsym bridge: every symbol in Sources/CCef/.../ccef_symbols.h
-      # must be an exported global of the just-downloaded framework binary.
-      - name: Check bridge symbols against CEF binary
-        run: Scripts/check-symbols.sh
+      # The generated bridge must match the vendored headers, and every
+      # function it binds must be exported by the framework it will load —
+      # a mismatch would otherwise abort at first call.
+      - name: C bridge matches the headers and the framework
+        run: Scripts/generate-bindings.py --check --framework "${{ steps.cef.outputs.framework }}"
 
-      - name: Build Examples package
-        run: swift build --package-path Examples
+      - name: Build
+        run: swift build --build-tests
 
-      # Bundle the Browser example into a runnable .app.
-      # NOTE: the `cef` command plugin is declared in the ROOT package; the
-      # Examples package depends on it via `.package(path: "..")`, which makes
-      # the plugin verb available when running from Examples. If SwiftPM ever
-      # reports an ambiguous/unknown `cef` verb here, disambiguate with
-      # `--package cefswift` (the root package identity) after `swift package`.
-      # `--output dist` resolves relative to the Examples package directory.
-      - name: Bundle Browser example
+      # The package's deployment target reaches the built code: availability
+      # checking above was against macOS 14.
+      - name: Deployment target is macOS 14
+        run: |
+          xcrun vtool -show-build .build/debug/cefswift-helper | tee "$RUNNER_TEMP/build-version.txt"
+          grep -Eq 'minos 14\.0$' "$RUNNER_TEMP/build-version.txt"
+
+      # With the framework's path, the loader tests run instead of skipping.
+      - name: Test
+        env:
+          CEF_FRAMEWORK_PATH: ${{ steps.cef.outputs.framework }}
+        run: swift test
+
+      # The examples' own unit tests (the Browser example's policies).
+      - name: Test the examples
+        run: swift test --package-path Examples
+
+      # The unit tests again under Thread Sanitizer and Address Sanitizer.
+      # They never start Chromium; the loader tests skip without the
+      # framework's path.
+      - name: Test with Thread Sanitizer
+        run: swift test --sanitize=thread
+
+      # The default build system links the C helper-startup dylib without
+      # the ASan runtime (undefined ___asan_* symbols); the native one
+      # links it.
+      - name: Test with Address Sanitizer
+        run: swift test --sanitize=address --build-system native
+
+      # Every Swift sample in README.md and docs/ compiles against this
+      # checkout, for macOS 14.
+      - name: Documentation samples compile
+        run: Scripts/check-doc-samples.py
+
+      # In release, as cef bundle builds below: it then only relinks SelfTest
+      # instead of compiling CefSwift and the examples a second time.
+      - name: Build examples
+        run: swift build --package-path Examples --configuration release
+
+      # The plugin keeps its cache in the invoking package's .cef/, so the
+      # Examples package would download the same archive again; give it a
+      # copy-on-write clone of the one already here.
+      - name: Bundle SelfTest
+        run: |
+          mkdir -p Examples/.cef
+          cp -Rc .cef/downloads Examples/.cef/
+          swift package --package-path Examples \
+            --allow-writing-to-package-directory \
+            --allow-network-connections all \
+            cef bundle --product SelfTest --configuration release --output dist
+
+      - name: The bundle passes cef doctor
         run: |
           swift package --package-path Examples \
             --allow-writing-to-package-directory \
             --allow-network-connections all \
-            cef bundle --product Browser --configuration release --output dist
+            cef doctor dist/SelfTest.app
 
-      # The Browser example exits 0 after its first successful page load when
-      # launched with --cef-smoke-test. macOS runners lack GNU `timeout`, so
-      # use a portable shell watchdog: background the app + a killer, wait for
-      # the app, kill the killer if it returned first.
-      - name: Smoke test (launch CEF, load a page, exit)
+      # Runs every end-to-end check against the real Chromium runtime, each
+      # group in a process of its own; the app exits with the number of
+      # failed checks. SELFTEST_STRICT makes a skip for a reason of the
+      # environment (offline, window not visible) a failure, since this
+      # runner's environment is under our control. FAIL and SKIP lines go
+      # to the run summary.
+      - name: SelfTest
+        shell: bash
+        env:
+          SELFTEST_ISOLATED: "1"
+          SELFTEST_STRICT: "1"
+          # What a hosted runner, a virtual machine, cannot run: frame rates
+          # that follow a display's refresh, and FairPlay playback.
+          SELFTEST_EXPECTED_SKIPS: "frames: ;compatibility: an offscreen page gets animation frames;system engine: FairPlay playback;extensions: installing from the Chrome Web Store;extensions (relaunch): installing a Chrome Web Store"
+          SELFTEST_JSON: ${{ runner.temp }}/selftest.json
         run: |
-          set +e
-          ./Examples/dist/Browser.app/Contents/MacOS/Browser --cef-smoke-test &
-          APP=$!
-          ( sleep 60; kill -9 $APP 2>/dev/null ) &
-          KILLER=$!
-          wait $APP
-          STATUS=$?
-          kill $KILLER 2>/dev/null
-          echo "smoke test exit: $STATUS"
-          exit $STATUS
+          set -o pipefail
+          status=0
+          ./Examples/dist/SelfTest.app/Contents/MacOS/SelfTest 2>&1 | tee "$RUNNER_TEMP/selftest.log" || status=$?
+          {
+            echo "### SelfTest: exit status $status"
+            if [ -f "$SELFTEST_JSON" ]; then
+              jq -r '"\(.passed) passed, \(.failed) failed, skipped: environment \(.skipped.environment), limitation \(.skipped.limitation), uncategorized \(.skipped.uncategorized); \(.durationSeconds | floor) s"' "$SELFTEST_JSON"
+            fi
+            echo '```'
+            grep -E '^(FAIL|SKIP|SUMMARY)|CHECK' "$RUNNER_TEMP/selftest.log" || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
 
-      # Catch generated files escaping .gitignore: after building, testing,
-      # downloading, and bundling, the working tree must still be clean —
-      # no modified tracked files and nothing untracked.
+      # Opens every demo of the Gallery example in turn; the app prints a
+      # PASS or FAIL line for each and exits with the number of failures.
+      - name: Gallery smoke test
+        run: |
+          swift package --package-path Examples \
+            --allow-writing-to-package-directory \
+            --allow-network-connections all \
+            cef bundle --product Gallery --configuration release --output dist
+          ./Examples/dist/Gallery.app/Contents/MacOS/Gallery -smoke
+
+      # Idle footprint of the Minimal and Browser examples (relaunch on an
+      # existing profile, a static local page), written to the run summary.
+      # A virtual machine's numbers differ from a Mac's and drift, so the
+      # bounds are wide: about 1.5 times what an Apple M3 measures (Minimal
+      # about 100 MiB, Browser about 215 MiB in 8 processes) and today's
+      # process counts. The Browser's windows are Chromium's own tabbed
+      # windows (CefChromeWindow); CefTabStrip runs no hidden host while
+      # nothing changes, and the Browser turns Chromium's WebUI omnibox
+      # popup off (its preloaded renderer and off-screen drawing cost about
+      # 160 MiB under the covered omnibox).
+      # They catch a gross regression, such as a page or a host process kept
+      # alive at idle; compare smaller changes on a Mac (CONTRIBUTING.md).
+      - name: Footprint
+        run: |
+          for product in Minimal Browser; do
+            swift package --package-path Examples \
+              --allow-writing-to-package-directory \
+              --allow-network-connections all \
+              cef bundle --product "$product" --configuration release --output dist
+          done
+          status=0
+          Scripts/measure-footprint.py Examples/dist/Minimal.app --kinds relaunch --runs 3 \
+            --markdown "$GITHUB_STEP_SUMMARY" --max-mib 160 --max-processes 5 || status=1
+          Scripts/measure-footprint.py Examples/dist/Browser.app --kinds relaunch --runs 3 \
+            --markdown "$GITHUB_STEP_SUMMARY" --max-mib 320 --max-processes 9 || status=1
+          exit "$status"
+
+      # On failure: the full log, the results, and any crash reports from
+      # this run (Chromium's helpers report under their own names).
+      - name: Collect SelfTest diagnostics
+        if: failure()
+        run: |
+          mkdir -p "$RUNNER_TEMP/diagnostics"
+          cp "$RUNNER_TEMP"/selftest.* "$RUNNER_TEMP/diagnostics/" 2>/dev/null || true
+          find "$HOME/Library/Logs/DiagnosticReports" -newer "$GITHUB_WORKSPACE/Package.swift" -type f \
+            -exec cp {} "$RUNNER_TEMP/diagnostics/" \; 2>/dev/null || true
+          ls -la "$RUNNER_TEMP/diagnostics"
+
+      - name: Upload SelfTest diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: selftest-diagnostics
+          path: ${{ runner.temp }}/diagnostics
+          if-no-files-found: ignore
+          retention-days: 14
+
       - name: Working tree must stay clean
         run: |
           git diff --exit-code
@@ -107,4 +240,90 @@ jobs:
             echo "Working tree is dirty after the build — add the offenders to .gitignore:"
             echo "$UNTRACKED"
             exit 1
+          fi
+
+  # The package and its tests compile for Intel. CefKit loads the CEF
+  # framework at run time and the plugin builds the helper only when it
+  # bundles, so compiling needs no x86_64 CEF download; bundling and
+  # running for Intel would (docs/automation.md#ci).
+  intel:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: swift --version
+
+      - name: Build for x86_64
+        run: swift build --build-tests --arch x86_64
+
+      - name: The build is x86_64, for macOS 14
+        run: |
+          helper="$(swift build --arch x86_64 --show-bin-path)/cefswift-helper"
+          lipo -archs "$helper" | tee "$RUNNER_TEMP/archs.txt"
+          grep -qx x86_64 "$RUNNER_TEMP/archs.txt"
+          xcrun vtool -show-build "$helper" | grep -Eq 'minos 14\.0$'
+
+  # The Xcode track: Examples/Xcode built with xcodebuild, Debug and Release,
+  # archived and exported, each launched with -smoke YES, and cef doctor on
+  # the exported app (Scripts/check-xcode-example.sh, docs/bundling.md#xcode).
+  # Its build phase downloads CEF into Examples/Xcode/.cef unless the cache
+  # has the archive.
+  xcode:
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      # The example's xcconfig turns build settings into entitlements
+      # (RUNTIME_EXCEPTION_*), which Xcode does from version 26: use the
+      # newest Xcode the runner has.
+      - name: Toolchain
+        run: |
+          newest="$(ls -d /Applications/Xcode_*.app | grep -vi beta | sort -V | tail -1)"
+          echo "DEVELOPER_DIR=$newest/Contents/Developer" >> "$GITHUB_ENV"
+          export DEVELOPER_DIR="$newest/Contents/Developer"
+          xcodebuild -version
+          swift --version
+
+      - name: Read the pinned CEF version
+        id: cef
+        run: echo "version=$(jq -r .cef CEF_VERSION.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache CEF downloads
+        uses: actions/cache@v4
+        with:
+          path: Examples/Xcode/.cef/downloads
+          key: cef-${{ steps.cef.outputs.version }}-macosarm64-minimal
+
+      - name: Build, archive and run the Xcode example
+        run: Scripts/check-xcode-example.sh
+
+      - name: Working tree must stay clean
+        run: |
+          git diff --exit-code
+          test -z "$(git status --porcelain)"
+
+  # Runs started for an update pull request are dispatched with the workflow
+  # token, so a failure notifies nobody and auto-merge just waits. Say so on
+  # the pull request.
+  report:
+    needs: ci
+    if: >-
+      always() && needs.ci.result == 'failure' && github.event_name == 'workflow_dispatch' &&
+      (github.ref_name == 'cef-update' || github.ref_name == 'cef-api-update')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: Comment on the update pull request
+        run: |
+          if [ "$(gh pr view "$GITHUB_REF_NAME" --json state --jq .state 2>/dev/null)" = OPEN ]; then
+            gh pr comment "$GITHUB_REF_NAME" --body "CI failed for ${GITHUB_SHA:0:7}, so this will not merge: $RUN_URL (the run summary lists the SelfTest FAIL lines). Push a fix to this branch; later update runs leave it alone until a newer CEF is released."
           fi

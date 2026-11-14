@@ -3,6 +3,7 @@ import Testing
 
 @testable import CCef
 @testable import CefKit
+import CefBase
 
 @Suite struct CefStringTests {
     @Test func roundTrip() {
@@ -64,20 +65,19 @@ import Testing
     }
 }
 
-
 @Suite struct SafeStoragePolicyTests {
     @Test func explicitPoliciesPassThrough() {
-        #expect(CefSafeStoragePolicy.keychain.resolved() == .keychain)
-        #expect(CefSafeStoragePolicy.mockKeychain.resolved() == .mockKeychain)
+        #expect(CefRuntime.SafeStoragePolicy.keychain.resolved() == .keychain)
+        #expect(CefRuntime.SafeStoragePolicy.mockKeychain.resolved() == .mockKeychain)
     }
 
     @Test func automaticResolvesToATerminalPolicy() {
-        let resolved = CefSafeStoragePolicy.automatic.resolved()
+        let resolved = CefRuntime.SafeStoragePolicy.automatic.resolved()
         #expect(resolved == .keychain || resolved == .mockKeychain)
     }
 
     @Test func defaultConfigurationUsesAutomatic() {
-        #expect(CefConfiguration().safeStorage == .automatic)
+        #expect(CefRuntime.Configuration().safeStorage == .automatic)
     }
 }
 

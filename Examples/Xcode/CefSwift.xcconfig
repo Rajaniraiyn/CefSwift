@@ -1,0 +1,53 @@
+// The build settings an Xcode app target needs for CefSwift. Use this file
+// as the target's base configuration (Project > Info > Configurations), or
+// copy its lines into your own .xcconfig. docs/bundling.md#xcode describes
+// each setting.
+
+// The CefSwift build phase (Scripts/xcode-embed.sh) runs SwiftPM and writes
+// the helper apps into the app, which a sandboxed script phase cannot do.
+ENABLE_USER_SCRIPT_SANDBOXING = NO
+
+// Chromium cannot run in the App Sandbox, which Xcode's app template turns
+// on: remove App Sandbox in Signing & Capabilities (a setting there wins
+// over this file). Chromium's own sandbox still confines its helpers.
+ENABLE_APP_SANDBOX = NO
+
+// Library validation, part of the hardened runtime, loads only libraries
+// signed by the app's team. "Sign to Run Locally" (ad hoc, no team) has none,
+// so a Release build, which keeps the hardened runtime, could not load CEF's
+// framework. Remove this line once the target signs with your team.
+RUNTIME_EXCEPTION_DISABLE_LIBRARY_VALIDATION = YES
+
+// CEF's distributions hold one architecture each: build for this Mac's.
+ARCHS = $(NATIVE_ARCH_ACTUAL)
+
+// Where Xcode checks out the CefSwift package. For a local package, set it
+// to that checkout instead.
+CEFSWIFT_PACKAGE_DIR = $(BUILD_DIR)/../../SourcePackages/checkouts/CefSwift
+
+// CefSwift's own settings; each matches a key of cefapp.json. Uncomment to
+// change the default.
+
+// Which of Chromium's locale packs the app keeps: application (the app's
+// localizations, its development language and English), all, or a list
+// such as en fr de.
+// CEF_LOCALIZATIONS = application
+
+// exclude leaves out SwiftShader, Chromium's software GPU (16 MiB).
+// CEF_SOFTWARE_GPU_FALLBACK = include
+
+// Capabilities that add Info.plist keys and helper entitlements, such as
+// camera microphone defaultBrowser (docs/bundling.md#features). Camera and
+// microphone also follow from ENABLE_RESOURCE_ACCESS_CAMERA and
+// ENABLE_RESOURCE_ACCESS_AUDIO_INPUT.
+// CEF_CAPABILITIES =
+
+// Entitlements merged over a helper's built-in ones.
+// CEF_HELPER_ENTITLEMENTS_RENDERER = Renderer.entitlements
+
+// A cefapp.json shared with `swift package cef bundle`; the settings above
+// win over it.
+// CEF_APP_CONFIG = cefapp.json
+
+// Where the CEF distribution is downloaded and kept (about 135 MB, once).
+// CEF_CACHE_DIR = $(PROJECT_DIR)/.cef

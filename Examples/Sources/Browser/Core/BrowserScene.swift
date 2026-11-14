@@ -1,0 +1,199 @@
+import AppKit
+import CefChromium
+import CefSwiftUI
+import SwiftUI
+
+extension CefRuntime.Configuration {
+    /// The browser's Chromium: Chrome's runtime, under the browser's name.
+    static var browser: CefRuntime.Configuration {
+        var configuration = CefRuntime.Configuration.chrome
+        configuration.productName = "CefSwift Browser"
+        // Chrome's own UI is replaced by the SwiftUI toolbar; keep its
+        // internal pages free of buttons that would open Chrome windows.
+        configuration.chromeToolbar.hiddenAppMenuCommands = [.newWindow, .newIncognitoWindow]
+        // Chrome's omnibox, under the browser's own address field, is never
+        // used; its WebUI popup would be preloaded in a renderer of its own
+        // (about 50 MB) and drawn off screen (about 110 MB in the GPU
+        // process). Chromium falls back to its views popup.
+        configuration.disabledFeatures.formUnion(["WebUIOmniboxPopup", "WebUIOmniboxAimPopup", "WebUIOmniboxFullPopup"])
+        configuration.customSchemes = [CefCustomScheme(name: BrowserPages.scheme)]
+        // Quit immediately on ⌘Q instead of Chromium's "Hold ⌘Q to Quit".
+        configuration.preferences["browser.confirm_to_quit"] = false
+        if let path = UserDefaults.standard.string(forKey: "cacheDirectory") {
+            configuration.rootCacheDirectory = URL(fileURLWithPath: path, isDirectory: true)
+        }
+        return configuration
+    }
+}
+
+/// The browser's scenes: its Settings window, and its commands in the menu
+/// bar. Browser windows are Chromium's, opened by ``BrowserController``,
+/// not by a scene.
+struct BrowserScene<Features: BrowserFeature>: Scene {
+    let features: Features
+    let controller: BrowserController
+
+    var body: some Scene {
+        Settings {
+            Form {
+                StartupSetting()
+                NewTabPageSetting()
+                TabLayoutSetting()
+                features.settings
+            }
+            .formStyle(.grouped)
+            .frame(width: 420)
+            .fixedSize()
+            .environment(controller)
+        }
+        .commands {
+            // File › New Tab first: the features' File items follow it.
+            CommandGroup(replacing: .newItem) {
+                Button("New Tab") { controller.openTab() }.keyboardShortcut("t")
+                Button("New Window") { Task { await controller.openWindow() } }.keyboardShortcut("n")
+            }
+            TabCommands(controller: controller)
+            features.commands(for: controller)
+            // Groups placed before the same item stack up in reverse, so
+            // declared last, these lead the View menu.
+            PageCommands(controller: controller)
+        }
+        // SwiftUI would open Settings at launch, it being the only scene.
+        .defaultLaunchBehavior(.suppressed)
+    }
+}
+
+/// The View menu's commands for the frontmost page: reloading, zoom and
+/// DevTools.
+struct PageCommands: Commands {
+    let controller: BrowserController
+
+    var body: some Commands {
+        // Into the system's View menu, beside its tab bar and full screen items.
+        CommandGroup(before: .toolbar) {
+            Button("Reload") { controller.frontmostPage?.reload(ignoringCache: false) }
+                .keyboardShortcut("r")
+            Button("Reload Ignoring Cache") { controller.current?.reload(ignoringCache: true) }
+                .keyboardShortcut("r", modifiers: [.command, .shift])
+            Divider()
+            Button("Zoom In") { controller.current?.zoomLevel += 0.5 }.keyboardShortcut("+")
+            Button("Zoom Out") { controller.current?.zoomLevel -= 0.5 }.keyboardShortcut("-")
+            Button("Actual Size") { controller.current?.zoomLevel = 0 }.keyboardShortcut("0")
+            Divider()
+            Button("Developer Tools") { controller.current?.execute(.showDevTools) }
+                .keyboardShortcut("i", modifiers: [.command, .option])
+            Divider()
+        }
+    }
+}
+
+/// Settings: where new tabs open.
+private struct NewTabPageSetting: View {
+    @AppStorage(BrowserController.newTabPageKey) private var newTabPage = ""
+    @Environment(BrowserController.self) private var controller
+
+    var body: some View {
+        TextField(
+            "New tabs open", text: $newTabPage,
+            prompt: Text(controller.startPage?.absoluteString ?? "about:blank"))
+    }
+}
+
+extension String {
+    /// A page's title as a menu item shows it: its address when it has no
+    /// title, and shortened past 60 characters.
+    init(menuTitle title: String, url: URL?) {
+        let text = title.isEmpty ? (url?.absoluteString ?? "Untitled") : title
+        self = text.count > 60 ? text.prefix(59) + "…" : text
+    }
+}
+
+/// Commands on tabs: closing and reopening them, picking another, and where
+/// the rail is.
+struct TabCommands: Commands {
+    let controller: BrowserController
+
+    var body: some Commands {
+        CommandGroup(after: .newItem) {
+            Divider()
+            Button("Close Tab") {
+                if let tab = controller.keyWindow?.chrome.activeTab { tab.close() } else { NSApp.keyWindow?.performClose(nil) }
+            }
+            .keyboardShortcut("w")
+            Button("Reopen Closed Tab") { controller.keyWindow?.chrome.reopenClosedTab() }
+                .keyboardShortcut("t", modifiers: [.command, .shift])
+            RecentlyClosedMenu(controller: controller)
+        }
+        CommandGroup(before: .windowList) {
+            Button("Show Next Tab") { controller.select(.next) }.keyboardShortcut(.tab, modifiers: .control)
+            Button("Show Previous Tab") { controller.select(.previous) }.keyboardShortcut(.tab, modifiers: [.control, .shift])
+            Button("Next Tab") { controller.select(.next) }.keyboardShortcut("]", modifiers: [.command, .shift])
+            Button("Previous Tab") { controller.select(.previous) }.keyboardShortcut("[", modifiers: [.command, .shift])
+            Button("Select Next Tab") { controller.select(.next) }.keyboardShortcut(.rightArrow, modifiers: [.command, .option])
+            Button("Select Previous Tab") { controller.select(.previous) }.keyboardShortcut(.leftArrow, modifiers: [.command, .option])
+            ForEach(1..<10) { number in
+                Button(number == 9 ? "Last Tab" : "Tab \(number)") { controller.select(.number(number)) }
+                    .keyboardShortcut(KeyEquivalent(Character("\(number)")), modifiers: .command)
+            }
+            Divider()
+        }
+        CommandGroup(after: .sidebar) {
+            Toggle("Tabs at the Side", isOn: Binding(
+                get: { controller.tabsAtTheSide }, set: { controller.tabsAtTheSide = $0 }))
+        }
+    }
+}
+
+/// Settings: whether tabs are across the top or down the side.
+private struct TabLayoutSetting: View {
+    @Environment(BrowserController.self) private var controller
+
+    var body: some View {
+        Picker("Tabs", selection: Binding(get: { controller.tabsAtTheSide }, set: { controller.tabsAtTheSide = $0 })) {
+            Text("Across the Top").tag(false)
+            Text("Down the Side").tag(true)
+        }
+    }
+}
+
+/// File › Recently Closed: what Chromium can reopen, newest first — tabs,
+/// and windows and groups with their tab counts. Each reopens as Chromium
+/// closed it (`CefTabStrip.reopen`): a tab in its window at its place, a
+/// window with all its tabs, each with its history.
+private struct RecentlyClosedMenu: View {
+    let controller: BrowserController
+
+    var body: some View {
+        let strip = CefProfile.default.tabStrip
+        Menu("Recently Closed") {
+            ForEach(strip.recentlyClosed.prefix(15)) { item in
+                Button(Self.title(of: item)) {
+                    Task { try? await strip.reopen(item) }
+                }
+            }
+        }
+        .disabled(strip.recentlyClosed.isEmpty)
+    }
+
+    static func title(of item: CefTabStrip.ClosedItem) -> String {
+        let title = String(menuTitle: item.title, url: item.url)
+        switch item.kind {
+        case .window: return "Window: \(item.tabCount) \(item.tabCount == 1 ? "Tab" : "Tabs") — \(title)"
+        case .group: return "Group: \(title) (\(item.tabCount) \(item.tabCount == 1 ? "Tab" : "Tabs"))"
+        case .tab, .other: return title
+        }
+    }
+}
+
+/// Settings: what the browser opens at launch.
+private struct StartupSetting: View {
+    @AppStorage(BrowserController.restoresWindowsKey) private var restoresWindows = false
+
+    var body: some View {
+        Picker("On startup", selection: $restoresWindows) {
+            Text("Open a new window").tag(false)
+            Text("Reopen windows from last time").tag(true)
+        }
+        .help("After the browser quits unexpectedly, it offers to reopen its windows either way.")
+    }
+}

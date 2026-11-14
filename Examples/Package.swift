@@ -3,39 +3,77 @@ import PackageDescription
 
 let package = Package(
     name: "CefSwiftExamples",
-    platforms: [.macOS(.v14)],
-    products: [
-        .executable(name: "Browser", targets: ["Browser"]),
-        .executable(name: "Gallery", targets: ["Gallery"]),
-        .executable(name: "Launcher", targets: ["Launcher"]),
-    ],
+    platforms: [.macOS(.v15)],
     dependencies: [
-        .package(path: ".."),
+        .package(name: "CefSwift", path: ".."),
     ],
     targets: [
-        // Arc-class mini browser — the flagship example.
+        // A complete tabbed browser: Chrome-style windows, SwiftUI toolbar,
+        // composed of features (Sources/Browser/Features) on a small core.
         .executableTarget(
             name: "Browser",
             dependencies: [
                 .product(name: "CefSwiftUI", package: "CefSwift"),
+                .product(name: "CefChromium", package: "CefSwift"),
+                .product(name: "CefPasskeys", package: "CefSwift"),
+                "SystemEngine",
             ],
-            exclude: ["cefapp.json"]
+            exclude: ["cefapp.json", "Browser.entitlements", "Browser-Distribution.entitlements"]
         ),
-        // Embedding showcase — native SwiftUI dashboard mixing web cards and controls.
+        // The Browser example's WebKit tabs (SystemBrowser, SystemWebView):
+        // pages in the system's WKWebView, which plays H.264/AAC and
+        // FairPlay content Chromium in CefSwift does not. Not CEF; shows
+        // how an app puts WebKit beside CefKit with its public API.
+        .target(
+            name: "SystemEngine",
+            dependencies: [.product(name: "CefKit", package: "CefSwift")]
+        ),
+        // A library of small examples, one capability each, in one SwiftUI
+        // app; `Gallery -smoke` opens each in turn.
         .executableTarget(
             name: "Gallery",
             dependencies: [
+                .product(name: "CefKit", package: "CefSwift"),
                 .product(name: "CefSwiftUI", package: "CefSwift"),
+                .product(name: "CefChromium", package: "CefSwift"),
+                .product(name: "CefPasskeys", package: "CefSwift"),
+            ],
+            exclude: ["cefapp.json"],
+            resources: [.copy("Resources/Site")]
+        ),
+        // One CefWebView on the `.embedded` configuration; the footprint
+        // benchmark's lean case (Scripts/measure-footprint.py).
+        .executableTarget(
+            name: "Minimal",
+            dependencies: [.product(name: "CefSwiftUI", package: "CefSwift")],
+            exclude: ["cefapp.json"]
+        ),
+        // One page in one host with chosen CefSwift features: the
+        // web-compatibility matrix (Scripts/compat-matrix.py). AppKit only:
+        // it hosts browsers with CefKit's views and imports no SwiftUI.
+        .executableTarget(
+            name: "Compat",
+            dependencies: [
+                .product(name: "CefKit", package: "CefSwift"),
+                .product(name: "CefPasskeys", package: "CefSwift"),
             ],
             exclude: ["cefapp.json"]
         ),
-        // Launcher — opens each hosting mode / config demo one at a time.
+        // End-to-end checks against the real Chromium runtime; CI runs it.
         .executableTarget(
-            name: "Launcher",
+            name: "SelfTest",
             dependencies: [
                 .product(name: "CefSwiftUI", package: "CefSwift"),
+                .product(name: "CefChromium", package: "CefSwift"),
+                .product(name: "CefPasskeys", package: "CefSwift"),
+                "SystemEngine",
             ],
-            exclude: ["cefapp.json"]
+            exclude: ["cefapp.json"],
+            // An unpacked extension the extension checks load: a test
+            // fixture, not something CefSwift ships.
+            resources: [.copy("Resources/TestExtension")]
         ),
+        // Unit tests of the Browser example's own logic.
+        .testTarget(name: "BrowserTests", dependencies: ["Browser"]),
     ]
 )

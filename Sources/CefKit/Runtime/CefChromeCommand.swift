@@ -1,0 +1,117 @@
+import CCef
+import Foundation
+
+/// One of Chrome's own commands (`IDC_*`). Run it with
+/// ``CefBrowser/execute(_:disposition:)``, intercept it in
+/// ``CefBrowserDelegate/browser(_:handleChromeCommand:disposition:)``, or hide
+/// it from Chrome's app menu with ``CefRuntime/Configuration/ChromeToolbar``.
+///
+/// The named constants cover the common commands; any other `IDC_*` value
+/// from Chromium's `chrome/app/chrome_command_ids.h` works through
+/// `init(rawValue:)`.
+public struct CefChromeCommand: RawRepresentable, Hashable, Sendable {
+    public let rawValue: Int
+    public init(rawValue: Int) { self.rawValue = rawValue }
+
+    public static let back = Self(rawValue: Int(IDC_BACK))
+    public static let forward = Self(rawValue: Int(IDC_FORWARD))
+    public static let reload = Self(rawValue: Int(IDC_RELOAD))
+    public static let stop = Self(rawValue: Int(IDC_STOP))
+    public static let home = Self(rawValue: Int(IDC_HOME))
+
+    public static let newTab = Self(rawValue: Int(IDC_NEW_TAB))
+    public static let closeTab = Self(rawValue: Int(IDC_CLOSE_TAB))
+    public static let duplicateTab = Self(rawValue: Int(IDC_DUPLICATE_TAB))
+    public static let restoreTab = Self(rawValue: Int(IDC_RESTORE_TAB))
+    public static let selectNextTab = Self(rawValue: Int(IDC_SELECT_NEXT_TAB))
+    public static let selectPreviousTab = Self(rawValue: Int(IDC_SELECT_PREVIOUS_TAB))
+    public static let newWindow = Self(rawValue: Int(IDC_NEW_WINDOW))
+    public static let newIncognitoWindow = Self(rawValue: Int(IDC_NEW_INCOGNITO_WINDOW))
+    public static let closeWindow = Self(rawValue: Int(IDC_CLOSE_WINDOW))
+    public static let toggleFullscreen = Self(rawValue: Int(IDC_FULLSCREEN))
+
+    public static let find = Self(rawValue: Int(IDC_FIND))
+    public static let print = Self(rawValue: Int(IDC_PRINT))
+    public static let savePage = Self(rawValue: Int(IDC_SAVE_PAGE))
+    public static let viewSource = Self(rawValue: Int(IDC_VIEW_SOURCE))
+    public static let openFile = Self(rawValue: Int(IDC_OPEN_FILE))
+    public static let focusLocation = Self(rawValue: Int(IDC_FOCUS_LOCATION))
+    public static let bookmarkThisTab = Self(rawValue: Int(IDC_BOOKMARK_THIS_TAB))
+    public static let toggleBookmarkBar = Self(rawValue: Int(IDC_SHOW_BOOKMARK_BAR))
+
+    public static let copyURL = Self(rawValue: Int(IDC_COPY_URL))
+    public static let createQRCode = Self(rawValue: Int(IDC_QRCODE_GENERATOR))
+    public static let showSharingHub = Self(rawValue: Int(IDC_SHARING_HUB))
+    public static let sendTabToSelf = Self(rawValue: Int(IDC_SEND_TAB_TO_SELF))
+    public static let castMedia = Self(rawValue: Int(IDC_ROUTE_MEDIA))
+    public static let showReadingMode = Self(rawValue: Int(IDC_SHOW_READING_MODE_SIDE_PANEL))
+    public static let showPasswordManager = Self(rawValue: Int(IDC_SHOW_PASSWORD_MANAGER))
+    public static let showPerformance = Self(rawValue: Int(IDC_PERFORMANCE))
+    public static let installWebApp = Self(rawValue: Int(IDC_INSTALL_PWA))
+    public static let pinTab = Self(rawValue: Int(IDC_WINDOW_PIN_TAB))
+    /// Chrome's tab search (⇧⌘A), in Chromium's own tabbed windows.
+    public static let searchTabs = Self(rawValue: Int(IDC_TAB_SEARCH))
+    /// Creates a tab group with a new tab, and opens Chrome's group editor.
+    public static let createTabGroup = Self(rawValue: Int(IDC_CREATE_NEW_TAB_GROUP))
+
+    public static let zoomIn = Self(rawValue: Int(IDC_ZOOM_PLUS))
+    public static let zoomOut = Self(rawValue: Int(IDC_ZOOM_MINUS))
+    public static let resetZoom = Self(rawValue: Int(IDC_ZOOM_NORMAL))
+
+    public static let showHistory = Self(rawValue: Int(IDC_SHOW_HISTORY))
+    public static let showDownloads = Self(rawValue: Int(IDC_SHOW_DOWNLOADS))
+    public static let showSettings = Self(rawValue: Int(IDC_OPTIONS))
+    public static let manageExtensions = Self(rawValue: Int(IDC_MANAGE_EXTENSIONS))
+    public static let clearBrowsingData = Self(rawValue: Int(IDC_CLEAR_BROWSING_DATA))
+    public static let showTaskManager = Self(rawValue: Int(IDC_TASK_MANAGER))
+    public static let showDevTools = Self(rawValue: Int(IDC_DEV_TOOLS))
+
+    /// Whether the command changes the page's zoom level.
+    var isZoomCommand: Bool { self == .zoomIn || self == .zoomOut || self == .resetZoom }
+
+    /// Commands that end the browser process when run in CEF 156: managing
+    /// a page's passwords, whose bubble finds nothing to hang from (found
+    /// by SelfTest's surface inventory, with and without Chrome's toolbar).
+    static let endingTheBrowserProcess: Set<Int> = [Int(IDC_MANAGE_PASSWORDS_FOR_PAGE)]
+}
+
+extension CefRuntime.Configuration {
+    /// Trims the toolbar and app menu of Chrome-style windows. Set on
+    /// ``CefRuntime/Configuration/chromeToolbar`` before initializing.
+    public struct ChromeToolbar: Sendable, Equatable {
+        /// Commands removed from Chrome's app ("⋮") menu.
+        public var hiddenAppMenuCommands: Set<CefChromeCommand> = []
+        /// Commands shown but greyed out in Chrome's app menu.
+        public var disabledAppMenuCommands: Set<CefChromeCommand> = []
+        /// Whether Chrome's toolbar shows its optional buttons (extensions,
+        /// downloads, side panel, cast, …).
+        public var showsToolbarButtons = true
+        /// Whether the omnibox shows page-action icons (bookmark star, zoom,
+        /// translate, reader mode, …).
+        public var showsPageActionIcons = true
+
+        public init() {}
+    }
+}
+
+extension CefRuntime {
+    /// Identifies one of Chromium's built-in UI strings (`IDS_*`), for
+    /// ``CefRuntime/Configuration/stringOverrides``.
+    ///
+    /// Identifiers are stable for a given CEF build but can change between CEF
+    /// versions; the named constants here are re-resolved against the vendored
+    /// headers on every build. Other identifiers are listed in the vendored
+    /// `cef_pack_strings.h`.
+    public struct StringID: RawRepresentable, Hashable, Sendable {
+        public let rawValue: Int32
+        public init(rawValue: Int32) { self.rawValue = rawValue }
+
+        /// The product name ("Chromium") as shown throughout settings, About,
+        /// dialogs and internal pages.
+        public static let productName = Self(rawValue: IDS_PRODUCT_NAME)
+        /// The short product name, used where space is tight.
+        public static let shortProductName = Self(rawValue: IDS_SHORT_PRODUCT_NAME)
+        /// The company line on `chrome://version`.
+        public static let companyName = Self(rawValue: IDS_ABOUT_VERSION_COMPANY_NAME)
+    }
+}

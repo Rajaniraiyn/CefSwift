@@ -1,0 +1,402 @@
+import CefKit
+import Foundation
+
+/// Answers one browser's WebAuthn requests for a ``CefPasskeyController``,
+/// through the DevTools Protocol.
+///
+/// - `WebAuthn.enable`, without Chromium's UI, puts the browser's pages in a
+///   virtual authenticator environment: Chromium's own dialog, security
+///   keys and iCloud Keychain are out of the picture, and a request waits
+///   for an authenticator until its timeout passes.
+/// - A function-call breakpoint on each document's
+///   `CredentialsContainer.prototype.create` and `.get` stops the page at
+///   every call, before the call runs, in the calling document's execution
+///   context (and so with its origin). Nothing in the page is changed.
+/// - The breakpoints are in place before a document's first script runs:
+///   a one-statement script, `debugger`, runs at the start of every
+///   document in an isolated world of its own, which the page cannot see
+///   or reach. It stops the renderer there; the new document's main-world
+///   context exists by then, and its breakpoints are set before the page
+///   goes on.
+/// - While the page is stopped, the delegate decides, and an authenticator
+///   made for that one call is put in place: an empty one for a
+///   registration, one holding only the chosen passkey for an assertion,
+///   or one whose user verification fails for a refusal, which rejects the
+///   call at once. Then the page goes on and makes its call. Chromium
+///   reports the new or used credential (`WebAuthn.credentialAdded`,
+///   `credentialAsserted`), which goes to the store, and the authenticator
+///   is removed.
+@MainActor
+final class CefPasskeySession {
+    private weak var browser: CefBrowser?
+    private weak var controller: CefPasskeyController?
+    private let policy: CefPasskeyController.Policy
+
+    private struct Context {
+        var origin: String
+        var frameID: String
+        /// The breakpoints on this context's `create` and `get`.
+        var breakpoints: [String] = []
+    }
+
+    /// Default-world execution contexts by ID.
+    private var contexts: [Int: Context] = [:]
+    /// Each parsed script's execution context.
+    private var scriptContexts: [String: Int] = [:]
+    /// Breakpoint IDs by the request kind they report.
+    private var breakpointKinds: [String: CefPasskeyRequest.Kind] = [:]
+    private var mainFrameID: String?
+    private var listeners: [(method: String, token: UUID)] = []
+    /// The authenticator put in place for the latest call.
+    private var authenticatorID: String?
+    /// Credentials Chromium reported, by the authenticator that reported them.
+    private var reported: [String: CefJSON] = [:]
+    /// The document-start scripts' IDs.
+    private var holdScripts: Set<String> = []
+    /// Setting each context's breakpoints, running or done.
+    private var arming: [Int: Task<Void, Never>] = [:]
+
+    /// The address the document-start script reports its pause under.
+    nonisolated static let holdScriptURL = "cefswift://passkeys/document-start.js"
+
+    init(browser: CefBrowser, controller: CefPasskeyController) {
+        self.browser = browser
+        self.controller = controller
+        self.policy = controller.policy
+    }
+
+    /// Who answers: the controller's delegate, or the default one.
+    private var delegate: any CefPasskeyDelegate {
+        controller?.delegate ?? CefDefaultPasskeyDelegate.shared
+    }
+
+    /// Installs the environment and the breakpoints. Called before the
+    /// browser loads its first page.
+    func start() async throws {
+        guard let browser else { throw CefError.browserClosed }
+        let devTools = browser.devTools
+        listen(devTools, "Runtime.executionContextCreated") { $0.contextCreated($1["context"]) }
+        listen(devTools, "Runtime.executionContextDestroyed") { $0.contextDestroyed($1["executionContextId"].intValue) }
+        listen(devTools, "Runtime.executionContextsCleared") { owner, _ in owner.contextsCleared() }
+        listen(devTools, "Debugger.scriptParsed") { owner, event in
+            guard let script = event["scriptId"].stringValue else { return }
+            if let context = event["executionContextId"].intValue { owner.scriptContexts[script] = context }
+            if event["url"].stringValue == Self.holdScriptURL { owner.holdScripts.insert(script) }
+        }
+        listen(devTools, "Debugger.paused") { owner, event in Task { await owner.paused(event) } }
+        listen(devTools, "WebAuthn.credentialAdded") { $0.credentialReported($1) }
+        listen(devTools, "WebAuthn.credentialAsserted") { $0.credentialReported($1) }
+
+        try await devTools.send("WebAuthn.enable", ["enableUI": false])
+        mainFrameID = try await devTools.send("Page.getFrameTree")["frameTree"]["frame"]["id"].stringValue
+        try await devTools.send("Debugger.enable")
+        try await devTools.send("Page.enable")
+        try await devTools.send("Page.addScriptToEvaluateOnNewDocument", [
+            "source": .string("debugger\n//# sourceURL=\(Self.holdScriptURL)"),
+            "worldName": "cefswift-passkeys",
+        ])
+        // Reports the contexts already there, which are armed as they are
+        // reported; documents from now on are armed at their start.
+        try await devTools.send("Runtime.enable")
+    }
+
+    /// Stops listening. The browser's DevTools session ends with it.
+    func stop() {
+        guard let devTools = browser?.devTools else { return }
+        for (method, token) in listeners { devTools.removeListener(token, for: method) }
+        listeners = []
+    }
+
+    /// Listens synchronously, so events are handled in the order Chromium
+    /// sends them: a script's `scriptParsed` before the pause in it.
+    private func listen(
+        _ devTools: CefDevTools, _ event: String, _ handler: @escaping @MainActor (CefPasskeySession, CefJSON) -> Void
+    ) {
+        let token = devTools.addListener(for: event) { [weak self] parameters in
+            guard let self else { return }
+            handler(self, parameters)
+        }
+        listeners.append((event, token))
+    }
+
+    // MARK: Contexts and breakpoints
+
+    private func contextCreated(_ context: CefJSON) {
+        guard let id = context["id"].intValue, context["auxData"]["isDefault"].boolValue == true else { return }
+        contexts[id] = Context(
+            origin: context["origin"].stringValue ?? "",
+            frameID: context["auxData"]["frameId"].stringValue ?? "")
+        armIfNeeded(id)
+    }
+
+    private func contextDestroyed(_ id: Int?) {
+        guard let id else { return }
+        arming[id] = nil
+        guard let context = contexts.removeValue(forKey: id) else { return }
+        for breakpoint in context.breakpoints {
+            breakpointKinds[breakpoint] = nil
+            let devTools = browser?.devTools
+            Task { _ = try? await devTools?.send("Debugger.removeBreakpoint", ["breakpointId": .string(breakpoint)]) }
+        }
+    }
+
+    private func contextsCleared() {
+        contexts = [:]
+        scriptContexts = [:]
+        holdScripts = []
+        breakpointKinds = [:]
+        arming = [:]
+    }
+
+    /// Starts setting a context's breakpoints unless that has started, and
+    /// returns the work, to wait for.
+    @discardableResult
+    private func armIfNeeded(_ context: Int) -> Task<Void, Never> {
+        if let task = arming[context] { return task }
+        let task = Task { await arm(context) }
+        arming[context] = task
+        return task
+    }
+
+    /// Sets the breakpoints on one context's `create` and `get`.
+    private func arm(_ context: Int) async {
+        guard let devTools = browser?.devTools, contexts[context] != nil else { return }
+        for (name, kind) in [("create", CefPasskeyRequest.Kind.registration), ("get", .assertion)] {
+            do {
+                let function = try await devTools.send("Runtime.evaluate", [
+                    "expression": .string("CredentialsContainer.prototype.\(name)"),
+                    "contextId": .number(Double(context)), "silent": true,
+                ])
+                guard let object = function["result"]["objectId"].stringValue else { continue }
+                let breakpoint = try await devTools.send("Debugger.setBreakpointOnFunctionCall", ["objectId": .string(object)])
+                guard let id = breakpoint["breakpointId"].stringValue else { continue }
+                guard contexts[context] != nil else {
+                    _ = try? await devTools.send("Debugger.removeBreakpoint", ["breakpointId": .string(id)])
+                    return
+                }
+                breakpointKinds[id] = kind
+                contexts[context]?.breakpoints.append(id)
+            } catch {
+                // The context went away first, as a document that navigates
+                // on at once does.
+                return
+            }
+        }
+    }
+
+    // MARK: Answering
+
+    private func paused(_ event: CefJSON) async {
+        guard let devTools = browser?.devTools else { return }
+        let frame = event["callFrames"][0]
+        let kind = (event["hitBreakpoints"].arrayValue ?? []).compactMap { $0.stringValue.flatMap { breakpointKinds[$0] } }.first
+        let contextID = scriptContexts[frame["location"]["scriptId"].stringValue ?? ""]
+        let isHold = kind == nil && holdScripts.contains(frame["location"]["scriptId"].stringValue ?? "")
+        // A pause of someone else's, such as a breakpoint or a `debugger`
+        // statement, belongs to whoever else debugs the page: the app,
+        // holding its own lease on the Debugger domain, or the DevTools
+        // window. Only when nobody does would it stop the page for good.
+        if kind == nil, !isHold, devTools.leaseCount("Debugger") > 1 || browser?.isShowingDevTools == true {
+            return
+        }
+        if isHold {
+            // A document is starting. Its main-world context was reported
+            // before this pause; arm it, and any other not armed yet, while
+            // nothing in the page has run.
+            for task in contexts.keys.map(armIfNeeded) {
+                await task.value
+            }
+        } else if let kind, let contextID, let context = contexts[contextID] {
+            let gesture = try? await devTools.send("Debugger.evaluateOnCallFrame", [
+                "callFrameId": frame["callFrameId"], "expression": "navigator.userActivation.isActive",
+                "silent": true, "throwOnSideEffect": true, "returnByValue": true,
+            ])
+            let request = CefPasskeyRequest(
+                kind: kind, origin: context.origin,
+                isMainFrame: context.frameID == mainFrameID,
+                hasUserGesture: gesture?["result"]["value"].boolValue ?? false)
+            await prepare(for: request)
+        }
+        _ = try? await devTools.send("Debugger.resume")
+    }
+
+    /// Decides `request` while the page is stopped before its call, and
+    /// puts the authenticator in place that answers the call that way.
+    private func prepare(for request: CefPasskeyRequest) async {
+        // An authenticator left from an earlier call must not answer this
+        // one unasked.
+        await removeAuthenticator()
+        guard let browser, browser.state == .live else { return }
+        // A tracked decision: a navigation or closing ends it, which
+        // dismisses the default sheet, and its answer is then dropped.
+        let policy = policy
+        let delegate = delegate
+        let decided = await browser.decision(.page) {
+            await Self.decide(request, policy: policy) { request in
+                await delegate.browser(browser, decidePasskeyFor: request)
+            } failed: { error in
+                delegate.browser(browser, passkeyStoreDidFail: error)
+            }
+        }
+        guard let decision = decided, browser.state == .live else { return }
+
+        switch (decision, request.kind) {
+        case (.ignore, _):
+            return
+        case (.createPasskey, .registration):
+            guard let id = await addAuthenticator() else { return }
+            Task { await finish(id) { created in
+                guard var passkey = CefPasskey(devToolsCredential: created) else {
+                    self.storeFailed(.save, request, nil, "Chromium reported a credential CefKit cannot read")
+                    return
+                }
+                passkey.creationDate = .now
+                await self.save(passkey, for: request)
+            } }
+        case (.signIn(let passkey), .assertion):
+            guard let id = await addAuthenticator(holding: passkey) else { return }
+            Task { await finish(id) { asserted in
+                var used = passkey
+                used.signCount = UInt32(clamping: asserted["signCount"].intValue ?? Int(passkey.signCount) + 1)
+                used.lastUsedDate = .now
+                await self.save(used, for: request)
+            } }
+        default:
+            // A refusal: user verification fails, which ends the call with
+            // `NotAllowedError` at once whatever verification it asks for.
+            guard let id = await addAuthenticator(),
+                  (try? await browser.devTools.send(
+                      "WebAuthn.setUserVerified", ["authenticatorId": .string(id), "isUserVerified": false])) != nil
+            else { return }
+            Task { await finish(id, timeout: .seconds(1)) { _ in } }
+        }
+    }
+
+    /// The decision for `request`. Store failures refuse the call before
+    /// the delegate is asked: a registration's store must be available, as
+    /// a key the page receives cannot be withdrawn once its save fails, and
+    /// an assertion needs the store's passkeys.
+    static func decide(
+        _ request: CefPasskeyRequest, policy: CefPasskeyController.Policy,
+        ask: (CefPasskeyRequest) async -> CefPasskeyDecision,
+        failed: (CefPasskeyStoreError) -> Void
+    ) async -> CefPasskeyDecision {
+        guard case .app(let store) = policy else { return .deny }
+        var request = request
+        do {
+            switch request.kind {
+            case .registration:
+                try await store.checkAvailability()
+            case .assertion:
+                request.passkeys = try await store.passkeys(usableOnHost: request.host)
+            }
+        } catch {
+            failed(CefPasskeyStoreError(
+                operation: request.kind == .registration ? .checkAvailability : .read,
+                origin: request.origin, message: "\(error)"))
+            return .deny
+        }
+        return await ask(request)
+    }
+
+    private func save(_ passkey: CefPasskey, for request: CefPasskeyRequest) async {
+        guard case .app(let store) = policy else { return }
+        do {
+            try await store.save(passkey)
+        } catch {
+            storeFailed(.save, request, passkey, "\(error)")
+        }
+    }
+
+    private func storeFailed(_ operation: CefPasskeyStoreError.Operation, _ request: CefPasskeyRequest, _ passkey: CefPasskey?, _ message: String) {
+        let error = CefPasskeyStoreError(operation: operation, origin: request.origin, passkey: passkey, message: message)
+        guard let browser else { return CefLog.error("passkeys: \(error)") }
+        delegate.browser(browser, passkeyStoreDidFail: error)
+    }
+
+    private func addAuthenticator(holding passkey: CefPasskey? = nil) async -> String? {
+        guard let devTools = browser?.devTools else { return nil }
+        do {
+            let added = try await devTools.send("WebAuthn.addVirtualAuthenticator", ["options": [
+                "protocol": "ctap2", "ctap2Version": "ctap2_1", "transport": "internal",
+                "hasResidentKey": true, "hasUserVerification": true, "isUserVerified": true,
+                "automaticPresenceSimulation": true,
+            ]])
+            guard let id = added["authenticatorId"].stringValue else { return nil }
+            authenticatorID = id
+            if let passkey {
+                try await devTools.send("WebAuthn.addCredential", ["authenticatorId": .string(id), "credential": passkey.devToolsCredential])
+            }
+            return id
+        } catch {
+            CefLog.error("passkeys: could not set up an authenticator: \(error)")
+            await removeAuthenticator()
+            return nil
+        }
+    }
+
+    /// Waits for the credential authenticator `id` reports, hands it to
+    /// `body`, and removes the authenticator. The page may end its call
+    /// instead (it aborts, navigates or times out); then nothing is reported.
+    private func finish(_ id: String, timeout: Duration = .seconds(30), _ body: (CefJSON) async -> Void) async {
+        let deadline = ContinuousClock.now + timeout
+        while reported[id] == nil, authenticatorID == id, ContinuousClock.now < deadline, browser?.state == .live {
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        if let credential = reported.removeValue(forKey: id) {
+            await body(credential)
+        }
+        if authenticatorID == id { await removeAuthenticator() }
+    }
+
+    /// Records the credential and takes the authenticator away at once:
+    /// it has answered its one call, and must not answer another.
+    private func credentialReported(_ event: CefJSON) {
+        guard let id = event["authenticatorId"].stringValue, id == authenticatorID else { return }
+        reported[id] = event["credential"]
+        authenticatorID = nil
+        let devTools = browser?.devTools
+        Task { _ = try? await devTools?.send("WebAuthn.removeVirtualAuthenticator", ["authenticatorId": .string(id)]) }
+    }
+
+    private func removeAuthenticator() async {
+        guard let id = authenticatorID, let devTools = browser?.devTools else { return }
+        authenticatorID = nil
+        reported[id] = nil
+        _ = try? await devTools.send("WebAuthn.removeVirtualAuthenticator", ["authenticatorId": .string(id)])
+    }
+}
+
+// MARK: - DevTools credential form
+
+extension CefPasskey {
+    /// A credential from the `WebAuthn` domain, whose binary fields are
+    /// standard base64.
+    init?(devToolsCredential json: CefJSON) {
+        guard let id = json["credentialId"].stringValue.flatMap(Data.init(base64OrBase64URL:)),
+              let party = json["rpId"].stringValue,
+              let key = json["privateKey"].stringValue.flatMap(Data.init(base64OrBase64URL:))
+        else { return nil }
+        self.init(
+            id: id, relyingPartyID: party,
+            userHandle: json["userHandle"].stringValue.flatMap(Data.init(base64OrBase64URL:)) ?? Data(),
+            userName: json["userName"].stringValue ?? "",
+            userDisplayName: json["userDisplayName"].stringValue ?? "",
+            privateKey: key,
+            signCount: UInt32(clamping: json["signCount"].intValue ?? 0))
+    }
+
+    /// The `WebAuthn.Credential` that hands this passkey to an authenticator.
+    var devToolsCredential: CefJSON {
+        [
+            "credentialId": .string(id.base64EncodedString()),
+            "isResidentCredential": true,
+            "rpId": .string(relyingPartyID),
+            "privateKey": .string(privateKey.base64EncodedString()),
+            "userHandle": .string(userHandle.base64EncodedString()),
+            "signCount": .number(Double(signCount)),
+            "userName": .string(userName),
+            "userDisplayName": .string(userDisplayName),
+        ]
+    }
+}

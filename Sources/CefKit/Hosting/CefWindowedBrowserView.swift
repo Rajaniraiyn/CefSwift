@@ -1,0 +1,218 @@
+import AppKit
+import Foundation
+
+/// An `NSView` showing a windowed browser: Chromium's own native view is
+/// added as a subview and kept sized to fill it. Chromium handles input,
+/// IME and accessibility itself.
+///
+/// Use it for browsers whose ``CefBrowser/Configuration/rendering`` is
+/// `.windowed` (the default). Chromium creates the browser once the view is
+/// in a window. The view never closes its browser: call
+/// ``CefBrowser/close(force:)`` when you are done with it.
+///
+/// ```swift
+/// let browser = CefBrowser(url: URL(string: "https://example.com")!)
+/// window.contentView = CefWindowedBrowserView(browser: browser)
+/// ```
+///
+/// `CefWebView` in CefSwiftUI hosts its windowed browsers in this view.
+@MainActor
+public final class CefWindowedBrowserView: NSView {
+
+    /// The browser shown in this view. Assigning a browser that is already
+    /// live moves its native view here; assigning `nil` removes it. The
+    /// browser assigned before, if still waiting for its profile, is not
+    /// created here later.
+    ///
+    /// It becomes nil when the browser moves to another host
+    /// (``CefBrowser/host(windowedIn:)``, another view's `browser`) or is
+    /// withdrawn from this one (``CefBrowser/stopHosting(in:)``): a
+    /// browser shows in one place at a time, and this view no longer
+    /// claims its swipes, takes focus for it or hosts it again when it
+    /// returns to a window.
+    public var browser: CefBrowser? {
+        didSet {
+            guard browser !== oldValue else { return }
+            browserDidChange(from: oldValue)
+        }
+    }
+
+    private var swipeMonitor: Any?
+    private var dragMonitor: Any?
+
+    /// Whether ``tearDown()`` closes the browser. `CefWebView(url:)` sets
+    /// this for the browser it owns.
+    package var closesBrowserOnTeardown = false
+    private var isTornDown = false
+
+    /// Creates a view showing `browser`.
+    public init(browser: CefBrowser) {
+        self.browser = browser
+        super.init(frame: .zero)
+        // The canvas until Chromium's view paints, and where a resize
+        // uncovers the view before Chromium's catches up.
+        wantsLayer = true
+        // Chromium's frame, a frame or two behind an animated size, never
+        // draws over the view's neighbours.
+        layer?.masksToBounds = true
+        browserDidChange(from: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { nil }
+
+    private func browserDidChange(from oldValue: CefBrowser?) {
+        // Its native view leaves, and one still waiting for its profile is
+        // not created here later.
+        oldValue?.stopHosting(in: self)
+        layer?.backgroundColor = browser?.hostBackgroundColor
+        hostBrowserIfPossible()
+        updateSwipeMonitor()
+        updateDragMonitor()
+    }
+
+    public override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        // Chromium creates a windowed browser only in a window; back in
+        // one, the view asks again.
+        if window == nil { browser?.cancelDeferredCreation(in: self) }
+        hostBrowserIfPossible()
+        updateSwipeMonitor()
+        updateDragMonitor()
+    }
+
+    /// Chromium's view takes mouse-downs directly, so a drag that starts
+    /// in a region the page marks `-webkit-app-region: drag` is claimed
+    /// before it sees it, and moves the window.
+    private func updateDragMonitor() {
+        let wantsMonitor = !isTornDown && window != nil && browser != nil
+        guard wantsMonitor != (dragMonitor != nil) else { return }
+        if let dragMonitor {
+            NSEvent.removeMonitor(dragMonitor)
+            self.dragMonitor = nil
+            return
+        }
+        dragMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown]) { [weak self] event in
+            nonisolated(unsafe) let event = event
+            let claimed = MainActor.assumeIsolated { () -> Bool in
+                guard let self, let browser = self.browser, !browser.draggableRegions.isEmpty,
+                      let window = self.window, event.window === window, !self.isHiddenOrHasHiddenAncestor
+                else { return false }
+                let point = self.convert(event.locationInWindow, from: nil)
+                guard self.bounds.contains(point) else { return false }
+                // Regions are in the page's coordinates, top-left origin.
+                let pagePoint = CGPoint(x: point.x, y: self.isFlipped ? point.y : self.bounds.height - point.y)
+                return browser.handleWindowDrag(event, at: pagePoint)
+            }
+            return claimed ? nil : event
+        }
+    }
+
+    /// Chromium's view takes scroll events directly, so swipes are claimed
+    /// before it sees them, while the view is in a window and the browser
+    /// allows them.
+    private func updateSwipeMonitor() {
+        let wantsMonitor = !isTornDown && window != nil
+            && browser?.configuration.allowsBackForwardNavigationGestures == true
+        guard wantsMonitor != (swipeMonitor != nil) else { return }
+        if let swipeMonitor {
+            NSEvent.removeMonitor(swipeMonitor)
+            self.swipeMonitor = nil
+            return
+        }
+        swipeMonitor = NSEvent.addLocalMonitorForEvents(matching: [.scrollWheel, .swipe]) { [weak self] event in
+            nonisolated(unsafe) let event = event
+            let claimed = MainActor.assumeIsolated { () -> Bool in
+                guard let self, let browser = self.browser, let window = self.window, event.window === window,
+                      !self.isHiddenOrHasHiddenAncestor,
+                      self.bounds.contains(self.convert(event.locationInWindow, from: nil))
+                else { return false }
+                if event.type == .swipe {
+                    return browser.handleNavigationSwipe(event)
+                }
+                return browser.beginHistorySwipeIfNeeded(with: event)
+            }
+            return claimed ? nil : event
+        }
+    }
+
+    public override func resizeSubviews(withOldSize oldSize: NSSize) {
+        super.resizeSubviews(withOldSize: oldSize)
+        if let native = browser?.nativeView, native.superview === self { layoutChromiumView(native) }
+    }
+
+    /// Sizes Chromium's view to fill this one in whole points, its top
+    /// edge on this view's, the fraction past the bottom and trailing
+    /// edges clipped.
+    ///
+    /// Chromium's view keeps the layer that holds its frames sized with
+    /// Core Animation's autoresizing, which rounds each change of size: at
+    /// the fractional sizes an animation gives a view on every refresh the
+    /// rounding adds up, a few points per spring, and that layer ends up
+    /// larger than the view, so the page shows shifted up, cut off at the
+    /// top, with its background along the bottom. Whole sizes resize it
+    /// exactly.
+    func layoutChromiumView(_ native: NSView) {
+        let size = CGSize(width: bounds.width.rounded(.up), height: bounds.height.rounded(.up))
+        let frame = CGRect(x: 0, y: isFlipped ? 0 : bounds.height - size.height, width: size.width, height: size.height)
+        if native.frame != frame { native.frame = frame }
+    }
+
+    /// A discarded browser comes back when its view is shown again.
+    public override func viewDidUnhide() {
+        super.viewDidUnhide()
+        hostBrowserIfPossible()
+    }
+
+    /// `browser` now shows elsewhere, or was withdrawn from this view.
+    func browserDidStopHosting(_ browser: CefBrowser) {
+        guard self.browser === browser else { return }
+        self.browser = nil
+    }
+
+    /// Chromium can only create a windowed browser inside a window, so
+    /// hosting waits until the view is in one.
+    private func hostBrowserIfPossible() {
+        guard !isTornDown, window != nil, let browser else { return }
+        browser.host(windowedIn: self)
+    }
+
+    // MARK: Focus
+
+    /// The view stands in the window's key-view loop for its page, so Tab
+    /// and Shift-Tab from the app's controls reach it.
+    public override var acceptsFirstResponder: Bool {
+        browser?.state == .live && browser?.nativeView?.superview === self
+    }
+
+    /// Selected through the key-view loop, it hands focus to the page and
+    /// focuses the page's first element (Tab) or last (Shift-Tab).
+    public override func becomeFirstResponder() -> Bool {
+        guard let browser, super.becomeFirstResponder() else { return false }
+        let direction = window?.keyViewSelectionDirection ?? .directSelection
+        let selectedIn = window
+        // Once AppKit has finished selecting this view, and only if it is
+        // still selected, in the same window, for the same browser: focus
+        // that moved on meanwhile must not be taken back.
+        DispatchQueue.main.async { [weak self, weak browser] in
+            guard let self, let browser, let window = self.window, window === selectedIn,
+                  window.firstResponder === self, self.browser === browser, browser.state == .live
+            else { return }
+            browser.hostViewDidBecomeKey(selecting: direction)
+        }
+        return true
+    }
+
+    /// Stops hosting for good: removes the swipe monitor, closes the browser
+    /// if ``closesBrowserOnTeardown`` is set, and clears ``browser``.
+    package func tearDown() {
+        guard !isTornDown else { return }
+        isTornDown = true
+        updateSwipeMonitor()
+        updateDragMonitor()
+        if closesBrowserOnTeardown {
+            browser?.close(force: true)
+        }
+        browser = nil
+    }
+}

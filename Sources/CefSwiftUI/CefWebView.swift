@@ -2,189 +2,183 @@ import AppKit
 import CefKit
 import SwiftUI
 
-/// A SwiftUI view that displays a CEF (Chromium) browser.
-///
-/// Use the ``init(url:)`` convenience for a self-contained web view, or drive the view with a
-/// shared ``CefWebViewModel`` for full control over navigation and observable state:
+/// A view that displays a ``CefBrowser``.
 ///
 /// ```swift
-/// // Simple:
+/// // Self-contained: the view owns its browser.
 /// CefWebView(url: URL(string: "https://example.com")!)
 ///
-/// // Full control:
-/// @State private var model = CefWebViewModel(url: homeURL)
-/// CefWebView(model: model)
+/// // Model-driven: keep the browser, bind UI to its state.
+/// @State private var browser = CefBrowser(url: home)
+///
+/// CefWebView(browser)
+///     .navigationTitle(browser.title)
 /// ```
 ///
-/// The underlying CEF browser is created lazily the first time the view lands in a window
-/// (CEF windowed browsers need a parent `NSView` inside a window), tracks the view's bounds,
-/// and is closed when SwiftUI dismantles the view.
-public struct CefWebView: NSViewRepresentable {
+/// The browser's ``CefBrowser/Configuration/rendering`` picks how it draws:
+/// `.windowed` (the default) embeds Chromium's own native view; `.offscreen`
+/// composites the page in a layer so SwiftUI content can overlap it.
+///
+/// A view created with ``init(_:)`` never closes the browser you gave it —
+/// it can leave the hierarchy and come back, or move to another view. Call
+/// ``CefBrowser/close(force:)`` when you are done with it. A view created
+/// with ``init(url:configuration:)`` closes its browser when it goes away.
+public struct CefWebView: View {
+    private let source: Source
 
-    private let externalModel: CefWebViewModel?
-    private let initialURL: URL?
-
-    /// Creates a web view driven by the given model.
-    /// - Parameter model: The model whose browser this view hosts and displays.
-    public init(model: CefWebViewModel) {
-        self.externalModel = model
-        self.initialURL = nil
+    private enum Source {
+        case browser(CefBrowser)
+        case url(URL, CefBrowser.Configuration)
     }
 
-    /// Creates a self-contained web view that loads `url`, owning a private model.
-    /// - Parameter url: The URL to load.
-    public init(url: URL) {
-        self.externalModel = nil
-        self.initialURL = url
+    /// Shows `browser`.
+    public init(_ browser: CefBrowser) {
+        source = .browser(browser)
     }
 
-    // MARK: NSViewRepresentable
-
-    public func makeCoordinator() -> Coordinator {
-        // The coordinator owns the private model for `init(url:)` so the model (and its
-        // browser) survives SwiftUI re-creating the `CefWebView` value on every render.
-        Coordinator(model: externalModel ?? CefWebViewModel(url: initialURL))
+    /// Shows `url` in a browser owned by the view.
+    public init(url: URL, configuration: CefBrowser.Configuration = .init()) {
+        source = .url(url, configuration)
     }
 
-    public func makeNSView(context: Context) -> CefBrowserHostView {
-        let view = CefBrowserHostView()
-        view.model = context.coordinator.model
-        return view
-    }
-
-    public func updateNSView(_ nsView: CefBrowserHostView, context: Context) {
-        // If the caller swapped in a different model instance, rebind the host view
-        // (closes the old model's browser and creates one for the new model).
-        if let externalModel, externalModel !== context.coordinator.model {
-            context.coordinator.model = externalModel
+    public var body: some View {
+        switch source {
+        case .browser(let browser):
+            Host(browser: browser, ownsBrowser: false)
+        case .url(let url, let configuration):
+            OwnedHost(url: url, configuration: configuration)
         }
-        nsView.model = context.coordinator.model
     }
 
-    public static func dismantleNSView(_ nsView: CefBrowserHostView, coordinator: Coordinator) {
-        nsView.tearDown()
+    /// Keeps the view-owned browser alive across view updates.
+    private struct OwnedHost: View {
+        let url: URL
+        // SwiftUI keeps the first browser and discards the ones later
+        // initializers make; a browser does nothing in Chromium until hosted.
+        @State private var browser: CefBrowser
+
+        init(url: URL, configuration: CefBrowser.Configuration) {
+            self.url = url
+            _browser = State(initialValue: CefBrowser(url: url, configuration: configuration))
+        }
+
+        var body: some View {
+            Host(browser: browser, ownsBrowser: true)
+                .onChange(of: url) { _, newURL in browser.load(newURL) }
+        }
     }
 
-    /// Bridges the representable's lifetime to the (possibly view-owned) model.
-    @MainActor public final class Coordinator {
-        var model: CefWebViewModel
+    private struct Host: View {
+        let browser: CefBrowser
+        let ownsBrowser: Bool
 
-        init(model: CefWebViewModel) {
-            self.model = model
+        var body: some View {
+            // Before Chromium starts, as in Xcode's SwiftUI previews, where
+            // it never does: a placeholder, replaced by the page once it runs.
+            if CefRuntime.shared.state == .notStarted {
+                Placeholder(url: browser.url)
+            } else {
+                switch browser.configuration.rendering {
+                case .windowed:
+                    BrowserRepresentable<CefWindowedBrowserView>(browser: browser, ownsBrowser: ownsBrowser)
+                case .offscreen:
+                    BrowserRepresentable<CefOffscreenBrowserView>(browser: browser, ownsBrowser: ownsBrowser)
+                }
+            }
+        }
+    }
+
+    private struct Placeholder: View {
+        let url: URL?
+
+        var body: some View {
+            ContentUnavailableView {
+                Label(url?.host() ?? "Web content", systemImage: "globe")
+            } description: {
+                Text("The page shows when Chromium runs, in the app.")
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(.background)
         }
     }
 }
 
-// MARK: - Hosting NSView
+/// The AppKit views `CefWebView` hosts a browser in, one per rendering.
+@MainActor
+protocol CefBrowserHostView: NSView {
+    init(browser: CefBrowser)
+    var browser: CefBrowser? { get set }
+    var closesBrowserOnTeardown: Bool { get set }
+    func tearDown()
+    func apply(_ environment: EnvironmentValues)
+}
 
-/// The `NSView` that hosts the CEF-created browser view.
-///
-/// Creates the browser the first time the view is attached to a window, keeps the CEF child
-/// view sized to its bounds, and survives being removed from and re-added to a window.
-@MainActor public final class CefBrowserHostView: NSView {
+extension CefWindowedBrowserView: CefBrowserHostView {
+    func apply(_ environment: EnvironmentValues) {}
+}
 
-    /// The model whose browser this view hosts. Setting a different model closes the
-    /// previously hosted browser and (when possible) creates one for the new model.
-    var model: CefWebViewModel? {
-        didSet {
-            guard model !== oldValue else { return }
-            if let oldValue {
-                closeBrowser(of: oldValue)
-            }
-            adoptOrCreateBrowserIfPossible()
-        }
+extension CefOffscreenBrowserView: CefBrowserHostView {
+    func apply(_ environment: EnvironmentValues) {
+        resizePolicy = environment.offscreenResizePolicy
+        framePlacement = environment.offscreenFramePlacement
+        pageSize = environment.offscreenPageSize
+    }
+}
+
+private struct BrowserRepresentable<HostView: CefBrowserHostView>: NSViewRepresentable {
+    let browser: CefBrowser
+    let ownsBrowser: Bool
+
+    func makeNSView(context: Context) -> HostView {
+        let view = HostView(browser: browser)
+        view.closesBrowserOnTeardown = ownsBrowser
+        // A page moving to another CefWebView, as in a matched-geometry
+        // transition, leaves its last frame here while this view animates
+        // out, rather than a blank view.
+        (view as? CefOffscreenBrowserView)?.keepsLastFrameWhenMoved = true
+        view.apply(context.environment)
+        return view
     }
 
-    /// Set during teardown so a late `viewDidMoveToWindow` can't resurrect the browser.
-    private var isTornDown = false
-
-    init() {
-        super.init(frame: .zero)
-        autoresizesSubviews = true
+    func updateNSView(_ view: HostView, context: Context) {
+        view.apply(context.environment)
+        view.browser = browser
     }
 
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        // This view is created programmatically by CefWebView only.
-        return nil
+    static func dismantleNSView(_ view: HostView, coordinator: ()) {
+        view.tearDown()
+    }
+}
+
+// MARK: - Offscreen geometry
+
+extension EnvironmentValues {
+    @Entry var offscreenResizePolicy: CefOffscreenBrowserView.ResizePolicy = .live
+    @Entry var offscreenFramePlacement: CefOffscreenBrowserView.FramePlacement = .stretch
+    @Entry var offscreenPageSize: CGSize? = nil
+}
+
+extension View {
+    /// When offscreen pages in this view lay out again while their
+    /// `CefWebView`'s size changes, as it does on every display refresh of
+    /// a size animation; see ``CefOffscreenBrowserView/resizePolicy``.
+    /// Windowed pages always lay out live.
+    public func offscreenResizePolicy(_ policy: CefOffscreenBrowserView.ResizePolicy) -> some View {
+        environment(\.offscreenResizePolicy, policy)
     }
 
-    public override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        guard window != nil else { return }
-        // CEF windowed browsers require a parent view in a window: this is the earliest
-        // reliable creation point. Re-entry on subsequent appearances is a no-op when the
-        // model already has a live browser.
-        adoptOrCreateBrowserIfPossible()
+    /// Where offscreen pages in this view draw a frame whose size differs
+    /// from their `CefWebView`'s; see ``CefOffscreenBrowserView/framePlacement``.
+    public func offscreenFramePlacement(_ placement: CefOffscreenBrowserView.FramePlacement) -> some View {
+        environment(\.offscreenFramePlacement, placement)
     }
 
-    public override func layout() {
-        super.layout()
-        resizeBrowserView()
-    }
-
-    // MARK: Browser lifecycle
-
-    private func adoptOrCreateBrowserIfPossible() {
-        guard !isTornDown, window != nil, let model else { return }
-
-        if let existing = model.browser {
-            // The model already has a browser (view re-created, or model shared with a
-            // previous host). Adopt its native view into our hierarchy if needed.
-            if let native = existing.nativeView, native.superview !== self {
-                native.removeFromSuperview()
-                addSubview(native)
-                configure(browserView: native)
-            }
-            return
-        }
-
-        let url = model.url ?? URL(string: "about:blank") ?? URL(fileURLWithPath: "/")
-        let browser = CefBrowser.createBrowser(
-            parentView: self,
-            bounds: bounds,
-            url: url,
-            options: model.options,
-            delegate: model
-        )
-        model.attach(browser)
-        if let native = browser.nativeView {
-            configure(browserView: native)
-        }
-    }
-
-    private func configure(browserView: NSView) {
-        browserView.frame = bounds
-        browserView.autoresizingMask = [.width, .height]
-    }
-
-    private func resizeBrowserView() {
-        guard let native = model?.browser?.nativeView, native.superview === self else { return }
-        if native.frame != bounds {
-            native.frame = bounds
-        }
-        if native.autoresizingMask != [.width, .height] {
-            native.autoresizingMask = [.width, .height]
-        }
-    }
-
-    private func closeBrowser(of model: CefWebViewModel) {
-        guard let browser = model.browser else { return }
-        // Only close browsers actually hosted by this view.
-        guard let native = browser.nativeView, native.superview === self || native.superview == nil else { return }
-        model.detach()
-        // Force-close: the hosting view is going away, so JS onbeforeunload prompts
-        // can't meaningfully be shown.
-        browser.close(force: true)
-    }
-
-    /// Closes the hosted browser and detaches the model. Called on dismantle.
-    func tearDown() {
-        guard !isTornDown else { return }
-        isTornDown = true
-        if let model {
-            closeBrowser(of: model)
-        }
-        model = nil
+    /// Lays offscreen pages in this view out at `size`, in points, shown
+    /// in their `CefWebView` as ``offscreenFramePlacement(_:)`` places
+    /// them, with input mapped back to the page: thumbnails and live
+    /// previews. `nil` follows the view's size. See
+    /// ``CefOffscreenBrowserView/pageSize``.
+    public func offscreenPageSize(_ size: CGSize?) -> some View {
+        environment(\.offscreenPageSize, size)
     }
 }

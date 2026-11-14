@@ -1,88 +1,193 @@
-# CEF auto-update automation
+# Automation
 
-CefSwift pins an exact CEF build in `CEF_VERSION.json`. Keeping that pin
-current is fully automated: Chromium security releases arrive as pull requests
-that merge themselves once CI proves them.
+## CEF updates
 
-## How the flow works
+`.github/workflows/cef-update.yml` (CEF Update) runs every Monday and
+Thursday at 06:17 UTC and keeps the pinned CEF on the newest stable release.
+
+1. `Scripts/update-cef.py` reads the CEF build index and picks the newest
+   stable release that ships the minimal and standard distributions for both
+   macOS architectures. A newer release that is out for one architecture
+   only is logged and waited for.
+2. If that release is newer than `CEF_VERSION.json`, the script downloads the
+   arm64 minimal distribution into `.cef/downloads` (resuming a partial
+   download, verifying size and SHA-1, and starting over once if a resumed
+   download does not verify). It stages the new headers in `.cef/update`,
+   regenerates the C bridge there, and only then moves the headers and
+   generated files into `Sources/CCef` and rewrites `CEF_VERSION.json`. A
+   failure at any step leaves the tree unchanged, and a second run does
+   nothing.
+3. The workflow commits the change to the `cef-update` branch, opens a pull
+   request or refreshes the open one, saves the download to the Actions
+   cache for CI, starts CI on the branch, and enables auto-merge. An open
+   pull request that already pins the same CEF and `CEF_API_VERSION` is left
+   alone, so fixes pushed to it survive later runs.
+4. When there is nothing to update and a `cef-update` pull request is still
+   open, the workflow closes it as obsolete and deletes the branch.
+
+The pull request lists CEF, Chromium and `CEF_API_VERSION` before and after,
+and the C functions added, removed or changed. It merges only when CI
+passes. The squash commit on `main` is:
 
 ```
-cron (Mon & Thu 06:17 UTC)            .github/workflows/cef-update.yml
-        │
-        ▼
-Scripts/cef-update.sh
-  1. Conditional-GET https://cef-builds.spotifycdn.com/index.json (ETag-cached)
-  2. Pick the HIGHEST cef_version where channel == "stable" and both
-     macosarm64 and macosx64 ship minimal + standard files.
-     (index entries are not version-ordered, and several stable major
-     lines coexist — the script sorts numerically and takes the max.)
-  3. Same as the pin? → "up to date", exit 0. Done.
-  4. Newer? →
-     - Rewrite CEF_VERSION.json (names/sha1/sizes for both platforms, both flavors)
-     - Download + sha1-verify the new macosarm64 minimal tarball
-     - Re-vendor the CEF include/ tree into Sources/CCef (the vendored tree is
-       discovered at runtime; CefSwift-authored files are untouched)
-     - Check the pinned CEF_API_VERSION still exists in the new
-       include/cef_api_versions.h → WARNING into the PR if not
-     - Write a PR body (old→new, chromium version, distro sizes)
-        │
-        ▼
-Workflow: branch cef-update/<version> → commit → push → gh pr create
-        → close older cef-update PRs and delete their branches
-        → dispatch CI explicitly when using the built-in Actions token
-        → gh pr merge --auto --squash
-        │
-        ▼
-CI runs on the PR: build, unit tests, bundle the Browser example, and a live
-smoke test that launches CEF and loads a page (--cef-smoke-test).
-Green → auto-merge fires → main is on the new CEF.
+Update CEF to <new version>
+
+From <old version>.
+
+Co-authored-by: <CEF_UPDATE_COAUTHOR>
 ```
 
-API-version pinning is what makes this safe: CefSwift compiles against a fixed
-`CEF_API_VERSION`, which CEF guarantees ABI-stable across releases. If a
-future CEF ever drops the pinned version, the script detects it, puts a loud
-warning in the PR, and the workflow **skips auto-merge** so a human migrates
-the pin deliberately.
+The `Co-authored-by:` line is present only when a co-author is configured
+(see [Attribution](#attribution)).
 
-You can also run the whole check by hand, locally or via the workflow's
-**Run workflow** button:
+### Failure reports
+
+- **CI fails on an update branch.** CI for `cef-update` and `cef-api-update`
+  is started with the workflow token, which notifies nobody. When it fails,
+  CI's `report` job comments on the open pull request with a link to the
+  run, whose summary lists the SelfTest `FAIL` lines. Auto-merge keeps
+  waiting. Push a fix to the branch; later update runs leave it alone until
+  a newer CEF is released.
+- **The update run fails.** For example, the release's headers do not
+  support the pinned API version. The workflow comments on the open issue titled
+  **CEF update failed**, or opens it. Close the issue once a run succeeds; it
+  is not closed automatically.
+
+### Attribution
+
+Update commits are authored by `github-actions[bot]`. To credit a person
+as well, set the repository variable `CEF_UPDATE_COAUTHOR` to
+`Name <email>`, using an address GitHub associates with the account, such
+as its `noreply` address; the commits then carry a `Co-authored-by:`
+trailer. Without the variable, `Rajaniraiyn/CefSwift` credits its
+maintainer and any other repository, a fork included, adds no trailer.
+
+### One-time repository setup
+
+- Settings → General: enable **Allow auto-merge**.
+- Protect `main` with the `ci` job as a required status check. Without it,
+  auto-merge would merge before CI has run.
+- Settings → Actions → General: allow GitHub Actions to create pull
+  requests.
+- Optional: set the `CEF_UPDATE_COAUTHOR` variable to credit a co-author.
+
+## Moving `CEF_API_VERSION`
+
+The pin in `Sources/CCef/include/ccef_config.h` keeps the C API the Swift
+code sees the same across CEF updates; newer CEF APIs stay hidden until the
+pin moves. Moving it is a separate, reviewed change:
+
+- Run **CEF Update** by hand with `api_version` set to `latest` (the newest
+  version in the vendored `cef_api_versions.h`) or a number such as `15700`.
+  It works on the headers already vendored and opens a `cef-api-update` pull
+  request that does not merge itself.
+- Or run `Scripts/update-cef.py --api-version latest` locally.
+
+If a new CEF release drops the pinned API version, the scheduled run fails
+and says so. Move both at once with
+`Scripts/update-cef.py --to latest --api-version latest`, then adapt the
+Swift code.
+
+## Running the scripts
 
 ```sh
-Scripts/cef-update.sh   # prints "up to date" or prepares the update in-place
+Scripts/update-cef.py --check                        # report whether a newer stable exists
+Scripts/update-cef.py                                # update the working tree
+Scripts/update-cef.py --to <version>                 # vendor that stable release (also repairs a tree)
+Scripts/update-cef.py --api-version latest           # move only the API pin, on the vendored headers
+Scripts/update-cef.py --to latest --api-version latest
+Scripts/update-cef.py --index index.json             # use a saved copy of the CDN index
+Scripts/update-cef.py --self-test                    # offline checks of the script
+Scripts/generate-bindings.py                         # regenerate the C bridge
+Scripts/generate-bindings.py --check                 # fail if the bridge is out of date
+Scripts/generate-bindings.py --check --framework <path to Chromium Embedded Framework.framework>
 ```
 
-## Required repository settings
+`--check` only reports and cannot be combined with `--to` or
+`--api-version`. The update script writes its results (`updated`, `cef_old`,
+`cef_new`, `api_old`, `api_new`, `subject`) to `$GITHUB_OUTPUT`, or to
+standard output outside Actions, and the commit message and pull-request
+description to `.cef/update/`.
 
-The pipeline needs three things configured once on GitHub:
+## CI
 
-1. **Allow auto-merge** — Settings → General → Pull Requests → check
-   *Allow auto-merge*. Without it, `gh pr merge --auto` fails (the workflow
-   degrades to a plain PR with a warning annotation).
+`.github/workflows/ci.yml` runs on pushes and pull requests to `main`, and
+when dispatched. Its `ci` job, on a `macos-15` runner, does everything
+below; two jobs run beside it:
 
-2. **Branch protection with a required check** — Settings → Branches →
-   protect `main` and mark the CI job (`ci`) as a **required status check**.
-   Auto-merge only fires after required checks pass; with no required checks,
-   auto-merge would merge instantly without waiting for CI.
+- `intel` compiles the package and its tests for x86_64
+  (`swift build --build-tests --arch x86_64`) on the same arm64 runner,
+  and checks that the result is x86_64 for macOS 14. CefKit loads the CEF
+  framework at run time and the plugin builds the helper only when it
+  bundles, so compiling needs no `macosx64` CEF archive.
+- `xcode` runs `Scripts/check-xcode-example.sh`: the Xcode example
+  (`Examples/Xcode`) built with `xcodebuild`, Debug and Release, archived
+  and exported, each build launched with `-smoke YES`, and `cef doctor` on
+  the exported app. Its build phase downloads CEF into
+  `Examples/Xcode/.cef` unless the cache, with the same key as `ci`'s, has
+  the archive. It takes about 2.5 minutes on an M3 and is not a required
+  check: release tags and CEF updates wait for `ci` and `intel` only. It
+  had not run on GitHub when it was added; the runner's Xcode is older
+  than the Xcode 27.2 it was written with.
 
-3. **Actions may create PRs** — Settings → Actions → General → check
-   *Allow GitHub Actions to create and approve pull requests*.
+The `ci` job:
 
-An optional fine-grained PAT with **contents: read/write** and **pull requests:
-read/write** may be stored as `CEF_UPDATE_TOKEN`. Without it, the workflow
-uses `GITHUB_TOKEN` and explicitly dispatches `ci.yml`, bypassing GitHub's
-workflow-recursion guard without any manual step.
+1. Print the macOS, Xcode and Swift versions. The `macos-15` label selects
+   an image family that GitHub updates in place, so these can change
+   between runs without a commit.
+2. The update script's self-test.
+3. Download CEF (minimal, arm64), cached by CEF version.
+4. `Scripts/generate-bindings.py --check --framework …`: the generated
+   bridge must match the headers, and the framework must export every
+   function it binds.
+5. `swift build --build-tests`, then check that the built code's
+   deployment target is macOS 14.
+6. `swift test`, with `CEF_FRAMEWORK_PATH` set, so the loader tests run;
+   then again with the Thread Sanitizer and with the Address Sanitizer.
+7. `Scripts/check-doc-samples.py`: every Swift sample in the README and
+   the docs compiles.
+8. Build the Examples package in release, then bundle SelfTest and run `cef doctor`
+   on it. The Examples package gets a copy-on-write clone of the
+   downloaded archive instead of downloading it again.
+9. Run SelfTest with `SELFTEST_ISOLATED=1` (each group in a process of its
+   own), `SELFTEST_STRICT=1` (a skip for a reason of the environment
+   fails) and `SELFTEST_JSON`. `SELFTEST_EXPECTED_SKIPS` names the checks a
+   hosted runner cannot run, being a virtual machine: frame rates that
+   follow a display's refresh, and FairPlay playback. Those skips do not
+   fail the run; they are verified on a Mac only. Its `FAIL` and `SKIP` lines and the counts
+   go to the run summary. On failure, the log, the JSON results and the
+   crash reports written during the run are uploaded as the
+   `selftest-diagnostics` artifact.
+10. Bundle the Gallery example and run `Gallery -smoke`, which opens each
+    demo in turn and fails when one does not come up or leaves a browser
+    open.
+11. Check that the build left the working tree clean.
 
-Also note: **scheduled workflows only run on the default branch** — the cron
-will not fire until `cef-update.yml` is on `main`.
+What CI verifies, and what it does not:
 
-## Failure modes & manual recovery
+- Compiling against the macOS 14 deployment target means the compiler
+  rejects any newer API used without an availability check. Nothing runs
+  on macOS 14, since GitHub no longer offers a macOS 14 runner: CefKit's
+  macOS 14 executor path is compiled but not exercised, and the unit
+  tests and SelfTest run on macOS 15 only.
+- Everything compiles for Intel, and nothing runs there. Running on Intel
+  needs an Intel runner (`macos-15-intel`), the `macosx64` CEF archive in
+  the cache, `cef bundle --platform macosx64` there, and a SelfTest run;
+  on a schedule rather than per pull request, given what those runners
+  cost. (`cef bundle` cannot cross-bundle: it bundles for the architecture
+  SwiftPM builds for.)
+- One toolchain: whichever Xcode the runner image selects. The oldest
+  Swift 6 toolchain the package claims is not built with.
 
-| Symptom | Cause | Fix |
-|---|---|---|
-| PR created but CI never ran | Explicit CI dispatch failed | Re-run the CEF Update workflow and inspect its final step; verify Actions have read/write workflow permissions |
-| PR open but not merging | Auto-merge disabled, or no required checks on `main` | Settings per above; merge manually meanwhile |
-| PR carries a CEF_API_VERSION warning | New CEF dropped the pinned API version | Bump `CEF_API_VERSION` in `Sources/CCef` (ccef_config.h) to a version listed in the new `include/cef_api_versions.h`, fix any compile fallout, push to the PR branch |
-| Workflow fails in the script | CDN/index change | Run `Scripts/cef-update.sh` locally; it logs each step |
+## Releases
 
-The update is always an ordinary PR — review it, push to it, or close it like
-any other.
+Pushing a `v*` tag creates a GitHub release with generated notes
+(`.github/workflows/release.yml`). SwiftPM resolves the tag itself, so there
+are no assets to build.
+
+The release is made only for a commit CI passed: before it creates the
+release, the workflow reads the tagged commit's check runs and requires
+the latest `ci` and `intel` runs to have succeeded, waiting up
+to 75 minutes for runs still in progress. A commit pushed to `main` has
+those runs. For another commit, run CI on the tag first
+(`gh workflow run ci.yml --ref v0.1.0`), then re-run the release workflow.
