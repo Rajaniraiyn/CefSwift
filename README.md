@@ -198,7 +198,7 @@ browser's state in their `body` and update when it changes.
 |---|---|---|
 | `CefKit` (core) | What any app embedding CEF needs and could not write itself: the runtime, browsers, profiles, the AppKit host views, CEF Views windows (`CefWindow`), handlers and delegates, offscreen rendering and its accessibility, discarding | `CefRuntime`, `CefBrowser`, `CefProfile`, `CefOffscreenBrowserView`, `CefWindow` |
 | `CefSwiftUI` | SwiftUI on top of `CefKit`, nothing else | `CefSwiftApp`, `CefWebView`, `setToolbar`, `setPageOverlay` |
-| `CefPasskeys`, `CefChromium` (optional) | Capabilities on Chromium internals some apps want: passkeys the app answers; Chromium's bookmark, history and suggestion stores and its bubbles | `CefPasskeyController`, `CefBookmarks`, `CefChromiumSurface` |
+| `CefPasskeys`, `CefChromium` (optional) | Capabilities on Chromium internals some apps want: passkeys the app answers; Chromium's bookmark, history and suggestion stores, its tab strip and its bubbles | `CefPasskeyController`, `CefBookmarks`, `CefTabStrip`, `CefChromiumSurface` |
 | `Examples` | Product decisions written against the public API: UI, defaults, heuristics for when to use a capability | the Browser's toolbar, swipe indicator, Memory Saver, permission names |
 
 The rule: the library holds what an app cannot write against its public
@@ -224,6 +224,7 @@ or Chromium limit. Everything else belongs to the app.
 | Profiles, cookies, Chromium preferences | `CefProfile` | [Profiles](docs/guide.md#profiles) |
 | The app's own requests through Chromium's network stack, sharing a profile's cookies, cache and proxy | `CefProfile.data(for:)`, `bytes(for:)` | [Requests through Chromium's network stack](docs/guide.md#requests-through-chromiums-network-stack) |
 | Chromium's bookmarks, history and omnibox suggestions (the optional `CefChromium` library) | `CefBookmarks`, `CefHistory`, `CefAutocomplete` | [Bookmarks, history and suggestions](docs/guide.md#bookmarks-history-and-suggestions) |
+| Chromium's own tabs, windows and tab groups, mirrored and driven, for a tab interface of your own (`CefChromium`) | `CefTabStrip` | [Chromium's tab strip](docs/guide.md#chromiums-tab-strip) |
 | Discarding hidden browsers to free memory, and restoring them when shown (when to discard is the app's choice) | `discard()`, `discardBlockers()`, `lifecycle`, `lifecycleChangedAt` | [Discarding browsers](docs/guide.md#discarding-browsers) |
 | Chrome DevTools Protocol, in-process | `CefDevTools` | [DevTools](docs/guide.md#devtools) |
 | Your own set-up code for every browser of a configuration, before its first page if it must | `CefBrowserAttachment` | [Attachments](docs/guide.md#attachments) |

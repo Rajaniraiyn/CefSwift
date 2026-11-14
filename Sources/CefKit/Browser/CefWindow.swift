@@ -25,10 +25,14 @@ import CefBase
 /// For a window drawn entirely by Chrome, tab strip included, use
 /// ``CefRuntime/openChromeWindow(url:frame:configuration:delegate:)`` instead.
 ///
-/// Each window holds one browser. To present several as tabs, give the
-/// windows the same ``Configuration/tabbingIdentifier`` and macOS groups
-/// them under a native tab bar; or keep one window per tab and show the
-/// selected one.
+/// Each window holds one browser: CEF refuses a second Chrome-style
+/// browser view in a window, and Chromium counts every `CefWindow` as a
+/// popup window of one tab. To present several as tabs, give the windows
+/// the same ``Configuration/tabbingIdentifier`` and macOS groups them under
+/// a native tab bar; or keep one window per tab and show the selected one.
+/// Tabs that are Chromium's own, which `chrome.tabs` and tab groups see,
+/// live in the windows ``CefRuntime/openChromeWindow(url:frame:configuration:delegate:)``
+/// opens (CefChromium's `CefTabStrip` mirrors them).
 @MainActor
 @Observable
 public final class CefWindow: Identifiable {

@@ -976,7 +976,8 @@ Chromium locks a WebUI renderer to its host, and neither
 
 | Host | Reaches | Used for |
 |---|---|---|
-| `chrome://bookmarks` | `chrome.bookmarks`, `chrome.tabs`, `chrome://favicon2` | `CefBookmarks`, `CefHistory.favicon` |
+| `chrome://bookmarks` | `chrome.bookmarks`, `chrome.tabs`, `chrome.windows`, `chrome://favicon2` | `CefBookmarks`, `CefHistory.favicon`, `CefTabStrip`'s changes |
+| `chrome://tab-strip-internals` | `tab_strip_internals.mojom.PageHandlerFactory` | `CefTabStrip`'s mirror |
 | `chrome://history` | `history.mojom.PageHandler`, `chrome://favicon2` | `CefHistory.search`, `remove` |
 | `chrome://new-tab-page-third-party` | `most_visited.mojom.MostVisitedPageHandlerFactory` | `CefHistory.topSites` |
 | `chrome://omnibox` | `mojom.OmniboxPageHandler` | `CefAutocomplete` |
