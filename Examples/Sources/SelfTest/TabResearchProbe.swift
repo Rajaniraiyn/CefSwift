@@ -237,8 +237,7 @@ extension SelfTest {
             let browser = window?.activeTab?.browser
             let titles = Box<[String]>([])
             let observation = window?.window?.observe(\.title, options: [.new]) { nsWindow, _ in
-                let title = nsWindow.title
-                MainActor.assumeIsolated { titles.value.append(title) }
+                MainActor.assumeIsolated { titles.value.append(nsWindow.title) }
             }
             note("title before: '\(window?.window?.title ?? "-")'")
             _ = try? await browser?.evaluateJavaScript("""

@@ -36,6 +36,7 @@ struct BrowserScene<Features: BrowserFeature>: Scene {
     var body: some Scene {
         Settings {
             Form {
+                StartupSetting()
                 NewTabPageSetting()
                 TabLayoutSetting()
                 features.settings
@@ -155,23 +156,44 @@ private struct TabLayoutSetting: View {
     }
 }
 
-/// File › Recently Closed: what Chromium can reopen, newest first. Chromium
-/// reopens the newest (⌘⇧T, `IDC_RESTORE_TAB`); the others are listed for
-/// reference, as no route reopens a given entry.
+/// File › Recently Closed: what Chromium can reopen, newest first — tabs,
+/// and windows and groups with their tab counts. Each reopens as Chromium
+/// closed it (`CefTabStrip.reopen`): a tab in its window at its place, a
+/// window with all its tabs, each with its history.
 private struct RecentlyClosedMenu: View {
     let controller: BrowserController
 
     var body: some View {
         let strip = CefProfile.default.tabStrip
         Menu("Recently Closed") {
-            ForEach(Array(strip.recentlyClosed.prefix(12).enumerated()), id: \.offset) { offset, item in
-                Button(String(menuTitle: item.title, url: item.url) + (item.kind == .window ? " (window)" : "")) {
-                    controller.keyWindow?.chrome.reopenClosedTab()
+            ForEach(strip.recentlyClosed.prefix(15)) { item in
+                Button(Self.title(of: item)) {
+                    Task { try? await strip.reopen(item) }
                 }
-                .disabled(offset > 0)
             }
         }
         .disabled(strip.recentlyClosed.isEmpty)
-        .task { await strip.refreshRecentlyClosed() }
+    }
+
+    static func title(of item: CefTabStrip.ClosedItem) -> String {
+        let title = String(menuTitle: item.title, url: item.url)
+        switch item.kind {
+        case .window: return "Window: \(item.tabCount) \(item.tabCount == 1 ? "Tab" : "Tabs") — \(title)"
+        case .group: return "Group: \(title) (\(item.tabCount) \(item.tabCount == 1 ? "Tab" : "Tabs"))"
+        case .tab, .other: return title
+        }
+    }
+}
+
+/// Settings: what the browser opens at launch.
+private struct StartupSetting: View {
+    @AppStorage(BrowserController.restoresWindowsKey) private var restoresWindows = false
+
+    var body: some View {
+        Picker("On startup", selection: $restoresWindows) {
+            Text("Open a new window").tag(false)
+            Text("Reopen windows from last time").tag(true)
+        }
+        .help("After the browser quits unexpectedly, it offers to reopen its windows either way.")
     }
 }
