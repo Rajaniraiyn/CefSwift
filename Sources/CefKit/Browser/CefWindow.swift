@@ -117,8 +117,6 @@ public final class CefWindow: Identifiable {
     @ObservationIgnored private var cefWindow: CefRef<cef_window_t>?
     @ObservationIgnored private var browserView: CefRef<cef_browser_view_t>?
     @ObservationIgnored private var accessoryController: NSTitlebarAccessoryViewController?
-    /// Where the window is shown in an app's window (``attach(to:)``).
-    @ObservationIgnored var placement: Placement?
 
     /// Creates the window and its browser. `browser` must not have been
     /// hosted elsewhere. The window stays hidden until ``show()``.
@@ -327,12 +325,8 @@ public final class CefWindow: Identifiable {
         return Unmanaged<NSView>.fromOpaque(handle).takeUnretainedValue().window
     }
 
-    /// Shows the window; one attached to a view of yours
-    /// (``attach(to:)``) is shown over that view.
     public func show() {
-        placement?.place()
         cefWindow.map { $0.pointer.pointee.show($0.pointer) }
-        placement?.order()
     }
 
     public func hide() {
@@ -553,8 +547,6 @@ public final class CefWindow: Identifiable {
             (state as? CefWindowParticipant)?.windowDidClose(self)
         }
         accessoryController = nil
-        placement?.stop()
-        placement = nil
         windowWaiters = []
         cefWindow = nil
         browserView = nil
