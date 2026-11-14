@@ -275,6 +275,18 @@ public final class CefBrowser: Identifiable {
     /// Whether the offscreen host last reported that it cannot be seen
     /// (``hostViewDidHide()``).
     @ObservationIgnored var isHostViewHidden = false
+    /// A windowed browser's native view while no host shows it. CEF closes
+    /// a browser whose view is deallocated (`CefBrowserHostView`'s
+    /// `dealloc`), so a view withdrawn from its host, as SwiftUI does when
+    /// a `CefWebView` leaves the hierarchy, is kept here until a host shows
+    /// it again or the browser closes.
+    @ObservationIgnored var parkedNativeView: NSView?
+    /// Whether the Chromium browser is closing: its view must then go, for
+    /// the close to finish, and is not kept.
+    @ObservationIgnored var isChromiumBrowserClosing = false
+    /// How many times the host told Chromium its size changed
+    /// (``hostViewDidResize()``), for SelfTest's animation measurements.
+    @ObservationIgnored @_spi(Testing) public internal(set) var resizeNotificationCount = 0
     /// Whether the lifecycle coordinator hid a windowed browser's native
     /// view, and the responder to give focus back to when it shows it.
     @ObservationIgnored var lifecycleHidNativeView = false
@@ -536,6 +548,10 @@ public final class CefBrowser: Identifiable {
     /// handler may ask the user to stay.
     public func close(force: Bool = false) {
         loads.browserWillClose()
+        if raw != nil {
+            isChromiumBrowserClosing = true
+            parkedNativeView = nil
+        }
         guard raw != nil else {
             // Not created yet, or Chromium is still creating it: it closes
             // now, and a browser Chromium finishes creating after this

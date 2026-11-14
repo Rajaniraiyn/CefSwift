@@ -212,6 +212,9 @@ extension CefBrowser {
     /// Returns `false` for browsers that own their window or have no view.
     func detachEmbeddedView() -> Bool {
         guard isEmbeddedView, let native = nativeView else { return false }
+        // Closing finishes when the view is gone.
+        isChromiumBrowserClosing = true
+        parkedNativeView = nil
         DispatchQueue.main.async { native.removeFromSuperview() }
         return true
     }
@@ -312,6 +315,7 @@ extension CefBrowser {
     func handleClosed() {
         guard state != .closed else { return }
         hideTooltip()
+        parkedNativeView = nil
         if discardPhase == .closing {
             browserDidCloseForDiscard()
             return

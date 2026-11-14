@@ -665,6 +665,170 @@ That wait slows CEF's message loop, so Chromium delivers fewer frames.
 Chromium's surfaces count toward the GPU process, the copies toward the
 app.
 
+## Animating pages
+
+Four parties take part when a page animates, each on its own clock.
+
+**SwiftUI and AppKit, on the main thread.** SwiftUI interpolates its
+animations itself, once per display refresh, and applies each step to the
+platform view as AppKit state; it hands nothing to Core Animation to
+interpolate. Measured with a `withAnimation(.spring)` on a page's frame:
+every refresh sets the `NSViewRepresentable`'s frame, about three times
+per refresh at a fractional size, and the presentation layer always equals
+the model layer. `updateNSView` is not called during the animation, so a
+representable cannot read the animation from its transaction. The other
+modifiers act on SwiftUI's own container views around the representable,
+again per refresh: `scaleEffect` and `rotationEffect` set an affine
+transform on the layer of the platform-view host, `rotation3DEffect` a 3D
+transform on an `_NSProjectionView`'s layer, `opacity` the host layer's
+opacity, `clipShape(.rect(cornerRadius:))` a corner radius with
+`masksToBounds` on a container's layer, `blur` a `gaussianBlur` filter,
+and `offset` the origin of a container's frame. A matched-geometry move
+between two containers and an inserted page each make a new view.
+AppKit's `animator()` and `NSAnimationContext.animate(_:)` also set the
+frame on every refresh. And AppKit calls `viewDidChangeBackingProperties`
+on the view on every refresh of a `scaleEffect` or `rotationEffect`, a
+matched-geometry move and a scale transition, though neither the scale
+nor the screen changes.
+
+**Core Animation's render server**, out of process, composites the
+window's layer tree, including Chromium's, and would interpolate implicit
+layer animations; neither SwiftUI nor AppKit uses them for these.
+
+**Chromium.** A windowed page is Chromium's own view: its frames come from
+the GPU process as a `CALayerHost` (a layer whose content another process
+draws), inside a layer Chromium sizes to the frame it shows and a
+masking layer at the view's size. Chromium's compositor produces frames on
+its own begin-frame source, and a resize reaches it through AppKit: its
+view's frame changes, it lays the page out at the new size, rasters and
+presents, and the new frame shows a few milliseconds to a refresh or two
+later. An offscreen page is told of a size by `was_resized`, asks
+`get_view_rect`, lays out and rasters, and its frames arrive through
+`on_accelerated_paint` on the main thread, timed by Chromium's own timer
+(see [Frame timing](#frame-timing)), where `CefOffscreenBrowserView`
+copies each into a surface of its own (see [Frame ownership](#frame-ownership))
+and makes it its content layer's contents with implicit actions off.
+
+**Why a size animation is expensive and late.** At each size the page
+lays out, rasters and composites, so a spring that changes the size on
+every refresh asks Chromium for a new layout on every refresh, and the
+frame of each size arrives after the view already has the next one. The
+`animation` benchmark below measures it: during a 0.6 s spring an
+offscreen page presents about 20 frames in 1.2 s instead of 72 refreshes,
+and 30 of those refreshes show a frame of an earlier size. The capture
+pipeline of an offscreen page makes the lag visible: while a resize is in
+flight viz's `FrameSinkVideoCapturer` captures the page, still at its old
+size, into a surface of the new size and letterboxes it, filling the rest
+with black; 10 of the 24 frames presented during a spring were
+letterboxed. Each frame carries the part its content fills
+(`content_rect` in `cef_accelerated_paint_info_common_t`), and
+`CefOffscreenBrowserView` shows only that part, placed as
+`framePlacement` says (stretched by default), so a resize shows the last
+frame stretched rather than a black band. The frame also carries the
+size of what was captured (`source_size`): the page's size in the frame,
+which is not the surface's when Chromium scales the capture, as it does
+for a page laid out larger than its view with `pageSize` (a 1200×800
+page shown in a 300×400 view arrived in 600×800-pixel surfaces). Input
+maps through that size.
+
+What each rendering can do:
+
+| | Offscreen (`CefOffscreenBrowserView`) | Windowed (`CefWindowedBrowserView`) |
+|---|---|---|
+| Who draws | The app's layer, with Chromium's frame copied into it | Chromium's layer tree, from the GPU process |
+| Transforms, opacity, masks, corner radius, blur, shadows | Applied to the app's layer: exact, interpolated by SwiftUI or Core Animation like any layer | Applied by the render server to Chromium's layers; nothing in the process can read the result |
+| Input under a transform | Converted through the layers, 2D and 3D, so a click lands on the page point it shows | Chromium converts clicks through AppKit's view geometry, which applies a 2D transform on this macOS and no 3D one |
+| A frame of another size than the view | Placed by `framePlacement`, with input mapped back | Anchored at the top left by Chromium; the view's background shows where it is smaller |
+| Laying out at another size (`pageSize`) | Yes: thumbnails and previews with live input | No: Chromium sizes the page to its view |
+| When the size animates | `resizePolicy`: live, once per run-loop pass, or scale, then settle | Live: Chromium resizes with its view |
+| Moving to another view | Shows the last frame at once; the old view can keep it | Chromium's view moves; it has no frame to keep |
+| Cost | A GPU copy per frame on the main thread (1.6–3.4 ms) | None in the app |
+
+SwiftUI content over a page is not the "airspace" problem of a native
+child window on other platforms: a page is a layer subtree of the
+window like any view's, and AppKit hit-tests SwiftUI's overlay first. The
+`animation` checks click an overlay over each kind of page, and the click
+goes to SwiftUI's hosting view, not to the page. What a windowed page
+cannot do is be read back: its pixels are the GPU process's, so effects
+that need them in the app's process (sampling, snapshots of what is on
+screen, compositing it into an image) need offscreen rendering, and
+nothing in the process can check what the window server drew over it.
+
+Three things were wrong and are fixed:
+
+- **Per-refresh screen changes under a transform.** AppKit's
+  `viewDidChangeBackingProperties` on every refresh of a `scaleEffect` or
+  `rotationEffect` made `CefOffscreenBrowserView` send
+  `notify_screen_info_changed` and `was_resized` 30 to 45 times in 1.2 s,
+  and the main thread hitched for up to 50 ms. The view now tells
+  Chromium only when the backing scale or the screen changes.
+- **Black bands while resizing**: letterboxed frames, above.
+- **A windowed page closed when its view left the hierarchy.** CEF's
+  `CefBrowserHostView` closes its browser when it is deallocated, and
+  nothing else held Chromium's view once `stopHosting(in:)` took it out of
+  its host, as happens when SwiftUI removes a `CefWebView`, with or
+  without a transition. `CefBrowser` now keeps the view while no host
+  shows it, and lets it go when the browser closes.
+
+`CefOffscreenBrowserView` also tells Chromium of a size once per pass of
+the main run loop rather than on each of SwiftUI's frame changes, halving
+`was_resized` during a spring, and a page moving to another offscreen
+view arrives with the frame it last showed, so it is never blank there.
+
+### Measurements
+
+`-benchmark animation` in SelfTest runs each animation there and back on
+a windowed page, an offscreen page under each resize policy, an offscreen
+page that resizes on every frame change (the earlier design), and
+`WKWebView`, on an M3 MacBook Air with a 60 Hz display, two runs each,
+1.2 s per run (72 refreshes). The page is a gradient with text. Hitches
+are refreshes the main thread's display link missed. A trailing refresh
+shows a frame of an earlier size. Before is the design before this
+change; after is now:
+
+| Animation | Host | Hitches (longest) | `was_resized` | Page `resize` events | Frames presented | Letterboxed | Trailing refreshes | Main thread busy |
+|---|---|---|---|---|---|---|---|---|
+| Spring on the width | Windowed | 0 (16.7 ms) | – | 29–32 | – | – | – | 17–26% |
+| | Offscreen, before (every frame change) | 0 (16.7 ms) | 73–127 | 8–10 | 15–20 | 6–8, shown as black bands | 25–30 | 16–19% |
+| | Offscreen, `.live` | 0 (16.7 ms) | 38–41 | 9–12 | 18–24 | 9–11, cropped | 29–32 | 16–22% |
+| | Offscreen, `.scaleThenSettle` | 0 (16.7 ms) | 4 | 3 | 6 | 3, cropped | 30–33 | 8–9% |
+| | `WKWebView` | 0 (16.7 ms) | – | 28–30 | – | – | – | 6–7% |
+| `animator()` on the container's frame | Windowed | 0 (16.7 ms) | – | 31–32 | – | – | – | 24–29% |
+| | Offscreen, `.live` | 0–1 (33.9 ms) | 32–33 | 9–11 | 17–21 | 7–9, cropped | 30–34 | 14–21% |
+| | Offscreen, `.scaleThenSettle` | 0 (16.7 ms) | 4 | 4 | 8 | 3, cropped | 30–33 | 10–12% |
+| | `WKWebView` | 0 (16.7 ms) | – | 26–32 | – | – | – | 5–7% |
+| Animated window resize (`setFrame(_:display:animate:)`) | Windowed, offscreen, `WKWebView` | 0–1 (24–29 ms) | 1–3 | 1–3 | 3–6 | 0–2 | 1–5 | 18–22% |
+| `scaleEffect` | Offscreen, before | 0–2 (50.3 ms) | 41–45 | 0 | – | – | – | 14–35% |
+| | Offscreen, after | 0 (16.7 ms) | 1 | 0 | – | – | – | 5–7% |
+| | Windowed; `WKWebView` | 0 (16.7 ms) | – | 0–1 | – | – | – | 1–8% |
+| `rotationEffect` | Offscreen, before | 0–1 (47.7 ms) | 28–32 | 0 | – | – | – | 24–30% |
+| | Offscreen, after | 0 (16.7 ms) | 1 | 0 | – | – | – | 4% |
+| Matched-geometry move | Offscreen, before | 0–1 (46.3 ms) | 66–74 | 0 | – | – | – | 21–30% |
+| | Offscreen, after | 0 (16.7 ms) | 3 | 0 | – | – | – | 3–9% |
+| Inserted with `.transition(.scale)` | Offscreen, before | 0–1 (51.7 ms) | 50–67 | 0 | – | – | – | 22–30% |
+| | Offscreen, after | 0 (16.7 ms) | 1–3 | 0 | – | – | – | 2–4% |
+| `rotation3DEffect`, `opacity`, `clipShape`, `blur`, `offset` | Every host | 0 (16.7 ms) | 0–1 | 0 | – | – | – | 1–8% |
+
+An animated window resize changes the page's frame about 15 times, but
+every host's page lays out only once or twice, whatever it is told, as if
+Chromium's work waited for the end of AppKit's resize animation, which
+runs the main run loop itself (inferred from the counts, not traced). A windowed page's frames come
+from another process, so whether they trail its view, and by how much, is
+not measured; the layer Chromium sizes to its frame was never smaller than
+the view in the windowed runs, growing or shrinking.
+
+`WKWebView` does what a windowed Chromium page does: it lays the page out
+live, firing `resize` 29 to 31 times per spring, with no hitches. Neither
+rendering can do better than live layout and stay sharp; an offscreen
+page under `.scaleThenSettle` lays out 4 times instead of 40 and halves
+the main thread's work, at the price of a stretched frame until it
+settles.
+
+Display-link-driven begin frames were measured for animation before (see
+[Frame timing](#frame-timing)): they match the timer's rate and add
+latency, so offscreen pages keep Chromium's timer during animations too.
+The display had no 120 Hz mode to measure ProMotion with.
+
 ## Offscreen accessibility
 
 Windowed browsers expose Chromium's own `NSAccessibility` objects. For

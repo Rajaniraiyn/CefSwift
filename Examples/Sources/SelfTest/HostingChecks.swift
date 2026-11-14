@@ -163,8 +163,11 @@ extension SelfTest {
             (try? await browser.evaluateJavaScript("innerWidth + 'x' + innerHeight").stringValue) == secondSize
         })
         browser.stopHosting(in: second)
+        // CEF closes a browser whose view goes away, a moment later.
+        try? await Task.sleep(for: .milliseconds(500))
         check("hosting: windowed stopHosting removes the native view without closing",
-              second.browser == nil && browser.nativeView?.superview == nil && browser.state == .live)
+              second.browser == nil && browser.nativeView?.superview == nil && browser.state == .live,
+              detail: "\(browser.state)")
         await closeHosted(browser, second)
     }
 }

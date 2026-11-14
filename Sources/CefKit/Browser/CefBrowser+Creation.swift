@@ -111,6 +111,7 @@ extension CefBrowser {
         }
         native.frame = parentView.bounds
         native.autoresizingMask = [.width, .height]
+        parkedNativeView = nil
         hostView = parentView
         if let previous, previous !== parentView {
             (previous as? CefWindowedBrowserView)?.browserDidStopHosting(self)
@@ -179,7 +180,11 @@ extension CefBrowser {
         }
         var stoppedWindowed: CefWindowedBrowserView?
         if hostView === host {
-            if !isOffscreen, let native = nativeView, native.superview === host { native.removeFromSuperview() }
+            if !isOffscreen, let native = nativeView, native.superview === host {
+                // Kept, or Chromium closes the browser with its view.
+                if state == .live, !isChromiumBrowserClosing { parkedNativeView = native }
+                native.removeFromSuperview()
+            }
             hostView = nil
             stoppedWindowed = host as? CefWindowedBrowserView
         }
@@ -192,6 +197,7 @@ extension CefBrowser {
     }
 
     private func createWindowed(in parentView: NSView) {
+        isChromiumBrowserClosing = false
         var blueprint = makeBlueprint()
         var windowInfo = cef_window_info_t()
         windowInfo.size = MemoryLayout<cef_window_info_t>.stride

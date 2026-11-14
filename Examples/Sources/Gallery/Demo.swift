@@ -42,6 +42,7 @@ enum Demos {
     static let all: [any Demo] = [
         ObservableStateDemo(),
         OffscreenOverlayDemo(),
+        AnimationDemo(),
         SwipeNavigationDemo(),
         AppKitHostingDemo(),
 

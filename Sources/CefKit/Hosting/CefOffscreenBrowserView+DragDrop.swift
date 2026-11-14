@@ -16,7 +16,7 @@ extension CefOffscreenBrowserView: NSDraggingSource {
     }
 
     private func viewPoint(for info: NSDraggingInfo) -> CGPoint {
-        convert(info.draggingLocation, from: nil)
+        pagePoint(fromWindow: info.draggingLocation)
     }
 
     // MARK: Drags into the page
@@ -64,7 +64,8 @@ extension CefOffscreenBrowserView: NSDraggingSource {
     public func offscreenBeginDraggingSession(_ data: CefDragData, allowedOperations: CefDragOperation, at point: CGPoint) -> Bool {
         guard let event = NSApp.currentEvent ?? syntheticDragEvent(at: point) else { return false }
         let item = NSDraggingItem(pasteboardWriter: data.pasteboardItem)
-        item.setDraggingFrame(NSRect(x: point.x - 16, y: point.y - 16, width: 32, height: 32), contents: nil)
+        let start = viewPoint(fromPage: point)
+        item.setDraggingFrame(NSRect(x: start.x - 16, y: start.y - 16, width: 32, height: 32), contents: nil)
         currentDragAllowedOperations = allowedOperations
         beginDraggingSession(with: [item], event: event, source: self)
         return true
@@ -91,12 +92,12 @@ extension CefOffscreenBrowserView: NSDraggingSource {
         currentDragAllowedOperations = .none
         guard let browser else { return }
         let inWindow = window?.convertPoint(fromScreen: screenPoint) ?? screenPoint
-        browser.draggingSessionEnded(at: convert(inWindow, from: nil), operation: CefDragOperation(operation))
+        browser.draggingSessionEnded(at: pagePoint(fromWindow: inWindow), operation: CefDragOperation(operation))
     }
 
-    private func syntheticDragEvent(at viewPoint: CGPoint) -> NSEvent? {
+    private func syntheticDragEvent(at pagePoint: CGPoint) -> NSEvent? {
         NSEvent.mouseEvent(
-            with: .leftMouseDragged, location: convert(viewPoint, to: nil), modifierFlags: [],
+            with: .leftMouseDragged, location: windowPoint(fromView: viewPoint(fromPage: pagePoint)), modifierFlags: [],
             timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window?.windowNumber ?? 0,
             context: nil, eventNumber: 0, clickCount: 1, pressure: 1)
     }

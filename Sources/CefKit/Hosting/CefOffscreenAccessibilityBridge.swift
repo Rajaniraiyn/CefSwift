@@ -72,16 +72,15 @@ final class CefOffscreenAccessibilityBridge {
 
     func hitTest(screenPoint: NSPoint) -> Any? {
         guard let view, let window = view.window, let tree else { return nil }
-        let point = view.convert(window.convertPoint(fromScreen: screenPoint), from: nil)
-        guard view.bounds.contains(point) else { return nil }
-        return tree.hitTest(point).map { element(for: $0.id) }
+        let windowPoint = window.convertPoint(fromScreen: screenPoint)
+        guard view.bounds.contains(view.viewPoint(fromWindow: windowPoint)) else { return nil }
+        return tree.hitTest(view.pagePoint(fromWindow: windowPoint)).map { element(for: $0.id) }
     }
 
-    /// A rect in the view's coordinates (top-left origin), in screen
-    /// coordinates (bottom-left origin).
+    /// A rect in page points (top-left origin), in screen coordinates
+    /// (bottom-left origin), as the view shows the page.
     func screenRect(forViewRect rect: CGRect) -> NSRect {
-        guard let view, let window = view.window else { return .zero }
-        return window.convertToScreen(view.convert(rect, to: nil))
+        view?.screenRect(fromPage: rect) ?? .zero
     }
 
     func perform(_ action: CefAccessibilityAction, on id: CefAccessibilityNode.ID) {

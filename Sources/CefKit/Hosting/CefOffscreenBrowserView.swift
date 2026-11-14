@@ -11,6 +11,12 @@ import Foundation
 /// forwarding mouse, keyboard, scroll, IME and drag input, applying cursors,
 /// and presenting context menus.
 ///
+/// The page follows SwiftUI and AppKit animations of the view: input lands
+/// where a transformed view shows the page, ``resizePolicy`` says when the
+/// page lays out while the size animates, ``pageSize`` lays it out at a
+/// size of its own, and ``framePlacement`` places a frame of another size
+/// than the view.
+///
 /// Chromium paints at the browser's frame rate while the view can be seen.
 /// When its window is occluded or miniaturized, or the view is hidden, the
 /// view tells the browser it is hidden, and Chromium stops painting.
@@ -43,9 +49,14 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
     public var browser: CefBrowser? {
         didSet {
             guard browser !== oldValue else { return }
-            browserDidChange(from: oldValue)
+            browserDidChange(from: oldValue, keepingFrame: isKeepingFrame)
         }
     }
+    /// Set while the browser leaves for another host and the view keeps
+    /// its last frame (``keepsLastFrameWhenMoved``).
+    private var isKeepingFrame = false
+    /// The browser whose frame the content layer shows.
+    private weak var frameBrowser: CefBrowser?
 
     /// The page's accessibility elements.
     lazy var accessibilityBridge = CefOffscreenAccessibilityBridge(view: self)
@@ -103,6 +114,109 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
     /// The operations allowed for the page-initiated drag in progress.
     var currentDragAllowedOperations: CefDragOperation = .none
 
+    // MARK: Geometry
+
+    /// When the page lays out again while the view's size changes.
+    public enum ResizePolicy: Sendable, Hashable {
+        /// The page lays out at every size the view takes, at most once
+        /// per pass of the main run loop: during an animation, once per
+        /// display refresh. Its frames trail the view by a frame or two,
+        /// shown meanwhile as ``framePlacement`` places them.
+        case live
+        /// While the size keeps changing, the page keeps its layout and
+        /// its last frame is placed in the view by ``framePlacement``; it
+        /// lays out again once the size has been still for a few display
+        /// refreshes, and at most four times a second until then. A size
+        /// change on its own, not part of a run of them, applies at once.
+        case scaleThenSettle
+    }
+
+    /// When the page lays out again while the view's size changes, as it
+    /// does on every refresh of a SwiftUI or AppKit size animation and of a
+    /// window's live resize. The default is ``ResizePolicy/live``, as a
+    /// windowed browser and `WKWebView` behave.
+    public var resizePolicy: ResizePolicy = .live {
+        didSet { if resizePolicy != oldValue { commitPageSize(force: false) } }
+    }
+
+    /// Where a frame whose size differs from the view's is drawn.
+    public enum FramePlacement: Sendable, Hashable {
+        /// Stretched to fill the view.
+        case stretch
+        /// Scaled to fit the view, keeping its aspect ratio, and centred.
+        case aspectFit
+        /// Scaled to fill the view, keeping its aspect ratio, centred and
+        /// cropped.
+        case aspectFill
+        /// At its own size from the view's top-leading corner, cropped
+        /// where it is larger and showing the view's background where it
+        /// is smaller, as Safari keeps a page during a live resize.
+        case topLeading
+    }
+
+    /// Where a frame whose size differs from the view's is drawn: a frame
+    /// that has not caught up with a resize yet, one of a page laid out at
+    /// ``pageSize``, or one kept by ``ResizePolicy/scaleThenSettle``. Input,
+    /// the IME candidate window, popup widgets, context menus and
+    /// accessibility frames follow the frame. The default is
+    /// ``FramePlacement/stretch``.
+    public var framePlacement: FramePlacement = .stretch {
+        didSet { if framePlacement != oldValue { updateContentFrame() } }
+    }
+
+    /// The size the page lays out at, in points, or `nil` (the default) for
+    /// the view's size. A page laid out at one size and shown at another,
+    /// placed by ``framePlacement``, is a thumbnail or a live preview whose
+    /// input still lands where it is clicked; set it to the size a view is
+    /// animating to, with ``FramePlacement/topLeading``, to lay the page
+    /// out once at its final size and reveal it as the view grows.
+    public var pageSize: CGSize? {
+        didSet {
+            guard pageSize != oldValue else { return }
+            commitPageSize(force: true)
+        }
+    }
+
+    /// Whether the view goes on showing its last frame when its browser
+    /// moves to another host, until it is given another browser. Off by
+    /// default; `CefWebView` turns it on, so a page moving between two
+    /// views in a SwiftUI transition does not leave a blank view behind
+    /// while the old one animates out. The view sends the page nothing
+    /// once the browser has moved.
+    public var keepsLastFrameWhenMoved = false
+
+    /// The size Chromium was last told, through
+    /// ``CefOffscreenHost/offscreenViewInfo``.
+    private var committedPageSize: CGSize = .zero
+    /// The page size of the frame the content layer shows, in points.
+    private var presentedFrameSize: CGSize?
+    /// The popup widget's rect, in page points.
+    private var popupPageRect: CGRect = .zero
+    private var commitScheduled = false
+    private var settleTimer: Timer?
+    private var lastSizeChange: CFTimeInterval = 0
+    private var lastCommit: CFTimeInterval = 0
+    /// How long the size must stay still before ``ResizePolicy/scaleThenSettle``
+    /// lays the page out, and how often it does while it does not.
+    private static let settleDelay: CFTimeInterval = 0.05
+    private static let settleInterval: CFTimeInterval = 0.25
+
+    /// For SelfTest's `animation` benchmark: tell Chromium about every
+    /// frame change at once, as an earlier design did, instead of once per
+    /// run-loop pass.
+    @_spi(Testing) public static var resizesOnEveryFrameChange = false
+    /// For SelfTest: called with each frame's size in pixels as it becomes
+    /// the content layer's contents, and the part the page fills when
+    /// Chromium letterboxed it.
+    @_spi(Testing) public var didPresentFrame: ((CGSize, CGRect?) -> Void)?
+    /// For SelfTest: the content layer's frame, in view points.
+    @_spi(Testing) public var contentFrame: CGRect { contentLayer.frame }
+    /// For SelfTest: the page point a point in the window falls on, and
+    /// the page size of the frame shown.
+    @_spi(Testing) public func testingPagePoint(fromWindow point: NSPoint) -> (point: CGPoint, frameSize: CGSize) {
+        (pagePoint(fromWindow: point), shownPageSize)
+    }
+
     // MARK: Initialization
 
     /// Creates a view showing `browser`, whose
@@ -138,27 +252,52 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
     @available(*, unavailable)
     required init?(coder: NSCoder) { nil }
 
-    private func browserDidChange(from oldValue: CefBrowser?) {
+    private func browserDidChange(from oldValue: CefBrowser?, keepingFrame: Bool = false) {
         // It stops painting here, and one still waiting for its profile,
         // or discarded, is not created here later.
         oldValue?.stopHosting(in: self)
-        if oldValue != nil {
-            // Nothing of the last page stays up, and the next browser's
-            // first frame is copied whole.
-            CATransaction.begin()
-            CATransaction.setDisableActions(true)
-            contentLayer.contents = nil
+        // A live page moving here from another view shows that view's last
+        // frame until it paints here, instead of a blank view.
+        let adopted = browser.flatMap { browser in
+            (browser.hostView as? CefOffscreenBrowserView).flatMap { $0 !== self ? $0.shownFrame : nil }
+        }
+        // The compositor never writes into a surface it no longer holds,
+        // so a frame kept on screen stays as it is, and the next frame is
+        // copied whole.
+        contentCompositor.reset()
+        popupCompositor.reset()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        if oldValue != nil || browser !== frameBrowser {
             popupLayer.contents = nil
             popupLayer.isHidden = true
-            CATransaction.commit()
-            contentCompositor.reset()
-            popupCompositor.reset()
             toolTip = nil
         }
+        if let adopted {
+            contentLayer.contents = adopted.contents
+            contentLayer.contentsRect = adopted.contentsRect
+            presentedFrameSize = adopted.size
+            frameBrowser = browser
+        } else if !keepingFrame, browser !== frameBrowser || oldValue != nil {
+            // Nothing of the last page stays up.
+            contentLayer.contents = nil
+            contentLayer.contentsRect = CGRect(x: 0, y: 0, width: 1, height: 1)
+            presentedFrameSize = nil
+            frameBrowser = nil
+        }
+        CATransaction.commit()
+        updateContentFrame()
         if let browser { layer?.backgroundColor = browser.hostBackgroundColor }
         hostBrowserIfPossible()
         updateVisibility(notifyingBrowser: true)
         accessibilityBridge.browserDidChange()
+    }
+
+    /// The frame the content layer shows and its page size, for a view the
+    /// browser moves to.
+    private var shownFrame: (contents: Any, size: CGSize, contentsRect: CGRect)? {
+        guard let contents = contentLayer.contents, let presentedFrameSize else { return nil }
+        return (contents, presentedFrameSize, contentLayer.contentsRect)
     }
 
     public override var isFlipped: Bool { true }
@@ -192,51 +331,260 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
         updateVisibility()
     }
 
+    // AppKit calls this on every display refresh of a SwiftUI
+    // `scaleEffect` or `rotationEffect`, without a change of scale or
+    // screen; Chromium hears only of real changes.
     public override func viewDidChangeBackingProperties() {
         super.viewDidChangeBackingProperties()
-        updateScale()
+        updateScale(onlyIfChanged: true)
     }
 
     public override func layout() {
         super.layout()
-        syncLayerGeometry()
-        browser?.hostViewDidResize()
+        geometryDidChange()
     }
 
-    // Live resize calls this on every step. Resizing the content layer here,
-    // without animation, keeps the last frame stretched over the whole view
-    // until Chromium paints at the new size.
+    // SwiftUI and AppKit animate a view's size by setting its frame on
+    // every display refresh, several times per refresh, on the main
+    // thread. Resizing the content layer here, without animation, keeps
+    // the last frame over the view until Chromium paints at the new size.
     public override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
-        syncLayerGeometry()
-        browser?.hostViewDidResize()
+        geometryDidChange()
     }
 
     public override func viewDidEndLiveResize() {
         super.viewDidEndLiveResize()
-        syncLayerGeometry()
-        browser?.hostViewDidResize()
+        geometryDidChange()
+        commitPageSize(force: true)
         browser?.setNeedsDisplay()
     }
 
-    private func syncLayerGeometry() {
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        contentLayer.frame = bounds
-        CATransaction.commit()
-    }
-
-    private func updateScale() {
-        guard let scale = window?.backingScaleFactor else { return }
+    private func updateScale(onlyIfChanged: Bool = false) {
+        guard let window else { return }
+        let scale = window.backingScaleFactor
+        let screen = window.screen.map(ObjectIdentifier.init)
+        guard !onlyIfChanged || scale != lastBackingScale || screen != lastScreen else { return }
+        lastBackingScale = scale
+        lastScreen = screen
         contentLayer.contentsScale = scale
         popupLayer.contentsScale = scale
         browser?.hostViewDidChangeBackingProperties()
-        browser?.hostViewDidResize()
+        commitPageSize(force: true)
     }
+    private var lastBackingScale: CGFloat = 0
+    private var lastScreen: ObjectIdentifier?
 
     private func hostBrowserIfPossible() {
         guard !isTornDown, window != nil, let browser else { return }
-        browser.host(offscreenIn: self, size: bounds.size == .zero ? CGSize(width: 800, height: 600) : bounds.size)
+        let size = targetPageSize
+        committedPageSize = size
+        browser.host(offscreenIn: self, size: size == .zero ? CGSize(width: 800, height: 600) : size)
+    }
+
+    // MARK: Page geometry
+
+    /// The size the page should lay out at.
+    private var targetPageSize: CGSize { pageSize ?? bounds.size }
+
+    /// The view's size changed: place the frame, and tell Chromium as the
+    /// resize policy says.
+    private func geometryDidChange() {
+        updateContentFrame()
+        guard targetPageSize != committedPageSize else { return }
+        if Self.resizesOnEveryFrameChange {
+            commitPageSize(force: true)
+            return
+        }
+        switch resizePolicy {
+        case .live:
+            // Once per pass of the run loop, after its last frame change:
+            // SwiftUI sets a frame several times per display refresh.
+            guard !commitScheduled else { return }
+            commitScheduled = true
+            CFRunLoopPerformBlock(CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue) { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.commitScheduled = false
+                    self.commitPageSize(force: false)
+                }
+            }
+            CFRunLoopWakeUp(CFRunLoopGetMain())
+        case .scaleThenSettle:
+            let now = CACurrentMediaTime()
+            let isAlone = settleTimer == nil && now - lastSizeChange > Self.settleDelay
+            lastSizeChange = now
+            if isAlone { commitPageSize(force: false) }
+            startSettleTimer()
+        }
+    }
+
+    /// Checks on every display refresh whether the size has settled.
+    private func startSettleTimer() {
+        guard settleTimer == nil else { return }
+        let timer = Timer(timeInterval: 1.0 / 120, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.settleTimerFired() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        settleTimer = timer
+    }
+
+    private func settleTimerFired() {
+        let now = CACurrentMediaTime()
+        if now - lastSizeChange >= Self.settleDelay {
+            settleTimer?.invalidate()
+            settleTimer = nil
+            commitPageSize(force: false)
+        } else if now - lastCommit >= Self.settleInterval {
+            commitPageSize(force: false)
+        }
+    }
+
+    /// Tells Chromium the page's size, if it changed or `force` is set.
+    private func commitPageSize(force: Bool) {
+        let size = targetPageSize
+        guard force || size != committedPageSize else { return }
+        committedPageSize = size
+        lastCommit = CACurrentMediaTime()
+        browser?.hostViewDidResize()
+    }
+
+    /// Places the content and popup layers for the frame shown.
+    private func updateContentFrame() {
+        let frame = Self.rect(placing: presentedFrameSize ?? targetPageSize, in: bounds, framePlacement)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        if contentLayer.frame != frame { contentLayer.frame = frame }
+        // A frame placed larger than the view is cropped to it; otherwise
+        // a popup widget may reach past the view, as Chromium places it.
+        let crops = !bounds.insetBy(dx: -0.5, dy: -0.5).contains(frame)
+        if layer?.masksToBounds != crops { layer?.masksToBounds = crops }
+        let popup = viewRect(fromPage: popupPageRect)
+        if popupLayer.frame != popup { popupLayer.frame = popup }
+        CATransaction.commit()
+    }
+
+    /// Where a frame of page size `size` is drawn in `bounds`.
+    static func rect(placing size: CGSize, in bounds: CGRect, _ placement: FramePlacement) -> CGRect {
+        guard size.width > 0, size.height > 0, bounds.width > 0, bounds.height > 0 else { return bounds }
+        switch placement {
+        case .stretch:
+            return bounds
+        case .topLeading:
+            return CGRect(origin: bounds.origin, size: size)
+        case .aspectFit, .aspectFill:
+            let x = bounds.width / size.width, y = bounds.height / size.height
+            let scale = placement == .aspectFit ? min(x, y) : max(x, y)
+            let width = size.width * scale, height = size.height * scale
+            return CGRect(
+                x: bounds.minX + (bounds.width - width) / 2, y: bounds.minY + (bounds.height - height) / 2,
+                width: width, height: height)
+        }
+    }
+
+    /// The page size of the frame shown, or the size the page lays out at.
+    private var shownPageSize: CGSize { presentedFrameSize ?? committedPageSize }
+
+    /// A point in page points (top-left origin), in view coordinates.
+    func viewPoint(fromPage point: CGPoint) -> CGPoint {
+        let size = shownPageSize, frame = contentLayer.frame
+        guard size.width > 0, size.height > 0 else { return point }
+        return CGPoint(
+            x: frame.minX + point.x * frame.width / size.width,
+            y: frame.minY + point.y * frame.height / size.height)
+    }
+
+    /// A point in view coordinates, in page points.
+    func pagePoint(fromView point: CGPoint) -> CGPoint {
+        let size = shownPageSize, frame = contentLayer.frame
+        guard size.width > 0, size.height > 0, frame.width > 0, frame.height > 0 else { return point }
+        return CGPoint(
+            x: (point.x - frame.minX) * size.width / frame.width,
+            y: (point.y - frame.minY) * size.height / frame.height)
+    }
+
+    /// A rect in page points, in view coordinates.
+    func viewRect(fromPage rect: CGRect) -> CGRect {
+        guard !rect.isNull else { return rect }
+        let origin = viewPoint(fromPage: rect.origin)
+        let corner = viewPoint(fromPage: CGPoint(x: rect.maxX, y: rect.maxY))
+        return CGRect(x: origin.x, y: origin.y, width: corner.x - origin.x, height: corner.y - origin.y)
+    }
+
+    /// The window's root view, when a layer between it and this view has
+    /// a transform: SwiftUI's `scaleEffect`, `rotationEffect` and
+    /// `rotation3DEffect`, or a transform an app sets on a layer. Points
+    /// are then converted through the layers, which apply transforms,
+    /// rather than through the views, which on some macOS releases do not
+    /// and never apply a 3D one.
+    private var transformedRoot: NSView? {
+        guard let window, let layer, let root = window.contentView?.superview ?? window.contentView,
+              let rootLayer = root.layer
+        else { return nil }
+        var transformed = false
+        var current: CALayer? = layer
+        while let each = current, each !== rootLayer {
+            if !CATransform3DIsIdentity(each.transform) || !CATransform3DIsIdentity(each.sublayerTransform) {
+                transformed = true
+            }
+            current = each.superlayer
+        }
+        // Only within the window's own layer tree.
+        return transformed && current === rootLayer ? root : nil
+    }
+
+    /// A point in the window's base coordinates, in view coordinates,
+    /// through any transform the view is shown with.
+    func viewPoint(fromWindow point: NSPoint) -> CGPoint {
+        guard let root = transformedRoot, let rootLayer = root.layer, let layer else {
+            return convert(point, from: nil)
+        }
+        var inRoot = root.convert(point, from: nil)
+        if rootLayer.contentsAreFlipped() != root.isFlipped { inRoot.y = root.bounds.height - inRoot.y }
+        var inView = layer.convert(inRoot, from: rootLayer)
+        if layer.contentsAreFlipped() != isFlipped { inView.y = bounds.height - inView.y }
+        return inView
+    }
+
+    /// A point in view coordinates, in the window's base coordinates,
+    /// through any transform the view is shown with.
+    func windowPoint(fromView point: CGPoint) -> NSPoint {
+        guard let root = transformedRoot, let rootLayer = root.layer, let layer else {
+            return convert(point, to: nil)
+        }
+        var inLayer = point
+        if layer.contentsAreFlipped() != isFlipped { inLayer.y = bounds.height - inLayer.y }
+        var inRoot = rootLayer.convert(inLayer, from: layer)
+        if rootLayer.contentsAreFlipped() != root.isFlipped { inRoot.y = root.bounds.height - inRoot.y }
+        return root.convert(inRoot, to: nil)
+    }
+
+    /// A point in the window's base coordinates, in page points.
+    func pagePoint(fromWindow point: NSPoint) -> CGPoint {
+        pagePoint(fromView: viewPoint(fromWindow: point))
+    }
+
+    /// A rect in page points, in screen coordinates: the smallest rect
+    /// around it as it is shown.
+    func screenRect(fromPage rect: CGRect) -> NSRect {
+        guard let window else { return .zero }
+        let view = viewRect(fromPage: rect)
+        let corners = [
+            CGPoint(x: view.minX, y: view.minY), CGPoint(x: view.maxX, y: view.minY),
+            CGPoint(x: view.minX, y: view.maxY), CGPoint(x: view.maxX, y: view.maxY),
+        ].map { windowPoint(fromView: $0) }
+        let xs = corners.map(\.x), ys = corners.map(\.y)
+        let inWindow = NSRect(
+            x: xs.min()!, y: ys.min()!, width: xs.max()! - xs.min()!, height: ys.max()! - ys.min()!)
+        return window.convertToScreen(inWindow)
+    }
+
+    /// Under a 3D transform AppKit hit-tests the view's untransformed
+    /// frame; the view claims only points it shows.
+    public override func hitTest(_ point: NSPoint) -> NSView? {
+        guard transformedRoot != nil, let superview, !isHiddenOrHasHiddenAncestor else { return super.hitTest(point) }
+        let inView = viewPoint(fromWindow: superview.convert(point, to: nil))
+        return bounds.contains(inView) ? self : nil
     }
 
     /// Stops hosting for good: stops observing the window, closes the
@@ -330,7 +678,7 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
     /// same window would report them.
     public var offscreenViewInfo: CefOffscreenViewInfo {
         var info = CefOffscreenViewInfo(
-            size: bounds.size == .zero ? CGSize(width: 1, height: 1) : bounds.size,
+            size: Self.nonEmpty(committedPageSize == .zero ? targetPageSize : committedPageSize),
             deviceScaleFactor: window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2)
         guard let window, let screen = window.screen ?? NSScreen.main else { return info }
         // Chromium's screen coordinates have their origin at the top-left
@@ -349,6 +697,10 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
         return info
     }
 
+    private static func nonEmpty(_ size: CGSize) -> CGSize {
+        CGSize(width: max(size.width, 1), height: max(size.height, 1))
+    }
+
     /// For SelfTest's `compositor` benchmark: copy every frame whole, as an
     /// earlier design did, instead of only its damage.
     @_spi(Testing) public static var copiesWholeFrames: Bool {
@@ -365,8 +717,10 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
     public func offscreenDidPaint(_ frame: CefOffscreenFrame, element: CefOffscreenPaintElement, details: CefOffscreenPaintDetails) {
         let target = element == .popup ? popupLayer : contentLayer
         let contents: Any
+        let pixels: CGSize
         switch frame {
         case let .accelerated(surface, _):
+            pixels = CGSize(width: IOSurfaceGetWidth(surface), height: IOSurfaceGetHeight(surface))
             // Chromium paints the next frames into the same few surfaces,
             // so the layer shows a copy the view owns, updated where the
             // frame changed.
@@ -383,24 +737,56 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
                       Data(bytes: buffer, count: count), width: width, height: height, bytesPerRow: bytesPerRow)
             else { return }
             contents = image
+            pixels = CGSize(width: width, height: height)
         }
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         target.contents = contents
         CATransaction.commit()
+        guard element == .view else { return }
+        frameBrowser = browser
+        // A frame captured while a resize is in flight holds the page at
+        // its old size, letterboxed in black: show only the page.
+        let content = details.contentRect ?? CGRect(origin: .zero, size: pixels)
+        let unit = CGRect(
+            x: content.minX / pixels.width, y: content.minY / pixels.height,
+            width: content.width / pixels.width, height: content.height / pixels.height)
+        // The page's size in the frame: what Chromium captured, which it
+        // scales into a surface of another size, as when the page lays out
+        // larger than the view (`pageSize`).
+        let scale = contentLayer.contentsScale > 0 ? contentLayer.contentsScale : 1
+        let source = details.sourceSize ?? content.size
+        let size = CGSize(width: source.width / scale, height: source.height / scale)
+        if unit != contentLayer.contentsRect {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            contentLayer.contentsRect = unit
+            CATransaction.commit()
+        }
+        if size != presentedFrameSize {
+            presentedFrameSize = size
+            updateContentFrame()
+        }
+        didPresentFrame?(pixels, details.contentRect)
     }
 
     public func offscreenSnapshot() -> CGImage? {
-        guard let page = Self.image(of: contentLayer.contents) else { return nil }
-        guard !popupLayer.isHidden, let popup = Self.image(of: popupLayer.contents), bounds.width > 0,
+        guard let frame = Self.image(of: contentLayer.contents) else { return nil }
+        // The page alone, without a letterbox.
+        let crop = CGRect(
+            x: contentLayer.contentsRect.minX * CGFloat(frame.width), y: contentLayer.contentsRect.minY * CGFloat(frame.height),
+            width: contentLayer.contentsRect.width * CGFloat(frame.width),
+            height: contentLayer.contentsRect.height * CGFloat(frame.height)).integral
+        let page = crop.size == CGSize(width: frame.width, height: frame.height) ? frame : frame.cropping(to: crop) ?? frame
+        guard !popupLayer.isHidden, let popup = Self.image(of: popupLayer.contents),
               let context = CGContext(
                   data: nil, width: page.width, height: page.height, bitsPerComponent: 8, bytesPerRow: 0,
                   space: page.colorSpace ?? Self.sRGB, bitmapInfo: Self.bgraBitmapInfo.rawValue)
         else { return page }
-        // View points, origin at the top left, to image pixels, origin at
+        // Page points, origin at the top left, to image pixels, origin at
         // the bottom left.
-        let scale = CGFloat(page.width) / bounds.width
-        let rect = popupLayer.frame
+        let scale = CGFloat(page.width) / max(shownPageSize.width, 1)
+        let rect = popupPageRect
         context.draw(page, in: CGRect(x: 0, y: 0, width: page.width, height: page.height))
         context.draw(popup, in: CGRect(
             x: rect.minX * scale, y: CGFloat(page.height) - rect.maxY * scale,
@@ -466,10 +852,8 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
     }
 
     public func offscreenPopupDidResize(_ rect: CGRect) {
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        popupLayer.frame = rect
-        CATransaction.commit()
+        popupPageRect = rect
+        updateContentFrame()
     }
 
     public func offscreenDidChangeCompositionRange(_ range: NSRange, characterBounds: [CGRect]) {
@@ -491,13 +875,18 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
 
     public func offscreenDidStopHosting(_ browser: CefBrowser) {
         guard self.browser === browser else { return }
+        // Moved to another host: keep the last frame if asked to.
+        let keepingFrame = keepsLastFrameWhenMoved && browser.hostView != nil && browser.hostView !== self
+        isKeepingFrame = keepingFrame
+        defer { isKeepingFrame = false }
         self.browser = nil
     }
 
-    /// An event's location in view coordinates, which are Chromium's: the
-    /// view is flipped, so the origin is at the top left.
-    func viewPoint(for event: NSEvent) -> CGPoint {
-        convert(event.locationInWindow, from: nil)
+    /// An event's location in page points, which are Chromium's view
+    /// coordinates (top-left origin): through any transform the view is
+    /// shown with, and where ``framePlacement`` puts the frame.
+    func pagePoint(for event: NSEvent) -> CGPoint {
+        pagePoint(fromWindow: event.locationInWindow)
     }
 }
 
@@ -557,7 +946,7 @@ extension CefOffscreenBrowserView {
 
     private func forwardTouches(in event: NSEvent, phase: NSTouch.Phase, as touchPhase: CefTouchEvent.Phase) {
         guard let browser, browser.configuration.forwardsRawTouchEvents else { return }
-        let size = bounds.size
+        let size = shownPageSize
         for touch in event.touches(matching: phase, in: self) {
             // Trackpad touches have normalized, bottom-left positions.
             let position = touch.normalizedPosition
