@@ -1,0 +1,2 @@
+[{ "id": 1, "priority": 1, "action": { "type": "block" },
+   "condition": { "urlFilter": "/dnr-blocked", "resourceTypes": ["main_frame", "xmlhttprequest", "sub_frame"] } }]

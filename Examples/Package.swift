@@ -68,7 +68,10 @@ let package = Package(
                 .product(name: "CefPasskeys", package: "CefSwift"),
                 "SystemEngine",
             ],
-            exclude: ["cefapp.json"]
+            exclude: ["cefapp.json"],
+            // An unpacked extension the extension checks load: a test
+            // fixture, not something CefSwift ships.
+            resources: [.copy("Resources/TestExtension")]
         ),
         // Unit tests of the Browser example's own logic.
         .testTarget(name: "BrowserTests", dependencies: ["Browser"]),

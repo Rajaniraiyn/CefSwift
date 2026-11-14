@@ -147,6 +147,12 @@ final class BrowserViewDelegate: Sendable {
             }
         }
         d.pointee.get_browser_runtime_style = { _ in CEF_RUNTIME_STYLE_CHROME }
+        // CEF makes Chrome's toolbar once the view is in its window.
+        d.pointee.base.on_window_changed = { s, view, added in
+            cefRelease(view)
+            guard added != 0, let owner = cefOwner(BrowserViewDelegate.self, s) else { return }
+            MainActor.assumeIsolated { owner.window?.applyLayout() }
+        }
         return d
     }
 }
