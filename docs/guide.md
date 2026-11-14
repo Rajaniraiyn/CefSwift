@@ -3101,6 +3101,11 @@ screen, and Chromium moves the tab in); tabs Chromium makes itself (an
 extension's `chrome.tabs.create`, a duplicate, a reopened tab) have CefKit's
 default configuration and reach `CefRuntime.onBrowserCreated`.
 
+**Previews.** `tab.capturePreview()` captures a tab's page, a background
+tab's too, as a small picture into `tab.preview` (with `capturedAt`):
+about 80 ms each through the DevTools Protocol, so take them when an
+overview opens or a tab is hovered, not continuously.
+
 **Dragging tabs.** `CefTab.Transfer` is `Transferable` (the tab inside the
 app, its address in Finder and other apps) and `tab.pasteboardItem` is the
 same for AppKit dragging; the drop lands with `move(to:in:)` or

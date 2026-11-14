@@ -653,7 +653,13 @@ are the result. Measured further (SelfTest `tabStrip`, and the
   until the quit, which is what tells a crash.
 - **Previews.** Chromium's hover-card thumbnails come from
   `ThumbnailTabHelper`, which only Chrome's views tab strip and the WebUI
-  tab strip (not built on macOS) read; no route was found. Not done.
+  tab strip (not built on macOS) read; no route to them was found. The
+  DevTools Protocol's `Page.captureScreenshot` does capture a background
+  tab (Chromium draws a frame for it): a quarter-size JPEG of a 1200 × 900
+  page took 73 ms for the active tab and 94 ms for a background one, the
+  first capture attaching DevTools (`tabResearch` probe, `preview`); a
+  full-size PNG took 135 ms and 560 KB. `CefTab.capturePreview()` takes
+  the small one on demand; nothing captures continuously.
 
 ## Memory settings measured and not used
 
