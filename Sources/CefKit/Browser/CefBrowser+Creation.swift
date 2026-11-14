@@ -345,6 +345,7 @@ extension CefBrowser {
         state = .live
         CefRuntime.shared.register(self)
         if !isBootstrapping { readyWaiters.completeAll(.success(())) }
+        applyPendingAudioMuted()
         refreshZoomLevel()
         refreshAudioMuted()
         applyInitialAccessibilityState()

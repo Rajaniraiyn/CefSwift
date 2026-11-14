@@ -292,6 +292,13 @@ public final class CefBrowser: Identifiable {
 
     var observedAudioMuted = false
 
+    /// A zoom level set while the browser had nothing in Chromium, applied
+    /// when its first page starts loading (Chromium keeps zoom per site).
+    @ObservationIgnored var pendingZoomLevel: Double?
+    /// A mute set while the browser had nothing in Chromium, applied when
+    /// Chromium creates it.
+    @ObservationIgnored var pendingAudioMuted: Bool?
+
     @ObservationIgnored var lastFindText: String?
 
     /// Whether this browser's DevTools window is open.

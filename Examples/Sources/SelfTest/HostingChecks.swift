@@ -7,6 +7,32 @@ extension SelfTest {
     static func hostingChecks() async {
         await offscreenTransferChecks()
         await windowedTransferChecks()
+        await settersBeforeCreationChecks()
+    }
+
+    /// Zoom and mute set before Chromium creates the browser apply once it
+    /// has.
+    private static func settersBeforeCreationChecks() async {
+        let browser = CefBrowser(url: URL(string: "selftest://app/second.html")!)
+        browser.zoomLevel = 1
+        browser.isAudioMuted = true
+        let view = hostWindowed(browser)
+        guard await loaded(browser, title: "second") else {
+            check("hosting: page loads for pre-creation setters", false, detail: browser.title)
+            await closeHosted(browser, view)
+            return
+        }
+        // At zoom level 1 (120%), CSS pixels are 1.2 times larger.
+        let ratio = (try? await browser.evaluateJavaScript("devicePixelRatio").doubleValue) ?? 0
+        let expected = window.backingScaleFactor * 1.2
+        check("hosting: a zoom level set before creation applies to the first page",
+              abs(ratio - expected) < 0.01 && abs(browser.zoomLevel - 1) < 0.001,
+              detail: "devicePixelRatio \(ratio), expected \(expected), zoomLevel \(browser.zoomLevel)")
+        check("hosting: muting before creation applies once created", browser.isAudioMuted)
+        // Chromium keeps the level for the site, which later checks load.
+        browser.zoomLevel = 0
+        _ = await waitUntil { abs(browser.zoomLevel) < 0.001 }
+        await closeHosted(browser, view)
     }
 
     private static let transferPage = URL(string: "selftest://app/transfer.html")!

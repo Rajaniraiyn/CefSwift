@@ -15,6 +15,9 @@ extension CefBrowser {
         endUnresponsiveEpisode()
         pageScripting.mainFrameDidStartLoading()
         let wasDiscarded = isDiscarded
+        // The document has committed, so a level set before the browser
+        // existed applies to its site.
+        applyPendingZoomLevel(for: url)
         pageDidStartLoading()
         // The new document reports its own icon. A restored page keeps the
         // one it had until then, so its tab does not flash empty.
