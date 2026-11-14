@@ -66,19 +66,29 @@ public final class CefTab: Identifiable {
     public internal(set) var isPinned = false
     /// Whether Chromium discarded the page to save memory. It loads again
     /// when the tab is selected.
-    public internal(set) var isDiscarded = false
-    /// Whether the page plays sound, or did a moment ago.
-    public internal(set) var isAudible = false
+    public var isDiscarded: Bool { browser?.isDiscarded ?? reportedDiscarded }
+    var reportedDiscarded = false
+    /// Whether the page plays sound, or did a moment ago, as Chromium last
+    /// reported it (see ``CefTabStrip/observesChromiumEvents``).
+    public var isAudible: Bool { reportedAudible }
+    var reportedAudible = false
     /// Whether the tab's sound is muted.
-    public internal(set) var isMuted = false
+    public var isMuted: Bool { browser?.isAudioMuted ?? false }
     /// Whether the page is loading.
     public var isLoading: Bool { browser?.isLoading ?? reportedLoading }
     var reportedLoading = false
     /// The tab group the tab is in.
     public internal(set) var group: CefTabGroup?
-    /// What the tab shows it is doing: playing sound, recording, sharing
-    /// the screen.
-    public internal(set) var alerts: [Alert] = []
+    /// What the tab shows it is doing: playing sound, muted, recording,
+    /// sharing the screen.
+    public var alerts: [Alert] {
+        var alerts = otherAlerts
+        if isMuted { alerts.insert(.muted, at: 0) }
+        if isAudible, !isMuted { alerts.insert(.playingAudio, at: 0) }
+        return alerts
+    }
+    /// Alerts other than sound, as Chromium last reported them.
+    var otherAlerts: [Alert] = []
     /// The tab the tab was opened from, while Chromium remembers it.
     public internal(set) var openerID: ID?
     /// The page's icon address as Chromium reports it; ``favicon`` is the
@@ -141,7 +151,6 @@ public final class CefTab: Identifiable {
     /// Mutes or unmutes the tab's sound.
     public func setMuted(_ isMuted: Bool) {
         browser?.isAudioMuted = isMuted
-        strip?.scheduleRead()
     }
 
     /// Discards the tab's page to free its memory, as Chromium's Memory
@@ -149,7 +158,46 @@ public final class CefTab: Identifiable {
     public func discard() async throws {
         guard let browser else { throw CefTabStrip.Error.noBrowser }
         do { try await browser.discard() } catch { throw CefTabStrip.Error.chromium("\(error)") }
-        strip?.scheduleRead()
+    }
+
+    /// A picture of a tab's page, and when it was taken.
+    public struct Preview: @unchecked Sendable {
+        public let image: NSImage
+        public let capturedAt: Date
+    }
+
+    /// The tab's page as last captured by ``capturePreview(scale:)``; it
+    /// grows stale as the page changes.
+    public internal(set) var preview: Preview?
+
+    /// Captures the tab's page now, a background tab's included (Chromium
+    /// draws a frame for it), at `scale` of its size, into ``preview``.
+    ///
+    /// Through the DevTools Protocol's `Page.captureScreenshot` as a small
+    /// JPEG (CEF has no capture API for a page in a window, and Chromium's
+    /// own tab thumbnails reach only its views tab strip): measured at
+    /// 75–95 ms for a quarter-size picture of a 1200 × 900 page, the first
+    /// one attaching DevTools to the tab (no domain enabled). Capture on
+    /// demand — as an overview opens, on hover — not continuously.
+    @discardableResult
+    public func capturePreview(scale: Double = 0.25) async throws -> Preview {
+        guard let browser else { throw CefTabStrip.Error.noBrowser }
+        let size = window?.contentFrame.size ?? browser.nativeView?.bounds.size ?? .zero
+        var parameters: [String: CefJSON] = ["format": "jpeg", "quality": 70]
+        if size.width > 0, size.height > 0 {
+            parameters["clip"] = ["x": 0, "y": 0, "width": .number(size.width), "height": .number(size.height),
+                                  "scale": .number(scale)]
+        }
+        let reply: CefJSON
+        do { reply = try await browser.devTools.send("Page.captureScreenshot", .object(parameters)) } catch {
+            throw CefTabStrip.Error.chromium("\(error)")
+        }
+        guard let data = reply["data"].stringValue.flatMap({ Data(base64Encoded: $0) }), let image = NSImage(data: data) else {
+            throw CefTabStrip.Error.chromium("Page.captureScreenshot returned no picture")
+        }
+        let made = Preview(image: image, capturedAt: .now)
+        preview = made
+        return made
     }
 
     private func requireStrip() throws -> CefTabStrip {

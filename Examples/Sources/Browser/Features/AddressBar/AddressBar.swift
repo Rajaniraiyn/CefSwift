@@ -110,7 +110,9 @@ private struct AddressField: View {
 
     /// What the field shows when not editing.
     private var summary: String {
-        controller.isStartPage(browser.url) ? "" : AddressBar.summary(of: browser.url, title: browser.title)
+        controller.isStartPage(browser.url) ? "" : AddressBar.summary(
+            of: browser.url, title: browser.title,
+            securityDisplay: browser.url.flatMap(CefRuntime.shared.securityDisplayString(for:)))
     }
 
     /// What the field shows while editing: the full address.
@@ -153,11 +155,18 @@ private struct AddressField: View {
 extension AddressBar {
     /// What the field shows when not editing a page other than the start
     /// page: the site's host without `www.`, the title of an internal page,
-    /// or the address.
-    nonisolated static func summary(of url: URL?, title: String) -> String {
+    /// or, for other schemes, the address as Chromium shows it to decide
+    /// on trust (`securityDisplay`, from
+    /// `CefRuntime.securityDisplayString(for:)`): never a `data:` page's
+    /// whole content.
+    nonisolated static func summary(of url: URL?, title: String, securityDisplay: String? = nil) -> String {
         guard let url, url.absoluteString != "about:blank" else { return "" }
         if BrowserPages.isInternal(url) { return title.isEmpty ? url.absoluteString : title }
-        guard let host = url.host(), url.scheme == "https" || url.scheme == "http" else { return url.absoluteString }
+        guard let host = url.host(), url.scheme == "https" || url.scheme == "http" else {
+            guard url.scheme == "data" else { return securityDisplay ?? url.absoluteString }
+            // However Chromium spells it, a page's content is not its address.
+            return securityDisplay.flatMap { $0.count <= 32 ? $0 : nil } ?? "data:"
+        }
         return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
     }
 

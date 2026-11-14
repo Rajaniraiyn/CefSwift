@@ -244,7 +244,7 @@ public final class CefWindow: Identifiable {
     }
 
     /// The window showing `browser`, if it is shown in a ``CefWindow``.
-    static func hosting(_ browser: CefBrowser) -> CefWindow? {
+    package static func hosting(_ browser: CefBrowser) -> CefWindow? {
         all.first { $0.browser === browser }
     }
 

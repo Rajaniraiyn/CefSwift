@@ -237,7 +237,11 @@ extension CefBrowser {
     /// does nothing: in CEF 156 it ends the browser process, with or
     /// without Chrome's toolbar.
     public func execute(_ command: CefChromeCommand, disposition: CefWindowOpenDisposition = .currentTab) {
-        if let window = CefWindow.hosting(self), window.intercept(command) { return }
+        if let window = CefWindow.hosting(self) {
+            if window.intercept(command) { return }
+        } else if Self.intercept(command, in: self) {
+            return
+        }
         guard !isDiscarded else {
             whenRestored { [weak self] in self?.execute(command, disposition: disposition) }
             return

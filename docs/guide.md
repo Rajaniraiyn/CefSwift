@@ -67,6 +67,8 @@ The runtime, browser, window and profile APIs are `@MainActor`.
   - [Requests through Chromium's network stack](#requests-through-chromiums-network-stack)
   - [Site settings](#site-settings)
   - [Bookmarks, history and suggestions](#bookmarks-history-and-suggestions)
+  - [Chromium's tabs: windows, tabs and groups](#chromiums-tabs-windows-tabs-and-groups)
+  - [Restoring tabs and sessions](#restoring-tabs-and-sessions)
 - [Extensions](#extensions)
   - [The profile's extensions](#the-profiles-extensions)
   - [Installing extensions with the app](#installing-extensions-with-the-app)
@@ -3204,7 +3206,18 @@ usable alone, all `@Observable`:
 The profile's `CefTabStrip` (`profile.tabStrip`) lists the windows and
 follows Chromium from first use, so a tab interface draws Chromium's model
 instead of keeping one: changes made by the app, by Chrome's commands and
-by extensions all show up the same way.
+shortcuts and by extensions all show up the same way.
+
+The strip follows the events CEF and AppKit deliver anyway — a browser
+created or closed, each page's title, address, icon and loading, the page
+a window shows, every Chrome command — and reads Chromium's tab model, in
+a hidden service host, only when one of them reports a change to its
+structure; the host closes a few seconds after. While nothing changes no
+host runs. Two things CEF does not report — sound starting or stopping in
+a tab, and an extension moving, pinning or grouping tabs — show at the
+next read, or at once with `strip.observesChromiumEvents = true`, which
+keeps one host listening to `chrome.tabs`' events (one renderer, about
+30 MB). The Browser example turns it on while it is the active app.
 
 ```swift
 import CefChromium
@@ -3227,7 +3240,8 @@ the change, a moment later. Commands: `select`, `close`, `pin`, `move(to:in:)`
 the strip `group`, `ungroup`, `select(_:)` for several tabs (Chromium's
 multiple selection), `pin`/`move`/`close` for several, `reopenClosed(in:)`
 (⌘⇧T); on a group `add`, `ungroup`, `close`, `move`, `moveToNewWindow`,
-`setTitle`, `setColor`. `recentlyClosed` lists what Chromium can reopen.
+`setTitle`, `setColor`. `recentlyClosed` lists what Chromium can reopen
+([Restoring tabs and sessions](#restoring-tabs-and-sessions)).
 
 **The app's own tab interface.** Set `showsChromeUI` to `false` and
 Chrome's tab strip and toolbar are covered by the app's `topBar` (and,
@@ -3265,6 +3279,37 @@ func dress(_ window: CefChromeWindow) {
 }
 ```
 
+**Chromium's surfaces.** Bubbles, dialogs, the find bar and the status
+bubble are surfaces of the window, with the policy, anchors and custom
+presentations of a `CefWindow`'s ([Chromium's own interface](#chromiums-own-interface)):
+`chromiumSurfacePolicy`, `setCustomPresentation(for:)`, `setFindBar`,
+`setStatusBubble`, `onChromiumSurface`. Each surface belongs to the tab it
+opened in (`surface.browser`): switching tabs closes the bubbles about the
+tab left, yours included, and keeps a tab's find bar for when it comes
+back. With Chrome's UI covered, bubbles that hang from Chrome's toolbar go
+under the app's top bar at the page's trailing edge unless an anchor says
+otherwise (`chromiumSurfaceAnchor` on a view of the top bar). A tabbed
+window adds kinds: `.tabSearch` (⇧⌘A, replaceable), `.tabGroupEditor` and
+`.tabHoverCard`, and an extension's action popup (`.extensionPopup`)
+opens here, which it does not in a `CefWindow`. `pageBar` holds a bar of
+the app's along the top of the page, which is where `setFindBar` puts it.
+
+```swift
+import CefChromium
+import SwiftUI
+
+func dressSurfaces(_ window: CefChromeWindow) {
+    window.setFindBar { session in
+        TextField("Find on Page", text: Bindable(session).text)
+            .onSubmit(session.next)
+            .padding(6)
+    }
+    window.setCustomPresentation(for: .qrCode) { surface in
+        Text(surface.url?.absoluteString ?? "").padding()
+    }
+}
+```
+
 **Tabs and browsers.** Each tab is matched with its `CefBrowser` exactly:
 a tab the app opens with `openTab` is known from its creation; a window's
 active tab is the browser shown in its window; a background tab is the one
@@ -3275,6 +3320,11 @@ configuration and delegate (it starts in a window of its own, kept off
 screen, and Chromium moves the tab in); tabs Chromium makes itself (an
 extension's `chrome.tabs.create`, a duplicate, a reopened tab) have CefKit's
 default configuration and reach `CefRuntime.onBrowserCreated`.
+
+**Previews.** `tab.capturePreview()` captures a tab's page, a background
+tab's too, as a small picture into `tab.preview` (with `capturedAt`):
+about 80 ms each through the DevTools Protocol, so take them when an
+overview opens or a tab is hovered, not continuously.
 
 **Dragging tabs.** `CefTab.Transfer` is `Transferable` (the tab inside the
 app, its address in Finder and other apps) and `tab.pasteboardItem` is the
@@ -3302,6 +3352,64 @@ process, so tabs close through CEF.
 
 The [design notes](design-notes.md#tabs-chromiums-tab-strip-under-the-apps-own)
 record the measurements.
+
+### Restoring tabs and sessions
+
+Chromium keeps what closed, newest first, with each tab's history:
+`strip.recentlyClosed` lists it (tabs, windows and groups, with
+`tabCount`, `closedAt`, and for a tab its `windowID` and `index`), and
+`strip.reopen(item)` brings one back as Chromium closed it — a tab in its
+window at its place, a window with all its tabs and groups. The page is a
+new `CefBrowser`, with its back and forward history. `reopenClosed(in:)`
+is ⌘⇧T: the newest entry. Closing tabs updates the list; call
+`refreshRecentlyClosed()` before showing it to be sure.
+
+```swift
+import CefChromium
+
+let strip = CefProfile.default.tabStrip
+for item in await strip.refreshRecentlyClosed() where item.kind == .window {
+    print("Window of \(item.tabCount) tabs, closed \(item.closedAt?.formatted() ?? "-")")
+}
+if let tab = strip.recentlyClosed.first(where: { $0.kind == .tab }) {
+    let window = try await strip.reopen(tab)
+    print(window?.tabs.count ?? 0)
+}
+```
+
+**After a relaunch.** CEF restores nothing by itself at startup — Chrome's
+`session.restore_on_startup` is not acted on, and after a crash Chromium
+lists nothing from the previous run and shows no "Restore pages?" bubble.
+CefChromium keeps the facts instead: `strip.previousSession` says how the
+previous run of the app ended (`.clean` after the app's quit, `.crashed`
+otherwise) and which windows and tabs it had, and
+`restorePreviousSession()` opens them again. After a clean quit they come
+back as Chromium closed them, history, groups and pinning included: the
+app's quit closes each of Chromium's windows as a window (which Chromium
+records whole) before CefKit closes the rest. After a crash only the
+tabs' addresses and pinning are left (`keepsHistory` is `false`), which
+CefChromium saves as the windows change. Restored windows reach
+`onWindowOpened` like any other, so the app's views go on them. So the
+app decides: restore at launch, ask in its own interface, or ignore it
+(`discardPreviousSession()`):
+
+```swift
+import CefChromium
+
+let strip = CefProfile.default.tabStrip
+if let session = strip.previousSession {
+    switch session.exit {
+    case .clean:
+        try await strip.restorePreviousSession()
+    case .crashed:
+        print("Reopen \(session.windows.count) windows?")  // ask in the app's own UI
+    }
+}
+```
+
+Incognito profiles have no previous session. The Browser example's
+Settings › On startup restores after a quit; after a crash it opens a new
+window and a small prompt to reopen the others.
 
 ## Extensions
 

@@ -29,6 +29,15 @@ final class ChromeWindowHost {
     private weak var observedPage: NSView?
     private var isMovingFocus = false
 
+    /// The hosts of every attached window.
+    private static var all: [Weak] = []
+    private struct Weak { weak var host: ChromeWindowHost? }
+
+    /// The ``CefChromeWindow`` shown in `nsWindow`, of any profile.
+    static func window(for nsWindow: NSWindow) -> CefChromeWindow? {
+        all.lazy.compactMap(\.host).first { $0.nsWindow === nsWindow }?.window
+    }
+
     init(window: CefChromeWindow, nsWindow: NSWindow) {
         self.window = window
         self.nsWindow = nsWindow
@@ -43,9 +52,12 @@ final class ChromeWindowHost {
             MainActor.assumeIsolated { self?.firstResponderChanged() }
         }
         ChromeAccessibilityFilter.install()
+        Self.all.removeAll { $0.host == nil }
+        Self.all.append(Weak(host: self))
     }
 
     func tearDown() {
+        Self.all.removeAll { $0.host == nil || $0.host === self }
         observers.forEach(NotificationCenter.default.removeObserver)
         observers = []
         responderObservation = nil
@@ -74,6 +86,9 @@ final class ChromeWindowHost {
         guard let page = Self.page(in: contentView) else { return }
         if observedPage !== page {
             observedPage = page
+            // Chromium shows another tab's page: that tab is active now.
+            window.strip.windowDidShowPage(page, in: window)
+            window.surfaceController?.shownBrowserDidChange()
             page.postsFrameChangedNotifications = true
             observers.append(NotificationCenter.default.addObserver(
                 forName: NSView.frameDidChangeNotification, object: page, queue: .main
@@ -87,11 +102,17 @@ final class ChromeWindowHost {
         let pageRect = contentView.isFlipped
             ? pageInContent
             : CGRect(x: pageInContent.minX, y: height - pageInContent.maxY, width: pageInContent.width, height: pageInContent.height)
-        let isRightToLeft = nsWindow.windowTitlebarLayoutDirection == .rightToLeft
         let top = max(0, pageRect.minY)
-        let leading = isRightToLeft ? max(0, contentView.bounds.width - pageRect.maxX) : max(0, pageRect.minX)
-        // Chrome's vertical tabs are at the leading edge; the side panel,
-        // at the trailing edge, stays Chromium's.
+        // Chrome's vertical tabs are at Chromium's leading edge, which
+        // follows Chromium's language, not AppKit's layout direction (a
+        // right-to-left AppKit app in an English Chromium has them on the
+        // left); the side panel, at Chromium's trailing edge, stays
+        // Chromium's. The strip is on the side the page leaves free, or
+        // Chromium's leading side when both are.
+        let leftGap = max(0, pageRect.minX), rightGap = max(0, contentView.bounds.width - pageRect.maxX)
+        let chromiumIsRightToLeft = Locale.Language(identifier: Locale.preferredLanguages.first ?? "en").characterDirection == .rightToLeft
+        let isRightToLeft = rightGap > 0.5 && (leftGap <= 0.5 || chromiumIsRightToLeft)
+        let leading = isRightToLeft ? rightGap : leftGap
         let sidebarWidth = Self.isVertical(window.strip.layout) ? leading : 0
         if window.contentFrame != pageRect { window.contentFrame = pageRect }
         if window.topBarHeight != top { window.topBarHeight = top }
@@ -105,20 +126,22 @@ final class ChromeWindowHost {
             cover.frame = contentView.frame
             cover.autoresizingMask = [.width, .height]
             cover.layout(topHeight: top, sidebarWidth: sidebarWidth, pageRect: pageRect, isRightToLeft: isRightToLeft,
-                         topBar: window.topBar, sidebar: window.sidebar, overlay: window.pageOverlay)
+                         topBar: window.topBar, sidebar: window.sidebar, overlay: window.pageOverlay,
+                         pageBar: window.pageBar)
             ChromeAccessibilityFilter.cover(nsWindow, rects: cover.coveredScreenRects())
             // Chromium moves focus between its own views without AppKit's
             // first responder changing, so look after each update too.
             firstResponderChanged()
         } else {
-            if cover.superview != nil { cover.removeFromSuperview() }
             ChromeAccessibilityFilter.coveredWindows.removeAll { $0.window === nsWindow }
-            if let overlay = window.pageOverlay {
+            if window.pageOverlay != nil || window.pageBar != nil {
                 // Over the page, even with Chrome's own UI.
                 if cover.superview !== frameView { frameView.addSubview(cover, positioned: .above, relativeTo: contentView) }
                 cover.frame = contentView.frame
                 cover.layout(topHeight: 0, sidebarWidth: 0, pageRect: pageRect, isRightToLeft: isRightToLeft,
-                             topBar: nil, sidebar: nil, overlay: overlay)
+                             topBar: nil, sidebar: nil, overlay: window.pageOverlay, pageBar: window.pageBar)
+            } else if cover.superview != nil {
+                cover.removeFromSuperview()
             }
         }
     }
@@ -193,8 +216,12 @@ final class ChromeUICoverView: NSView {
     override var isFlipped: Bool { true }
     override var mouseDownCanMoveWindow: Bool { true }
 
+    /// Where the app's bar over the top of the page is (a find bar).
+    private var pageBarRect = CGRect.zero
+    private weak var pageBar: NSView?
+
     func layout(topHeight: CGFloat, sidebarWidth: CGFloat, pageRect: CGRect, isRightToLeft: Bool,
-                topBar: NSView?, sidebar: NSView?, overlay: NSView?) {
+                topBar: NSView?, sidebar: NSView?, overlay: NSView?, pageBar: NSView?) {
         topRect = CGRect(x: 0, y: 0, width: bounds.width, height: topHeight)
         sideRect = CGRect(x: isRightToLeft ? bounds.width - sidebarWidth : 0, y: topHeight,
                           width: sidebarWidth, height: max(0, bounds.height - topHeight))
@@ -203,6 +230,16 @@ final class ChromeUICoverView: NSView {
         background.isHidden = topHeight == 0 && sidebarWidth == 0
         place(topBar, in: topRect)
         place(sidebar, in: sideRect)
+        if self.pageBar !== pageBar, let old = self.pageBar { old.removeFromSuperview() }
+        self.pageBar = pageBar
+        if let pageBar, !pageBar.isHidden {
+            if pageBar.superview !== self { addSubview(pageBar) }
+            let height = min(pageRect.height, max(pageBar.fittingSize.height, 1))
+            pageBarRect = CGRect(x: pageRect.minX, y: pageRect.minY, width: pageRect.width, height: height)
+            pageBar.frame = pageBarRect
+        } else {
+            pageBarRect = .zero
+        }
         overlayContainer.frame = pageRect
         if let overlay {
             if overlay.superview !== overlayContainer {
@@ -233,6 +270,10 @@ final class ChromeUICoverView: NSView {
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         let local = convert(point, from: superview)
+        if pageBarRect.contains(local), let pageBar, !pageBar.isHidden {
+            // A subview's hit test takes the point in its superview's coordinates.
+            return pageBar.hitTest(local) ?? pageBar
+        }
         guard topRect.contains(local) || sideRect.contains(local) else { return nil }
         return super.hitTest(point) ?? self
     }
@@ -242,6 +283,7 @@ final class ChromeUICoverView: NSView {
     }
 
     override func accessibilityChildren() -> [Any]? {
+        // pageBar is among the subviews while shown.
         subviews.filter { !$0.isHidden && $0 !== background && $0 !== overlayContainer }
     }
 }

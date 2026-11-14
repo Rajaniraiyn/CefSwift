@@ -127,6 +127,17 @@ extension SelfTest {
               await waitUntil(timeout: .seconds(5)) { window.tabs.count == count + 1 },
               detail: "\(tabs(window)) \(strip.lastError ?? "")")
 
+        await expect("tab strip: captures a background tab's preview") {
+            guard let background = window.tabs.first(where: { !$0.isActive && $0.browser != nil }) else {
+                return (false, "no background tab")
+            }
+            let start = ContinuousClock.now
+            let preview = try await background.capturePreview()
+            let elapsed = ContinuousClock.now - start
+            return (preview.image.size.width > 50 && preview.image.size.height > 50 && background.preview != nil,
+                    "\(preview.image.size) in \(elapsed)")
+        }
+
         await hostChecks(window)
 
         // Moves between windows keep the browser.

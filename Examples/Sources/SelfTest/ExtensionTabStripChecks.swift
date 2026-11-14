@@ -9,6 +9,10 @@ import CefKit
 extension SelfTest {
     static func extensionTabStripChecks(base: URL) async {
         let strip = CefProfile.default.tabStrip
+        // What an extension does to tabs reaches the strip through
+        // Chromium's own events, which it listens to only when asked.
+        strip.observesChromiumEvents = true
+        defer { strip.observesChromiumEvents = false }
         let page = base.appendingPathComponent("page")
         let window: CefChromeWindow
         do { window = try await CefChromeWindow.open(url: page) } catch {

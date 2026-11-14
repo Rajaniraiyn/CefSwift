@@ -204,6 +204,8 @@ enum SelfTest {
         ("chromeWindow", chromeWindowChecks),
         ("tabHosting", tabHostingChecks),
         ("tabStrip", tabStripChecks),
+        ("chromeWindowSurfaces", chromeWindowSurfaceChecks),
+        ("session", sessionRestoreChecks),
         ("operations", operationChecks),
         ("loading", loadingChecks),
         ("siteSettings", siteSettingsChecks),

@@ -27,6 +27,8 @@ extension SelfTest {
         "chromeTabStrip": chromeTabStripProbe,
         "extensionSurvey": extensionSurveyProbe,
         "extensions": extensionProbeChecks,
+        "tabResearch": tabResearchProbe,
+        "sessionRestore": sessionRestoreProbe,
     ]
 
     /// Changes the configuration for the probe `name`.
@@ -46,6 +48,19 @@ extension SelfTest {
             configureLaunchPromptsProbe(&configuration)
         case "extensionSurvey", "extensions":
             configureExtensionProbe(&configuration)
+        case "tabResearch":
+            if ProcessInfo.processInfo.environment["CEFSWIFT_RESEARCH"]?.hasPrefix("listener=") == true {
+                configureExtensionProbe(&configuration)
+            }
+            // CEFSWIFT_RESEARCH_SWITCHES="name=value name2" for an experiment.
+            for item in (ProcessInfo.processInfo.environment["CEFSWIFT_RESEARCH_SWITCHES"] ?? "").split(separator: " ") {
+                let parts = item.split(separator: "=", maxSplits: 1)
+                if parts[0] == "disable-features", parts.count > 1 {
+                    for feature in parts[1].split(separator: ",") { configuration.disabledFeatures.insert(String(feature)) }
+                    continue
+                }
+                configuration.extraCommandLineSwitches[String(parts[0])] = parts.count > 1 ? String(parts[1]) : ""
+            }
         default:
             break
         }

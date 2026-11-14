@@ -61,9 +61,9 @@ private struct WebKitTabView: View {
             .toolbar {
                 ToolbarItem(placement: .navigation) {
                     HStack(spacing: 2) {
-                        Button("Back", systemImage: "chevron.left", action: tab.browser.goBack)
+                        Button("Back", systemImage: "chevron.backward", action: tab.browser.goBack)
                             .disabled(!tab.browser.canGoBack)
-                        Button("Forward", systemImage: "chevron.right", action: tab.browser.goForward)
+                        Button("Forward", systemImage: "chevron.forward", action: tab.browser.goForward)
                             .disabled(!tab.browser.canGoForward)
                     }
                     .buttonStyle(ToolbarIconButtonStyle())

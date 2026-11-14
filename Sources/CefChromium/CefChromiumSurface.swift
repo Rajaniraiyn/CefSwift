@@ -85,6 +85,21 @@ public final class CefChromiumSurface: Identifiable {
         /// "Add “…”?", the dialog that confirms installing an extension and
         /// lists its permissions, from the Chrome Web Store's Add to Chrome.
         case extensionInstallPrompt
+        /// Chrome's tab search (``CefChromeCommand/searchTabs``, ⇧⌘A), in a
+        /// ``CefChromeWindow``. The app can list and switch tabs itself
+        /// (``CefTabStrip``), so it can replace it.
+        case tabSearch
+        /// Chrome's tab group editor bubble: the group's name, colour and
+        /// commands, from ``CefChromeCommand/createTabGroup`` or a group
+        /// header's menu, in a ``CefChromeWindow``. (``CefTabGroup/setTitle(_:)``
+        /// and ``CefTabGroup/setColor(_:)`` use it unseen; it is not
+        /// reported then.)
+        case tabGroupEditor
+        /// The card Chrome shows over a tab hovered in its tab strip, with
+        /// the tab's title and address. Under the app's views in a
+        /// ``CefChromeWindow`` without Chrome's UI, no pointer reaches
+        /// Chrome's strip, so it appears only with ``CefChromeWindow/showsChromeUI``.
+        case tabHoverCard
         /// Any other surface, identified by its title or else by the class
         /// of Chromium's view inside it (`view:` and the class), or empty
         /// when Chromium's window names neither. Identifiers are Chromium's
@@ -108,6 +123,12 @@ public final class CefChromiumSurface: Identifiable {
                 [.anchor, .hide, .dismiss]
             case .extensionInstallPrompt:
                 [.anchor, .dismiss]
+            case .tabSearch:
+                [.anchor, .hide, .dismiss, .replace]
+            case .tabGroupEditor:
+                [.anchor, .hide, .dismiss]
+            case .tabHoverCard:
+                [.hide]
             case .autofillSuggestions:
                 [.hide]
             case .other(let identifier):
@@ -122,12 +143,12 @@ public final class CefChromiumSurface: Identifiable {
         public var hangsFromToolbar: Bool {
             switch self {
             case .qrCode, .cast, .share, .downloads, .permissionPrompt, .translate, .savePassword, .bookmark,
-                 .pageInfo, .zoom, .deviceChooser, .extensionsMenu, .extensionPopup:
+                 .pageInfo, .zoom, .deviceChooser, .extensionsMenu, .extensionPopup, .tabSearch, .tabGroupEditor:
                 true
             case .other:
                 capabilities.contains(.anchor)
             case .findBar, .signIn, .statusBubble, .fullscreenNotice, .autofillSuggestions, .paymentRequest, .printPreview,
-                 .extensionInstallPrompt:
+                 .extensionInstallPrompt, .tabHoverCard:
                 false
             }
         }
@@ -215,8 +236,8 @@ public final class CefChromiumSurface: Identifiable {
     /// for a custom surface goes; `nil` when there is none. ``position(_:)``
     /// places a window there.
     public var anchorRect: CGRect? {
-        guard let window = parentWindow?.window else { return nil }
-        return parentWindow?.chromiumSurfacePolicy.anchor(for: kind)?.screenRect(in: window)
+        guard let window = host?.surfaceNSWindow else { return nil }
+        return host?.surfaceController?.anchor(for: kind)?.screenRect(in: window)
     }
     /// How the surface is presented.
     public internal(set) var presentation: Presentation = .native
@@ -228,21 +249,27 @@ public final class CefChromiumSurface: Identifiable {
     /// with your own interface. Chromium owns it: move it, but dismiss it
     /// with ``dismiss()``.
     @ObservationIgnored public private(set) weak var window: NSWindow?
-    /// The window the surface belongs to. Chromium attaches the surface's ``window`` to it as a child window.
-    @ObservationIgnored public private(set) weak var parentWindow: CefWindow?
+    /// The ``CefWindow`` the surface belongs to, if it is in one. Chromium
+    /// attaches the surface's ``window`` to it as a child window.
+    @ObservationIgnored public var parentWindow: CefWindow? { host as? CefWindow }
+    /// The ``CefChromeWindow`` the surface belongs to, if it is in one of
+    /// Chromium's own windows; ``browser`` is then the tab's.
+    @ObservationIgnored public var chromeWindow: CefChromeWindow? { host as? CefChromeWindow }
+    /// The window the surface belongs to.
+    @ObservationIgnored weak var host: (any ChromiumSurfaceHost)?
 
     public nonisolated var id: ObjectIdentifier { ObjectIdentifier(self) }
 
     init(
         kind: Kind, title: String, browser: CefBrowser, url: URL?,
-        window: NSWindow?, parentWindow: CefWindow
+        window: NSWindow?, host: any ChromiumSurfaceHost
     ) {
         self.kind = kind
         self.title = title
         self.browser = browser
         self.url = url
         self.window = window
-        self.parentWindow = parentWindow
+        self.host = host
     }
 
     /// Ends the surface (``Dismissal/app``). Chromium's surfaces close as
@@ -257,8 +284,8 @@ public final class CefChromiumSurface: Identifiable {
         if window != nil, !kind.capabilities.contains(.dismiss) { return }
         // Ended first: Chromium closes its window as it handles Esc, which
         // would otherwise end it as .chromium.
-        if let parentWindow, !parentWindow.isClosed {
-            parentWindow.surfaces.end(self, .app)
+        if let host, !host.isSurfaceHostClosed, let controller = host.surfaceController {
+            controller.end(self, .app)
         } else {
             state = .dismissed(.app)
         }
@@ -322,9 +349,9 @@ public final class CefChromiumSurface: Identifiable {
     /// beneath the kind's anchor, or else at the top right of the page
     /// (top left in a right-to-left layout).
     public func position(_ panel: NSWindow) {
-        guard let parent = parentWindow?.window else { return }
+        guard let parent = host?.surfaceNSWindow else { return }
         let size = panel.frame.size
-        if let anchor = parentWindow?.chromiumSurfacePolicy.anchor(for: kind), let origin = anchor.origin(for: size, in: parent) {
+        if let anchor = host?.surfaceController?.anchor(for: kind), let origin = anchor.origin(for: size, in: parent) {
             panel.setFrameOrigin(origin)
             return
         }
@@ -336,7 +363,7 @@ public final class CefChromiumSurface: Identifiable {
     /// Shows macOS's share menu for ``url`` at ``anchorRect``, or at the top
     /// right of the window. What ``Kind/share`` does by default.
     public func showSharingServicePicker() {
-        guard let url, let host = parentWindow?.window?.contentView else { return }
+        guard let url, let host = self.host?.surfaceNSWindow?.contentView else { return }
         let picker = NSSharingServicePicker(items: [url])
         let rect: CGRect
         if let anchorRect, let window = host.window {
@@ -379,7 +406,19 @@ public final class CefChromiumSurface: Identifiable {
         ("ExtensionsMenuView", .extensionsMenu),
         ("ExtensionPopup", .extensionPopup),
         ("ExtensionInstallDialogView", .extensionInstallPrompt),
+        ("TabGroupEditorBubbleView", .tabGroupEditor),
+        ("TabHoverCardBubbleView", .tabHoverCard),
+        ("TabSearch", .tabSearch),
+        ("webui:tab-search.top-chrome", .tabSearch),
     ]
+
+    /// The kind a WebUI bubble (`WebUIBubbleDialogView`) is, when its page
+    /// is not in its accessibility tree yet: the kind of the command that
+    /// just opened one.
+    static func kind(ofWebUIBubble classes: [String], openedBy command: CefChromeCommand?) -> Kind? {
+        guard classes.contains("WebUIBubbleDialogView") else { return nil }
+        return command == .searchTabs ? .tabSearch : nil
+    }
 
     /// Views every surface has, which say nothing about its kind.
     private static let frameClasses: Set<String> = [
@@ -418,7 +457,7 @@ public final class CefChromiumSurface: Identifiable {
     /// What `window` shows: its kind, title, and its accessibility tree's
     /// first editable text, which is the address in a QR code bubble.
     /// `kind` is `nil` while Chromium has not yet built the view tree.
-    static func recognize(_ window: NSWindow) -> (kind: Kind?, title: String, text: String?) {
+    static func recognize(_ window: NSWindow, openedBy command: CefChromeCommand? = nil) -> (kind: Kind?, title: String, text: String?) {
         let (classes, text, root) = viewClasses(in: window)
         let rootTitle = (root as? NSAccessibilityProtocol)?.accessibilityTitle() ?? ""
         let title = window.title.isEmpty ? rootTitle : window.title
@@ -427,6 +466,7 @@ public final class CefChromiumSurface: Identifiable {
         }).first {
             return (match, title, text)
         }
+        if let kind = kind(ofWebUIBubble: classes, openedBy: command) { return (kind, title, text) }
         if let kind = kind(forTitle: title) { return (kind, title, text) }
         guard root != nil else { return (nil, title, text) }
         if !title.isEmpty { return (.other(title), title, text) }
@@ -455,6 +495,11 @@ public final class CefChromiumSurface: Identifiable {
         if text == nil, accessible?.accessibilityRole() == .textField,
            let value = accessible?.accessibilityValue() as? String, !value.isEmpty {
             text = value
+        }
+        // A WebUI bubble's page, by its host (`webui:tab-search.top-chrome`).
+        if accessible?.accessibilityRole()?.rawValue == "AXWebArea", let url = accessible?.accessibilityURL(),
+           url.scheme == "chrome", let host = url.host() {
+            classes.append("webui:\(host)")
         }
         for child in (accessible?.accessibilityChildren() ?? []).prefix(16) {
             if let child = child as? NSObject { collect(child, depth: depth + 1, classes: &classes, text: &text) }
@@ -506,6 +551,10 @@ public final class CefChromiumSurface: Identifiable {
             return false
         }
         if let viewsWindowClass = NSClassFromString("CefNSWindow"), window.isKind(of: viewsWindowClass) {
+            return false
+        }
+        // Another of Chromium's browser windows (a tab being dragged out).
+        if let browserWindowClass = NSClassFromString("BrowserNativeWidgetWindow"), window.isKind(of: browserWindowClass) {
             return false
         }
         return true
@@ -730,6 +779,35 @@ enum CefSurfaceTracker {
                 },
                 .init(method: .init("NativeWidgetMacNSWindow", alphaSelector, types: "v@:d"), block: setAlpha) {
                     alphaOriginal = unsafeBitCast($0, to: SetAlpha.self)
+                },
+            ])
+
+        // The same in Chromium's own windows (CefChromeWindow), whose class
+        // is BrowserNativeWidgetWindow: surfaces go to the window's
+        // controller once its surface API was used.
+        var chromeAddOriginal: AddChild?
+        let chromeAdd: @convention(block) (NSWindow, NSWindow, NSWindow.OrderingMode) -> Void = { parent, child, order in
+            let surfaces = MainActor.assumeIsolated { UncheckedBox(ChromeWindowHost.window(for: parent)?.surfaceController) }
+            MainActor.assumeIsolated { surfaces.value?.childWindowWillAttach(child) }
+            chromeAddOriginal?(parent, addSelector, child, order)
+            MainActor.assumeIsolated { surfaces.value?.childWindowDidAttach(child) }
+        }
+        var chromeRemoveOriginal: RemoveChild?
+        let chromeRemove: @convention(block) (NSWindow, NSWindow) -> Void = { parent, child in
+            chromeRemoveOriginal?(parent, removeSelector, child)
+            MainActor.assumeIsolated {
+                ChromeWindowHost.window(for: parent)?.surfaceController?.childWindowDidDetach(child)
+            }
+        }
+        CefObjCHook.installFeature(
+            "Chromium surfaces in Chromium's windows",
+            requires: [.init("NativeWidgetMacNSWindow", #selector(NSWindow.sendEvent(_:)), types: "v@:@")],
+            overrides: [
+                .init(method: .init("BrowserNativeWidgetWindow", addSelector, types: "v@:@q"), block: chromeAdd) {
+                    chromeAddOriginal = unsafeBitCast($0, to: AddChild.self)
+                },
+                .init(method: .init("BrowserNativeWidgetWindow", removeSelector, types: "v@:@"), block: chromeRemove) {
+                    chromeRemoveOriginal = unsafeBitCast($0, to: RemoveChild.self)
                 },
             ])
     }

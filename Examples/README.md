@@ -51,6 +51,12 @@ Chrome, under the browser's own tab rail and toolbar.
   that does nothing.
 - `BrowserScene`: the Settings window and the menu bar, filled with the
   features' rows and commands; the example's runtime configuration (`CefRuntime.Configuration.browser`, the library's `.chrome` under the example's name, with its scheme).
+- Reopening what closed: File › Reopen Closed Tab (⌘⇧T) and File ›
+  Recently Closed, tabs and whole windows (with their tab counts), each
+  reopened as Chromium closed it (`CefTabStrip.reopen`); Settings › On
+  startup reopens the windows from last time after a quit; after a crash,
+  a small prompt under the toolbar offers to (`previousSession`,
+  `RestorePrompt`).
 - Back and forward, File › New Tab and New Window, the tab commands, and
   the View menu's reload, zoom and Developer Tools; what typed text
   means (`TypedAddress`: an address, or a search); the `browser://` scheme
@@ -67,16 +73,16 @@ Chrome, under the browser's own tab rail and toolbar.
 | `Bookmarks` | The star in the field (⌘D) and the Bookmarks menu | `CefBookmarks` |
 | `History` | The History menu: back, forward and the latest pages | `CefHistory` |
 | `StartPage` | `browser://start/`, which new tabs open: frequently visited sites and recent bookmarks | `CefSchemeHandler`, `CefBridge`, `topSites()` |
-| `FindBar` | Edit › Find, Chromium's find bar | `CefChromeCommand.find` |
+| `FindBar` | Edit › Find (⌘F): a bar along the top of the page, in place of Chromium's, a search per tab | `CefChromeWindow.setFindBar`, `CefFindSession` |
 | `StatusBubble` | The hovered link's address over the page, in place of Chromium's | `statusText`, `showsChromiumStatusBubble`, `setPageOverlay` |
 | `SwipeIndicator` | The browser's own back and forward swipe indicator | `navigationGestureProgress`, `pageOverlay` |
 | `Appearance` | Settings › Appearance, for the windows and the pages | `CefProfile.setColorScheme` |
 | `Downloads` | A toolbar button listing downloads | `CefBrowser.downloads` |
 | `TabDiscarding` | Memory Saver: background tabs put to sleep after a while or under memory pressure; Settings › Put tabs to sleep; a button that wakes them. Background tabs are Chromium's real background tabs now, so Chromium's own discarding applies to them too | `discard()`, `lifecycle` |
-| `ChromiumPanels` | QR code and Share buttons and View › Cast, with Chromium's bubbles | `CefChromeCommand` |
+| `ChromiumPanels` | QR code and Share buttons and View › Cast: Chromium's bubbles under the buttons, or the browser's own QR code and Cast panels (Settings, `-customChromiumPanels YES`) | `chromiumSurfaceAnchor`, `CefChromeWindow.setCustomPresentation`, `CefMediaRouter` |
 | `ChromiumPages` | `chrome://settings` without what does nothing in an embedded Chromium, an About page of the browser's own, and a Browser menu of Chromium's pages | `CefUserScript.styleSheet`, navigation policy |
 | `Playground` | `browser://playground/` (Help › Playground): popups, a download, a page that asks before leaving, an unreachable site, Widevine and FairPlay test streams | `CefSchemeHandler` |
-| `WebKitTabs` | Streaming services (Netflix, Disney+ and others) in windows shown by the system's WebKit, which plays FairPlay; View › Open in WebKit, and "Open in Chromium" back. WebKit pages are not Chromium tabs, so each is a window of its own, not an entry in the rail | `Sources/SystemEngine` |
+| `WebKitTabs` | Streaming services (Netflix, Disney+ and others) in windows shown by the system's WebKit, which plays FairPlay; View › Open in WebKit, and "Open in Chromium" back. A WebKit page is not a Chromium tab: it opens in a separate window of its own beside the browser window, with no entry in the rail, no tab groups and no place in Recently Closed; the menus that navigate reach it while it is in front | `Sources/SystemEngine` |
 | `Passkeys` | Passkeys answered by Chromium or by the browser itself, and the saved passkeys, in Settings | `CefPasskeyController` |
 | `TaskManager` | Window › Task Manager | `CefTaskManager` |
 | `SingleInstance` | Launching the app again opens a tab, or one for each URL or file passed | `CefRuntime.onRelaunch` |
@@ -98,7 +104,7 @@ commands: `commands(for:)`, `settings`, `toolbarItems(_:for:)` and
 
 ```swift
 struct FindBar: BrowserFeature {
-    func windowDidOpen(_ window: CefWindow) {
+    func windowDidOpen(_ window: CefChromeWindow) {
         window.setFindBar { session in Bar(session: session) }
     }
 
@@ -245,6 +251,8 @@ Examples/dist/Browser.app/Contents/MacOS/Browser -private YES -addressBarText sw
 | `-addressBarText <text>` | Starts editing with that text typed. |
 | `-private YES` | Opens the tabs in a private window. |
 | `-tabsAtTheSide YES` | Puts the tab rail down the side. |
+| `-customChromiumPanels YES` | The browser's own QR code and Cast panels in place of Chromium's bubbles. |
+| `-restoresWindowsOnLaunch YES` | Settings › On startup › Reopen windows from last time. |
 | `-railScreenshots <directory>` | Opens tabs, pins, groups and overflows them, saves a PNG of the browser's own views in each state (light, dark, side), then quits. Drawn from inside the app (`cacheDisplay(in:to:)`), so no screen recording is involved. |
 | `-appearance light\|dark\|system` | Overrides the appearance setting. |
 | `-showTaskManager YES` | Opens the Task Manager window. |

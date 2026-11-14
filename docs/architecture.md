@@ -417,7 +417,13 @@ lays out (toolbar, insets, popups through `onPopup`, Chromium's surfaces
 recognised per window); the second has no CEF object at all, only the
 `NSWindow` Chromium made and the tab model Chromium keeps, reached through
 Chromium's WebUI hosts (`chrome://bookmarks`' `chrome.tabs`,
-`tab_strip_internals.mojom`). A one-tab `CefChromeWindow` is a different
+`tab_strip_internals.mojom`, `tab_search.mojom`). `CefTabStrip` follows
+the events CEF and AppKit deliver for every browser and window, and asks a
+host only when they report a change to the tab model's structure; hosts
+close seconds after their last call. Chromium's surfaces are one
+controller for both window kinds (`ChromiumSurfaceHost`: the window's
+`NSWindow` and the browser it shows, a `CefChromeWindow`'s active tab's).
+A one-tab `CefChromeWindow` is a different
 Chromium window from a `CefWindow`: a `normal` one, with a toolbar for
 extensions' action popups and a tab strip extensions can group and move
 tabs in.
@@ -438,8 +444,9 @@ is the visible `WebContentsViewCocoa`, whose frame the window follows.
 The framework exports only CEF's C API, but Chromium's macOS UI is AppKit,
 and its Objective-C classes are visible to the Objective-C runtime.
 `CefObjCHook` overrides a few of their methods, a feature at a time:
-CefChromium's surface tracking (`CefNSWindow` child windows and
-`NativeWidgetMacNSWindow` alpha), swipe gating (`ChromeRenderWidgetHostViewMacDelegate`) and the
+CefChromium's surface tracking (`CefNSWindow` and
+`BrowserNativeWidgetWindow` child windows, `NativeWidgetMacNSWindow`
+alpha), swipe gating (`ChromeRenderWidgetHostViewMacDelegate`) and the
 swipe indicator (`HistoryOverlayController`). Every method a feature
 overrides or calls is looked up first by class name, selector and type
 encoding, and the feature's overrides go in only when all of them are

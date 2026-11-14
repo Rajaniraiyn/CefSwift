@@ -20,7 +20,8 @@ import CefSwiftUI
 ///   standard input closes, for `Scripts/measure-footprint.py`.
 ///
 /// Features read their own: `-appearance` (Appearance), `-showTaskManager`
-/// (TaskManager) and `-showPageInfo` (PageInfo).
+/// (TaskManager), `-showPageInfo` (PageInfo) and `-customChromiumPanels`
+/// (ChromiumPanels); `-restoresWindowsOnLaunch` is Settings › On startup.
 @MainActor
 struct LaunchOptions {
     var urls: [URL] = []
@@ -46,7 +47,11 @@ struct LaunchOptions {
     func openTabs(in controller: BrowserController) {
         if benchmarks { Benchmark.reportFirstLoadAndQuitWhenInputCloses(controller) }
         Task {
-            guard let window = await controller.openWindow(url: urls.first, isPrivate: opensPrivateTabs) else { return }
+            let startsPlain = urls.isEmpty && !opensPrivateTabs && !benchmarks
+            guard let window = startsPlain
+                ? await controller.openStartupWindows()
+                : await controller.openWindow(url: urls.first, isPrivate: opensPrivateTabs)
+            else { return }
             var last = window.tabs.first?.browser
             for url in urls.dropFirst() {
                 last = await controller.openTabNow(url: url, isPrivate: opensPrivateTabs)?.browser ?? last

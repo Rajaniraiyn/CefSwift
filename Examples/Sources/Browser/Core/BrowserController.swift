@@ -151,6 +151,15 @@ final class BrowserController: CefBrowserDelegate {
     private func dress(_ strip: CefTabStrip) {
         guard dressedStrips.insert(ObjectIdentifier(strip)).inserted else { return }
         strip.layout = tabsAtTheSide ? .vertical(width: 232) : .horizontal
+        // The rail's sound icons follow Chromium's events while the browser
+        // is the active app (one hidden page, CefTabStrip.observesChromiumEvents);
+        // in the background, the strip follows CEF's events alone.
+        strip.observesChromiumEvents = NSApp.isActive
+        for (name, isActive) in [(NSApplication.didBecomeActiveNotification, true), (NSApplication.didResignActiveNotification, false)] {
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak strip] _ in
+                MainActor.assumeIsolated { strip?.observesChromiumEvents = isActive }
+            }
+        }
         strip.onWindowOpened = { [weak self] chrome in
             guard let self, !self.windows.contains(where: { $0.chrome === chrome }) else { return }
             let window = BrowserWindow(chrome: chrome, controller: self)
@@ -194,6 +203,32 @@ final class BrowserController: CefBrowserDelegate {
             NSLog("Browser: could not open a window: \(error)")
             return nil
         }
+    }
+
+    static let restoresWindowsKey = "restoresWindowsOnLaunch"
+
+    /// The windows at launch: those from last time, after a quit, when
+    /// Settings › On startup says so (Chromium's own records of them, with
+    /// each tab's history); after a crash, a new window and a prompt
+    /// offering to reopen the others; otherwise a new window.
+    func openStartupWindows() async -> CefChromeWindow? {
+        let strip = CefProfile.default.tabStrip
+        dress(strip)
+        if let session = strip.previousSession {
+            switch session.exit {
+            case .clean where UserDefaults.standard.bool(forKey: Self.restoresWindowsKey):
+                let restored = (try? await strip.restorePreviousSession(
+                    configuration: tabConfiguration(for: .default), delegate: self)) ?? []
+                if let last = restored.last { return last }
+            case .crashed:
+                let window = await openWindow()
+                if let window { RestorePrompt.show(in: window, session: session, controller: self) }
+                return window
+            default:
+                strip.discardPreviousSession()
+            }
+        }
+        return await openWindow()
     }
 
     private func privateSession() -> CefProfile {

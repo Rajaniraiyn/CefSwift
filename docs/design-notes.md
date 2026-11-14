@@ -521,9 +521,13 @@ In a window Chrome draws, measured:
   neither a new window nor a group renamed or recoloured (an extension's
   `chrome.tabGroups.update`) by itself.
 - `chrome://tab-strip.top-chrome` (the WebUI tab strip) is not built on
-  macOS; `chrome://tab-search.top-chrome` loads, but its Mojo modules are
-  bundled into the app; `tabs_api.mojom.TabStripService` is bound only to
-  the experimental WebUI browser window.
+  macOS; `chrome://tab-search.top-chrome` loads, and its bundle
+  (`tab_search.js`) exports `TabSearchApiProxyImpl`, whose
+  `getProfileData()` lists windows (without identifiers), tabs, groups and
+  recently closed tabs and groups, with `tabsChanged`, `tabUpdated` and
+  `tabsRemoved` events and `openRecentlyClosedEntry`;
+  `tabs_api.mojom.TabStripService` is bound only to the experimental WebUI
+  browser window.
 - Chrome's tab strip and toolbar take the top of the window (121 of 1006
   points in the probe; the page is the `WebContentsViewCocoa`). Chromium's
   `BridgedContentView` answers every hit test inside itself, so a view
@@ -562,14 +566,50 @@ are the result. Measured further (SelfTest `tabStrip`, and the
   browser is muted for a moment to see which tab reports it. Matches are
   kept by `chrome.tabs` id, which survives moves between windows (the
   `CefBrowser` does too).
-- **No `chrome.tabs` event listeners on the WebUI host.** With
-  `chrome.tabs.onUpdated` and the like listened to on `chrome://bookmarks`,
-  Chromium crashed (`SIGTRAP`, nothing logged) later in the same run, when
-  an extension was disabled and enabled again or an incognito window
-  opened. `CefTabStrip` reads `chrome.windows.getAll({populate: true})` when
-  `OnTabStripUpdated` reports a change, and every second for what that
-  does not report (a new window, titles, sound); with groups present the
-  internal page is read every two seconds for their names and colours.
+- **One listener crashes Chromium: `chrome.windows.onFocusChanged`.**
+  Each `chrome.tabs` and `chrome.windows` event was listened to alone on
+  the `chrome://bookmarks` host, then an incognito window opened and an
+  extension was disabled and enabled (`tabResearch` probe,
+  `listener=<name>`): `chrome.tabs`' `onUpdated`, `onCreated`,
+  `onRemoved`, `onMoved`, `onActivated`, `onAttached` and
+  `chrome.windows`' `onCreated` and `onRemoved` all survived; with
+  `onFocusChanged`, Chromium ended with `SIGTRAP` as the incognito window
+  opened.
+- **Following without polling, and without a host at idle.** CEF and
+  AppKit already report most of what a tab strip shows: a browser created
+  (a new tab or window) or closed (`CefRuntime.browsers`), each page's
+  title, address, icon and loading (`CefBrowser`), the page a window shows
+  (the shown `WebContentsViewCocoa` changes: the active tab), every Chrome
+  command (`on_chrome_command`, Chrome's shortcuts included). `CefTabStrip`
+  applies a closed tab and a new active tab at once, reads
+  `chrome.windows.getAll({populate: true})` only after a new browser, a
+  window or tab command (`IDC_*` 34000–34999) or a change the app makes,
+  and the internal page only for groups' names and colours and what
+  Chromium can reopen. Each host closes 3 s after its last call (a
+  per-call idle time in `CefServiceHosts`). Not reported by CEF: sound
+  starting or stopping (an `NSWindow` title carries no alert state on
+  macOS) and an extension's moves, pinning and grouping; with
+  `observesChromiumEvents` the bookmarks host stays open listening to
+  every event above but `onFocusChanged`. `chrome://tab-strip-internals`
+  could not serve both: its renderer can reach `chrome.tabs` no more than
+  the bookmarks renderer can bind its Mojo interface (WebUI hosts bind by
+  host), and `chrome://tab-search.top-chrome` has no window identifiers.
+- **What a window Chrome draws cost, and why.** The Browser example on
+  `CefChromeWindow` measured 10 processes and 410 MiB (relaunch, median
+  of three, alternating with the new build on one Mac), against 8 and
+  215 MiB now. The two hosts were two renderers (about 45 MiB). The rest
+  was Chrome's WebUI omnibox popup (`chrome://omnibox-popup.top-chrome`,
+  "Tool: Omnibox" in the task manager): preloaded with every window in a
+  renderer of its own (about 50 MiB) and drawn off screen, 120 MB of
+  IOSurfaces in the GPU process (`footprint -p`: 127 IOSurfaces against 16
+  without it), under a covered omnibox no one types in. The Browser turns
+  `WebUIOmniboxPopup`, `WebUIOmniboxAimPopup` and `WebUIOmniboxFullPopup`
+  off; Chromium falls back to its views popup. Disabling
+  `PreloadTopChromeWebUI` did not remove it. What a window Chrome draws
+  still costs, measured in one process: about 12 MB more in the GPU
+  process than a `CefWindow` of the same size (35 against 23 MiB), for
+  Chrome's frame, tab strip and toolbar, which are views without an
+  `NSView` each, so nothing outside Chromium can hide them.
 - **Group names and colours** change through Chrome's own group editor:
   the header's `AXShowMenu` opens it, kept transparent, the name is typed
   through its `NSTextInputClient` and a colour pressed through
@@ -584,9 +624,42 @@ are the result. Measured further (SelfTest `tabStrip`, and the
   browser with the app's configuration in a window of its own, kept off
   screen and transparent, then `chrome.tabs.move`s its tab in: the browser,
   its bridges and user scripts come along.
+- **Surfaces in these windows.** Chromium attaches its bubbles to a
+  window it draws as it does to a `CefWindow` (child windows of
+  `BrowserNativeWidgetWindow`), so the same controller follows both;
+  CefChromium overrides that class's `addChildWindow:ordered:` and
+  `removeChildWindow:` as it does `CefNSWindow`'s. Commands come through
+  CEF's command handler for every tab's browser. Tab search is a
+  `WebUIBubbleDialogView`, recognized by its page's host when its
+  accessibility tree has it and otherwise by the command that opened it;
+  the group editor is `TabGroupEditorBubbleView`. "Sharing this tab" is an
+  infobar inside the window's views, not a surface.
+- **Reopening and the previous session.** CEF runs no session restore:
+  after a clean quit and after a kill, with `session.restore_on_startup`
+  at 1 or at its default, the second launch opened nothing, Chromium's tab
+  restore service listed nothing from a killed run, and no "Restore
+  pages?" bubble appeared (`tabResearch` probe, `session1`/`session2`,
+  `crash1`/`crash2`). The tab restore service is saved and read at the
+  next launch: a window closed with `IDC_CLOSE_WINDOW` is one entry with
+  its tabs and their history; a tab closed through CEF, as CefKit's quit
+  closes every browser, is a loose tab. `tab_search.mojom`'s
+  `OpenRecentlyClosedEntry` reopens a given entry into the window of the
+  page that asks (a CefWindow's is a popup, where a tab cannot stay), so
+  CefChromium asks from a page in a Chrome window kept off screen and
+  moves a reopened tab to where it was; only `IDC_RESTORE_TAB` puts the
+  newest entry back by itself. At quit CefChromium closes each of
+  Chromium's windows as a window first, and saves the windows' tabs (a
+  small file in the profile's directory) as they change, marked running
+  until the quit, which is what tells a crash.
 - **Previews.** Chromium's hover-card thumbnails come from
   `ThumbnailTabHelper`, which only Chrome's views tab strip and the WebUI
-  tab strip (not built on macOS) read; no route was found. Not done.
+  tab strip (not built on macOS) read; no route to them was found. The
+  DevTools Protocol's `Page.captureScreenshot` does capture a background
+  tab (Chromium draws a frame for it): a quarter-size JPEG of a 1200 × 900
+  page took 73 ms for the active tab and 94 ms for a background one, the
+  first capture attaching DevTools (`tabResearch` probe, `preview`); a
+  full-size PNG took 135 ms and 560 KB. `CefTab.capturePreview()` takes
+  the small one on demand; nothing captures continuously.
 
 ## Memory settings measured and not used
 

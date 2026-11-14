@@ -136,9 +136,30 @@ extension CefBrowser {
         if delegate?.browser(self, handleChromeCommand: command, disposition: disposition) == true { return true }
         // Modules that handle commands in CefWindows (CefChromium).
         if let window = CefWindow.hosting(self), window.intercept(command) { return true }
+        // And in the browsers of Chromium's own windows.
+        if CefWindow.hosting(self) == nil, Self.intercept(command, in: self) { return true }
         // Chrome runs the command after this returns.
         if command.isZoomCommand { CefBrowser.refreshZoomLevels() }
         return false
+    }
+
+    /// Decides Chrome commands before Chromium runs them in browsers that
+    /// no ``CefWindow`` hosts (Chromium's own windows' tabs): from Chrome's
+    /// shortcuts, menus and UI, and from ``execute(_:disposition:)``. An
+    /// interceptor returns whether it handled the command, which Chromium
+    /// then does not run; one that only watches returns `false`. They run in
+    /// the order added, after the browser's delegate.
+    package static func addChromeCommandInterceptor(
+        _ interceptor: @escaping @MainActor (CefBrowser, CefChromeCommand) -> Bool
+    ) {
+        commandInterceptors.append(interceptor)
+    }
+
+    private static var commandInterceptors: [@MainActor (CefBrowser, CefChromeCommand) -> Bool] = []
+
+    /// Whether an interceptor handled `command` in `browser`.
+    static func intercept(_ command: CefChromeCommand, in browser: CefBrowser) -> Bool {
+        commandInterceptors.contains { $0(browser, command) }
     }
 
     func applyFullscreen(_ isFullscreen: Bool) { self.isFullscreen = isFullscreen }
