@@ -190,6 +190,14 @@ public final class CefChromeWindow: Identifiable {
         didSet { if pageOverlay !== oldValue { oldValue?.removeFromSuperview(); host?.update() } }
     }
 
+    /// A bar of the app's along the top of the active tab's page, such as a
+    /// find bar (``setFindBar(_:)`` puts one here): it lies over the page,
+    /// as tall as it needs (its `fittingSize`), and takes its own clicks,
+    /// with or without Chrome's UI. Hide the view to give the page back.
+    public var pageBar: NSView? {
+        didSet { if pageBar !== oldValue { oldValue?.removeFromSuperview(); host?.update() } }
+    }
+
     /// Where the active tab's page is, in the window's content view, in
     /// points from its top left. It follows resizing, full screen,
     /// Chrome's bookmarks bar, infobars and side panel.
@@ -203,6 +211,10 @@ public final class CefChromeWindow: Identifiable {
     @ObservationIgnored var host: ChromeWindowHost?
     @ObservationIgnored private var announced = false
     @ObservationIgnored var isTransient = false
+    /// Chromium's surfaces in the window, once its surface API was used.
+    @ObservationIgnored var surfaceController: ChromiumSurfaceController?
+    /// What waits for the window's `NSWindow`.
+    @ObservationIgnored var whenAttached: [@MainActor (NSWindow) -> Void] = []
 
     // MARK: Updates from the strip
 
@@ -223,6 +235,9 @@ public final class CefChromeWindow: Identifiable {
         window = nsWindow
         host = ChromeWindowHost(window: self, nsWindow: nsWindow)
         host?.update()
+        let waiting = whenAttached
+        whenAttached = []
+        waiting.forEach { $0(nsWindow) }
         announceIfNeeded()
     }
 
@@ -237,6 +252,8 @@ public final class CefChromeWindow: Identifiable {
     func didClose() {
         guard !isClosed else { return }
         isClosed = true
+        surfaceController?.hostDidClose()
+        whenAttached = []
         host?.tearDown()
         host = nil
         tabs = []

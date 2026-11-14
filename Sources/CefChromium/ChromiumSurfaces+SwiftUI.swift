@@ -75,6 +75,135 @@ extension CefWindow {
     }
 }
 
+extension CefChromeWindow {
+    /// Replaces one of Chromium's surfaces with a SwiftUI view in a panel,
+    /// as ``CefWindow/setCustomPresentation(for:content:)``: under the
+    /// kind's anchor, or under the app's top bar at the page's trailing
+    /// edge.
+    ///
+    /// ```swift
+    /// window.setCustomPresentation(for: .qrCode) { surface in
+    ///     MyQRCodeView(url: surface.url).padding()
+    /// }
+    /// ```
+    public func setCustomPresentation(
+        for kind: CefChromiumSurface.Kind, @ViewBuilder content: @escaping (CefChromiumSurface) -> some View
+    ) {
+        setCustomPresentation(for: kind) { surface in
+            SurfacePanel.present(surface, content: AnyView(content(surface)))
+        }
+    }
+
+    /// Replaces Chromium's find bar with a SwiftUI view along the top of
+    /// the page (``pageBar``), shown while the active tab's
+    /// ``CefBrowser/findSession`` is active: from ⌘F or
+    /// ``CefChromeCommand/find`` until ``CefFindSession/end()``. Each tab
+    /// keeps its own search; the bar shows the active tab's, as Chrome's
+    /// find bar does.
+    ///
+    /// ```swift
+    /// window.setFindBar { session in FindBar(session: session) }
+    /// ```
+    ///
+    /// The bar's first text field takes keyboard focus as it appears.
+    public func setFindBar(@ViewBuilder _ content: @escaping (CefFindSession) -> some View) {
+        let bar = ChromeFindBar(window: self) { AnyView(content($0)) }
+        pageBar = bar
+        setCustomPresentation(for: .findBar) { [weak bar] _ in bar?.update(focusing: true) }
+    }
+
+    /// Replaces Chromium's status bubble with a SwiftUI view over the
+    /// page, as ``CefWindow/setStatusBubble(_:)``: `content` receives the
+    /// active tab's ``CefBrowser/statusText``, shown while it is not empty.
+    public func setStatusBubble(@ViewBuilder _ content: @escaping (String) -> some View) {
+        chromiumSurfacePolicy[.statusBubble] = .hidden
+        let hosting = NSHostingView(rootView: ActiveStatusTextReader(window: self, content: { AnyView(content($0)) }))
+        pageOverlay = PassthroughHostingContainer(hosting)
+    }
+}
+
+/// The active tab's status text, for a ``CefChromeWindow``.
+private struct ActiveStatusTextReader: View {
+    let window: CefChromeWindow
+    let content: (String) -> AnyView
+
+    var body: some View {
+        let text = window.activeTab?.browser?.statusText ?? ""
+        ZStack {
+            if !text.isEmpty { content(text) }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .allowsHitTesting(false)
+    }
+}
+
+/// A find bar along the top of a ``CefChromeWindow``'s page, for its active
+/// tab's find session.
+@MainActor
+private final class ChromeFindBar: NSView {
+    private weak var chromeWindow: CefChromeWindow?
+    private let content: (CefFindSession) -> AnyView
+    private var hosting: NSHostingView<AnyView>?
+    private weak var session: CefFindSession?
+
+    init(window: CefChromeWindow, content: @escaping (CefFindSession) -> AnyView) {
+        self.chromeWindow = window
+        self.content = content
+        super.init(frame: .zero)
+        isHidden = true
+        follow()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { nil }
+
+    override var fittingSize: NSSize { hosting?.fittingSize ?? .zero }
+
+    /// Shows the active tab's session while it is active.
+    private func follow() {
+        withObservationTracking {
+            _ = chromeWindow?.activeTab?.browser?.findSession.isActive
+        } onChange: { [weak self] in
+            Task { @MainActor in
+                self?.update(focusing: false)
+                self?.follow()
+            }
+        }
+        update(focusing: false)
+    }
+
+    func update(focusing: Bool) {
+        let active = chromeWindow?.activeTab?.browser?.findSession
+        let isActive = active?.isActive == true
+        if let active, active !== session {
+            session = active
+            hosting?.removeFromSuperview()
+            let made = NSHostingView(rootView: content(active))
+            made.sizingOptions = [.intrinsicContentSize]
+            made.frame = bounds
+            made.autoresizingMask = [.width, .height]
+            addSubview(made)
+            hosting = made
+        }
+        let wasHidden = isHidden
+        isHidden = !isActive
+        if isActive, wasHidden || focusing {
+            DispatchQueue.main.async { [weak self] in
+                guard let self, let field = Self.firstTextField(in: self) else { return }
+                self.chromeWindow?.window?.makeFirstResponder(field)
+            }
+        }
+    }
+
+    private static func firstTextField(in view: NSView) -> NSTextField? {
+        for subview in view.subviews {
+            if let field = subview as? NSTextField, field.isEditable { return field }
+            if let found = firstTextField(in: subview) { return found }
+        }
+        return nil
+    }
+}
+
 /// Reads the status text in `body`, so SwiftUI redraws as it changes.
 private struct StatusTextReader: View {
     let browser: CefBrowser
@@ -150,12 +279,12 @@ private struct SurfaceAnchorRepresentable: NSViewRepresentable {
 }
 
 /// An invisible view that registers itself as a surface anchor with the
-/// ``CefWindow`` it is in.
+/// ``CefWindow`` or ``CefChromeWindow`` it is in.
 private final class SurfaceAnchorView: NSView {
     private var kinds: Set<CefChromiumSurface.Kind>?
     private var alignment = CefChromiumSurface.Anchor.Alignment.center
     private var spacing: CGFloat = 4
-    private weak var registeredWindow: CefWindow?
+    private weak var registeredWindow: ChromiumSurfaceController?
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
@@ -185,12 +314,13 @@ private final class SurfaceAnchorView: NSView {
     }
 
     private func register() {
-        guard let window, let owner = CefWindow.owning(window) else { return }
+        guard let window, let owner = CefWindow.owning(window)?.surfaces ?? ChromeWindowHost.window(for: window)?.surfaces
+        else { return }
         let anchor = CefChromiumSurface.Anchor.view(self, alignment: alignment, spacing: spacing)
         if let kinds {
-            for kind in kinds { owner.chromiumSurfacePolicy.anchors[kind] = anchor }
+            for kind in kinds { owner.policy.anchors[kind] = anchor }
         } else {
-            owner.chromiumSurfacePolicy.anchor = anchor
+            owner.policy.anchor = anchor
         }
         registeredWindow = owner
     }
@@ -199,11 +329,11 @@ private final class SurfaceAnchorView: NSView {
         guard let owner = registeredWindow else { return }
         registeredWindow = nil
         // Wherever this view anchors, whatever kinds it was set up with.
-        for (kind, anchor) in owner.chromiumSurfacePolicy.anchors where anchor.isAnchored(to: self) {
-            owner.chromiumSurfacePolicy.anchors[kind] = nil
+        for (kind, anchor) in owner.policy.anchors where anchor.isAnchored(to: self) {
+            owner.policy.anchors[kind] = nil
         }
-        if owner.chromiumSurfacePolicy.anchor?.isAnchored(to: self) == true {
-            owner.chromiumSurfacePolicy.anchor = nil
+        if owner.policy.anchor?.isAnchored(to: self) == true {
+            owner.policy.anchor = nil
         }
     }
 }
@@ -218,7 +348,7 @@ private final class SurfacePanel: NSPanel {
     private var clickMonitor: Any?
 
     static func present(_ surface: CefChromiumSurface, content: AnyView) {
-        guard let parent = surface.parentWindow?.window else { return }
+        guard let parent = surface.host?.surfaceNSWindow else { return }
         let panel = SurfacePanel(surface: surface, content: content)
         parent.addChildWindow(panel, ordered: .above)
         surface.position(panel)

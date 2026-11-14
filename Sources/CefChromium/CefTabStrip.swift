@@ -464,6 +464,7 @@ public final class CefTabStrip {
         }
         shown.isActive = true
         shown.isSelected = true
+        window.surfaceController?.shownBrowserDidChange()
     }
 
     /// Reads after Chrome commands that change tabs and windows, from any

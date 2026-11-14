@@ -49,6 +49,10 @@ public struct CefChromeCommand: RawRepresentable, Hashable, Sendable {
     public static let showPerformance = Self(rawValue: Int(IDC_PERFORMANCE))
     public static let installWebApp = Self(rawValue: Int(IDC_INSTALL_PWA))
     public static let pinTab = Self(rawValue: Int(IDC_WINDOW_PIN_TAB))
+    /// Chrome's tab search (⇧⌘A), in Chromium's own tabbed windows.
+    public static let searchTabs = Self(rawValue: Int(IDC_TAB_SEARCH))
+    /// Creates a tab group with a new tab, and opens Chrome's group editor.
+    public static let createTabGroup = Self(rawValue: Int(IDC_CREATE_NEW_TAB_GROUP))
 
     public static let zoomIn = Self(rawValue: Int(IDC_ZOOM_PLUS))
     public static let zoomOut = Self(rawValue: Int(IDC_ZOOM_MINUS))
