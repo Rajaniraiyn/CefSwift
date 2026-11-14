@@ -1017,8 +1017,9 @@ same set:
 A browser that is shown, starts loading or navigates while it is being
 discarded stays loaded, and `discard()` throws.
 
-Every blocker is something Chromium or CefKit knows natively; CefKit does
-not read the page's content to find more. Chrome-style browsers get
+Every blocker but `.beforeUnloadHandler` is something Chromium or CefKit
+knows natively; that one reads the page's listeners through the DevTools
+Protocol, and no check reads the page's content. Chrome-style browsers get
 Chromium's own discard rules, which cover audio, form input, picture in
 picture and devices in every frame. A `CefWebView` browser gets audio and
 form input from where Chromium's rules read them, its performance
@@ -1035,10 +1036,22 @@ If a CEF update changes that page's interface, the check reports
 `.beforeUnloadHandler` is asked of the DevTools Protocol in both runtime
 styles, for every frame, since Chromium runs `beforeunload` in each: a
 listener added or removed after load, `window.onbeforeunload`, and
-handlers in same-site and cross-site `iframe`s all count. Asking attaches
-the browser's DevTools session if nothing else had (see
+handlers in same-site and cross-site `iframe`s all count. It is asked
+last, only when no other blocker applies, so a browser that is visible,
+playing audio or holding form input is never asked, and a set with
+another blocker may lack `.beforeUnloadHandler`. Asking attaches the
+browser's DevTools session if nothing else had (see
 [Compatibility with bot protection](#compatibility-with-bot-protection));
-it enables no domain and takes a few milliseconds.
+it enables no domain and takes a few milliseconds. CEF keeps a session
+attached until the browser closes, or is discarded by closing it, and has
+no call to detach it, so a policy that polls hidden tabs leaves attached
+only those that got that far.
+
+`discard()` itself could find `beforeunload` natively in a `CefWebView`,
+by closing the Chromium browser without forcing it and answering "stay"
+when the page asks, but that runs the page's `beforeunload` handlers while
+it is hidden, which Chrome's own discarding never does and a page can
+observe; so it uses the same checks as `discardBlockers()`.
 
 `restore()` loads a discarded page at once, even while it is hidden. The
 delegate hears `browserWillDiscard(_:)`, while the page can still be read,
@@ -3283,7 +3296,8 @@ the switches measured and not used.
 - Chromium's own Memory Saver never discards a CefKit browser, since each
   is the active tab of its own Chromium window; call `discard()` from your
   own policy instead. A `CefWebView` browser loses its back/forward list
-  when discarded, does not report playing audio or form input as blockers, and Chromium tells tabs apart only by
+  when discarded, never reports `.exempt`, `.pictureInPicture` or
+  `.connectedToDevice`, and Chromium tells tabs apart only by
   address and title, so Chrome-style tabs showing the same page under the
   same title cannot be discarded (`.unknown`) until one of them moves on.
 - DevTools opens in a window of its own; there is no docked DevTools.

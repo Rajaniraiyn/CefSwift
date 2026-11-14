@@ -6,7 +6,9 @@ import Foundation
 extension CefBrowser {
     /// A reason a browser cannot be discarded right now.
     ///
-    /// Each one is a fact Chromium or CefKit knows without reading the page.
+    /// Each one is a fact Chromium or CefKit knows natively, except
+    /// ``beforeUnloadHandler``, which reads the page's listeners (not its
+    /// content) through the DevTools Protocol.
     /// Chrome-style browsers can report all of them; browsers in a
     /// `CefWebView` all but ``exempt``, ``pictureInPicture`` and
     /// ``connectedToDevice``.
@@ -196,9 +198,13 @@ extension CefBrowser {
     /// What keeps this browser from being discarded now; empty when
     /// ``discard()`` would discard it.
     ///
-    /// Every blocker is a fact known natively, never read from the page's
-    /// content. A check that cannot be made counts as a blocker,
-    /// ``CefBrowser/DiscardBlocker/unknown(_:)``. Where each comes from:
+    /// Every blocker but ``CefBrowser/DiscardBlocker/beforeUnloadHandler``
+    /// is a fact Chromium or CefKit knows natively; that one reads the
+    /// page's listeners through the DevTools Protocol, and only when
+    /// nothing else blocks, so a set with another blocker may lack it. No
+    /// check reads the page's content. A check that cannot be made counts
+    /// as a blocker, ``CefBrowser/DiscardBlocker/unknown(_:)``. Where each
+    /// comes from:
     ///
     /// - ``CefBrowser/DiscardBlocker/visible``, ``CefBrowser/DiscardBlocker/notLoaded``,
     ///   ``CefBrowser/DiscardBlocker/devToolsOpen``, ``CefBrowser/DiscardBlocker/downloading``
@@ -209,10 +215,13 @@ extension CefBrowser {
     ///   listeners of every frame, `onbeforeunload` included, asked of the
     ///   DevTools Protocol (`DOMDebugger.getEventListeners`), for both
     ///   styles; a cross-site frame is asked in a session attached to it
-    ///   for the call and detached again. This attaches the browser's
-    ///   DevTools session (``CefBrowser/devTools``) if nothing had; no
-    ///   domain is enabled. Chromium's page graph would have it without
-    ///   DevTools (`has_nonempty_beforeunload`), but Blink never sets it.
+    ///   for the call and detached again. Asked last, once every native
+    ///   check has found nothing, it attaches the browser's DevTools
+    ///   session (``CefBrowser/devTools``) if nothing had; no domain is
+    ///   enabled. CEF keeps a browser's session attached until the browser
+    ///   closes, or is discarded by closing it, and offers no way to detach
+    ///   it. Chromium's page graph would have the answer without DevTools
+    ///   (`has_nonempty_beforeunload`), but Blink never sets it.
     /// - Chrome style, everything else: Chromium's own discard rules for the
     ///   tab, from `chrome://discards` (`GetTabDiscardsInfo`): audio,
     ///   picture in picture, devices, form input, exemptions.
@@ -237,18 +246,20 @@ extension CefBrowser {
         guard !isDiscarded else { return [] }
         var blockers = stateBlockers()
         if discardPhase != .none { blockers.insert(.notLoaded) }
-        guard !blockers.contains(.notLoaded) else { return blockers }
-        async let beforeUnload = hasBeforeUnloadHandler()
+        guard blockers.isEmpty else { return blockers }
         // Chromium's rules for a tab; for an Alloy browser, its page's
         // audio and form state in the performance-manager graph.
-        async let chromium = isChromeStyle
-            ? CefRuntime.shared.tabDiscarder.blockers(for: self) : CefPageGraph.blockers(for: self)
-        switch await beforeUnload {
+        blockers.formUnion(isChromeStyle
+            ? await CefRuntime.shared.tabDiscarder.blockers(for: self) : await CefPageGraph.blockers(for: self))
+        // Only a browser nothing native keeps is asked of DevTools, which
+        // attaches its session for good: a visible, audible or edited
+        // page, polled by a memory policy, stays unattached.
+        guard blockers.isEmpty else { return blockers }
+        switch await hasBeforeUnloadHandler() {
         case true?: blockers.insert(.beforeUnloadHandler)
         case false?: break
         case nil: blockers.insert(.unknown("Could not read the page's beforeunload listeners."))
         }
-        blockers.formUnion(await chromium)
         return blockers
     }
 
