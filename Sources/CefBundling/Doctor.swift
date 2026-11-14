@@ -192,7 +192,7 @@ enum Doctor {
         case .appStore:
             signature.append(.init(status: .warning, title: "signature",
                                    detail: "\(app.authority ?? "Apple Distribution"): App Store signing, which " +
-                                       "requires the App Sandbox; CefSwift does not support it."))
+                                       "requires the App Sandbox, which is not supported with official CEF builds."))
         }
         if let verifyError = facts.verifyError {
             signature.append(.init(status: .error, title: "codesign --verify", detail: verifyError,

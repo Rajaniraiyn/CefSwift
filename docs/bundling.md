@@ -832,30 +832,47 @@ Other features:
 
 ### App Sandbox
 
-Chromium, as official CEF builds ship it, does not run in the App Sandbox
-(`com.apple.security.app-sandbox`), so a CefSwift app cannot ship in the Mac
-App Store. Measured with the Xcode example (CEF 156.0.28, macOS 27.2): with
-App Sandbox on, and every helper given `com.apple.security.app-sandbox` and
-`com.apple.security.inherit` as App Sandbox child processes require, the
-browser process stops at launch:
+The App Sandbox (`com.apple.security.app-sandbox`) is not supported with
+official CEF builds, so a CefSwift app cannot ship in the Mac App Store.
+`cef bundle` and the Xcode build phase refuse entitlements that claim it,
+whatever identity signs the bundle, and name the fix: remove App Sandbox
+in Signing & Capabilities (Xcode's app template turns it on), or the key
+from the entitlements file. Chromium's own sandbox, which confines the
+renderers and other helpers, is separate and on by default: see
+[Sandbox](sandbox.md).
+
+What was measured, with the Xcode example signed ad hoc (CEF 156.0.28,
+macOS 27.2): with App Sandbox on, and every helper given
+`com.apple.security.app-sandbox` and `com.apple.security.inherit` as App
+Sandbox child processes require, the browser process stops at launch:
 
 ```
 FATAL:base/apple/mach_port_rendezvous_mac.cc:159] Check failed: kr == KERN_SUCCESS.
 bootstrap_check_in <bundle ID>.MachPortRendezvousServer.<pid>: Permission denied (1100)
 ```
 
-Chromium's processes find each other through a Mach service the browser
-process registers under the app's bundle identifier, and the App Sandbox
-lets an app register only services named after one of its application
-groups. Electron, the one Chromium-based framework with a Mac App Store
-build, patches Chromium for this and more (its own builds of Chromium);
-Chromium's signing never uses the App Sandbox, and CEF documents Developer
-ID distribution only. So `cef bundle` and the Xcode build phase refuse
-entitlements that claim it, and name the fix: remove App Sandbox in
-Signing & Capabilities (Xcode's app template turns it on), or the key from
-the entitlements file. Chromium's own sandbox, which confines the
-renderers and other helpers, is separate and on by default: see
-[Sandbox](sandbox.md).
+Why, and what is reasoned rather than measured for a team signature:
+
+- Chromium's processes find each other through a Mach service the
+  browser process registers as `<bundle ID>.MachPortRendezvousServer.<pid>`.
+  The App Sandbox lets an app register Mach services only under one of its
+  application groups (`<team ID>.<group>…`), and the name Chromium builds
+  is not one; official CEF builds offer no way to change it. A Developer
+  ID or Apple Development signature with an application group does not
+  rename the service, so the same refusal is expected. That has not been
+  run, since it needs a team.
+- The Mac App Store additionally rejects apps that use private API, and
+  Chromium uses several on macOS.
+- Electron, the one Chromium-based framework with a Mac App Store build,
+  gets there with a patched Chromium (its MAS build names Chromium's Mach services
+  under the application group and avoids the private API), not with
+  stock Chromium. Chromium's own signing never uses the App Sandbox, and
+  CEF documents Developer ID distribution only.
+
+[`CefAppCapabilities`](guide.md#signing-and-capabilities) still reports
+`isAppSandboxed` and the `.appStore` signature kind, for diagnostics:
+they describe a configuration CefSwift refuses to bundle, so an app never
+sees them in a build it made with `cef bundle` or the Xcode build phase.
 
 ## cef doctor
 

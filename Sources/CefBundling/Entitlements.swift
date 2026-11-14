@@ -280,14 +280,18 @@ struct DistributionSettings: Sendable {
                 "and the App Store reject apps that allow debugging; remove it from the entitlements.")
         }
 
+        // Refused for every signature kind. Measured ad hoc; for team
+        // signatures the same Mach-name rule applies (docs/bundling.md).
         if appEntitlements[Self.appSandbox]?.isGranting == true {
             throw BundlingError(
                 "The App Sandbox is on (\(Self.appSandbox) in \(appEntitlementsFile?.source ?? "the entitlements")), " +
-                "and Chromium cannot run in it: the App Sandbox refuses the Mach service Chromium's browser process " +
-                "registers at launch, and the app stops with \"bootstrap_check_in " +
-                "<bundle ID>.MachPortRendezvousServer.<pid>: Permission denied (1100)\". Remove the entitlement " +
-                "(in Xcode: remove App Sandbox in Signing & Capabilities, ENABLE_APP_SANDBOX = NO). Chromium's " +
-                "own sandbox still confines the helpers (docs/sandbox.md); see docs/bundling.md#app-sandbox.")
+                "which is not supported with official CEF builds: Chromium's browser process registers the Mach " +
+                "service <bundle ID>.MachPortRendezvousServer.<pid> at launch, and the App Sandbox lets an app " +
+                "register Mach services only under one of its application groups, so the app stops with " +
+                "\"bootstrap_check_in <bundle ID>.MachPortRendezvousServer.<pid>: Permission denied (1100)\". " +
+                "Remove the entitlement (in Xcode: remove App Sandbox in Signing & Capabilities, " +
+                "ENABLE_APP_SANDBOX = NO). Chromium's own sandbox still confines the helpers (docs/sandbox.md); " +
+                "see docs/bundling.md#app-sandbox.")
         }
 
         // Library validation accepts a library only from the process's own

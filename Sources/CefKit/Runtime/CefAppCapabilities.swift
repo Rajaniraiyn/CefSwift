@@ -18,6 +18,10 @@ public struct CefAppCapabilities: Sendable, Equatable {
         /// Developer ID Application.
         case developerID
         /// Apple Distribution, for the Mac App Store.
+        ///
+        /// Diagnostic only: the Mac App Store requires the App Sandbox,
+        /// which official CEF builds do not support, and bundling refuses
+        /// it (docs/bundling.md, "App Sandbox").
         case appStore
         /// A certificate Apple did not issue to a team, such as a
         /// self-signed one.
@@ -36,6 +40,11 @@ public struct CefAppCapabilities: Sendable, Equatable {
     public let isHardenedRuntime: Bool
     /// Whether the app runs in the App Sandbox
     /// (`com.apple.security.app-sandbox`).
+    ///
+    /// Diagnostic only: official CEF builds do not run in the App Sandbox
+    /// (Chromium registers a Mach service the App Sandbox refuses), and
+    /// `cef bundle` and the Xcode build phase refuse it for every
+    /// signature, so a bundled app reports `false`.
     public let isAppSandboxed: Bool
     /// The entitlement keys the signature grants (a key whose value is
     /// `false` is left out).

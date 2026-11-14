@@ -393,9 +393,10 @@ if !capabilities.webAuthnAuthenticators.contains(.iCloudKeychain) {
 
 | Property | Value |
 |---|---|
-| `signature` | `.unsigned`, `.adHoc`, `.development`, `.developerID`, `.appStore` or `.other` (a certificate without an Apple team). |
+| `signature` | `.unsigned`, `.adHoc`, `.development`, `.developerID`, `.appStore` or `.other` (a certificate without an Apple team). `.appStore` is diagnostic only, like `isAppSandboxed`. |
 | `teamIdentifier` | The team of an Apple certificate, else nil. |
-| `isHardenedRuntime`, `isAppSandboxed` | From the signature's flags and entitlements. |
+| `isHardenedRuntime` | From the signature's flags. |
+| `isAppSandboxed` | From the entitlements. Diagnostic only: the App Sandbox is not supported with official CEF builds and bundling refuses it, so a bundled app never reports `true` ([App Sandbox](bundling.md#app-sandbox)). |
 | `entitlements`, `keychainAccessGroups` | The entitlements the signature grants. |
 | `usageDescriptions` | The `NS…UsageDescription` keys in the Info.plist. |
 | `webAuthnAuthenticators` | `.securityKey`, `.hybrid`, `.touchID`, `.iCloudKeychain`: Chromium's native WebAuthn authenticators the app has. |
@@ -3290,8 +3291,9 @@ the switches measured and not used.
   `.org.chromium.Chromium.webauthn`, with an empty team identifier, and
   macOS lets a signed app claim only groups its provisioning profile
   authorizes, which start with the team identifier.
-- The App Sandbox is not supported, so CefSwift apps do not ship in the
-  Mac App Store ([bundling](bundling.md#app-sandbox)).
+- The App Sandbox is not supported with official CEF builds, so CefSwift
+  apps do not ship in the Mac App Store: Chromium registers a Mach service
+  the App Sandbox refuses ([bundling](bundling.md#app-sandbox)).
 - Chromium plays Widevine only as an unverified software (L3) client and
   has no H.264, HEVC or AAC, so Netflix-class services do not play in it;
   WebKit plays them with FairPlay, beside Chromium in the Browser example

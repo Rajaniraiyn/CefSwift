@@ -64,8 +64,8 @@ sources.
    package: File › Add Package Dependencies…, enter
    `https://github.com/Rajaniraiyn/CefSwift`, and add `CefSwiftUI` to the
    app target.
-2. In the target's Signing & Capabilities, remove App Sandbox: Chromium
-   cannot run in it ([why](docs/bundling.md#app-sandbox)).
+2. In the target's Signing & Capabilities, remove App Sandbox: it is not
+   supported with official CEF builds ([why](docs/bundling.md#app-sandbox)).
 3. Copy [`Examples/Xcode/CefSwift.xcconfig`](Examples/Xcode/CefSwift.xcconfig)
    into the project and choose it as the target's configuration file
    (Project › Info › Configurations). For a local package, set its

@@ -796,8 +796,8 @@ its framework; Chromium's cannot be generic, since their names, identifiers
 and entitlements follow the app's. Electron's and
 swift-bundler's packagers assemble the bundle outside Xcode, as `cef
 bundle` does for SwiftPM. Helpers of an App Sandbox app would take
-`com.apple.security.inherit`; Chromium does not run in the App Sandbox, so
-both tracks refuse it instead.
+`com.apple.security.inherit`; the App Sandbox is not supported with
+official CEF builds, so both tracks refuse it instead.
 
 **Previews.** Xcode's previews run the app's code in a process of Xcode's;
 Chromium cannot start its helpers there. `CefSwiftApp` skips Chromium when

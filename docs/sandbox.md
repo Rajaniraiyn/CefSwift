@@ -96,8 +96,8 @@ does not have, fails to start the GPU process, and ends the app.
   process's command line, Chromium passes it on and helpers skip sealing.
   This is the switch Chromium itself uses.
 - The App Sandbox (the App Store entitlement) is a separate mechanism from
-  Chromium's sandbox. Chromium does not run in it, so both tracks refuse
-  it ([bundling](bundling.md#app-sandbox)); Xcode's app template turns it
+  Chromium's sandbox. It is not supported with official CEF builds, so
+  both tracks refuse it ([bundling](bundling.md#app-sandbox)); Xcode's app template turns it
   on, so remove it there.
 
 ## Without the sandbox
