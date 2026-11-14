@@ -82,3 +82,15 @@
 
 /* Accessibility label of an offscreen browser view: the web page it shows. */
 "Web content" = "Web content";
+
+/* External protocol sheet: title. %@ is the app that would open the link. */
+"Open “%@”?" = "Open “%@”?";
+
+/* External protocol sheet: message. %@ is the site that asks. */
+"%@ wants to open this app." = "%@ wants to open this app.";
+
+/* External protocol sheet: message when the asking site is unknown. */
+"A page wants to open this app." = "A page wants to open this app.";
+
+/* External protocol sheet: the button that opens the app. */
+"Open" = "Open";

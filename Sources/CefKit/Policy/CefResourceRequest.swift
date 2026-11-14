@@ -67,16 +67,36 @@ public enum CefResourceRequestAction: Sendable, Equatable {
 /// ```
 public typealias CefRequestFilter = @CefIOActor @Sendable (CefResourceRequest) -> CefResourceRequestAction
 
-/// Owner of the `cef_resource_request_handler_t` that applies a filter.
-final class ResourceRequestFilter: Sendable {
-    let filter: CefRequestFilter
+/// Owner of the `cef_resource_request_handler_t` every browser's requests
+/// go through: it applies the browser's filter, when it has one, and
+/// hands URLs of schemes Chromium does not load to the delegate.
+final class ResourceRequestHandler: Sendable {
+    let filter: CefRequestFilter?
 
-    init(filter: @escaping CefRequestFilter) {
+    init(filter: CefRequestFilter?) {
         self.filter = filter
     }
 
     func makeHandler() -> UnsafeMutablePointer<cef_resource_request_handler_t> {
         let h = cefAllocate(cef_resource_request_handler_t.self, owner: self)
+        // IO thread. Chromium never opens another app itself: the delegate
+        // decides on the main actor, and CefKit opens the URL.
+        h.pointee.on_protocol_execution = { _, browser, frame, request, allowOSExecution in
+            allowOSExecution?.pointee = 0
+            let identifier = browser.map { $0.pointee.get_identifier($0) }
+            let frameURL = frame.flatMap { CefStringUtil.takingUserFree($0.pointee.get_url($0)) }.flatMap(URL.init(string:))
+            let isMainFrame = frame.map { $0.pointee.is_main($0) != 0 } ?? true
+            let url = request.flatMap { CefStringUtil.takingUserFree($0.pointee.get_url($0)) }.flatMap(URL.init(string:))
+            cefRelease(browser)
+            cefRelease(frame)
+            cefRelease(request)
+            guard let identifier, let url else { return }
+            let externalRequest = CefExternalProtocolRequest(url: url, frameURL: frameURL, isMainFrame: isMainFrame)
+            Task { @MainActor in
+                CefRuntime.shared.browser(withIdentifier: identifier)?.handleExternalProtocol(externalRequest)
+            }
+        }
+        guard filter != nil else { return h }
         h.pointee.on_before_resource_load = { s, browser, frame, request, callback in
             let started = CefDiagnostics.start()
             var filterTime: UInt64 = 0
@@ -89,7 +109,7 @@ final class ResourceRequestFilter: Sendable {
             // Released on every return below.
             guard let owned = CefOwned(request) else { return RV_CONTINUE }
             let request = owned.pointer
-            guard let owner = cefOwner(ResourceRequestFilter.self, s) else { return RV_CONTINUE }
+            guard let owner = cefOwner(ResourceRequestHandler.self, s), let filter = owner.filter else { return RV_CONTINUE }
             let resourceType = request.pointee.get_resource_type(request)
             let snapshot = CefResourceRequest(
                 url: CefStringUtil.takingUserFree(request.pointee.get_url(request)).flatMap(URL.init(string:)),
@@ -98,7 +118,6 @@ final class ResourceRequestFilter: Sendable {
                 isNavigation: resourceType == RT_MAIN_FRAME || resourceType == RT_SUB_FRAME
             )
             // CEF calls this on the IO thread, which the filter is isolated to.
-            let filter = owner.filter
             let filterStarted = CefDiagnostics.start()
             let action = CefIOActor.assumeIsolated({ filter(snapshot) })
             if filterStarted != 0 {

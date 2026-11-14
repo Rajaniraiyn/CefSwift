@@ -183,9 +183,7 @@ final class CefBrowserClient {
             handlers.set(makeRenderHandler())
             handlers.set(makeAccessibilityHandler())
         }
-        if let requestFilter {
-            handlers.set(ResourceRequestFilter(filter: requestFilter).makeHandler())
-        }
+        handlers.set(ResourceRequestHandler(filter: requestFilter).makeHandler())
 
         let client = cefAllocate(cef_client_t.self, owner: self)
         client.pointee.get_life_span_handler = { CefBrowserClient.handler($0) }
