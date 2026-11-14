@@ -42,6 +42,7 @@ enum DoctorInspector {
         let resourceBundles = resourceItems.filter { $0.pathExtension == "bundle" }.sorted { $0.path < $1.path }
         facts.appLibraries = appLibraries.map(\.lastPathComponent)
         facts.resourceBundles = resourceBundles.map(\.lastPathComponent)
+        facts.bundledExtensions = BundledExtensions.inspect(contents: contents)
 
         // A resource bundle with code of its own is signed like a library;
         // one without (SwiftPM's and Xcode's resource bundles) is sealed as

@@ -25,6 +25,8 @@ extension SelfTest {
         "quitWhilePending": quitWhilePendingProbeChecks,
         "tabHosting": tabHostingProbe,
         "chromeTabStrip": chromeTabStripProbe,
+        "extensionSurvey": extensionSurveyProbe,
+        "extensions": extensionProbeChecks,
     ]
 
     /// Changes the configuration for the probe `name`.
@@ -42,6 +44,8 @@ extension SelfTest {
             configuration.services.protectedMedia = .automatic
         case "launchPrompts":
             configureLaunchPromptsProbe(&configuration)
+        case "extensionSurvey", "extensions":
+            configureExtensionProbe(&configuration)
         default:
             break
         }

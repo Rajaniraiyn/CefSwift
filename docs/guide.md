@@ -64,6 +64,11 @@ The runtime, browser, window and profile APIs are `@MainActor`.
   - [Requests through Chromium's network stack](#requests-through-chromiums-network-stack)
   - [Site settings](#site-settings)
   - [Bookmarks, history and suggestions](#bookmarks-history-and-suggestions)
+- [Extensions](#extensions)
+  - [The profile's extensions](#the-profiles-extensions)
+  - [Installing extensions with the app](#installing-extensions-with-the-app)
+  - [Toolbars, popups and the Web Store](#toolbars-popups-and-the-web-store)
+  - [Trust](#trust)
 - [DevTools](#devtools)
 - [Compatibility with bot protection](#compatibility-with-bot-protection)
 - [Serving your own content](#serving-your-own-content)
@@ -156,7 +161,7 @@ Common options:
 | `preferences` | Chromium preferences by dotted name. See [Preferences](#preferences). |
 | `productName`, `stringOverrides` | Your product name, and replacements for other built-in strings. See [Customizing Chromium's own pages](#customizing-chromiums-own-pages). |
 | `chromeToolbar` | Hides Chrome app-menu commands, toolbar buttons and page-action icons in Chrome-style windows. |
-| `extensions` | Unpacked extension folders (each with a `manifest.json`) to load. Extensions run in Chrome-style browsers. |
+| `extensions` | Extensions the app installs: `.webStore(id)`, `.package(at:id:version:)`, `.unpacked(at:)`. See [Extensions](#extensions). |
 | `processPolicy` | How many helper processes Chromium keeps running. See [Footprint and launch time](#footprint-and-launch-time). |
 | `enabledFeatures`, `disabledFeatures` | Chromium feature names, passed as `--enable-features` and `--disable-features`. |
 | `safeStorage`, `keychainItem` | Whether Chromium uses the keychain, and which item. See [Keychain access](#keychain-access). |
@@ -2782,6 +2787,184 @@ Group names, colours and collapsing are read only: Chromium grants
 stay in the window; to show your own instead, cover them. The
 [design notes](design-notes.md#tabs-chromiums-tab-strip-under-the-apps-own)
 record the measurements.
+
+## Extensions
+
+Chrome style runs Chrome's own extension system: extensions users install
+from the Chrome Web Store or `chrome://extensions`, and ones the app
+installs. CefSwift ships no extension of its own.
+
+What works where, in CEF 156 (SelfTest's `extensions` group checks each
+row with a test extension):
+
+| | `openChromeWindow` (Chrome's window) | `CefWindow` | Alloy views (`CefWebView`, offscreen) |
+|---|---|---|---|
+| Content scripts, `declarativeNetRequest`, `webRequest` | yes | yes | yes |
+| Background service worker, `storage`, `cookies`, `bookmarks`, `history`, `downloads`, `alarms`, `offscreen`, native messaging | yes | yes | (runs for the profile) |
+| `chrome.tabs` / `chrome.windows` | real tabs and windows | each `CefWindow` is a `popup`-type window of one tab | not listed as tabs |
+| `chrome.tabs.group`, `tabs.move`, `chrome.tabGroups` | yes | refused ("Tabs can only be moved to and from normal windows") | — |
+| `tabs.create`, `windows.create`, `runtime.openOptionsPage()` | adds a tab to that window | opens a Chrome window → `onChromeTab` | — |
+| Action popups (toolbar button, `chrome.action.openPopup()`) | yes | no: Chromium has no toolbar for popup-type windows | no |
+| Chrome's extensions menu (puzzle piece) | yes | with `toolbar: .chrome` | no |
+| Context-menu items extensions add | yes | yes, in `CefContextMenu` | yes |
+| `chrome_url_overrides` (new tab page) | Chrome's new tabs | `chrome://newtab` loads | — |
+| Chrome Web Store "Add to Chrome" | yes | yes | no |
+
+The store's page says "Switch to Chrome to install extensions" because
+CEF's user agent names Chromium, not Google Chrome; Add to Chrome works
+regardless, through the store's own `chrome.webstorePrivate` API, and shows
+Chromium's install dialog ("Add “…”?") over the window, a surface of kind
+`.extensionInstallPrompt`. No user agent change is needed or made.
+
+### The profile's extensions
+
+With `CefChromium`, `profile.extensions` is Chromium's list for a profile,
+observable:
+
+```swift
+import CefChromium
+
+let extensions = profile.extensions
+for item in try await extensions.refresh() {
+    print(item.name, item.version, item.isEnabled, item.installSource)
+}
+try await extensions.setEnabled(false, for: "ddkjiahejlhfcafbddmgiahcphecmpfh")
+try await extensions.setAllowedInIncognito(true, for: "ddkjiahejlhfcafbddmgiahcphecmpfh")
+try await extensions.checkForUpdates()
+for await _ in extensions.changes { print(extensions.installed.count) }
+```
+
+- `installed` is the list as last read, sorted by name, and stays current
+  while the app uses it: after each change made through this API, and as
+  Chromium reports installs, updates and removals, the user's in Chrome's
+  interface included. A SwiftUI view that reads it updates by itself.
+- A `CefExtension` has its `id`, `name`, `version`, `description`, `icon`,
+  `state` (`.enabled`, `.disabled`, `.terminated`, `.blocklisted`),
+  `installSource` (`.webStore`, `.unpacked`, `.external`, `.policy`, …),
+  `permissionWarnings` (the lines Chrome shows), `hosts` and `siteAccess`,
+  `isAllowedInIncognito`, `optionsURL`, `homepageURL`, `webStoreURL`,
+  `commands` (with their shortcuts), `action` and `replacedPages`.
+- `action` is the toolbar action its manifest declares: `title`,
+  `popupURL` and `icon`. What an extension sets later per tab (badge text,
+  title, icon) Chromium keeps to itself and its own toolbar: no API reads
+  it, so an app's toolbar shows the declared action.
+- `replacedPages[.newTab]` is the page an extension puts in place of the
+  new tab page (`chrome_url_overrides`). Chromium shows it for
+  `chrome://newtab`; an app with a start page of its own decides whether to
+  open that instead.
+- `uninstall(_:)` removes an extension without asking: ask first, as
+  Chrome does. `setSiteAccess(_:for:)`, `setPinnedToToolbar(_:for:)`,
+  `reload(_:)`, and developer mode: `setDeveloperModeEnabled(_:)`,
+  `loadUnpacked(at:)` (Chrome's "Load unpacked") and `pack(_:privateKey:)`
+  (its "Pack extension", which writes a `.crx` and its key).
+- Incognito profiles share the default profile's extensions, which run
+  there only when allowed. CEF's `CefProfile.incognito()` is an in-memory
+  profile of its own, and extensions allowed in incognito did not run in
+  it in SelfTest; they do in Chrome's own incognito windows.
+
+### Installing extensions with the app
+
+`CefRuntime.Configuration.extensions` installs extensions in every
+profile, incognito ones aside:
+
+```swift
+var configuration = CefRuntime.Configuration.chrome
+configuration.extensions = [
+    // Downloaded from the Chrome Web Store in the background on first start.
+    .webStore("ddkjiahejlhfcafbddmgiahcphecmpfh"),
+    // A package the bundle carries (cefapp.json "extensions"), installed
+    // without a download.
+    .package(at: Bundle.main.resourceURL!.appendingPathComponent("Extensions/Helper.crx"),
+             id: "kpdaoijgjogphaiahlmcjhhfknhnllkc", version: "1.0"),
+    // An unpacked directory, loaded at every start as a developer's.
+    .unpacked(at: Bundle.main.resourceURL!.appendingPathComponent("Extensions/DevExtension")),
+]
+```
+
+- `.webStore` and `.package` use Chromium's mechanism for extensions other
+  programs install: CefKit writes `External Extensions/<id>.json` in the
+  root cache directory, which Chromium reads at start-up. Chromium installs
+  such an extension disabled until it is accepted; `profile.extensions`
+  accepts the configured ones the first time it reads the list, once, so a
+  user who turns one off later keeps it off. Users can remove them, and
+  Chromium does not install a removed one again. Taking an extension out
+  of the configuration removes CefKit's file for it, and Chromium then
+  treats it as withdrawn by the program that added it.
+- Until Chromium has installed one, its identifier is in
+  `profile.extensions.pendingInstallations`. Chromium reports no progress
+  and no failure for these: offline, or with an identifier the store does
+  not have, it stays pending, and Chromium tries again at its next start
+  and on its update schedule.
+- `.webStore` extensions update as store installs do. A `.package`
+  installs again when its `version` changes.
+- To ship one in the bundle, list it in `cefapp.json`'s `extensions`
+  (`"extensions": ["Extensions/Helper.crx"]`), or Xcode's `CEF_EXTENSIONS`
+  build setting: both tracks copy `.crx` packages and unpacked directories
+  into `Contents/Resources/Extensions`, which the app's signature seals.
+  `cef doctor` reads each: a package's identifier from its CRX3 header,
+  checked against its key; a directory's manifest, and its identifier
+  from its `key` (without one, Chromium derives the identifier from the
+  install path, which moves with the app). It warns about code inside one.
+  Make a `.crx` with `chrome://extensions`' Pack extension or
+  `profile.extensions.pack(_:privateKey:)`, and keep the key.
+- `.unpacked` uses `--load-extension`. Chromium 156 still honours it in
+  CEF (Chrome stopped in its branded builds); the extension is listed as a
+  developer's and comes back at each start even if removed.
+- Enterprise policy (`ExtensionInstallForcelist`, `ExtensionSettings`)
+  applies through `enterprisePolicy` only when it is mandatory: set by a
+  configuration profile or `/Library/Managed Preferences`. Chromium
+  rejects these policies as recommended values (`defaults write`), which
+  is all an app can write itself, so they are for administrators, not for
+  apps; `chrome://policy` shows them as errors otherwise.
+
+### Toolbars, popups and the Web Store
+
+In windows with Chrome's toolbar (`openChromeWindow`, and a `CefWindow`
+with `toolbar: .chrome`), Chrome's extensions button and menu work as in
+Chrome; the menu is a surface of kind `.extensionsMenu`, and an action's
+popup `.extensionPopup`, which CefChromium anchors and dismisses like its
+other surfaces.
+
+An app's own toolbar lists `installed` and shows each `action.icon`. For
+the popup, Chromium offers no way to open an extension's popup in a window
+without its toolbar, so the Browser example shows the action's `popupURL`
+in a small Chrome-style window of its own under the button
+(`Examples/Sources/Browser/Features/Extensions`): the popup runs with the
+extension's APIs, but its "current window" is its own and the click grants
+no `activeTab`.
+
+```swift
+import CefChromium
+import SwiftUI
+
+struct ExtensionButtons: View {
+    let extensions: CefExtensions
+    let open: (URL) -> Void
+
+    var body: some View {
+        ForEach(extensions.installed.filter { $0.isEnabled && $0.action != nil }) { item in
+            Button {
+                if let popup = item.action?.popupURL { open(popup) }
+            } label: {
+                if let icon = item.action?.icon ?? item.icon { Image(nsImage: icon) }
+            }
+            .help(item.action?.title ?? item.name)
+        }
+    }
+}
+```
+
+### Trust
+
+Extensions are third-party code with the reach Chrome gives them, inside
+the app's browser processes: they read and change the pages they have
+access to, see requests, and can talk to native messaging hosts the user
+installed. The app controls which can be installed: CefChromium's
+`installed` and `uninstall`, the configuration's list, and, on managed
+Macs, the administrator's policies. Extensions run in incognito only when
+allowed, one by one; they never run in Alloy-style browsers' own
+interface, but their content scripts and network rules do apply to pages
+there.
 
 ## DevTools
 

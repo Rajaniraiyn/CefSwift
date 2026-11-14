@@ -205,6 +205,7 @@ enum SelfTest {
         ("discard", discardChecks),
         ("contextMenu", contextMenuChecks),
         ("background", backgroundChecks),
+        ("extensions", extensionChecks),
     ]
 
     static func runChecks() async {

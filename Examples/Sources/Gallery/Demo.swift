@@ -71,6 +71,7 @@ enum Demos {
         BookmarksDemo(),
         HistoryDemo(),
         SuggestionsDemo(),
+        ExtensionsDemo(),
 
         PasskeysDemo(),
     ]

@@ -419,7 +419,7 @@ public final class CefWindow: Identifiable {
         frame.cornerRadius = contentCornerRadius
     }
 
-    private func applyLayout() {
+    func applyLayout() {
         updateContentFrame()
         updatePageOverlay()
         guard let window = cefWindow?.pointer else { return }
@@ -433,9 +433,46 @@ public final class CefWindow: Identifiable {
         settings.default_flex = 1
         // cef_window_t begins with its cef_panel_t base.
         window.withMemoryRebound(to: cef_panel_t.self, capacity: 1) { panel in
-            cefRelease(panel.pointee.set_to_box_layout(panel, &settings))
+            addChromeToolbar(to: panel)
+            let layout = panel.pointee.set_to_box_layout(panel, &settings)
+            if let layout, let toolbar = chromeToolbarView {
+                // The toolbar keeps its height; the page takes the rest.
+                cefAddRef(toolbar.pointer)
+                layout.pointee.set_flex_for_view(layout, toolbar.pointer, 0)
+            }
+            cefRelease(layout)
             panel.pointee.layout(panel)
         }
+    }
+
+    /// Chrome's toolbar (``Toolbar/chrome``, ``Toolbar/location``), which
+    /// CEF creates with the browser view but leaves to the window to place:
+    /// once the view is in the window, above it. Chromium's extension
+    /// actions, `chrome.action.openPopup()` and its toolbar bubbles need it.
+    @ObservationIgnored private var chromeToolbarView: CefRef<cef_view_t>?
+
+    /// Whether Chrome's toolbar is in the window. For tests.
+    @_spi(Testing) public var hasChromeToolbar: Bool { chromeToolbarView != nil }
+
+    /// The toolbar view's state, for tests.
+    @_spi(Testing) public var chromeToolbarDescription: String {
+        guard let view = chromeToolbarView?.pointer, let window = cefWindow?.pointer else { return "none" }
+        let bounds = view.pointee.get_bounds(view)
+        let preferred = view.pointee.get_preferred_size(view)
+        let children = window.withMemoryRebound(to: cef_panel_t.self, capacity: 1) { $0.pointee.get_child_view_count($0) }
+        return "visible \(view.pointee.is_visible(view)) drawn \(view.pointee.is_drawn(view)) attached \(view.pointee.is_attached(view)) "
+            + "bounds \(bounds.width)x\(bounds.height) preferred \(preferred.width)x\(preferred.height) window children \(children)"
+    }
+
+    private func addChromeToolbar(to panel: UnsafeMutablePointer<cef_panel_t>) {
+        guard chromeToolbarView == nil, let browserView else { return }
+        guard let view = CefRef(adopting: browserView.pointer.pointee.get_chrome_toolbar(browserView.pointer)) else { return }
+        chromeToolbarView = view
+        // add_child_view_at consumes a reference to the view.
+        cefAddRef(view.pointer)
+        panel.pointee.add_child_view_at(panel, view.pointer, 0)
+        // CEF makes it hidden.
+        view.pointer.pointee.set_visible(view.pointer, 1)
     }
 
     // MARK: Over the page
@@ -553,6 +590,7 @@ public final class CefWindow: Identifiable {
         accessoryController = nil
         windowWaiters = []
         cefWindow = nil
+        chromeToolbarView = nil
         browserView = nil
         extraViewsForTesting = []
         isClosed = true

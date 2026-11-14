@@ -22,6 +22,7 @@ struct XcodeEmbed {
         ("CEF_CAPABILITIES", "capabilities"),
         ("CEF_LOCALIZATIONS", "cef.localizations"),
         ("CEF_SOFTWARE_GPU_FALLBACK", "cef.softwareGPUFallback"),
+        ("CEF_EXTENSIONS", "extensions"),
         ("CEF_HELPER_ENTITLEMENTS_HELPER", "helperEntitlements.helper"),
         ("CEF_HELPER_ENTITLEMENTS_ALERTS", "helperEntitlements.alerts"),
         ("CEF_HELPER_ENTITLEMENTS_GPU", "helperEntitlements.gpu"),
@@ -483,7 +484,20 @@ struct XcodeEmbed {
             plan: settings.plan,
             trim: settings.trim,
             signingKeychain: settings.keychain,
-            workDirectory: build.workDirectory.appendingPathComponent("signing"))
+            workDirectory: build.workDirectory.appendingPathComponent("signing"),
+            extensions: extensions(config: settings.config))
+    }
+
+    /// `CEF_EXTENSIONS`, paths relative to the project's directory separated
+    /// by spaces, or else cefapp.json's `extensions`.
+    func extensions(config: CefAppConfig?) -> [URL] {
+        if let value = setting("CEF_EXTENSIONS") {
+            let base = URL(fileURLWithPath: setting("PROJECT_DIR") ?? FileManager.default.currentDirectoryPath, isDirectory: true)
+            return value.split(separator: " ").map {
+                URL(fileURLWithPath: (String($0) as NSString).expandingTildeInPath, relativeTo: base).standardizedFileURL
+            }
+        }
+        return config.map { config in (config.extensions ?? []).map(config.resolve) } ?? []
     }
 
     /// The Info.plist the embedder trims and makes the helpers' from: the

@@ -38,6 +38,7 @@ final class MappedCefSettings {
         let rootCache = configuration.resolvedRootCacheDirectory
         try? FileManager.default.createDirectory(at: rootCache, withIntermediateDirectories: true)
         configuration.services.protectedMedia.installPreinstalledCDM(rootCache: rootCache)
+        CefExternalExtensions.write(configuration.extensions, rootCache: rootCache)
         CefStringUtil.set(rootCache.path, into: &raw.root_cache_path)
         CefStringUtil.set(rootCache.path, into: &raw.cache_path)
 

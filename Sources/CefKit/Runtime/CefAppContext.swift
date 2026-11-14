@@ -119,9 +119,12 @@ final class CefAppContext: @unchecked Sendable {
         }
 
         var (enabledFeatures, disabledFeatures) = configuration.chromiumFeatures
-        if !configuration.extensions.isEmpty {
-            commandLine.appendSwitch(
-                "load-extension", value: configuration.extensions.map(\.path).joined(separator: ","))
+        let unpacked = configuration.extensions.compactMap { item -> String? in
+            if case .unpacked(let directory) = item.source { return directory.path }
+            return nil
+        }
+        if !unpacked.isEmpty {
+            commandLine.appendSwitch("load-extension", value: unpacked.joined(separator: ","))
         }
         // Discarding a tab then keeps its WebContents, and so its CefBrowser
         // and back/forward list. Without it Chromium replaces the

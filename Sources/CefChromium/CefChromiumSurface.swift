@@ -74,6 +74,17 @@ public final class CefChromiumSurface: Identifiable {
         case paymentRequest
         /// Print preview (``CefChromeCommand/print``, `window.print()`).
         case printPreview
+        /// Chrome's extensions menu, from the puzzle-piece button of Chrome's
+        /// toolbar: each extension's access to the page, pinning, options.
+        case extensionsMenu
+        /// An extension's action popup (its `default_popup` page), opened
+        /// from Chrome's toolbar or extensions menu, or by
+        /// `chrome.action.openPopup()`. Chromium opens these only in windows
+        /// with Chrome's toolbar.
+        case extensionPopup
+        /// "Add “…”?", the dialog that confirms installing an extension and
+        /// lists its permissions, from the Chrome Web Store's Add to Chrome.
+        case extensionInstallPrompt
         /// Any other surface, identified by its title or else by the class
         /// of Chromium's view inside it (`view:` and the class), or empty
         /// when Chromium's window names neither. Identifiers are Chromium's
@@ -93,6 +104,10 @@ public final class CefChromiumSurface: Identifiable {
                 [.anchor, .hide, .dismiss]
             case .paymentRequest, .printPreview:
                 [.hide, .dismiss]
+            case .extensionsMenu, .extensionPopup:
+                [.anchor, .hide, .dismiss]
+            case .extensionInstallPrompt:
+                [.anchor, .dismiss]
             case .autofillSuggestions:
                 [.hide]
             case .other(let identifier):
@@ -107,11 +122,12 @@ public final class CefChromiumSurface: Identifiable {
         public var hangsFromToolbar: Bool {
             switch self {
             case .qrCode, .cast, .share, .downloads, .permissionPrompt, .translate, .savePassword, .bookmark,
-                 .pageInfo, .zoom, .deviceChooser:
+                 .pageInfo, .zoom, .deviceChooser, .extensionsMenu, .extensionPopup:
                 true
             case .other:
                 capabilities.contains(.anchor)
-            case .findBar, .signIn, .statusBubble, .fullscreenNotice, .autofillSuggestions, .paymentRequest, .printPreview:
+            case .findBar, .signIn, .statusBubble, .fullscreenNotice, .autofillSuggestions, .paymentRequest, .printPreview,
+                 .extensionInstallPrompt:
                 false
             }
         }
@@ -360,6 +376,9 @@ public final class CefChromiumSurface: Identifiable {
         ("PaymentRequestDialogView", .paymentRequest),
         ("PaymentRequestSheetController", .paymentRequest),
         ("PrintPreviewDialog", .printPreview),
+        ("ExtensionsMenuView", .extensionsMenu),
+        ("ExtensionPopup", .extensionPopup),
+        ("ExtensionInstallDialogView", .extensionInstallPrompt),
     ]
 
     /// Views every surface has, which say nothing about its kind.
@@ -443,7 +462,7 @@ public final class CefChromiumSurface: Identifiable {
     }
 
     /// Chromium's Views name each view's class in `AXDOMClassList`.
-    private static func classList(of element: NSObject) -> [String] {
+    static func classList(of element: NSObject) -> [String] {
         let selector = NSSelectorFromString("accessibilityAttributeValue:")
         guard element.responds(to: selector),
               let value = element.perform(selector, with: "AXDOMClassList")?.takeUnretainedValue()

@@ -141,7 +141,8 @@ struct BundleCommand {
             trim: settings.trim,
             provisioningProfile: identity.kind.hasAppleTeam ? settings.profileURL : nil,
             signingKeychain: settings.keychain,
-            workDirectory: workDirectory.appendingPathComponent("signing"))
+            workDirectory: workDirectory.appendingPathComponent("signing"),
+            extensions: settings.config.map { config in (config.extensions ?? []).map(config.resolve) } ?? [])
         let app = try bundler.assemble()
 
         print("")

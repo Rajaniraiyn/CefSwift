@@ -249,6 +249,7 @@ phase warns, at the key's line, when the file disagrees with Xcode.
 | Provisioning profile | Signing & Capabilities (`PROVISIONING_PROFILE_SPECIFIER`) | `provisioningProfile` |
 | Locale packs kept | `CEF_LOCALIZATIONS` (`application`, `all`, or a list: `en fr`) | `cef.localizations` (`--localizations`) |
 | SwiftShader | `CEF_SOFTWARE_GPU_FALLBACK` (`include`, `exclude`) | `cef.softwareGPUFallback` (`--software-gpu-fallback`) |
+| Chrome extensions the app ships | `CEF_EXTENSIONS` (paths from the project's directory, separated by spaces) | `extensions` |
 | CEF version | `CEF_MANIFEST` (a `CEF_VERSION.json`) | `--manifest` |
 | CEF flavor | `CEF_FLAVOR` | `--flavor` |
 | CEF cache | `CEF_CACHE_DIR`, default `$(PROJECT_DIR)/.cef` | `.cef/` in the package |
@@ -331,6 +332,7 @@ a misspelled key does not go unnoticed.
 | `notarization.keychainProfile`, `notarization.format` | None, `zip` | Defaults of `cef notarize` and `bundle --notarize`. |
 | `cef.localizations` | `"application"` | Which of Chromium's locale packs the app keeps: `"application"`, `"all"`, or a list of localizations. As `--localizations`. See [Locale packs](#locale-packs). |
 | `cef.softwareGPUFallback` | `"include"` | `"exclude"` leaves out SwiftShader. As `--software-gpu-fallback`. See [Software GPU fallback](#software-gpu-fallback). |
+| `extensions` | None | Chrome extensions the app ships, `.crx` packages or unpacked directories, copied into `Contents/Resources/Extensions` and checked by `cef doctor`. The app installs them with `CefRuntime.Configuration.extensions`; see the guide's [Extensions](guide.md#installing-extensions-with-the-app). |
 
 An Xcode target takes these from its build settings instead, or reads a
 `cefapp.json` named by `CEF_APP_CONFIG`: see [Settings](#settings).

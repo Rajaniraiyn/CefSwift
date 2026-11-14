@@ -92,6 +92,7 @@ final class ChromiumStores {
     weak var history: CefHistory?
     weak var autocomplete: CefAutocomplete?
     weak var tabStrip: CefTabStrip?
+    weak var extensions: CefExtensions?
 
     var bookmarkReadSource = CefBookmarks.ReadSource.automatic
     /// When the last change made through ``CefBookmarks`` finished, until
