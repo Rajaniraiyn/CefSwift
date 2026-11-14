@@ -15,7 +15,7 @@ let package = Package(
         .plugin(name: "CefPlugin", targets: ["CefPlugin"]),
         // Assembles, signs and checks CEF app bundles: what the `cef` plugin
         // and the Xcode build phase (Scripts/xcode-embed.sh) both run.
-        .executable(name: "cefswift", targets: ["CefSwiftTool"]),
+        .executable(name: "cefswift", targets: ["cefswift"]),
         // The helper processes' executable and its startup library, which
         // `swift package cef bundle` and the Xcode build phase build and put
         // in the app bundle.
@@ -90,9 +90,12 @@ let package = Package(
         .target(
             name: "CefBundling"
         ),
+        // Named as its product: Swift 6.1 looks a plugin's tool up by the
+        // product name, later versions by either.
         .executableTarget(
-            name: "CefSwiftTool",
-            dependencies: ["CefBundling"]
+            name: "cefswift",
+            dependencies: ["CefBundling"],
+            path: "Sources/CefSwiftTool"
         ),
         // `swift package cef <download|bundle|info|clean|doctor|package|notarize>`:
         // builds the product and the helper with SwiftPM and runs cefswift.
@@ -108,7 +111,7 @@ let package = Package(
                     .allowNetworkConnections(scope: .all(ports: []), reason: "Download CEF binaries from cef-builds.spotifycdn.com"),
                 ]
             ),
-            dependencies: ["CefSwiftTool"]
+            dependencies: ["cefswift"]
         ),
         .testTarget(
             name: "CefKitTests",

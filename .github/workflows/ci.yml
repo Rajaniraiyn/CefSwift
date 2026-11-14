@@ -271,8 +271,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The example's xcconfig turns build settings into entitlements
+      # (RUNTIME_EXCEPTION_*), which Xcode does from version 26: use the
+      # newest Xcode the runner has.
       - name: Toolchain
         run: |
+          newest="$(ls -d /Applications/Xcode_*.app | grep -vi beta | sort -V | tail -1)"
+          echo "DEVELOPER_DIR=$newest/Contents/Developer" >> "$GITHUB_ENV"
+          export DEVELOPER_DIR="$newest/Contents/Developer"
           xcodebuild -version
           swift --version
 

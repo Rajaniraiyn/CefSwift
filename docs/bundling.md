@@ -187,6 +187,11 @@ until the target signs with a team. The phase stops a build that would
 fail this way. With a team (Apple Development, Developer ID), every part
 carries the team, and no exception is needed.
 
+Xcode turns `RUNTIME_EXCEPTION_*` build settings into entitlements from
+version 26. With an older Xcode, add the
+`com.apple.security.cs.disable-library-validation` entitlement to the
+target's `.entitlements` file instead, for as long as it signs ad hoc.
+
 ### Debugging and previews
 
 Run in Xcode starts the app, Chromium's browser process, under the

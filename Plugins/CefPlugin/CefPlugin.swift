@@ -321,7 +321,7 @@ struct Tool {
     let url: URL
 
     init(context: PluginContext) throws {
-        url = try context.tool(named: "CefSwiftTool").url
+        url = try context.tool(named: "cefswift").url
     }
 
     /// Runs the tool with its output going to the terminal.
