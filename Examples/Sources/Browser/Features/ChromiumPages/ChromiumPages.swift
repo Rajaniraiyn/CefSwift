@@ -12,13 +12,13 @@ struct ChromiumPages: BrowserFeature {
         BrowserPages.register(host: "about", AboutPage())
     }
 
-    func configure(_ configuration: inout CefBrowser.Configuration) {
+    func configure(_ configuration: inout CefPage.Configuration) {
         configuration.userScripts.append(Self.settingsStyle)
     }
 
-    func decidePolicy(for navigation: CefNavigationAction, in browser: CefBrowser) -> CefNavigationDecision? {
+    func decidePolicy(for navigation: CefNavigationAction, in page: CefPage) -> CefNavigationDecision? {
         guard navigation.isMainFrame, let replacement = Self.replacement(for: navigation.url) else { return nil }
-        browser.load(replacement)
+        page.load(replacement)
         return .cancel
     }
 

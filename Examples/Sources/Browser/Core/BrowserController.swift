@@ -11,11 +11,11 @@ import SwiftUI
 /// as in Chrome. Chrome's tab strip and toolbar are covered by the
 /// browser's own: a `TabRail` and a toolbar of the features' items
 /// (`BrowserWindow`). The controller keeps no list of tabs: it reads them
-/// from the profiles' `CefTabStrip`, and is the delegate of every tab's
+/// from the profiles' `CefTabs`, and is the delegate of every tab's
 /// browser, passing the decisions features make on to them.
 @MainActor
 @Observable
-final class BrowserController: CefBrowserDelegate {
+final class BrowserController: CefPageDelegate {
     /// The browser's windows, in the order they opened.
     private(set) var windows: [BrowserWindow] = []
 
@@ -25,7 +25,7 @@ final class BrowserController: CefBrowserDelegate {
     }
 
     /// The browser of the frontmost window's active tab.
-    var current: CefBrowser? { keyWindow?.activeBrowser }
+    var current: CefPage? { keyWindow?.activePage }
 
     /// The page of the frontmost tab, whichever engine shows it.
     var frontmostPage: (any TabPage)? {
@@ -65,7 +65,7 @@ final class BrowserController: CefBrowserDelegate {
     }
 
     /// Called whenever a tab's page finishes loading.
-    @ObservationIgnored var onPageLoad: ((CefBrowser) -> Void)?
+    @ObservationIgnored var onPageLoad: ((CefPage) -> Void)?
 
     @ObservationIgnored let features: any BrowserFeature
 
@@ -96,7 +96,7 @@ final class BrowserController: CefBrowserDelegate {
             }
             do {
                 try await group.setCollapsed(collapse)
-            } catch CefTabStrip.Error.unsupported {
+            } catch CefTabs.Error.unsupported {
                 if collapse { groupsCollapsedHere.insert(group.id) } else { groupsCollapsedHere.remove(group.id) }
             } catch {}
         }
@@ -136,11 +136,11 @@ final class BrowserController: CefBrowserDelegate {
         features.start(self)
         // Tabs Chromium makes itself (an extension's chrome.tabs.create,
         // a duplicate, a reopened tab) get the browser's decisions too.
-        CefRuntime.shared.onBrowserCreated = { [weak self] browser in
-            guard let self, browser.delegate == nil else { return }
-            browser.delegate = self
+        CefRuntime.shared.onPageCreated = { [weak self] page in
+            guard let self, page.delegate == nil else { return }
+            page.delegate = self
         }
-        dress(CefProfile.default.tabStrip)
+        dress(CefProfile.default.tabs)
         LaunchOptions().openTabs(in: self)
     }
 
@@ -148,11 +148,11 @@ final class BrowserController: CefBrowserDelegate {
 
     /// Has the browser dress every window of `strip`'s profile, those
     /// Chromium opens itself included.
-    private func dress(_ strip: CefTabStrip) {
+    private func dress(_ strip: CefTabs) {
         guard dressedStrips.insert(ObjectIdentifier(strip)).inserted else { return }
         strip.layout = tabsAtTheSide ? .vertical(width: 232) : .horizontal
         // The rail's sound icons follow Chromium's events while the browser
-        // is the active app (one hidden page, CefTabStrip.observesChromiumEvents);
+        // is the active app (one hidden page, CefTabs.observesChromiumEvents);
         // in the background, the strip follows CEF's events alone.
         strip.observesChromiumEvents = NSApp.isActive
         for (name, isActive) in [(NSApplication.didBecomeActiveNotification, true), (NSApplication.didResignActiveNotification, false)] {
@@ -172,14 +172,14 @@ final class BrowserController: CefBrowserDelegate {
     }
 
     private func applyLayout() {
-        for strip in [CefProfile.default.tabStrip] + (privateProfile.map { [$0.tabStrip] } ?? []) {
+        for strip in [CefProfile.default.tabs] + (privateProfile.map { [$0.tabs] } ?? []) {
             strip.layout = tabsAtTheSide ? .vertical(width: 232) : .horizontal
         }
     }
 
     /// The configuration of a tab the browser opens.
-    func tabConfiguration(for profile: CefProfile) -> CefBrowser.Configuration {
-        var configuration = CefBrowser.Configuration()
+    func tabConfiguration(for profile: CefProfile) -> CefPage.Configuration {
+        var configuration = CefPage.Configuration()
         configuration.profile = profile
         configuration.allowsBackForwardNavigationGestures = true
         features.configure(&configuration)
@@ -190,7 +190,7 @@ final class BrowserController: CefBrowserDelegate {
     @discardableResult
     func openWindow(url: URL? = nil, isPrivate: Bool = false) async -> CefChromeWindow? {
         let profile = isPrivate ? privateSession() : .default
-        dress(profile.tabStrip)
+        dress(profile.tabs)
         var frame: CGRect?
         if let key = keyWindow?.chrome.window?.frame {
             frame = key.offsetBy(dx: 24, dy: -24)
@@ -212,7 +212,7 @@ final class BrowserController: CefBrowserDelegate {
     /// each tab's history); after a crash, a new window and a prompt
     /// offering to reopen the others; otherwise a new window.
     func openStartupWindows() async -> CefChromeWindow? {
-        let strip = CefProfile.default.tabStrip
+        let strip = CefProfile.default.tabs
         dress(strip)
         if let session = strip.previousSession {
             switch session.exit {
@@ -248,16 +248,16 @@ final class BrowserController: CefBrowserDelegate {
     ///   - inBackground: Leave the current tab in front.
     ///   - source: The browser the tab is opened from: the tab shares its
     ///     profile and opens right after it.
-    func openTab(url: URL? = nil, isPrivate: Bool = false, inBackground: Bool = false, sharingProfileOf source: CefBrowser? = nil) {
+    func openTab(url: URL? = nil, isPrivate: Bool = false, inBackground: Bool = false, sharingProfileOf source: CefPage? = nil) {
         Task { await openTabNow(url: url, isPrivate: isPrivate, inBackground: inBackground, sharingProfileOf: source) }
     }
 
     @discardableResult
     func openTabNow(
-        url: URL? = nil, isPrivate: Bool = false, inBackground: Bool = false, sharingProfileOf source: CefBrowser? = nil
+        url: URL? = nil, isPrivate: Bool = false, inBackground: Bool = false, sharingProfileOf source: CefPage? = nil
     ) async -> CefTab? {
         let profile = source?.configuration.profile ?? (isPrivate ? privateSession() : .default)
-        let sourceTab = source.flatMap { profile.tabStrip.tab(for: $0) }
+        let sourceTab = source.flatMap { profile.tabs.tab(for: $0) }
         let target = sourceTab?.window
             ?? (keyWindow?.chrome.profile === profile ? keyWindow?.chrome : nil)
             ?? windows.last { $0.chrome.profile === profile }?.chrome
@@ -308,9 +308,9 @@ final class BrowserController: CefBrowserDelegate {
         window.makeKeyAndOrderFront(nil)
     }
 
-    /// The tab showing `browser`.
-    func tab(of browser: CefBrowser) -> CefTab? {
-        (browser.configuration.profile ?? .default).tabStrip.tab(for: browser)
+    /// The tab showing `page`.
+    func tab(of page: CefPage) -> CefTab? {
+        (page.configuration.profile ?? .default).tabs.tab(for: page)
     }
 
     /// Opens `url` in the frontmost tab, as Safari's menus do.
@@ -319,8 +319,8 @@ final class BrowserController: CefBrowserDelegate {
     }
 
     /// The browser of a tab showing `url`, if there is one.
-    func tab(showing url: URL) -> CefBrowser? {
-        allTabs.first { $0.url == url }?.browser
+    func tab(showing url: URL) -> CefPage? {
+        allTabs.first { $0.url == url }?.page
     }
 
     /// Brings the tab showing `url` to the front, if there is one.
@@ -452,42 +452,42 @@ final class BrowserController: CefBrowserDelegate {
     // MARK: Putting windows together
 
     /// The features' views for one place in a tab's toolbar.
-    func toolbarItems(_ placement: ToolbarPlacement, for browser: CefBrowser) -> some View {
-        func items(of features: some BrowserFeature) -> AnyView { AnyView(features.toolbarItems(placement, for: browser)) }
+    func toolbarItems(_ placement: ToolbarPlacement, for page: CefPage) -> some View {
+        func items(of features: some BrowserFeature) -> AnyView { AnyView(features.toolbarItems(placement, for: page)) }
         return items(of: features).environment(self)
     }
 
     /// The features' views over a tab's page.
-    func pageOverlay(for browser: CefBrowser) -> some View {
-        func overlay(of features: some BrowserFeature) -> AnyView { AnyView(features.pageOverlay(for: browser)) }
+    func pageOverlay(for page: CefPage) -> some View {
+        func overlay(of features: some BrowserFeature) -> AnyView { AnyView(features.pageOverlay(for: page)) }
         return overlay(of: features).environment(self)
     }
 
-    // MARK: CefBrowserDelegate
+    // MARK: CefPageDelegate
 
-    func browser(_ browser: CefBrowser, didFinishLoadWithStatus httpStatus: Int) {
-        onPageLoad?(browser)
+    func page(_ page: CefPage, didFinishLoadWithStatus httpStatus: Int) {
+        onPageLoad?(page)
     }
 
-    func browser(_ browser: CefBrowser, decidePolicyFor navigation: CefNavigationAction) -> CefNavigationDecision {
-        features.decidePolicy(for: navigation, in: browser) ?? .allow
+    func page(_ page: CefPage, decidePolicyFor navigation: CefNavigationAction) -> CefNavigationDecision {
+        features.decidePolicy(for: navigation, in: page) ?? .allow
     }
 
-    func browser(_ browser: CefBrowser, decideWindowOpenFor request: CefWindowOpenRequest) -> CefWindowOpenDecision {
+    func page(_ page: CefPage, decideWindowOpenFor request: CefWindowOpenRequest) -> CefWindowOpenDecision {
         // Popups (sign-in windows and the like) are Chromium's own popup
         // windows, which show the site's address.
         guard request.disposition != .newPopup, let url = request.targetURL else { return .allowNativePopup }
         // Open Link in Incognito Window opens a private tab.
         let isPrivate = request.disposition == .offTheRecord
         openTab(url: url, isPrivate: isPrivate, inBackground: request.disposition == .newBackgroundTab,
-                sharingProfileOf: isPrivate ? nil : browser)
+                sharingProfileOf: isPrivate ? nil : page)
         return .handled
     }
 
-    func browser(_ browser: CefBrowser, handleChromeCommand command: CefChromeCommand, disposition: CefWindowOpenDisposition) -> Bool {
+    func page(_ page: CefPage, handleChromeCommand command: CefChromeCommand, disposition: CefWindowOpenDisposition) -> Bool {
         switch command {
         case .newTab:
-            if let window = tab(of: browser)?.window { openTab(in: window) } else { openTab() }
+            if let window = tab(of: page)?.window { openTab(in: window) } else { openTab() }
             return true
         case .focusLocation:
             focusAddressBar()
@@ -497,8 +497,8 @@ final class BrowserController: CefBrowserDelegate {
         }
     }
 
-    func browser(_ browser: CefBrowser, decidePermissionFor request: CefPermissionRequest) async -> CefPermissionDecision {
-        await features.decidePermission(for: request, in: browser) ?? .deny
+    func page(_ page: CefPage, decidePermissionFor request: CefPermissionRequest) async -> CefPermissionDecision {
+        await features.decidePermission(for: request, in: page) ?? .deny
     }
 }
 
@@ -511,9 +511,9 @@ protocol TabPage: AnyObject {
     func reload(ignoringCache: Bool)
 }
 
-extension CefBrowser: TabPage {}
+extension CefPage: TabPage {}
 
-extension CefBrowser {
+extension CefPage {
     /// Whether the browser keeps to a profile of its own, such as a private
     /// tab's, rather than the default one.
     var isPrivate: Bool { configuration.profile.map { $0 !== CefProfile.default } ?? false }

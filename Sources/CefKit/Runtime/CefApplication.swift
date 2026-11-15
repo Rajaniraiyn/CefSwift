@@ -24,7 +24,7 @@ protocol CefAppProtocol: CrAppControlProtocol {}
 /// The `NSApplication` subclass Chromium needs.
 ///
 /// Chromium asks the application whether it is in the middle of dispatching
-/// an event, and expects quitting to close browsers first. The application
+/// an event, and expects quitting to close pages first. The application
 /// object must be this class from the start, so it has to be created before
 /// anything else touches `NSApp`. ``CefRuntime/initialize(configuration:)``
 /// and `CefSwiftApp` do that for you.
@@ -58,8 +58,8 @@ public final class CefApplication: NSApplication, CefAppProtocol {
     /// Posted when an assistive app asks the application for its full
     /// accessibility tree by setting `AXEnhancedUserInterface` or
     /// `AXManualAccessibility`, as Voice Control, Switch Control and UI
-    /// automation tools do. Offscreen browsers with
-    /// ``CefBrowser/AccessibilityPolicy/automatic`` start building their tree.
+    /// automation tools do. Offscreen pages with
+    /// ``CefPage/AccessibilityPolicy/automatic`` start building their tree.
     public nonisolated static let accessibilityRequestedNotification = Notification.Name("CefApplicationAccessibilityRequested")
 
     /// Whether an assistive app has asked for the full accessibility tree
@@ -88,7 +88,7 @@ public final class CefApplication: NSApplication, CefAppProtocol {
         unsafeBitCast(implementation, to: Setter.self)(self, selector, value as AnyObject?, attribute.rawValue as NSString)
     }
 
-    /// Quitting closes every browser first, so pages can run `beforeunload`
+    /// Quitting closes every page first, so pages can run `beforeunload`
     /// and state is flushed; the runtime calls back here once they are gone.
     public override func terminate(_ sender: Any?) {
         if CefRuntime.shared.handleTerminationRequest() {

@@ -73,7 +73,7 @@ private struct ExtensionsView: View {
     /// A page in a Chrome-style window, where extensions run.
     private func showPage(_ url: URL = SamplePage.tour[0].url) {
         page?.close()
-        let window = CefWindow(browser: CefBrowser(url: url))
+        let window = CefWindow(page: CefPage(url: url))
         window.show()
         page = window
     }

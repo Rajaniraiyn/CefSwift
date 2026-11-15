@@ -3,23 +3,23 @@ import CefSwiftUI
 import SwiftUI
 
 /// A Downloads button in the toolbar once a tab has downloaded something
-/// (`CefBrowser.downloads`): its popover lists them, with their progress,
+/// (`CefPage.downloads`): its popover lists them, with their progress,
 /// and cancels, resumes or shows each in the Finder; Clear takes the
 /// finished ones out of the list (`CefProfile.removeDownloads(where:)`).
 struct Downloads: BrowserFeature {
-    @ViewBuilder func toolbarItems(_ placement: ToolbarPlacement, for browser: CefBrowser) -> some View {
-        if placement == .trailing { DownloadsButton(browser: browser) }
+    @ViewBuilder func toolbarItems(_ placement: ToolbarPlacement, for page: CefPage) -> some View {
+        if placement == .trailing { DownloadsButton(page: page) }
     }
 }
 
 private struct DownloadsButton: View {
-    let browser: CefBrowser
+    let page: CefPage
     @State private var isPresented = false
 
-    private var isActive: Bool { browser.downloads.contains { $0.state == .inProgress } }
+    private var isActive: Bool { page.downloads.contains { $0.state == .inProgress } }
 
     var body: some View {
-        if !browser.downloads.isEmpty {
+        if !page.downloads.isEmpty {
             Button("Downloads", systemImage: isActive ? "arrow.down.circle.dotted" : "arrow.down.circle") { isPresented.toggle() }
                 .popover(isPresented: $isPresented, arrowEdge: .bottom) {
                     VStack(alignment: .leading, spacing: 12) {
@@ -27,11 +27,11 @@ private struct DownloadsButton: View {
                             Text("Downloads").font(.headline)
                             Spacer()
                             Button("Clear") {
-                                (browser.configuration.profile ?? .default).removeDownloads { $0.browser === browser }
+                                (page.configuration.profile ?? .default).removeDownloads { $0.page === page }
                             }
                             .buttonStyle(.link)
                         }
-                        ForEach(browser.downloads.reversed()) { download in
+                        ForEach(page.downloads.reversed()) { download in
                             DownloadRow(download: download)
                         }
                     }

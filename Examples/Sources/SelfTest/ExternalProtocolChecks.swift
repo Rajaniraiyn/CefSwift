@@ -6,11 +6,11 @@ import AppKit
 // replaced, and the scheme is made up, so no other app ever opens.
 extension SelfTest {
     @MainActor
-    private final class ExternalProtocolRecorder: CefBrowserDelegate {
+    private final class ExternalProtocolRecorder: CefPageDelegate {
         var requests: [CefExternalProtocolRequest] = []
         var answer = CefExternalProtocolDecision.allow
 
-        func browser(_ browser: CefBrowser, decideExternalProtocolFor request: CefExternalProtocolRequest) async
+        func page(_ page: CefPage, decideExternalProtocolFor request: CefExternalProtocolRequest) async
             -> CefExternalProtocolDecision
         {
             requests.append(request)
@@ -20,29 +20,29 @@ extension SelfTest {
 
     static func externalProtocolChecks() async {
         var opened: [URL] = []
-        let opener = CefBrowser.openExternalURL
-        CefBrowser.openExternalURL = { opened.append($0) }
-        defer { CefBrowser.openExternalURL = opener }
+        let opener = CefPage.openExternalURL
+        CefPage.openExternalURL = { opened.append($0) }
+        defer { CefPage.openExternalURL = opener }
 
         for style in ["Alloy", "Chrome style"] {
             opened = []
-            let browser = CefBrowser(url: URL(string: "selftest://app/second.html")!)
+            let page = CefPage(url: URL(string: "selftest://app/second.html")!)
             let recorder = ExternalProtocolRecorder()
-            browser.delegate = recorder
+            page.delegate = recorder
             var view: NSView?
             var window: CefWindow?
             if style == "Alloy" {
-                view = hostWindowed(browser)
+                view = hostWindowed(page)
             } else {
-                window = CefWindow(browser: browser)
+                window = CefWindow(page: page)
                 window?.show()
             }
-            guard await loaded(browser, title: "second") else {
-                check("external protocols (\(style)): page loads", false, detail: browser.title)
+            guard await loaded(page, title: "second") else {
+                check("external protocols (\(style)): page loads", false, detail: page.title)
                 continue
             }
             func open(_ target: String) async {
-                _ = try? await browser.evaluateJavaScript("location.href = '\(target)'; 0", userGesture: true)
+                _ = try? await page.evaluateJavaScript("location.href = '\(target)'; 0", userGesture: true)
             }
             await open("cefswift-selftest-app://allowed")
             let asked = await waitUntil(timeout: .seconds(5)) { !recorder.requests.isEmpty }
@@ -52,7 +52,7 @@ extension SelfTest {
                 check("external protocols (\(style)): the delegate decides, and an allowed URL is opened",
                       request.url.absoluteString == "cefswift-selftest-app://allowed" && request.isMainFrame
                           && request.frameURL?.host() == "app" && opened.map(\.absoluteString) == ["cefswift-selftest-app://allowed"]
-                          && browser.url?.path == "/second.html",
+                          && page.url?.path == "/second.html",
                       detail: "\(recorder.requests), opened \(opened)")
                 recorder.answer = .deny
                 await open("cefswift-selftest-app://denied")
@@ -66,8 +66,8 @@ extension SelfTest {
                 skip("external protocols (\(style)): the delegate decides",
                      because: "CEF did not call on_protocol_execution for this runtime style", .limitation)
             }
-            browser.close(force: true)
-            _ = await waitUntil { browser.state == .closed && (window?.isClosed ?? true) }
+            page.close(force: true)
+            _ = await waitUntil { page.state == .closed && (window?.isClosed ?? true) }
             view?.removeFromSuperview()
         }
     }

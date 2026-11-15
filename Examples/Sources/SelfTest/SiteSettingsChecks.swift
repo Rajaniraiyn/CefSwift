@@ -151,20 +151,20 @@ extension SelfTest {
         let origin = capabilityOrigin
         settings.reset(origin: origin)
         let recorder = PermissionRecorder()
-        let browser = CefBrowser(url: origin.appending(path: "permissions.html"))
-        browser.delegate = recorder
-        let view = hostWindowed(browser)
+        let page = CefPage(url: origin.appending(path: "permissions.html"))
+        page.delegate = recorder
+        let view = hostWindowed(page)
         func finish() async {
-            await closeHosted(browser, view)
+            await closeHosted(page, view)
             settings.reset(origin: origin)
         }
-        guard await loaded(browser, title: "permissions") else {
-            check("permissions: page loads", false, detail: browser.title)
+        guard await loaded(page, title: "permissions") else {
+            check("permissions: page loads", false, detail: page.title)
             await finish()
             return
         }
         func request() async -> String {
-            (try? await browser.evaluateJavaScript(
+            (try? await page.evaluateJavaScript(
                 "navigator.requestMIDIAccess({sysex: true}).then(() => 'granted', e => e.name)").stringValue) ?? "no answer"
         }
 
@@ -202,7 +202,7 @@ extension SelfTest {
         recorder.requests = []
         recorder.answer = .alwaysDeny
         func capture() async -> String {
-            (try? await browser.evaluateJavaScript(
+            (try? await page.evaluateJavaScript(
                 "navigator.mediaDevices.getDisplayMedia({video: true, audio: true}).then(() => 'granted', e => e.name)",
                 userGesture: true).stringValue) ?? "no answer"
         }
@@ -221,11 +221,11 @@ extension SelfTest {
 }
 
 @MainActor
-final class PermissionRecorder: CefBrowserDelegate {
+final class PermissionRecorder: CefPageDelegate {
     var requests: [CefPermissionRequest] = []
     var answer = CefPermissionDecision.deny
 
-    func browser(_ browser: CefBrowser, decidePermissionFor request: CefPermissionRequest) async -> CefPermissionDecision {
+    func page(_ page: CefPage, decidePermissionFor request: CefPermissionRequest) async -> CefPermissionDecision {
         requests.append(request)
         return answer
     }

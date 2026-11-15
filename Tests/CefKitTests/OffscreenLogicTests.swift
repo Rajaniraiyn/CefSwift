@@ -5,7 +5,7 @@ import Testing
 @testable import CefKit
 
 /// Key codes and menu titles used when forwarding AppKit input to offscreen
-/// browsers.
+/// pages.
 @MainActor
 struct OffscreenLogicTests {
 

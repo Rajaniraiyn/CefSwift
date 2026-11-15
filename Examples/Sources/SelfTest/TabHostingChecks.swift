@@ -11,7 +11,7 @@ extension SelfTest {
         await runProbe("tabHosting", label: "tab hosting", timeout: .seconds(90))
     }
 
-    static func page(_ title: String) -> URL {
+    static func pageURL(_ title: String) -> URL {
         URL(string: "data:text/html,<title>\(title)</title><p>\(title)")!
     }
 
@@ -22,11 +22,11 @@ extension SelfTest {
 
     /// (a) Several Chrome-style browser views in one `cef_window_t`.
     private static func secondBrowserViewChecks() async {
-        let first = CefBrowser(url: page("first"))
-        let window = CefWindow(browser: first)
+        let first = CefPage(url: pageURL("first"))
+        let window = CefWindow(page: first)
         window.show()
         _ = await loaded(first, title: "first")
-        let second = CefBrowser(url: page("second"))
+        let second = CefPage(url: pageURL("second"))
         window.addBrowserViewForTesting(second)
         let created = await waitUntil(timeout: .seconds(5)) { second.state != .pending }
         check("one window, two Chrome-style browser views: CEF leaves the second without a browser",
@@ -44,8 +44,8 @@ extension SelfTest {
     /// not macOS shows the windows as one tab group; a window Chrome draws
     /// holds several.
     private static func chromiumTabModelChecks() async {
-        let one = CefBrowser(url: page("one")), two = CefBrowser(url: page("two"))
-        let first = CefWindow(browser: one), second = CefWindow(browser: two)
+        let one = CefPage(url: pageURL("one")), two = CefPage(url: pageURL("two"))
+        let first = CefWindow(page: one), second = CefWindow(page: two)
         first.show()
         second.show()
         _ = await allLoaded([one, two])
@@ -63,13 +63,13 @@ extension SelfTest {
         second.close()
         _ = await waitUntil { first.isClosed && second.isClosed }
 
-        let chrome = CefRuntime.shared.openChromeWindow(url: page("chrome"))
+        let chrome = CefRuntime.shared.openChromeWindow(url: pageURL("chrome"))
         _ = await loaded(chrome, title: "chrome")
         chrome.execute(.newTab)
         let twoTabs = await waitUntil(timeout: .seconds(5)) { chrome.canExecute(.selectNextTab) }
         check("Chromium's tab model: a window Chrome draws holds several tabs", twoTabs)
-        for open in CefRuntime.shared.browsers { open.close(force: true) }
-        _ = await waitUntil { CefRuntime.shared.browsers.isEmpty }
+        for open in CefRuntime.shared.pages { open.close(force: true) }
+        _ = await waitUntil { CefRuntime.shared.pages.isEmpty }
     }
 
 }

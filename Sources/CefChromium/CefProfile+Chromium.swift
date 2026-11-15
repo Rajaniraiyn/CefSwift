@@ -1,7 +1,7 @@
 import CefKit
 import Foundation
 
-// CefChromium: Chromium's own browser features, on CefKit.
+// CefChromium: Chromium's own page features, on CefKit.
 //
 // - Chromium's stores of a profile, bookmarks, history and autocomplete,
 //   reached through CefKit's internal service hosts on Chromium's WebUI
@@ -16,8 +16,8 @@ import Foundation
 // its AppKit classes and the view names its accessibility reports, as the
 // pinned CEF has them. A CEF update is more likely to need changes here
 // than anywhere in CefKit; SelfTest exercises all of it. The service hosts
-// are Chrome-style browsers, and history records visits made in
-// Chrome-style browsers only.
+// are Chrome-style pages, and history records visits made in
+// Chrome-style pages only.
 //
 // Each store object holds its profile, so a profile stays alive while a
 // store of it is in use; the profile holds its stores weakly.
@@ -91,7 +91,7 @@ final class ChromiumStores {
     weak var bookmarks: CefBookmarks?
     weak var history: CefHistory?
     weak var autocomplete: CefAutocomplete?
-    weak var tabStrip: CefTabStrip?
+    weak var tabs: CefTabs?
     weak var extensions: CefExtensions?
 
     var bookmarkReadSource = CefBookmarks.ReadSource.automatic

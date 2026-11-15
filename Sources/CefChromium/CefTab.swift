@@ -3,16 +3,16 @@ import CefKit
 import Foundation
 import Observation
 
-/// A tab in one of Chromium's windows: a browser's place in Chromium's tab
+/// A tab in one of Chromium's windows: a page's place in Chromium's tab
 /// model (`TabStripModel`).
 ///
 /// One object stands for one Chromium tab for as long as the tab exists,
 /// across moves between windows, and its ``id`` is the tab's `chrome.tabs`
 /// identifier, the one extensions see. What a tab shows (``title``,
-/// ``favicon``, ``isLoading``) comes from its ``browser``, the page's
+/// ``favicon``, ``isLoading``) comes from its ``page``, the page's
 /// model; where it is (``window``, ``index``, ``isPinned``, ``group``,
 /// ``isActive``) comes from Chromium's tab strip, read by the profile's
-/// ``CefTabStrip``.
+/// ``CefTabs``.
 ///
 /// ```swift
 /// for tab in window.tabs {
@@ -48,14 +48,14 @@ public final class CefTab: Identifiable {
     public internal(set) var window: CefChromeWindow?
     /// The tab's position in its window, pinned tabs first.
     public internal(set) var index = 0
-    /// The page's title: its browser's, as it changes, or Chromium's
-    /// report of it while the browser is not known.
+    /// The page's title: its page's, as it changes, or Chromium's
+    /// report of it while the page is not known.
     public var title: String {
-        guard let browser, !browser.title.isEmpty else { return reportedTitle }
-        return browser.title
+        guard let page, !page.title.isEmpty else { return reportedTitle }
+        return page.title
     }
-    /// The page's address: its browser's, or Chromium's report.
-    public var url: URL? { browser?.url ?? reportedURL }
+    /// The page's address: its page's, or Chromium's report.
+    public var url: URL? { page?.url ?? reportedURL }
     var reportedTitle = ""
     var reportedURL: URL?
     /// Whether the tab is its window's active tab, the one shown.
@@ -66,16 +66,16 @@ public final class CefTab: Identifiable {
     public internal(set) var isPinned = false
     /// Whether Chromium discarded the page to save memory. It loads again
     /// when the tab is selected.
-    public var isDiscarded: Bool { browser?.isDiscarded ?? reportedDiscarded }
+    public var isDiscarded: Bool { page?.isDiscarded ?? reportedDiscarded }
     var reportedDiscarded = false
     /// Whether the page plays sound, or did a moment ago, as Chromium last
-    /// reported it (see ``CefTabStrip/observesChromiumEvents``).
+    /// reported it (see ``CefTabs/observesChromiumEvents``).
     public var isAudible: Bool { reportedAudible }
     var reportedAudible = false
     /// Whether the tab's sound is muted.
-    public var isMuted: Bool { browser?.isAudioMuted ?? false }
+    public var isMuted: Bool { page?.isAudioMuted ?? false }
     /// Whether the page is loading.
-    public var isLoading: Bool { browser?.isLoading ?? reportedLoading }
+    public var isLoading: Bool { page?.isLoading ?? reportedLoading }
     var reportedLoading = false
     /// The tab group the tab is in.
     public internal(set) var group: CefTabGroup?
@@ -92,20 +92,20 @@ public final class CefTab: Identifiable {
     /// The tab the tab was opened from, while Chromium remembers it.
     public internal(set) var openerID: ID?
     /// The page's icon address as Chromium reports it; ``favicon`` is the
-    /// image, once the tab's browser is known.
+    /// image, once the tab's page is known.
     public internal(set) var faviconURL: URL?
 
-    /// The browser showing the tab's page. `nil` until CefChromium has
-    /// matched the tab with its browser, which it does exactly (see
-    /// ``CefTabStrip``), usually as the tab appears.
-    public internal(set) var browser: CefBrowser?
+    /// The page showing the tab's page. `nil` until CefChromium has
+    /// matched the tab with its page, which it does exactly (see
+    /// ``CefTabs``), usually as the tab appears.
+    public internal(set) var page: CefPage?
 
     /// The page's icon.
-    public var favicon: NSImage? { browser?.favicon }
+    public var favicon: NSImage? { page?.favicon }
 
-    @ObservationIgnored weak var strip: CefTabStrip?
+    @ObservationIgnored weak var strip: CefTabs?
 
-    init(id: ID, strip: CefTabStrip) {
+    init(id: ID, strip: CefTabs) {
         self.id = id
         self.strip = strip
     }
@@ -131,7 +131,7 @@ public final class CefTab: Identifiable {
 
     /// Moves the tab to `index` in `window`, by default its own. A move to
     /// another window is Chromium's: the tab keeps its page, its history
-    /// and its ``browser``.
+    /// and its ``page``.
     public func move(to index: Int, in window: CefChromeWindow? = nil) async throws {
         try await requireStrip().move([self], to: index, in: window ?? self.window)
     }
@@ -150,14 +150,14 @@ public final class CefTab: Identifiable {
 
     /// Mutes or unmutes the tab's sound.
     public func setMuted(_ isMuted: Bool) {
-        browser?.isAudioMuted = isMuted
+        page?.isAudioMuted = isMuted
     }
 
     /// Discards the tab's page to free its memory, as Chromium's Memory
-    /// Saver does; see ``CefBrowser/discard()``.
+    /// Saver does; see ``CefPage/discard()``.
     public func discard() async throws {
-        guard let browser else { throw CefTabStrip.Error.noBrowser }
-        do { try await browser.discard() } catch { throw CefTabStrip.Error.chromium("\(error)") }
+        guard let page else { throw CefTabs.Error.noPage }
+        do { try await page.discard() } catch { throw CefTabs.Error.chromium("\(error)") }
     }
 
     /// A picture of a tab's page, and when it was taken.
@@ -181,27 +181,27 @@ public final class CefTab: Identifiable {
     /// demand — as an overview opens, on hover — not continuously.
     @discardableResult
     public func capturePreview(scale: Double = 0.25) async throws -> Preview {
-        guard let browser else { throw CefTabStrip.Error.noBrowser }
-        let size = window?.contentFrame.size ?? browser.nativeView?.bounds.size ?? .zero
+        guard let page else { throw CefTabs.Error.noPage }
+        let size = window?.contentFrame.size ?? page.nativeView?.bounds.size ?? .zero
         var parameters: [String: CefJSON] = ["format": "jpeg", "quality": 70]
         if size.width > 0, size.height > 0 {
             parameters["clip"] = ["x": 0, "y": 0, "width": .number(size.width), "height": .number(size.height),
                                   "scale": .number(scale)]
         }
         let reply: CefJSON
-        do { reply = try await browser.devTools.send("Page.captureScreenshot", .object(parameters)) } catch {
-            throw CefTabStrip.Error.chromium("\(error)")
+        do { reply = try await page.devTools.send("Page.captureScreenshot", .object(parameters)) } catch {
+            throw CefTabs.Error.chromium("\(error)")
         }
         guard let data = reply["data"].stringValue.flatMap({ Data(base64Encoded: $0) }), let image = NSImage(data: data) else {
-            throw CefTabStrip.Error.chromium("Page.captureScreenshot returned no picture")
+            throw CefTabs.Error.chromium("Page.captureScreenshot returned no picture")
         }
         let made = Preview(image: image, capturedAt: .now)
         preview = made
         return made
     }
 
-    private func requireStrip() throws -> CefTabStrip {
-        guard let strip else { throw CefTabStrip.Error.tabClosed }
+    private func requireStrip() throws -> CefTabs {
+        guard let strip else { throw CefTabs.Error.tabClosed }
         return strip
     }
 }
@@ -232,24 +232,24 @@ public final class CefTabGroup: Identifiable {
     /// The group's tabs, in order.
     public internal(set) var tabs: [CefTab] = []
 
-    @ObservationIgnored weak var strip: CefTabStrip?
+    @ObservationIgnored weak var strip: CefTabs?
     /// The tabs being collected while the strip is read.
     @ObservationIgnored var pendingTabs: [CefTab] = []
 
-    init(id: ID, strip: CefTabStrip) {
+    init(id: ID, strip: CefTabs) {
         self.id = id
         self.strip = strip
     }
 
     /// Adds `tabs` to the group.
     public func add(_ tabs: [CefTab]) async throws {
-        guard let strip else { throw CefTabStrip.Error.tabClosed }
+        guard let strip else { throw CefTabs.Error.tabClosed }
         try await strip.group(tabs, into: self)
     }
 
     /// Takes every tab out of the group, which then ends.
     public func ungroup() async throws {
-        guard let strip else { throw CefTabStrip.Error.tabClosed }
+        guard let strip else { throw CefTabs.Error.tabClosed }
         try await strip.ungroup(tabs)
     }
 
@@ -260,7 +260,7 @@ public final class CefTabGroup: Identifiable {
 
     /// Moves the group's tabs, in order, to `index` of `window`.
     public func move(to index: Int, in window: CefChromeWindow? = nil) async throws {
-        guard let strip else { throw CefTabStrip.Error.tabClosed }
+        guard let strip else { throw CefTabs.Error.tabClosed }
         try await strip.move(tabs, to: index, in: window ?? self.window)
     }
 
@@ -271,7 +271,7 @@ public final class CefTabGroup: Identifiable {
     /// where it can, which is not guaranteed.
     @discardableResult
     public func moveToNewWindow() async throws -> CefChromeWindow {
-        guard let strip else { throw CefTabStrip.Error.tabClosed }
+        guard let strip else { throw CefTabs.Error.tabClosed }
         return try await strip.moveGroupToNewWindow(self)
     }
 
@@ -281,12 +281,12 @@ public final class CefTabGroup: Identifiable {
     /// extensions only, no WebUI page or Chrome command collapses a group,
     /// and Chromium's own group header, beneath the app's views, takes no
     /// accessibility action, synthesized click or key press for it. Throws
-    /// ``CefTabStrip/Error/unsupported(_:)``; ``isCollapsed`` still follows
+    /// ``CefTabs/Error/unsupported(_:)``; ``isCollapsed`` still follows
     /// collapsing done by an extension. An app can collapse a group in its
     /// own view meanwhile.
     public func setCollapsed(_ isCollapsed: Bool) async throws {
         guard isCollapsed != self.isCollapsed else { return }
-        throw CefTabStrip.Error.unsupported(
+        throw CefTabs.Error.unsupported(
             "Chromium offers no way to collapse a tab group outside chrome.tabGroups, which only extensions have.")
     }
 
@@ -294,17 +294,17 @@ public final class CefTabGroup: Identifiable {
     ///
     /// The editor bubble Chromium opens for it is kept off screen while
     /// CefChromium types the name into it. Throws
-    /// ``CefTabStrip/Error/unsupported(_:)`` when the editor cannot be
+    /// ``CefTabs/Error/unsupported(_:)`` when the editor cannot be
     /// found, which a Chromium update can cause.
     public func setTitle(_ title: String) async throws {
-        guard let strip else { throw CefTabStrip.Error.tabClosed }
+        guard let strip else { throw CefTabs.Error.tabClosed }
         try await strip.editGroup(self, title: title, color: nil)
     }
 
     /// Recolours the group, through Chromium's own group editor; see
     /// ``setTitle(_:)``.
     public func setColor(_ color: Color) async throws {
-        guard let strip else { throw CefTabStrip.Error.tabClosed }
+        guard let strip else { throw CefTabs.Error.tabClosed }
         try await strip.editGroup(self, title: nil, color: color)
     }
 }

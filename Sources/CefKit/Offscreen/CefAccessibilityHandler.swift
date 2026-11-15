@@ -4,8 +4,8 @@ import CefBase
 
 extension CefBrowserClient {
     /// Builds the `cef_accessibility_handler_t` that the render handler
-    /// returns for offscreen browsers. Chromium calls it on the UI thread
-    /// once the browser's accessibility state is enabled.
+    /// returns for offscreen pages. Chromium calls it on the UI thread
+    /// once the page's accessibility state is enabled.
     ///
     /// A large page's first update holds tens of thousands of values. Each
     /// update is copied by CEF in one call (`cef_value_t` objects may be
@@ -18,12 +18,12 @@ extension CefBrowserClient {
         handler.pointee.on_accessibility_tree_change = { s, value in
             // The value arrives with a reference for the receiver.
             defer { cefRelease(value) }
-            CefBrowserClient.deliverAccessibility(s, value) { browser, json in browser.accessibilityTreeDidChange(json) }
+            CefBrowserClient.deliverAccessibility(s, value) { page, json in page.accessibilityTreeDidChange(json) }
         }
 
         handler.pointee.on_accessibility_location_change = { s, value in
             defer { cefRelease(value) }
-            CefBrowserClient.deliverAccessibility(s, value) { browser, json in browser.accessibilityLocationsDidChange(json) }
+            CefBrowserClient.deliverAccessibility(s, value) { page, json in page.accessibilityLocationsDidChange(json) }
         }
 
         return handler
@@ -35,7 +35,7 @@ extension CefBrowserClient {
     private nonisolated static func deliverAccessibility(
         _ handler: UnsafeMutablePointer<cef_accessibility_handler_t>?,
         _ value: UnsafeMutablePointer<cef_value_t>?,
-        _ apply: @escaping @MainActor @Sendable (CefBrowser, CefJSON) -> Void
+        _ apply: @escaping @MainActor @Sendable (CefPage, CefJSON) -> Void
     ) {
         guard let client = cefOwner(CefBrowserClient.self, handler), let value else { return }
         let started = CefDiagnostics.start()
@@ -54,8 +54,8 @@ extension CefBrowserClient {
             let json = CefJSON(foundationValue: object)
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
-                    guard let browser = client.primary else { return }
-                    apply(browser, json)
+                    guard let page = client.primary else { return }
+                    apply(page, json)
                 }
             }
         }
@@ -69,7 +69,7 @@ extension CefBrowserClient {
     /// (`-benchmark axingest`).
     private nonisolated static func deliverAccessibilityCopy(
         _ client: CefBrowserClient, _ value: UnsafeMutablePointer<cef_value_t>,
-        _ apply: @escaping @MainActor @Sendable (CefBrowser, CefJSON) -> Void
+        _ apply: @escaping @MainActor @Sendable (CefPage, CefJSON) -> Void
     ) {
         guard let copy = value.pointee.copy(value) else { return }
         let owned = CefRef(adopting: copy)
@@ -79,8 +79,8 @@ extension CefBrowserClient {
             CefDiagnostics.record(.accessibilityIngestBackground, since: parseStarted)
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
-                    guard let browser = client.primary else { return }
-                    apply(browser, json)
+                    guard let page = client.primary else { return }
+                    apply(page, json)
                 }
             }
         }

@@ -77,8 +77,8 @@ extension SelfTest {
             await stage.run(.insert, seconds: 0.9)
             let answers = await stage.evaluate("1 + 1") == "2"
             check("animation (\(kind.label)): a page removed with a transition and inserted again is shown and answers",
-                  stage.cefBrowser?.hostView?.window != nil && answers,
-                  detail: "host \(stage.cefBrowser?.hostView.map { String(describing: type(of: $0)) } ?? "none"), answers \(answers), state \(stage.cefBrowser.map { "\($0.state)" } ?? "-"), native view in \(stage.cefBrowser?.nativeView?.superview.map { String(describing: type(of: $0)) } ?? "nothing"), in a window \(stage.cefBrowser?.nativeView?.window != nil)")
+                  stage.cefPage?.hostView?.window != nil && answers,
+                  detail: "host \(stage.cefPage?.hostView.map { String(describing: type(of: $0)) } ?? "none"), answers \(answers), state \(stage.cefPage.map { "\($0.state)" } ?? "-"), native view in \(stage.cefPage?.nativeView?.superview.map { String(describing: type(of: $0)) } ?? "nothing"), in a window \(stage.cefPage?.nativeView?.window != nil)")
         }
         await offscreenPageGeometryChecks()
         await overlayChecks()
@@ -97,7 +97,7 @@ extension SelfTest {
             // AppKit gives the click to SwiftUI's hosting view, which owns
             // the overlay, and not to the page's view. (Whether SwiftUI then
             // runs the overlay's gesture for a synthesized event varies.)
-            let page = stage.cefBrowser?.nativeView ?? stage.hostView
+            let page = stage.cefPage?.nativeView ?? stage.hostView
             let pageTookIt = hit.map { hit in page.map { hit === $0 || hit.isDescendant(of: $0) } ?? false } ?? true
             check("animation (\(kind.label)): a click on SwiftUI content over the page reaches that content, not the page",
                   !pageTookIt && result.received == nil, detail: reached)
@@ -139,10 +139,10 @@ extension SelfTest {
               detail: "\(click.summary); last frame \(lastFrame); the view maps it to \(mapped.map { "\($0.point) in a frame of \($0.frameSize)" } ?? "-"); frames \(frameSizes.sorted().joined(separator: " | "))")
         stage.view?.didPresentFrame = nil
         // Straight to Chromium, at the page point, without the view.
-        if let browser = stage.cefBrowser {
+        if let page = stage.cefPage {
             _ = await stage.evaluate("window.__clicks = []")
-            browser.sendMouseDown(at: CGPoint(x: 300, y: 200), button: .left, clickCount: 1, modifiers: [])
-            browser.sendMouseUp(at: CGPoint(x: 300, y: 200), button: .left, clickCount: 1, modifiers: [])
+            page.sendMouseDown(at: CGPoint(x: 300, y: 200), button: .left, clickCount: 1, modifiers: [])
+            page.sendMouseUp(at: CGPoint(x: 300, y: 200), button: .left, clickCount: 1, modifiers: [])
             try? await Task.sleep(for: .milliseconds(300))
             print("NOTE animation (offscreen): a mouse down sent at page point 300,200 reaches the page at \(await stage.evaluate("window.__clicks.length ? window.__clicks[0].join(',') : 'nothing'") ?? "?")")
         }
@@ -160,8 +160,8 @@ extension SelfTest {
         check("animation (offscreen): a page moving to another CefWebView is never blank there",
               moved && shownAtOnce, detail: "moved \(moved), frame on arrival \(shownAtOnce)")
         check("animation (offscreen): the view it left keeps its last frame, and no browser, while it animates out",
-              before.browser == nil && before.layer?.sublayers?.first?.contents != nil,
-              detail: "browser \(before.browser == nil ? "none" : "kept"), frame \(before.layer?.sublayers?.first?.contents != nil), in a window \(before.window != nil)")
+              before.page == nil && before.layer?.sublayers?.first?.contents != nil,
+              detail: "browser \(before.page == nil ? "none" : "kept"), frame \(before.layer?.sublayers?.first?.contents != nil), in a window \(before.window != nil)")
         try? await Task.sleep(for: .seconds(1))
         withAnimation(.spring(duration: 0.6)) { stage.model.onRight.toggle() }
         _ = await waitUntil(timeout: .seconds(2)) { stage.view.map { $0 !== after } ?? false }
@@ -187,7 +187,7 @@ extension Benchmarks {
                 print("bench error: \(kind.label) did not load")
                 continue
             }
-            if case .windowed = kind, let native = stage.cefBrowser?.nativeView {
+            if case .windowed = kind, let native = stage.cefPage?.nativeView {
                 print("bench animation windowed layers: \(AnimationStage.layerSummary(native.layer))")
                 // Chromium's layers part way through a spring resize.
                 stage.start(.springSize)
@@ -211,7 +211,7 @@ extension Benchmarks {
                 }
             }
             stage.close()
-            _ = await SelfTest.waitUntil { CefRuntime.shared.browsers.isEmpty }
+            _ = await SelfTest.waitUntil { CefRuntime.shared.pages.isEmpty }
             try? await Task.sleep(for: .milliseconds(500))
         }
     }
@@ -233,8 +233,8 @@ final class AnimationStageModel {
     var onRight = false
     var shown = true
     var pageSize: CGSize?
-    var placement = CefOffscreenBrowserView.FramePlacement.stretch
-    var policy = CefOffscreenBrowserView.ResizePolicy.live
+    var placement = CefOffscreenPageView.FramePlacement.stretch
+    var policy = CefOffscreenPageView.ResizePolicy.live
     var showsOverlay = false
     var fills = false
     var overlayTaps = 0
@@ -245,7 +245,7 @@ final class AnimationStageModel {
 final class AnimationStage {
     enum Kind {
         case windowed
-        case offscreen(CefOffscreenBrowserView.ResizePolicy)
+        case offscreen(CefOffscreenPageView.ResizePolicy)
         /// Offscreen, telling Chromium of every frame change at once, as
         /// the view did before it coalesced them.
         case offscreenEveryFrameChange
@@ -271,7 +271,7 @@ final class AnimationStage {
     let kind: Kind
     let window: NSWindow
     let model = AnimationStageModel()
-    private(set) var cefBrowser: CefBrowser?
+    private(set) var cefPage: CefPage?
     private var webView: WKWebView?
     private let webKitHandler = WebKitMessages()
     private var hosting = NSView()
@@ -292,16 +292,16 @@ final class AnimationStage {
             self.webView = webView
             hosting = NSHostingView(rootView: AnimationStageView(model: model) { AnyView(WebKitRepresentable(webView: webView)) })
         default:
-            var configuration = CefBrowser.Configuration()
+            var configuration = CefPage.Configuration()
             if case .windowed = kind {} else { configuration.rendering = .offscreen(frameRate: 60) }
-            let browser = CefBrowser(url: URL(string: "selftest://bench/animation.html")!, configuration: configuration)
-            cefBrowser = browser
+            let page = CefPage(url: URL(string: "selftest://bench/animation.html")!, configuration: configuration)
+            cefPage = page
             if case .offscreen(let policy) = kind { model.policy = policy }
-            CefOffscreenBrowserView.resizesOnEveryFrameChange = {
+            CefOffscreenPageView.resizesOnEveryFrameChange = {
                 if case .offscreenEveryFrameChange = kind { return true }
                 return false
             }()
-            hosting = NSHostingView(rootView: AnimationStageView(model: model) { AnyView(CefWebView(browser)) })
+            hosting = NSHostingView(rootView: AnimationStageView(model: model) { AnyView(CefWebView(page)) })
         }
         // In a plain AppKit container, whose frame the animator can drive.
         let container = NSView(frame: CGRect(x: 0, y: 0, width: 1000, height: 520))
@@ -313,8 +313,8 @@ final class AnimationStage {
         NSApp.activate()
         // Clicks reach SwiftUI's content only in the key window.
         _ = await SelfTest.waitUntil(timeout: .seconds(3)) { self.window.isKeyWindow }
-        if let cefBrowser {
-            guard await SelfTest.loaded(cefBrowser, title: "animation") else { close(); return nil }
+        if let cefPage {
+            guard await SelfTest.loaded(cefPage, title: "animation") else { close(); return nil }
         } else {
             guard await SelfTest.waitUntilAsync(timeout: .seconds(10), { await self.evaluate("document.title") == "animation" })
             else { close(); return nil }
@@ -323,21 +323,21 @@ final class AnimationStage {
     }
 
     func close() {
-        CefOffscreenBrowserView.resizesOnEveryFrameChange = false
-        cefBrowser?.close(force: true)
+        CefOffscreenPageView.resizesOnEveryFrameChange = false
+        cefPage?.close(force: true)
         window.contentView = nil
         window.close()
     }
 
     /// The view showing the page now.
-    var view: CefOffscreenBrowserView? { cefBrowser?.hostView as? CefOffscreenBrowserView }
+    var view: CefOffscreenPageView? { cefPage?.hostView as? CefOffscreenPageView }
 
     /// The view whose frame SwiftUI animates.
-    var hostView: NSView? { cefBrowser?.hostView ?? webView }
+    var hostView: NSView? { cefPage?.hostView ?? webView }
 
     func evaluate(_ script: String) async -> String? {
-        if let cefBrowser {
-            guard let value = try? await cefBrowser.evaluateJavaScript(script) else { return nil }
+        if let cefPage {
+            guard let value = try? await cefPage.evaluateJavaScript(script) else { return nil }
             return value.stringValue ?? value.intValue.map(String.init) ?? value.doubleValue.map { String(Int($0)) }
         }
         guard let webView else { return nil }
@@ -438,7 +438,7 @@ final class AnimationStage {
         let tally = Tally()
         let center = NotificationCenter.default
         var observers: [NSObjectProtocol] = []
-        for (view, isHost) in [(hostView, true), (cefBrowser?.nativeView, false)] {
+        for (view, isHost) in [(hostView, true), (cefPage?.nativeView, false)] {
             guard let view else { continue }
             view.postsFrameChangedNotifications = true
             observers.append(center.addObserver(forName: NSView.frameDidChangeNotification, object: view, queue: nil) { _ in
@@ -447,8 +447,8 @@ final class AnimationStage {
                 }
             })
         }
-        let resizesBefore = cefBrowser?.resizeNotificationCount ?? 0
-        func watch(_ view: CefOffscreenBrowserView) {
+        let resizesBefore = cefPage?.resizeNotificationCount ?? 0
+        func watch(_ view: CefOffscreenPageView) {
             view.didPresentFrame = { [weak view] pixels, content in
                 tally.presented += 1
                 if content != nil { tally.letterboxed += 1 }
@@ -468,7 +468,7 @@ final class AnimationStage {
         recorder.onRefresh = { [weak self] in
             // A windowed page: Chromium's layer showing the frame, which
             // has the frame's size, against its view's.
-            if let native = self?.cefBrowser?.nativeView, let root = native.layer,
+            if let native = self?.cefPage?.nativeView, let root = native.layer,
                let frameLayer = AnimationStage.remoteLayer(in: root)?.superlayer {
                 // Chromium sizes this layer to the frame it shows.
                 let shown = frameLayer.convert(frameLayer.bounds, to: root)
@@ -516,7 +516,7 @@ final class AnimationStage {
         view?.didPresentFrame = nil
         sample.hostFrameChanges = tally.hostChanges
         sample.nativeFrameChanges = tally.nativeChanges
-        sample.resizes = (cefBrowser?.resizeNotificationCount ?? 0) - resizesBefore
+        sample.resizes = (cefPage?.resizeNotificationCount ?? 0) - resizesBefore
         sample.presented = tally.presented
         sample.trailing = tally.trailing
         sample.blank = tally.blank
@@ -552,7 +552,7 @@ final class AnimationStage {
     /// Clicks the page where it shows the page point a quarter of the way
     /// in, converting through the layers, and reads where the page got it.
     func clickLanding() async -> ClickResult {
-        guard let host = cefBrowser?.nativeView ?? hostView else { return ClickResult(expected: .zero, viewConversion: .zero) }
+        guard let host = cefPage?.nativeView ?? hostView else { return ClickResult(expected: .zero, viewConversion: .zero) }
         // The page point and where it shows in the view.
         let pageSize = CGSize(
             width: Double(await evaluate("innerWidth") ?? "") ?? host.bounds.width,
@@ -571,7 +571,7 @@ final class AnimationStage {
     /// in the view's points), converting through the layers, and reads
     /// where the page got the click.
     func click(atViewPoint point: CGPoint) async -> ClickResult {
-        guard let host = cefBrowser?.nativeView ?? hostView, let rootView = window.contentView?.superview,
+        guard let host = cefPage?.nativeView ?? hostView, let rootView = window.contentView?.superview,
               let hostLayer = host.layer, let rootLayer = rootView.layer
         else { return ClickResult(expected: .zero, viewConversion: .zero) }
         var inView = point

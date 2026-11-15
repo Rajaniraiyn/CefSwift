@@ -53,7 +53,7 @@ enum ChromeTabStripAccessibility {
         }
         guard let bubble, let content = bubble.contentView else {
             let opened = NSApp.windows.filter { !before.contains(ObjectIdentifier($0)) }.map { "\(type(of: $0))" }
-            throw CefTabStrip.Error.unsupported("Chromium's group editor did not open (new windows: \(opened)).")
+            throw CefTabs.Error.unsupported("Chromium's group editor did not open (new windows: \(opened)).")
         }
         bubble.alphaValue = 0
         if let color {
@@ -64,7 +64,7 @@ enum ChromeTabStripAccessibility {
             }
             guard swatches.count >= CefTabGroup.Color.allCases.count else {
                 content.doCommand(by: #selector(NSResponder.cancelOperation(_:)))
-                throw CefTabStrip.Error.unsupported("Chromium's group editor has \(swatches.count) colours.")
+                throw CefTabs.Error.unsupported("Chromium's group editor has \(swatches.count) colours.")
             }
             _ = swatches[color.rawValue].accessibilityPerformPress?()
             try? await Task.sleep(for: .milliseconds(30))
@@ -98,14 +98,14 @@ enum ChromeTabStripAccessibility {
     /// Chromium's, as AppKit would send one that reached it.
     private static func click(_ element: AnyObject, in window: CefChromeWindow, button: MouseButton) throws {
         guard let frame = element.accessibilityFrame?() as CGRect?, frame.width > 0 else {
-            throw CefTabStrip.Error.unsupported("Chromium's group header has no place in the window.")
+            throw CefTabs.Error.unsupported("Chromium's group header has no place in the window.")
         }
         try click(at: frame, in: window, button: button)
     }
 
     /// Sends a click at the middle of `frame`, in screen coordinates.
     private static func click(at frame: CGRect, in window: CefChromeWindow, button: MouseButton) throws {
-        guard let nsWindow = window.window, let content = nsWindow.contentView else { throw CefTabStrip.Error.tabClosed }
+        guard let nsWindow = window.window, let content = nsWindow.contentView else { throw CefTabs.Error.tabClosed }
         let point = nsWindow.convertPoint(fromScreen: CGPoint(x: frame.midX, y: frame.midY))
         let (down, up): (NSEvent.EventType, NSEvent.EventType) = button == .left ? (.leftMouseDown, .leftMouseUp) : (.rightMouseDown, .rightMouseUp)
         _ = content
@@ -132,10 +132,10 @@ enum ChromeTabStripAccessibility {
     /// Chromium's header view for `group`: the element beside the group's
     /// first tab in Chrome's tab strip that is not a tab.
     private static func header(of group: CefTabGroup, in window: CefChromeWindow) throws -> AnyObject {
-        guard let content = window.window?.contentView else { throw CefTabStrip.Error.tabClosed }
+        guard let content = window.window?.contentView else { throw CefTabs.Error.tabClosed }
         let elements = ChromeAccessibilityFilter.descendants(of: content)
         guard let strip = elements.first(where: { ($0.accessibilityRole?() ?? nil) == .tabGroup }) else {
-            throw CefTabStrip.Error.unsupported("Chromium's tab strip is not in the window's accessibility.")
+            throw CefTabs.Error.unsupported("Chromium's tab strip is not in the window's accessibility.")
         }
         let children = ChromeAccessibilityFilter.descendants(of: strip, limit: 1)
         let tabs = children.filter { ($0.accessibilityRole?() ?? nil) == .radioButton }
@@ -154,7 +154,7 @@ enum ChromeTabStripAccessibility {
         let seen = children.map { element in
             "\((element.accessibilityRole?() ?? nil)?.rawValue ?? "-") '\((element.accessibilityLabel?() ?? nil) ?? "")' \(actionNames(of: element))"
         }
-        throw CefTabStrip.Error.unsupported(
+        throw CefTabs.Error.unsupported(
             "Chromium's header for the group was not found (\(headers.count) headers, \(window.groups.count) groups: \(seen)).")
     }
 }

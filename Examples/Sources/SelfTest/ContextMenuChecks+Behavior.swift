@@ -87,10 +87,10 @@ extension SelfTest {
                 check("contextMenu (\(style)): the page loads", false)
                 continue
             }
-            let browser = host.browser
+            let page = host.page
             func open(_ name: String) async -> (shown: CefContextMenu, chromium: CefContextMenu, target: CefContextMenuTarget)? {
                 guard let target = menuTargets.first(where: { $0.name == name }) else { return nil }
-                return await openMenu(target, base: base, in: browser, recorder: recorder, reload: true)
+                return await openMenu(target, base: base, in: page, recorder: recorder, reload: true)
             }
             /// Opens `name`'s menu, chooses the item running `command`, and
             /// waits until `done`.
@@ -104,11 +104,11 @@ extension SelfTest {
             // What each menu holds.
             var commands: [String: [CefContextMenuCommand]] = [:]
             for target in menuTargets {
-                var opened = await openMenu(target, base: base, in: browser, recorder: recorder, reload: true)
+                var opened = await openMenu(target, base: base, in: page, recorder: recorder, reload: true)
                 // Spell checking marks the word a moment after it is typed.
                 for _ in 0..<3 where target.name == "misspelling" && opened?.target.misspelledWord.isEmpty != false {
                     try? await Task.sleep(for: .seconds(1))
-                    opened = await openMenu(target, base: base, in: browser, recorder: recorder, reload: false)
+                    opened = await openMenu(target, base: base, in: page, recorder: recorder, reload: false)
                 }
                 guard let opened else {
                     check("contextMenu (\(style), \(target.name)): the menu opens", false)
@@ -170,9 +170,9 @@ extension SelfTest {
             check("contextMenu (\(style)): Copy Image Address copies the image's address",
                   await choose(.copyImageAddress, on: "image") { NSPasteboard.general.string(forType: .string) == image.absoluteString })
             check("contextMenu (\(style)): Inspect opens DevTools",
-                  await choose(.inspectElement, on: "page") { browser.isShowingDevTools })
-            browser.closeDevTools()
-            _ = await waitUntil(timeout: .seconds(5)) { !browser.isShowingDevTools }
+                  await choose(.inspectElement, on: "page") { page.isShowingDevTools })
+            page.closeDevTools()
+            _ = await waitUntil(timeout: .seconds(5)) { !page.isShowingDevTools }
             let sources = recorder.windowOpens.count, tabs = chromeTabs.count
             check("contextMenu (\(style)): View Page Source opens the source in a new tab",
                   await choose(.viewSource, on: "page") {
@@ -183,7 +183,7 @@ extension SelfTest {
             let selected = await choose(.selectAll, on: "field") { true }
             let selection = "(() => { const f = document.getElementById('field'); return f.value.substring(f.selectionStart, f.selectionEnd); })()"
             let allSelected = await waitUntilAsync(timeout: .seconds(5)) {
-                (try? await browser.evaluateJavaScript(selection).stringValue) == "hello world"
+                (try? await page.evaluateJavaScript(selection).stringValue) == "hello world"
             }
             check("contextMenu (\(style)): Select All selects the field's text", selected && allSelected)
             if style != "offscreen" {
@@ -191,7 +191,7 @@ extension SelfTest {
                 // Offered only where Chromium's view answers it.
                 if await choose(.writingDirectionRightToLeft, on: "field", until: { true }) {
                     let flipped = await waitUntilAsync(timeout: .seconds(5)) {
-                        (try? await browser.evaluateJavaScript(direction).stringValue) == "rtl"
+                        (try? await page.evaluateJavaScript(direction).stringValue) == "rtl"
                     }
                     check("contextMenu (\(style)): Writing Direction › Right to Left turns the field", flipped)
                 }
@@ -286,7 +286,7 @@ extension SelfTest {
         guard let host = await makeMenuHost("chrome", base: base, recorder: recorder, configure: { $0.profile = profile }) else {
             return check("contextMenu (chrome, incognito): the page loads", false)
         }
-        let link = await openMenu(menuTargets.first { $0.name == "link" }!, base: base, in: host.browser, recorder: recorder)
+        let link = await openMenu(menuTargets.first { $0.name == "link" }!, base: base, in: host.page, recorder: recorder)
         check("contextMenu (chrome, incognito): Open Link in Incognito Window is there but off",
               link?.shown[.openLinkInIncognitoWindow]?.isEnabled == false, detail: "\(link?.shown.description ?? "no menu")")
         await host.close()

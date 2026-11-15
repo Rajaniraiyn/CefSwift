@@ -17,9 +17,9 @@ extension SelfTest {
         print("NOTE survey: \(label): \(text.prefix(3000))")
     }
 
-    static func surveyEvaluate(_ browser: CefBrowser, _ label: String, _ script: String) async {
+    static func surveyEvaluate(_ page: CefPage, _ label: String, _ script: String) async {
         do {
-            let value = try await browser.evaluateJavaScript(script, timeout: .seconds(10))
+            let value = try await page.evaluateJavaScript(script, timeout: .seconds(10))
             note(label, value.text)
         } catch {
             note(label, "error \(error)")
@@ -90,16 +90,16 @@ extension SelfTest {
         let plain = await surveyWindow(base.appendingPathComponent("page"), toolbar: .none)
         try? await Task.sleep(for: .milliseconds(500))
         await surveyEvaluate(plain.1, "content script in CefWindow (no toolbar)", "document.documentElement.dataset.cefswiftFixture ?? 'absent'")
-        let alloy = CefBrowser(url: base.appendingPathComponent("page"))
+        let alloy = CefPage(url: base.appendingPathComponent("page"))
         let alloyView = hostWindowed(alloy)
         _ = await loaded(alloy)
         try? await Task.sleep(for: .milliseconds(500))
         await surveyEvaluate(alloy, "content script in Alloy windowed", "document.documentElement.dataset.cefswiftFixture ?? 'absent'")
         await surveyEvaluate(alloy, "Alloy: chrome.runtime", "typeof chrome === 'object' ? Object.keys(chrome).join(',') : 'no chrome'")
         await closeHosted(alloy, alloyView)
-        var offscreenConfiguration = CefBrowser.Configuration()
+        var offscreenConfiguration = CefPage.Configuration()
         offscreenConfiguration.rendering = .offscreen()
-        let offscreen = CefBrowser(url: base.appendingPathComponent("page"), configuration: offscreenConfiguration)
+        let offscreen = CefPage(url: base.appendingPathComponent("page"), configuration: offscreenConfiguration)
         let offscreenView = hostOffscreen(offscreen)
         _ = await loaded(offscreen)
         try? await Task.sleep(for: .milliseconds(500))
@@ -144,17 +144,17 @@ extension SelfTest {
         await surveyEvaluate(options.1, "action badge (own API)", """
             (async () => JSON.stringify([await chrome.action.getBadgeText({}), await chrome.action.getTitle({}), await chrome.action.getUserSettings()]))()
             """)
-        let browsersBefore = CefRuntime.shared.browsers.count
+        let pagesBefore = CefRuntime.shared.pages.count
         await surveyEvaluate(options.1, "tabs.create", """
             (async () => { try { const t = await chrome.tabs.create({url: '\(base.appendingPathComponent("page").absoluteString)'}); return JSON.stringify([t.id, t.windowId]); } catch (e) { return 'error ' + e; } })()
             """)
         try? await Task.sleep(for: .seconds(2))
-        note("after tabs.create", "browsers \(browsersBefore) -> \(CefRuntime.shared.browsers.count); chrome tabs: \(tabRequests)")
+        note("after tabs.create", "browsers \(pagesBefore) -> \(CefRuntime.shared.pages.count); chrome tabs: \(tabRequests)")
         await surveyEvaluate(options.1, "windows.create", """
             (async () => { try { const w = await chrome.windows.create({url: '\(base.appendingPathComponent("page").absoluteString)'}); return JSON.stringify([w.id, w.type]); } catch (e) { return 'error ' + e; } })()
             """)
         try? await Task.sleep(for: .seconds(2))
-        note("after windows.create", "browsers \(CefRuntime.shared.browsers.count); chrome tabs: \(tabRequests)")
+        note("after windows.create", "browsers \(CefRuntime.shared.pages.count); chrome tabs: \(tabRequests)")
         tabRequests = []
         await surveyEvaluate(host, "developerPrivate.showOptions", """
             (async () => { try { await chrome.developerPrivate.showOptions('\(id)'); return 'ok'; } catch (e) { return 'error ' + e; } })()
@@ -230,20 +230,20 @@ extension SelfTest {
         let persistent = CefProfile.persistent(id: "survey-\(UUID().uuidString.prefix(6))")
         let incognito = CefProfile.incognito()
         for (label, profile) in [("persistent", persistent), ("incognito", incognito)] {
-            var configuration = CefBrowser.Configuration()
+            var configuration = CefPage.Configuration()
             configuration.profile = profile
-            let browser = CefBrowser(url: label == "incognito" ? base.appendingPathComponent("page") : URL(string: "chrome://extensions/strings.m.js")!, configuration: configuration)
+            let page = CefPage(url: label == "incognito" ? base.appendingPathComponent("page") : URL(string: "chrome://extensions/strings.m.js")!, configuration: configuration)
             var windowConfiguration = CefWindow.Configuration()
             windowConfiguration.frame = CGRect(x: 100, y: 100, width: 600, height: 400)
-            let window = CefWindow(browser: browser, configuration: windowConfiguration)
+            let window = CefWindow(page: page, configuration: windowConfiguration)
             window.show()
-            _ = await loaded(browser)
-            if label != "incognito" { await surveyEvaluate(browser, "\(label) profile extensions", """
+            _ = await loaded(page)
+            if label != "incognito" { await surveyEvaluate(page, "\(label) profile extensions", """
                 (async () => { try { return JSON.stringify((await chrome.developerPrivate.getExtensionsInfo({includeDisabled: true})).map(e => [e.id, e.name, e.incognitoAccess])); } catch (e) { return 'error ' + e; } })()
                 """) }
-            _ = await load(base.appendingPathComponent("page"), in: browser)
+            _ = await load(base.appendingPathComponent("page"), in: page)
             try? await Task.sleep(for: .milliseconds(500))
-            await surveyEvaluate(browser, "\(label) content script", "document.documentElement.dataset.cefswiftFixture ?? 'absent'")
+            await surveyEvaluate(page, "\(label) content script", "document.documentElement.dataset.cefswiftFixture ?? 'absent'")
             window.close()
             _ = await waitUntil { window.isClosed }
         }
@@ -338,7 +338,7 @@ extension SelfTest {
         first.execute(CefChromeCommand(rawValue: Int(IDC_NEW_TAB)))
         try? await Task.sleep(for: .seconds(1))
         _ = try? await first.evaluateJavaScript("1")
-        let options = CefRuntime.shared.browsers.last { $0 !== first } ?? first
+        let options = CefRuntime.shared.pages.last { $0 !== first } ?? first
         _ = options.load(URL(string: "chrome-extension://\(id)/options.html")!)
         _ = await loaded(options)
         note("new tab browser", "\(options.url?.absoluteString ?? "-") same=\(options === first)")
@@ -368,7 +368,7 @@ extension SelfTest {
             for new in NSApp.windows where !before.contains(ObjectIdentifier(new)) && new.isVisible {
                 note("window after openPopup", "\(NSStringFromClass(type(of: new))) \(new.frame) parent=\(new.parent.map { NSStringFromClass(type(of: $0)) } ?? "-") \(CefChromiumTesting.describe(new))")
             }
-            note("browsers after openPopup", CefRuntime.shared.browsers.map { $0.url?.absoluteString ?? "-" })
+            note("browsers after openPopup", CefRuntime.shared.pages.map { $0.url?.absoluteString ?? "-" })
             for child in window.childWindows ?? [] where child.isVisible { SurfaceInventory.sendEscape(to: child) }
             // The toolbar's action button.
             let before2 = Set(NSApp.windows.map(ObjectIdentifier.init))
@@ -407,7 +407,7 @@ extension SelfTest {
                 [...document.querySelectorAll('[role=dialog], [role=alertdialog]')].map(d => d.innerText.slice(0, 300)).join(' || ')
                 """)
         }
-        for browser in CefRuntime.shared.browsers { browser.close(force: true) }
+        for page in CefRuntime.shared.pages { page.close(force: true) }
         try? await Task.sleep(for: .seconds(2))
     }
 
@@ -415,7 +415,7 @@ extension SelfTest {
     /// action popup, and the Web Store's install dialog.
     static func surveyToolbarWindow(base: URL) async {
         NSApp.activate()
-        let (window, browser) = await surveyWindow(base.appendingPathComponent("page"), toolbar: .chrome)
+        let (window, page) = await surveyWindow(base.appendingPathComponent("page"), toolbar: .chrome)
         try? await Task.sleep(for: .seconds(1))
         guard let nsWindow = window.window else { return }
         nsWindow.makeKeyAndOrderFront(nil)
@@ -424,8 +424,8 @@ extension SelfTest {
             if NSStringFromClass(type(of: view)) == "RenderWidgetHostViewCocoa" { return view }
             return view.subviews.lazy.compactMap(pageView).first
         }
-        if let content = nsWindow.contentView, let page = pageView(content) {
-            note("page frame vs content", "\(page.convert(page.bounds, to: nil)) in \(content.bounds)")
+        if let content = nsWindow.contentView, let renderView = pageView(content) {
+            note("page frame vs content", "\(renderView.convert(renderView.bounds, to: nil)) in \(content.bounds)")
         }
         note("CefWindow AX (all)", axSummary(nsWindow.contentView, filter: { classes, text in
             !classes.isEmpty || !text.isEmpty
@@ -462,15 +462,15 @@ extension SelfTest {
         for child in nsWindow.childWindows ?? [] where child.isVisible { SurfaceInventory.sendEscape(to: child) }
         options.0.close()
         if let storeID = ProcessInfo.processInfo.environment[extensionStoreEnvironmentKey] {
-            _ = await load(URL(string: "https://chromewebstore.google.com/detail/\(storeID)")!, in: browser, timeout: .seconds(30))
+            _ = await load(URL(string: "https://chromewebstore.google.com/detail/\(storeID)")!, in: page, timeout: .seconds(30))
             try? await Task.sleep(for: .seconds(3))
-            let clicked = try? await browser.evaluateJavaScript("""
+            let clicked = try? await page.evaluateJavaScript("""
                 (() => { const b = [...document.querySelectorAll('button')].find(b => /Add to/i.test(b.innerText)); if (!b) return 'none'; b.click(); return 'clicked'; })()
                 """, userGesture: true)
             note("store click with gesture in CefWindow", clicked?.text ?? "-")
             try? await Task.sleep(for: .seconds(5))
             note("all windows after store click", NSApp.windows.filter(\.isVisible).map { "\(NSStringFromClass(type(of: $0))) '\($0.title)' parent=\($0.parent.map { NSStringFromClass(type(of: $0)) } ?? "-")" })
-            note("browsers after store click", CefRuntime.shared.browsers.map { $0.url?.absoluteString ?? "-" })
+            note("browsers after store click", CefRuntime.shared.pages.map { $0.url?.absoluteString ?? "-" })
             for top in NSApp.windows where top.isVisible && top.parent == nil && NSStringFromClass(type(of: top)) == "NativeWidgetMacNSWindow" {
                 note("top-level widget", "\(top.frame) level \(top.level.rawValue) \(CefChromiumTesting.describe(top))")
                 note("top-level widget AX", axSummary(top.contentView, filter: { _, text in !text.isEmpty }))
@@ -478,12 +478,12 @@ extension SelfTest {
                     SurfaceInventory.press(in: top) { $0.accessibilityRole() == .button && ($0.accessibilityTitle() ?? "") == "Add extension" }
                     for _ in 0..<40 {
                         try? await Task.sleep(for: .milliseconds(500))
-                        let removable = try? await browser.evaluateJavaScript("[...document.querySelectorAll('button')].some(b => /Remove from/i.test(b.innerText))")
+                        let removable = try? await page.evaluateJavaScript("[...document.querySelectorAll('button')].some(b => /Remove from/i.test(b.innerText))")
                         if removable?.boolValue == true { break }
                     }
                     try? await Task.sleep(for: .seconds(2))
                     note("windows after install", NSApp.windows.filter(\.isVisible).map { "\(NSStringFromClass(type(of: $0))) \(CefChromiumTesting.describe($0).classes.filter { $0.contains("Extension") || $0.contains("Bubble") })" })
-                    await surveyEvaluate(browser, "store buttons after install", """
+                    await surveyEvaluate(page, "store buttons after install", """
                         JSON.stringify([...document.querySelectorAll('button')].map(b => b.innerText.trim()).filter(Boolean).slice(0, 8))
                         """)
                 }
@@ -496,7 +496,7 @@ extension SelfTest {
                 SurfaceInventory.press(in: dialog) { $0.accessibilityRole() == .button && ($0.accessibilityTitle() ?? "") == "Add extension" }
                 for _ in 0..<40 {
                     try? await Task.sleep(for: .milliseconds(500))
-                    let removable = try? await browser.evaluateJavaScript("[...document.querySelectorAll('button')].some(b => /Remove from/i.test(b.innerText))")
+                    let removable = try? await page.evaluateJavaScript("[...document.querySelectorAll('button')].some(b => /Remove from/i.test(b.innerText))")
                     if removable?.boolValue == true { break }
                 }
                 try? await Task.sleep(for: .seconds(1))
@@ -505,7 +505,7 @@ extension SelfTest {
                     note("its AX", axSummary(child.contentView, filter: { _, text in !text.isEmpty }))
                 }
                 note("surfaces after install", window.chromiumSurfaces.map { "\($0.kind) '\($0.title)'" })
-                await surveyEvaluate(browser, "store buttons after install", """
+                await surveyEvaluate(page, "store buttons after install", """
                     JSON.stringify([...document.querySelectorAll('button')].map(b => b.innerText.trim()).filter(Boolean).slice(0, 8))
                     """)
             }
@@ -514,33 +514,33 @@ extension SelfTest {
         _ = await waitUntil { window.isClosed }
     }
 
-    static func surveyWebStore(_ storeID: String, in window: CefWindow, _ browser: CefBrowser) async {
+    static func surveyWebStore(_ storeID: String, in window: CefWindow, _ page: CefPage) async {
         let url = URL(string: "https://chromewebstore.google.com/detail/\(storeID)")!
-        let loadedStore = await load(url, in: browser, timeout: .seconds(30))
-        note("store loaded", "\(loadedStore) \(browser.title)")
+        let loadedStore = await load(url, in: page, timeout: .seconds(30))
+        note("store loaded", "\(loadedStore) \(page.title)")
         try? await Task.sleep(for: .seconds(3))
-        await surveyEvaluate(browser, "store page APIs", """
+        await surveyEvaluate(page, "store page APIs", """
             JSON.stringify({ua: navigator.userAgent, brands: navigator.userAgentData?.brands, webstorePrivate: typeof chrome?.webstorePrivate,
               wsp: chrome?.webstorePrivate ? Object.keys(chrome.webstorePrivate).sort() : null, management: typeof chrome?.management,
               chromeKeys: typeof chrome === 'object' ? Object.keys(chrome).sort() : null})
             """)
-        await surveyEvaluate(browser, "store buttons", """
+        await surveyEvaluate(page, "store buttons", """
             JSON.stringify([...document.querySelectorAll('button')].map(b => [b.innerText.trim(), b.disabled]).filter(b => b[0]).slice(0, 20))
             """)
-        await surveyEvaluate(browser, "store banners", """
+        await surveyEvaluate(page, "store banners", """
             document.body.innerText.split('\\n').filter(l => /chrome|switch|unsupported|available/i.test(l)).slice(0, 12).join(' | ')
             """)
-        let point = try? await browser.evaluateJavaScript("""
+        let point = try? await page.evaluateJavaScript("""
             (() => { const b = [...document.querySelectorAll('button')].find(b => /Add to/i.test(b.innerText)); if (!b) return null; b.scrollIntoView(); const r = b.getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })()
             """)
         guard let x = point?[0].doubleValue, let y = point?[1].doubleValue else { return note("store add button", "none") }
         guard let nsWindow = window.window else { return }
-        _ = try? await browser.evaluateJavaScript("""
+        _ = try? await page.evaluateJavaScript("""
             (() => { window.__wsLog = []; const w = chrome.webstorePrivate; for (const name of ['beginInstallWithManifest3', 'completeInstall', 'getExtensionStatus', 'install', 'getBrowserLogin', 'getMV2DeprecationStatus']) { const f = w[name]; if (typeof f !== 'function') continue; w[name] = function (...args) { window.__wsLog.push(name + ' ' + JSON.stringify(args).slice(0, 200)); const r = f.apply(this, args); if (r && r.then) r.then(v => window.__wsLog.push(name + ' -> ' + JSON.stringify(v)), e => window.__wsLog.push(name + ' !! ' + e)); return r; }; } return true; })()
             """)
         let before = Set(NSApp.windows.map(ObjectIdentifier.init))
         for type in ["mousePressed", "mouseReleased"] {
-            _ = try? await browser.devTools.send(
+            _ = try? await page.devTools.send(
                 "Input.dispatchMouseEvent", ["type": .string(type), "x": .number(x), "y": .number(y), "button": "left", "clickCount": 1])
         }
         var dialog: NSWindow?
@@ -550,7 +550,7 @@ extension SelfTest {
                 .first { !before.contains(ObjectIdentifier($0)) && $0.isVisible && $0 !== nsWindow }
             if dialog != nil { break }
         }
-        await surveyEvaluate(browser, "webstorePrivate calls", "JSON.stringify(window.__wsLog)")
+        await surveyEvaluate(page, "webstorePrivate calls", "JSON.stringify(window.__wsLog)")
         guard let dialog else { return note("store install prompt", "no window appeared") }
         try? await Task.sleep(for: .seconds(1))
         note("store install prompt", "\(NSStringFromClass(type(of: dialog))) parent=\(dialog.parent.map { NSStringFromClass(type(of: $0)) } ?? "none") \(CefChromiumTesting.describe(dialog))")
@@ -562,12 +562,12 @@ extension SelfTest {
         let installedBefore = Set(NSApp.windows.map(ObjectIdentifier.init))
         for _ in 0..<60 {
             try? await Task.sleep(for: .milliseconds(500))
-            let installed = try? await browser.evaluateJavaScript("""
+            let installed = try? await page.evaluateJavaScript("""
                 [...document.querySelectorAll('button')].some(b => /Remove from/i.test(b.innerText))
                 """)
             if installed?.boolValue == true { break }
         }
-        await surveyEvaluate(browser, "store buttons after", """
+        await surveyEvaluate(page, "store buttons after", """
             JSON.stringify([...document.querySelectorAll('button')].map(b => [b.innerText.trim(), b.disabled]).filter(b => b[0]).slice(0, 12))
             """)
         for child in SurfaceInventory.windows(of: nsWindow).map(\.0) where !installedBefore.contains(ObjectIdentifier(child)) && child.isVisible {
@@ -628,16 +628,16 @@ extension SelfTest {
         """
     }
 
-    static func surveyWindow(_ url: URL, toolbar: CefWindow.Toolbar) async -> (CefWindow, CefBrowser) {
-        let browser = CefBrowser(url: url)
+    static func surveyWindow(_ url: URL, toolbar: CefWindow.Toolbar) async -> (CefWindow, CefPage) {
+        let page = CefPage(url: url)
         var configuration = CefWindow.Configuration()
         configuration.toolbar = toolbar
         configuration.frame = CGRect(x: 120, y: 100, width: 1100, height: 760)
-        let window = CefWindow(browser: browser, configuration: configuration)
+        let window = CefWindow(page: page, configuration: configuration)
         window.chromiumSurfacePolicy = CefChromiumSurface.Policy()
         window.show()
-        _ = await loaded(browser)
-        return (window, browser)
+        _ = await loaded(page)
+        return (window, page)
     }
 
     /// The accessibility elements under `view` that `filter` keeps: their
@@ -694,12 +694,12 @@ extension SelfTest {
 
 /// Answers file dialogs with one folder, and records them.
 @MainActor
-final class SurveyFileDialogDelegate: CefBrowserDelegate {
+final class SurveyFileDialogDelegate: CefPageDelegate {
     let answer: URL
     var asked: [String] = []
     init(answer: URL) { self.answer = answer }
 
-    func browser(_ browser: CefBrowser, runFileDialog dialog: CefFileDialog) async -> [URL]? {
+    func page(_ page: CefPage, runFileDialog dialog: CefFileDialog) async -> [URL]? {
         asked.append("\(dialog.mode)")
         return [answer]
     }

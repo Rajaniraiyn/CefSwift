@@ -3,16 +3,16 @@ import AppKit
 import CefSwiftUI
 
 /// Context menus, opened with a right click the DevTools protocol sends,
-/// on each kind of target, in each way a browser can be hosted.
+/// on each kind of target, in each way a page can be hosted.
 ///
 /// `SELFTEST_MENU_DUMP=<folder>` also writes, per hosting mode, the menu
 /// Chromium built and the menu shown, item by item, and what choosing
 /// each item did.
 extension SelfTest {
-    /// Answers ``CefBrowserDelegate/browser(_:runContextMenu:for:)`` without
+    /// Answers ``CefPageDelegate/page(_:runContextMenu:for:)`` without
     /// showing anything, recording each menu and choosing what `choose`
     /// picks.
-    final class MenuRecorder: CefBrowserDelegate, CefProfileDelegate {
+    final class MenuRecorder: CefPageDelegate, CefProfileDelegate {
         var menus: [(menu: CefContextMenu, target: CefContextMenuTarget)] = []
         var choose: (CefContextMenu) -> CefContextMenu.Item? = { _ in nil }
         /// Runs before the choice is returned.
@@ -22,14 +22,14 @@ extension SelfTest {
         /// Shows the stock menu instead of choosing.
         var usesStockMenu = false
 
-        func browser(_ browser: CefBrowser, runContextMenu menu: CefContextMenu, for target: CefContextMenuTarget) async -> CefContextMenu.Item? {
+        func page(_ page: CefPage, runContextMenu menu: CefContextMenu, for target: CefContextMenuTarget) async -> CefContextMenu.Item? {
             menus.append((menu, target))
-            if usesStockMenu { return await CefContextMenuPresenter.present(menu, for: target, in: browser) }
+            if usesStockMenu { return await CefContextMenuPresenter.present(menu, for: target, in: page) }
             await beforeChoosing?()
             return choose(menu)
         }
 
-        func browser(_ browser: CefBrowser, decideWindowOpenFor request: CefWindowOpenRequest) -> CefWindowOpenDecision {
+        func page(_ page: CefPage, decideWindowOpenFor request: CefWindowOpenRequest) -> CefWindowOpenDecision {
             windowOpens.append(request)
             return .deny
         }
@@ -76,14 +76,14 @@ extension SelfTest {
         MenuTarget(name: "pdf", point: CGPoint(x: 450, y: 300), page: "doc.pdf", settle: .seconds(2)),
     ]
 
-    /// Right-clicks `target` in `browser`, which `recorder` answers for, and
+    /// Right-clicks `target` in `page`, which `recorder` answers for, and
     /// returns the menu shown and Chromium's own.
     static func openMenu(
-        _ target: MenuTarget, base: URL, in browser: CefBrowser, recorder: MenuRecorder, reload: Bool = false
+        _ target: MenuTarget, base: URL, in page: CefPage, recorder: MenuRecorder, reload: Bool = false
     ) async -> (shown: CefContextMenu, chromium: CefContextMenu, target: CefContextMenuTarget)? {
         let url = base.appendingPathComponent(target.page)
-        if browser.url != url || reload {
-            guard await load(url, in: browser) else { return nil }
+        if page.url != url || reload {
+            guard await load(url, in: page) else { return nil }
             try? await Task.sleep(for: target.settle)
         }
         var point = target.point
@@ -95,18 +95,18 @@ extension SelfTest {
                   const r = e.getBoundingClientRect();
                   return [r.left + r.width / 2, r.top + r.height / 2]; })()
                 """
-            guard let center = try? await browser.evaluateJavaScript(script).arrayValue,
+            guard let center = try? await page.evaluateJavaScript(script).arrayValue,
                   center.count == 2, let x = center[0].doubleValue, let y = center[1].doubleValue
             else { return nil }
             if target.element != nil { point = CGPoint(x: x + target.offset.x, y: y + target.offset.y) }
             try? await Task.sleep(for: target.settle)
         }
         var chromium: CefContextMenu?
-        CefBrowser.chromiumContextMenuObserver = { b, menu, _ in if b === browser { chromium = menu } }
-        defer { CefBrowser.chromiumContextMenuObserver = nil }
+        CefPage.chromiumContextMenuObserver = { b, menu, _ in if b === page { chromium = menu } }
+        defer { CefPage.chromiumContextMenuObserver = nil }
         let before = recorder.menus.count
         for type in ["mousePressed", "mouseReleased"] {
-            _ = try? await browser.devTools.send("Input.dispatchMouseEvent", [
+            _ = try? await page.devTools.send("Input.dispatchMouseEvent", [
                 "type": .string(type), "x": .number(point.x), "y": .number(point.y), "button": "right", "buttons": 2, "clickCount": 1,
             ])
         }
@@ -115,43 +115,43 @@ extension SelfTest {
         return (shown.menu, chromium!, shown.target)
     }
 
-    /// A browser hosted one of the ways an app can host it.
+    /// A page hosted one of the ways an app can host it.
     struct MenuHost {
         var name: String
-        var browser: CefBrowser
+        var page: CefPage
         var close: @MainActor () async -> Void
     }
 
     static func makeMenuHost(
-        _ style: String, base: URL, recorder: MenuRecorder, configure: (inout CefBrowser.Configuration) -> Void = { _ in }
+        _ style: String, base: URL, recorder: MenuRecorder, configure: (inout CefPage.Configuration) -> Void = { _ in }
     ) async -> MenuHost? {
-        var configuration = CefBrowser.Configuration()
+        var configuration = CefPage.Configuration()
         configure(&configuration)
         // Downloads a menu item starts are decided by the profile.
         (configuration.profile ?? .default).delegate = recorder
         let url = base.appendingPathComponent("page.html")
         switch style {
         case "chrome":
-            let browser = CefBrowser(url: url, configuration: configuration, delegate: recorder)
-            let cefWindow = CefWindow(browser: browser)
+            let page = CefPage(url: url, configuration: configuration, delegate: recorder)
+            let cefWindow = CefWindow(page: page)
             cefWindow.window?.setFrame(NSRect(x: 100, y: 100, width: 900, height: 640), display: true)
             cefWindow.show()
-            guard await loaded(browser, title: "menu") else { cefWindow.close(); return nil }
-            return MenuHost(name: style, browser: browser) {
+            guard await loaded(page, title: "menu") else { cefWindow.close(); return nil }
+            return MenuHost(name: style, page: page) {
                 cefWindow.close()
-                _ = await waitUntil { cefWindow.isClosed && browser.state == .closed }
+                _ = await waitUntil { cefWindow.isClosed && page.state == .closed }
             }
         case "offscreen":
             configuration.rendering = .offscreen
-            let browser = CefBrowser(url: url, configuration: configuration, delegate: recorder)
-            let view = hostOffscreen(browser)
-            guard await loaded(browser, title: "menu") else { await closeHosted(browser, view); return nil }
-            return MenuHost(name: style, browser: browser) { await closeHosted(browser, view) }
+            let page = CefPage(url: url, configuration: configuration, delegate: recorder)
+            let view = hostOffscreen(page)
+            guard await loaded(page, title: "menu") else { await closeHosted(page, view); return nil }
+            return MenuHost(name: style, page: page) { await closeHosted(page, view) }
         default:
-            let browser = CefBrowser(url: url, configuration: configuration, delegate: recorder)
-            let view = hostWindowed(browser)
-            guard await loaded(browser, title: "menu") else { await closeHosted(browser, view); return nil }
-            return MenuHost(name: style, browser: browser) { await closeHosted(browser, view) }
+            let page = CefPage(url: url, configuration: configuration, delegate: recorder)
+            let view = hostWindowed(page)
+            guard await loaded(page, title: "menu") else { await closeHosted(page, view); return nil }
+            return MenuHost(name: style, page: page) { await closeHosted(page, view) }
         }
     }
 
@@ -191,7 +191,7 @@ extension SelfTest {
                 var dump = "# \(style)\(incognito ? " incognito" : "")\n\n"
                 let targets = incognito ? menuTargets.filter { ["page", "link"].contains($0.name) } : menuTargets
                 for target in targets {
-                    guard let opened = await openMenu(target, base: base, in: host.browser, recorder: recorder) else {
+                    guard let opened = await openMenu(target, base: base, in: host.page, recorder: recorder) else {
                         dump += "## \(target.name)\n\nno menu\n\n"
                         continue
                     }
@@ -237,7 +237,7 @@ extension SelfTest {
         _ command: CefContextMenuCommand, target: MenuTarget, base: URL, host: MenuHost, recorder: MenuRecorder,
         chromeTabs: () -> [URL]
     ) async -> String {
-        let browser = host.browser
+        let page = host.page
         print("NOTE contextMenu probe: \(target.name) \(command)")
         let state = "JSON.stringify([document.getElementById('video')?.loop, document.getElementById('video')?.controls, "
             + "document.getElementById('field')?.value, document.getElementById('misspelt')?.value, getSelection().toString(), "
@@ -246,18 +246,18 @@ extension SelfTest {
         var stateBefore: String?
         var urlBefore: URL?
         recorder.beforeChoosing = {
-            stateBefore = try? await browser.evaluateJavaScript(state).stringValue
-            urlBefore = browser.url
+            stateBefore = try? await page.evaluateJavaScript(state).stringValue
+            urlBefore = page.url
         }
         defer {
             recorder.choose = { _ in nil }
             recorder.beforeChoosing = nil
         }
-        let browsersBefore = Set(CefRuntime.shared.browsers.map(ObjectIdentifier.init))
+        let pagesBefore = Set(CefRuntime.shared.pages.map(ObjectIdentifier.init))
         let windowsBefore = NSApp.windows.filter(\.isVisible).count
         let opens = recorder.windowOpens.count, downloads = recorder.downloads.count, tabs = chromeTabs().count
         let pasteboard = NSPasteboard.general.changeCount
-        guard await openMenu(target, base: base, in: browser, recorder: recorder, reload: true) != nil else { return "no menu" }
+        guard await openMenu(target, base: base, in: page, recorder: recorder, reload: true) != nil else { return "no menu" }
         try? await Task.sleep(for: .seconds(2))
         var effects: [String] = []
         if recorder.windowOpens.count > opens {
@@ -269,22 +269,22 @@ extension SelfTest {
             let types = NSPasteboard.general.types?.map(\.rawValue).prefix(3).joined(separator: ",") ?? ""
             effects.append("pasteboard [\(types)] \"\(NSPasteboard.general.string(forType: .string)?.prefix(60) ?? "")\"")
         }
-        if browser.isShowingDevTools { effects.append("DevTools open") }
-        let newBrowsers = CefRuntime.shared.browsers.filter { !browsersBefore.contains(ObjectIdentifier($0)) }
-        for other in newBrowsers {
+        if page.isShowingDevTools { effects.append("DevTools open") }
+        let newPages = CefRuntime.shared.pages.filter { !pagesBefore.contains(ObjectIdentifier($0)) }
+        for other in newPages {
             effects.append("new browser \(other.url?.absoluteString ?? "-")")
             other.close(force: true)
         }
-        if browser.url != urlBefore { effects.append("navigated to \(browser.url?.absoluteString ?? "-")") }
-        let stateAfter = try? await browser.evaluateJavaScript(state).stringValue
+        if page.url != urlBefore { effects.append("navigated to \(page.url?.absoluteString ?? "-")") }
+        let stateAfter = try? await page.evaluateJavaScript(state).stringValue
         if stateAfter != stateBefore { effects.append("page state \(stateBefore ?? "-") → \(stateAfter ?? "-")") }
         let windowsAfter = NSApp.windows.filter(\.isVisible).count
         if windowsAfter != windowsBefore { effects.append("visible windows \(windowsBefore) → \(windowsAfter)") }
-        if browser.isShowingDevTools {
-            browser.closeDevTools()
-            _ = await waitUntil(timeout: .seconds(3)) { !browser.isShowingDevTools }
+        if page.isShowingDevTools {
+            page.closeDevTools()
+            _ = await waitUntil(timeout: .seconds(3)) { !page.isShowingDevTools }
         }
-        _ = await waitUntil(timeout: .seconds(3)) { newBrowsers.allSatisfy { $0.state == .closed } }
+        _ = await waitUntil(timeout: .seconds(3)) { newPages.allSatisfy { $0.state == .closed } }
         return effects.isEmpty ? "NOTHING" : effects.joined(separator: "; ")
     }
 

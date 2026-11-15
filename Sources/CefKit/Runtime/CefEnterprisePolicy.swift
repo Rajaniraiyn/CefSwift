@@ -14,7 +14,7 @@ extension CefRuntime {
     /// (`defaults write <domain> <Policy> <value>`) are recommended, and set the
     /// default the user can change. On a Mac that is not managed, Chromium
     /// ignores the policies it counts as sensitive. `chrome://policy` lists
-    /// what applies, in Chrome-style browsers.
+    /// what applies, in Chrome-style pages.
     public enum EnterprisePolicy: Sendable, Equatable {
         /// No policies. The default.
         case disabled

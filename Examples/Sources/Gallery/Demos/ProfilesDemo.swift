@@ -4,7 +4,7 @@ import SwiftUI
 /// A `CefProfile` holds cookies, storage and cache. A persistent profile
 /// keeps them on disk, in a directory of its own, and finds them again at
 /// the next launch; an incognito profile keeps them in memory and drops
-/// them with the profile. Browsers in different profiles share nothing.
+/// them with the profile. Pages in different profiles share nothing.
 struct ProfilesDemo: Demo {
     let title = "Profiles and Cookies"
     let summary = "The same page in a persistent profile, kept on disk, and in an incognito one: each keeps its own cookies, read back from Swift."
@@ -16,22 +16,22 @@ struct ProfilesDemo: Demo {
 
 private struct ProfilesView: View {
     // Chromium loads a persistent profile in the background the first
-    // time it is used; the browser waits for it by itself.
-    @State private var onDisk = CefBrowser.inProfile(.persistent(id: "gallery", displayName: "Gallery"))
-    @State private var incognito = CefBrowser.inProfile(.incognito())
+    // time it is used; the page waits for it by itself.
+    @State private var onDisk = CefPage.inProfile(.persistent(id: "gallery", displayName: "Gallery"))
+    @State private var incognito = CefPage.inProfile(.incognito())
 
     var body: some View {
         HStack(spacing: 1) {
-            ProfilePane(browser: onDisk, name: "Persistent, on Disk", symbol: "externaldrive")
-            ProfilePane(browser: incognito, name: "Incognito", symbol: "eyeglasses")
+            ProfilePane(page: onDisk, name: "Persistent, on Disk", symbol: "externaldrive")
+            ProfilePane(page: incognito, name: "Incognito", symbol: "eyeglasses")
         }
         .background(.separator)
         .reportReady {
             // Throws CefError.profileUnavailable if Chromium could not
             // give the profile its directory: it never falls back to memory.
             try await onDisk.configuration.profile?.ready()
-            for browser in [onDisk, incognito] {
-                try await browser.waitUntilLoaded(timeout: .seconds(30))
+            for page in [onDisk, incognito] {
+                try await page.waitUntilLoaded(timeout: .seconds(30))
             }
         }
         .onDisappear {
@@ -42,7 +42,7 @@ private struct ProfilesView: View {
 }
 
 private struct ProfilePane: View {
-    let browser: CefBrowser
+    let page: CefPage
     let name: String
     let symbol: String
     @State private var cookies: [CefProfile.Cookie] = []
@@ -54,7 +54,7 @@ private struct ProfilePane: View {
             if let failure {
                 ContentUnavailableView("Profile Unavailable", systemImage: "exclamationmark.triangle", description: Text(failure))
             } else {
-                CefWebView(browser)
+                CefWebView(page)
             }
             List(cookies, id: \.name) { cookie in
                 LabeledContent(cookie.name, value: cookie.value)
@@ -63,8 +63,8 @@ private struct ProfilePane: View {
             .overlay { if cookies.isEmpty { Text("No cookies").foregroundStyle(.secondary) } }
             Button("Delete Cookies", role: .destructive) {
                 Task {
-                    _ = try? await browser.configuration.profile?.deleteCookies(for: ProfilesPages.page.localURL)
-                    browser.reload()
+                    _ = try? await page.configuration.profile?.deleteCookies(for: ProfilesPages.page.localURL)
+                    page.reload()
                 }
             }
             .padding(8)
@@ -72,24 +72,24 @@ private struct ProfilePane: View {
         .background(.background)
         .task {
             do {
-                try await browser.configuration.profile?.ready()
+                try await page.configuration.profile?.ready()
             } catch {
                 failure = "\(error)"
             }
         }
         // The profile's cookies for the page, read again after every load.
-        .task(id: browser.isLoading) {
-            guard !browser.isLoading, let profile = browser.configuration.profile else { return }
+        .task(id: page.isLoading) {
+            guard !page.isLoading, let profile = page.configuration.profile else { return }
             cookies = (try? await profile.cookies(for: ProfilesPages.page.localURL)) ?? []
         }
     }
 }
 
-private extension CefBrowser {
-    static func inProfile(_ profile: CefProfile) -> CefBrowser {
-        var configuration = CefBrowser.Configuration()
+private extension CefPage {
+    static func inProfile(_ profile: CefProfile) -> CefPage {
+        var configuration = CefPage.Configuration()
         configuration.profile = profile
-        return CefBrowser(url: ProfilesPages.page.localURL, configuration: configuration)
+        return CefPage(url: ProfilesPages.page.localURL, configuration: configuration)
     }
 }
 

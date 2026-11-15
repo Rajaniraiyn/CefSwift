@@ -4,7 +4,7 @@ CefSwift embeds Chromium in macOS apps written in Swift, through the
 [Chromium Embedded Framework](https://github.com/chromiumembedded/cef) (CEF).
 It is a general embedding library: use it for an app shell whose sections
 are web pages, for a web browser, or for any app that shows web content.
-It exposes what CEF and Chromium can do as Swift types: browsers in SwiftUI
+It exposes what CEF and Chromium can do as Swift types: pages in SwiftUI
 and AppKit views, windowed or offscreen; Chrome-style windows with
 Chrome's own pages; Chromium's own tabbed windows under your own tab
 interface; profiles, requests, DevTools, custom schemes and a JavaScript
@@ -20,9 +20,9 @@ CefSwift is pre-1.0; its API can change between releases.
 
 | Module | What it is | Needed |
 |---|---|---|
-| `CefKit` | The core: the runtime, browsers, profiles, delegates, the AppKit host views (`CefWindowedBrowserView`, `CefOffscreenBrowserView`), CEF Views windows (`CefWindow`), offscreen rendering, discarding | Yes |
+| `CefKit` | The core: the runtime, pages, profiles, delegates, the AppKit host views (`CefWindowedPageView`, `CefOffscreenPageView`), CEF Views windows (`CefWindow`), offscreen rendering, discarding | Yes |
 | `CefSwiftUI` | SwiftUI on top of CefKit: `CefSwiftApp`, `CefWebView`, toolbar and overlay modifiers. Re-exports CefKit | For SwiftUI apps |
-| `CefChromium` | Chromium's own browser features: bookmarks, history, address-bar suggestions, extensions, Chromium's tabbed windows and tab strip (`CefChromeWindow`, `CefTabStrip`), and Chromium's bubbles, find bar and status bubble. Bound to Chromium-private interfaces of the pinned CEF | Optional |
+| `CefChromium` | Chromium's own browser features: bookmarks, history, address-bar suggestions, extensions, Chromium's tabbed windows and tab strip (`CefChromeWindow`, `CefTabs`), and Chromium's bubbles, find bar and status bubble. Bound to Chromium-private interfaces of the pinned CEF | Optional |
 | `CefPasskeys` | WebAuthn requests answered by the app from its own store, or refused | Optional |
 | `cefswift` tool, `CefPlugin` (`swift package cef …`) | Download CEF, assemble, sign, check, package and notarize the `.app` (logic in `CefBundling`) | Build time |
 | `CefHelper`, `CefRenderer`, `CefHelperStartup`, `CefBase`, `CCef` | The helper-process executable, its renderer-side code, the helper's sandbox startup library, shared reference counting and strings, and the CEF C headers and loader | Internal; built and bundled for you |
@@ -132,7 +132,7 @@ instead ([In AppKit](docs/guide.md#in-appkit)).
 | `chrome://` pages, extensions, history | No | Yes |
 | Background services | Off | On |
 
-The [guide](docs/guide.md) covers each task: browsers and views,
+The [guide](docs/guide.md) covers each task: pages and views,
 JavaScript and the bridge, decisions and built-in sheets, profiles and
 requests, Chrome-style windows and Chromium's tabs, extensions, passkeys,
 DevTools, custom schemes and streaming media.
@@ -168,7 +168,7 @@ These come from CEF 156 and official CEF builds. The guide's
   the App Sandbox refuses. Bundling stops with an error if it is on.
   Chromium's own sandbox still confines the helpers ([Sandbox](docs/sandbox.md)).
 - One Chrome-style browser view per window. A `CefWindow` holds one
-  browser, and Chromium counts it as a popup window of one tab. Only
+  page, and Chromium counts it as a popup window of one tab. Only
   windows Chromium draws itself (`CefChromeWindow`, `openChromeWindow`)
   have real Chromium tabs.
 - CEF restores no tabs or windows at startup. CefChromium can reopen the

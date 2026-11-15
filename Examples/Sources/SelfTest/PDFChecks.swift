@@ -6,18 +6,18 @@ import PDFKit
 /// PDF export with its options, read back with PDFKit.
 extension SelfTest {
     static func pdfChecks() async {
-        let browser = CefBrowser(url: capabilityOrigin.appending(path: "print.html"))
-        let view = hostWindowed(browser)
-        guard await loaded(browser, title: "print") else {
-            check("pdf: page loads", false, detail: browser.title)
+        let page = CefPage(url: capabilityOrigin.appending(path: "print.html"))
+        let view = hostWindowed(page)
+        guard await loaded(page, title: "print") else {
+            check("pdf: page loads", false, detail: page.title)
             view.removeFromSuperview()
             return
         }
         let a4 = CGSize(width: 595.28, height: 841.89)
-        func document(_ configure: (inout CefBrowser.PDFConfiguration) -> Void) async throws -> PDFDocument {
-            var configuration = CefBrowser.PDFConfiguration(paperSize: a4)
+        func document(_ configure: (inout CefPage.PDFConfiguration) -> Void) async throws -> PDFDocument {
+            var configuration = CefPage.PDFConfiguration(paperSize: a4)
             configure(&configuration)
-            let data = try await browser.pdf(configuration: configuration)
+            let data = try await page.pdf(configuration: configuration)
             guard let document = PDFDocument(data: data) else { throw CefError.operationFailed("not a PDF") }
             return document
         }
@@ -33,14 +33,14 @@ extension SelfTest {
             return pdf.pageCount == 3 && close(size(pdf), a4)
         }
         // A page's @page size sets its orientation; this one has none.
-        _ = await load(capabilityOrigin.appending(path: "plain.html"), in: browser, title: "plain")
+        _ = await load(capabilityOrigin.appending(path: "plain.html"), in: page, title: "plain")
         await expect("pdf: landscape turns the paper") {
             let pdf = try await document { $0.isLandscape = true }
-            let page = pdf.page(at: 0)
+            let firstPage = pdf.page(at: 0)
             return (close(size(pdf), CGSize(width: a4.height, height: a4.width)),
-                    "\(size(pdf)), rotation \(page?.rotation ?? -1), \(pdf.pageCount) pages")
+                    "\(size(pdf)), rotation \(firstPage?.rotation ?? -1), \(pdf.pageCount) pages")
         }
-        _ = await load(capabilityOrigin.appending(path: "print.html"), in: browser, title: "print")
+        _ = await load(capabilityOrigin.appending(path: "print.html"), in: page, title: "print")
         await expect("pdf: page ranges select pages") {
             try await document { $0.pageRanges = [2...3] }.pageCount == 2
         }
@@ -71,14 +71,14 @@ extension SelfTest {
             return text.contains("Header print") && text.contains("Page 2 of 3")
         }
         await expect("pdf: no margins and the default paper") {
-            var configuration = CefBrowser.PDFConfiguration()
+            var configuration = CefPage.PDFConfiguration()
             configuration.margins = .none
             let file = FileManager.default.temporaryDirectory.appendingPathComponent("cefswift-selftest-margins.pdf")
             defer { try? FileManager.default.removeItem(at: file) }
-            try await browser.printToPDF(at: file, configuration: configuration)
+            try await page.printToPDF(at: file, configuration: configuration)
             return PDFDocument(url: file).map { close(size($0), NSPrintInfo.shared.paperSize) } ?? false
         }
-        await closeHosted(browser, view)
+        await closeHosted(page, view)
     }
 
     /// Whether the document has a structure tree, as tagged PDFs do.

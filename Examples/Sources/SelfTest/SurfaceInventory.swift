@@ -160,25 +160,25 @@ extension SelfTest {
 
 /// Records the delegate calls a trigger causes, answering each with a refusal.
 @MainActor
-final class SurfaceInventoryDelegate: CefBrowserDelegate, CefProfileDelegate {
+final class SurfaceInventoryDelegate: CefPageDelegate, CefProfileDelegate {
     var calls: [String] = []
 
-    func browser(_ browser: CefBrowser, decidePermissionFor request: CefPermissionRequest) async -> CefPermissionDecision {
+    func page(_ page: CefPage, decidePermissionFor request: CefPermissionRequest) async -> CefPermissionDecision {
         calls.append("decidePermissionFor \(request.kinds)")
         return .deny
     }
 
-    func browser(_ browser: CefBrowser, runJavaScriptDialog dialog: CefJavaScriptDialog) async -> CefJavaScriptDialogResponse {
+    func page(_ page: CefPage, runJavaScriptDialog dialog: CefJavaScriptDialog) async -> CefJavaScriptDialogResponse {
         calls.append("runJavaScriptDialog \(dialog.kind)")
         return .dismiss
     }
 
-    func browser(_ browser: CefBrowser, confirmLeavingPage isReload: Bool) async -> Bool {
+    func page(_ page: CefPage, confirmLeavingPage isReload: Bool) async -> Bool {
         calls.append("confirmLeavingPage")
         return true
     }
 
-    func browser(_ browser: CefBrowser, runFileDialog dialog: CefFileDialog) async -> [URL]? {
+    func page(_ page: CefPage, runFileDialog dialog: CefFileDialog) async -> [URL]? {
         calls.append("runFileDialog \(dialog.mode)")
         return nil
     }
@@ -188,17 +188,17 @@ final class SurfaceInventoryDelegate: CefBrowserDelegate, CefProfileDelegate {
         return .save(to: FileManager.default.temporaryDirectory.appendingPathComponent("cefswift-inventory-\(UUID().uuidString).txt"))
     }
 
-    func browserPageIsUnresponsive(_ browser: CefBrowser) async -> CefUnresponsivePageDecision {
-        calls.append("browserPageIsUnresponsive")
+    func pageIsUnresponsive(_ page: CefPage) async -> CefUnresponsivePageDecision {
+        calls.append("pageIsUnresponsive")
         return .reload
     }
 
-    func browser(_ browser: CefBrowser, decideWindowOpenFor request: CefWindowOpenRequest) -> CefWindowOpenDecision {
+    func page(_ page: CefPage, decideWindowOpenFor request: CefWindowOpenRequest) -> CefWindowOpenDecision {
         calls.append("decideWindowOpenFor \(request.disposition)")
         return .deny
     }
 
-    func browser(_ browser: CefBrowser, runContextMenu menu: CefContextMenu, for target: CefContextMenuTarget) async -> CefContextMenu.Item? {
+    func page(_ page: CefPage, runContextMenu menu: CefContextMenu, for target: CefContextMenuTarget) async -> CefContextMenu.Item? {
         calls.append("runContextMenu")
         return nil
     }
@@ -208,7 +208,7 @@ final class SurfaceInventoryDelegate: CefBrowserDelegate, CefProfileDelegate {
 final class SurfaceInventory {
     struct Host {
         let window: CefWindow
-        let browser: CefBrowser
+        let page: CefPage
         let delegate: SurfaceInventoryDelegate
     }
 
@@ -248,19 +248,19 @@ final class SurfaceInventory {
 
     func open(toolbar: CefWindow.Toolbar) async -> Host? {
         let delegate = SurfaceInventoryDelegate()
-        let browser = CefBrowser(url: base.appendingPathComponent("surfaces"))
-        browser.delegate = delegate
-        browser.profile.delegate = delegate
+        let page = CefPage(url: base.appendingPathComponent("surfaces"))
+        page.delegate = delegate
+        page.profile.delegate = delegate
         var configuration = CefWindow.Configuration()
         configuration.toolbar = toolbar
         configuration.frame = CGRect(x: 140, y: 120, width: 1000, height: 720)
-        let window = CefWindow(browser: browser, configuration: configuration)
+        let window = CefWindow(page: page, configuration: configuration)
         // Every surface native, so that each is followed and listed.
         window.chromiumSurfacePolicy = CefChromiumSurface.Policy()
         window.show()
-        guard await SelfTest.loaded(browser, title: "surfaces") else { return nil }
+        guard await SelfTest.loaded(page, title: "surfaces") else { return nil }
         window.window?.orderFrontRegardless()
-        return Host(window: window, browser: browser, delegate: delegate)
+        return Host(window: window, page: page, delegate: delegate)
     }
 
     func close(_ host: Host) async {
@@ -336,10 +336,10 @@ final class SurfaceInventory {
     /// Closes what the trigger left open and brings the page back.
     private func cleanUp(_ host: Host, before: Set<ObjectIdentifier>) async {
         for surface in host.window.chromiumSurfaces { surface.dismiss() }
-        host.browser.execute(CefChromeCommand(rawValue: Int(IDC_CLOSE_FIND_OR_STOP)))
-        if host.browser.isFullscreen {
-            host.browser.execute(CefChromeCommand(rawValue: Int(IDC_FULLSCREEN)))
-            _ = await SelfTest.waitUntil(timeout: .seconds(5)) { !host.browser.isFullscreen }
+        host.page.execute(CefChromeCommand(rawValue: Int(IDC_CLOSE_FIND_OR_STOP)))
+        if host.page.isFullscreen {
+            host.page.execute(CefChromeCommand(rawValue: Int(IDC_FULLSCREEN)))
+            _ = await SelfTest.waitUntil(timeout: .seconds(5)) { !host.page.isFullscreen }
             try? await Task.sleep(for: .seconds(1))
         }
         if NSColorPanel.sharedColorPanelExists { NSColorPanel.shared.close() }
@@ -357,12 +357,12 @@ final class SurfaceInventory {
             window.close()
         }
         // Back to the page, with the dialogs it left answered.
-        if host.browser.url?.lastPathComponent != "surfaces" || host.browser.isLoading {
-            _ = host.browser.load(base.appendingPathComponent("surfaces"))
+        if host.page.url?.lastPathComponent != "surfaces" || host.page.isLoading {
+            _ = host.page.load(base.appendingPathComponent("surfaces"))
         } else {
-            host.browser.reload()
+            host.page.reload()
         }
-        _ = await SelfTest.loaded(host.browser, title: "surfaces", timeout: .seconds(10))
+        _ = await SelfTest.loaded(host.page, title: "surfaces", timeout: .seconds(10))
         nsWindow.makeKeyAndOrderFront(nil)
     }
 
@@ -380,13 +380,13 @@ final class SurfaceInventory {
     // MARK: Triggers
 
     static func command(_ id: Int32) -> @MainActor (Host) async -> Void {
-        { $0.browser.execute(CefChromeCommand(rawValue: Int(id))) }
+        { $0.page.execute(CefChromeCommand(rawValue: Int(id))) }
     }
 
     /// Runs `script` in the page as a user gesture would.
     static func gesture(_ script: String) -> @MainActor (Host) async -> Void {
         { host in
-            _ = try? await host.browser.devTools.send(
+            _ = try? await host.page.devTools.send(
                 "Runtime.evaluate", ["expression": .string(script), "userGesture": true, "awaitPromise": false])
         }
     }
@@ -394,11 +394,11 @@ final class SurfaceInventory {
     /// Clicks the element `id` with the pointer, through the DevTools protocol.
     static func click(_ id: String) -> @MainActor (Host) async -> Void {
         { host in
-            let point = try? await host.browser.evaluateJavaScript(
+            let point = try? await host.page.evaluateJavaScript(
                 "(() => { const r = document.getElementById('\(id)').getBoundingClientRect(); return [r.x + 8, r.y + r.height / 2]; })()")
             let x = CefJSON.number(point?[0].doubleValue ?? 0), y = CefJSON.number(point?[1].doubleValue ?? 0)
             for type in ["mousePressed", "mouseReleased"] {
-                _ = try? await host.browser.devTools.send(
+                _ = try? await host.page.devTools.send(
                     "Input.dispatchMouseEvent", ["type": .string(type), "x": x, "y": y, "button": "left", "clickCount": 1])
             }
         }
@@ -406,8 +406,8 @@ final class SurfaceInventory {
 
     static func load(_ path: String) -> @MainActor (Host) async -> Void {
         { host in
-            guard let url = URL(string: path, relativeTo: host.browser.url) else { return }
-            _ = host.browser.load(url)
+            guard let url = URL(string: path, relativeTo: host.page.url) else { return }
+            _ = host.page.load(url)
         }
     }
 
@@ -438,22 +438,22 @@ final class SurfaceInventory {
         let common: [Trigger] = [
             T(name: "Find bar", how: "`IDC_FIND`", run: Self.command(IDC_FIND)),
             T(name: "Status bubble", how: "pointer over a link", wait: .milliseconds(2000), run: { host in
-                _ = try? await host.browser.devTools.send("Input.dispatchMouseEvent", ["type": "mouseMoved", "x": 1, "y": 1])
-                let point = try? await host.browser.evaluateJavaScript(
+                _ = try? await host.page.devTools.send("Input.dispatchMouseEvent", ["type": "mouseMoved", "x": 1, "y": 1])
+                let point = try? await host.page.evaluateJavaScript(
                     "(() => { const r = document.getElementById('link').getBoundingClientRect(); return [r.x + 4, r.y + 4]; })()")
-                _ = try? await host.browser.devTools.send("Input.dispatchMouseEvent", [
+                _ = try? await host.page.devTools.send("Input.dispatchMouseEvent", [
                     "type": "mouseMoved", "x": .number(point?[0].doubleValue ?? 0), "y": .number(point?[1].doubleValue ?? 0),
                 ])
             }),
             T(name: "Tooltip", how: "pointer resting on an element with `title`", wait: .milliseconds(3000), run: { host in
-                let point = try? await host.browser.evaluateJavaScript(
+                let point = try? await host.page.evaluateJavaScript(
                     "(() => { const r = document.getElementById('link').getBoundingClientRect(); return [r.x + 6, r.y + 6]; })()")
-                _ = try? await host.browser.devTools.send("Input.dispatchMouseEvent", [
+                _ = try? await host.page.devTools.send("Input.dispatchMouseEvent", [
                     "type": "mouseMoved", "x": .number(point?[0].doubleValue ?? 0), "y": .number(point?[1].doubleValue ?? 0),
                 ])
             }),
             T(name: "Zoom bubble", how: "`IDC_ZOOM_PLUS`", run: { host in
-                host.browser.execute(CefChromeCommand(rawValue: Int(IDC_ZOOM_PLUS)))
+                host.page.execute(CefChromeCommand(rawValue: Int(IDC_ZOOM_PLUS)))
             }),
             T(name: "Zoom reset", how: "`IDC_ZOOM_NORMAL`", run: Self.command(IDC_ZOOM_NORMAL)),
             T(name: "QR code", how: "`IDC_QRCODE_GENERATOR`", run: Self.command(IDC_QRCODE_GENERATOR)),
@@ -461,10 +461,10 @@ final class SurfaceInventory {
             T(name: "Send tab to self", how: "`IDC_SEND_TAB_TO_SELF`", run: Self.command(IDC_SEND_TAB_TO_SELF)),
             T(name: "Bookmark this tab", how: "`IDC_BOOKMARK_THIS_TAB` (⌘D)", run: Self.command(IDC_BOOKMARK_THIS_TAB)),
             T(name: "Translate", how: "French page, then `IDC_SHOW_TRANSLATE`", wait: .milliseconds(3000), run: { host in
-                _ = host.browser.load(host.browser.url!.deletingLastPathComponent().appendingPathComponent("french"))
-                _ = await SelfTest.loaded(host.browser, timeout: .seconds(5))
+                _ = host.page.load(host.page.url!.deletingLastPathComponent().appendingPathComponent("french"))
+                _ = await SelfTest.loaded(host.page, timeout: .seconds(5))
                 try? await Task.sleep(for: .milliseconds(1500))
-                host.browser.execute(CefChromeCommand(rawValue: Int(IDC_SHOW_TRANSLATE)))
+                host.page.execute(CefChromeCommand(rawValue: Int(IDC_SHOW_TRANSLATE)))
             }),
             T(name: "Manage passwords", how: "`IDC_MANAGE_PASSWORDS_FOR_PAGE`", run: Self.command(IDC_MANAGE_PASSWORDS_FOR_PAGE)),
             T(name: "Save password", how: "fill and submit a sign-in form", wait: .milliseconds(3000),
@@ -477,7 +477,7 @@ final class SurfaceInventory {
                   """)),
             T(name: "Autofill dropdown", how: "click a field with `autocomplete=email`", run: { host in
                 await Self.gesture("document.querySelector('[autocomplete=email]').focus()")(host)
-                _ = try? await host.browser.devTools.send("Input.insertText", ["text": "a"])
+                _ = try? await host.page.devTools.send("Input.insertText", ["text": "a"])
             }),
             T(name: "Download", how: "click a `download` link", wait: .milliseconds(2500), run: Self.click("download1")),
             T(name: "Multiple downloads", how: "two downloads from one gesture", wait: .milliseconds(2500),
@@ -494,7 +494,7 @@ final class SurfaceInventory {
             T(name: "Protocol handler", how: "`registerProtocolHandler('web+cefswift', …)`",
               run: Self.gesture("navigator.registerProtocolHandler('web+cefswift', '/page?%s')")),
             T(name: "Popup without gesture", how: "`window.open` from a timer", run: { host in
-                _ = try? await host.browser.evaluateJavaScript("setTimeout(() => window.open('/page'), 10); 0")
+                _ = try? await host.page.evaluateJavaScript("setTimeout(() => window.open('/page'), 10); 0")
             }),
             T(name: "Screen share", how: "`getDisplayMedia()` (denied by the delegate)",
               run: Self.gesture("navigator.mediaDevices.getDisplayMedia({video: true}).catch(() => {})")),
@@ -532,7 +532,7 @@ final class SurfaceInventory {
             T(name: "Crashed tab", how: "load `chrome://crash`", wait: .milliseconds(2500), run: Self.load("chrome://crash")),
             T(name: "Context menu", how: "right click (CefKit presents it)", run: { host in
                 for type in ["mousePressed", "mouseReleased"] {
-                    _ = try? await host.browser.devTools.send(
+                    _ = try? await host.page.devTools.send(
                         "Input.dispatchMouseEvent", ["type": .string(type), "x": 300, "y": 400, "button": "right", "clickCount": 1])
                 }
             }),

@@ -3,7 +3,7 @@ import CCef
 import Foundation
 
 /// A JavaScript dialog request delivered to
-/// ``CefBrowserDelegate/browser(_:runJavaScriptDialog:)``.
+/// ``CefPageDelegate/page(_:runJavaScriptDialog:)``.
 public struct CefJavaScriptDialog: Sendable, Equatable {
     /// The kind of JavaScript dialog the page is asking to display.
     public enum Kind: Sendable, Equatable {
@@ -41,9 +41,9 @@ public struct CefJavaScriptDialog: Sendable, Equatable {
 }
 
 /// Native presentation for the dialogs pages can raise — the defaults behind
-/// the corresponding ``CefBrowserDelegate`` methods. Call these from your own
+/// the corresponding ``CefPageDelegate`` methods. Call these from your own
 /// delegate to keep the stock UI for some cases while customizing others. Sheets attach to
-/// the browser's window when it has one, so the app stays responsive.
+/// the page's window when it has one, so the app stays responsive.
 @MainActor
 public enum CefDialogPresenter {
     /// Presents `dialog` and returns the user's answer.

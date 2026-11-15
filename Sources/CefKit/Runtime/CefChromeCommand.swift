@@ -2,8 +2,8 @@ import CCef
 import Foundation
 
 /// One of Chrome's own commands (`IDC_*`). Run it with
-/// ``CefBrowser/execute(_:disposition:)``, intercept it in
-/// ``CefBrowserDelegate/browser(_:handleChromeCommand:disposition:)``, or hide
+/// ``CefPage/execute(_:disposition:)``, intercept it in
+/// ``CefPageDelegate/page(_:handleChromeCommand:disposition:)``, or hide
 /// it from Chrome's app menu with ``CefRuntime/Configuration/ChromeToolbar``.
 ///
 /// The named constants cover the common commands; any other `IDC_*` value

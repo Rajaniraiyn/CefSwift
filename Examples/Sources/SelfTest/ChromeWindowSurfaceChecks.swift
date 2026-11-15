@@ -20,7 +20,7 @@ extension SelfTest {
         } catch {
             return check("chrome window surfaces: opens a window", false, detail: "\(error)")
         }
-        _ = await waitUntil(timeout: .seconds(10)) { window.window != nil && window.activeTab?.browser != nil }
+        _ = await waitUntil(timeout: .seconds(10)) { window.window != nil && window.activeTab?.page != nil }
         window.showsChromeUI = false
         window.setTopBar { Text("Top bar").frame(maxWidth: .infinity, maxHeight: .infinity) }
         _ = await waitUntil(timeout: .seconds(2)) { window.topBarHeight > 0 }
@@ -29,7 +29,7 @@ extension SelfTest {
         window.onChromiumSurface = { seen.append($0) }
 
         // Chromium's own QR code bubble, under the app's top bar.
-        guard let first = window.activeTab?.browser else { return check("chrome window surfaces: has a browser", false) }
+        guard let first = window.activeTab?.page else { return check("chrome window surfaces: has a browser", false) }
         _ = try? await first.waitUntilLoaded(timeout: .seconds(10))
         first.execute(.createQRCode)
         let native = await waitUntil(timeout: .seconds(5)) { window.chromiumSurfaces.contains { $0.kind == .qrCode && $0.window != nil } }
@@ -37,7 +37,7 @@ extension SelfTest {
         let pageTop = (window.window?.contentView).map { $0.frame.maxY - window.contentFrame.minY } ?? 0
         let qrTop = qr?.window.flatMap { child in window.window.map { child.frame.maxY - $0.frame.minY } } ?? 0
         check("chrome window surfaces: Chromium's QR code bubble is a surface of the window, under the app's top bar",
-              native && qr?.browser === first && qr?.chromeWindow === window && qrTop <= pageTop + 1 && qrTop > pageTop - 40,
+              native && qr?.page === first && qr?.chromeWindow === window && qrTop <= pageTop + 1 && qrTop > pageTop - 40,
               detail: "native \(native) kinds \(window.chromiumSurfaces.map { "\($0.kind)" }) top \(qrTop) page top \(pageTop) children \(childDescriptions(window)) hooks \(CefTesting.runtimeHookFeatures.filter { $0.name.contains("surfaces") })")
         qr?.dismiss()
         _ = await waitUntil(timeout: .seconds(3)) { qr?.window?.isVisible != true }
@@ -47,7 +47,7 @@ extension SelfTest {
         window.setCustomPresentation(for: .qrCode) { presented.append($0) }
         first.execute(.createQRCode)
         check("chrome window surfaces: a custom presentation gets the command, for the active tab",
-              await waitUntil(timeout: .seconds(3)) { presented.count == 1 } && presented.first?.browser === first
+              await waitUntil(timeout: .seconds(3)) { presented.count == 1 } && presented.first?.page === first
                 && presented.first?.state == .presented,
               detail: "presented \(presented.count)")
 
@@ -57,17 +57,17 @@ extension SelfTest {
         let bar = window.pageBar
         check("chrome window surfaces: the custom find bar shows for the active tab's find session",
               await waitUntil(timeout: .seconds(3)) { bar?.isHidden == false && first.findSession.isActive }
-                && window.chromiumSurfaces.contains { $0.kind == .findBar && $0.window == nil && $0.browser === first },
+                && window.chromiumSurfaces.contains { $0.kind == .findBar && $0.window == nil && $0.page === first },
               detail: "bar \(bar.map { "\($0.isHidden)" } ?? "none") session \(first.findSession.isActive)")
 
         // Switching tabs: the QR panel about the first tab is dismissed, the
         // find bar hides with its search kept, and comes back.
         await expect("chrome window surfaces: switching tabs dismisses the tab's bubbles and keeps its find bar") {
             let second = try await window.openTab(url("two"))
-            let switched = await waitUntil(timeout: .seconds(5)) { second.isActive && window.activeTab?.browser != nil }
+            let switched = await waitUntil(timeout: .seconds(5)) { second.isActive && window.activeTab?.page != nil }
             let qrDismissed = await waitUntil(timeout: .seconds(3)) { presented.first?.state == .dismissed(.chromium) }
             let barHidden = await waitUntil(timeout: .seconds(3)) { bar?.isHidden == true }
-            guard let firstTab = window.tabs.first(where: { $0.browser === first }) else { return (false, "no first tab") }
+            guard let firstTab = window.tabs.first(where: { $0.page === first }) else { return (false, "no first tab") }
             try await firstTab.select()
             let barBack = await waitUntil(timeout: .seconds(3)) { bar?.isHidden == false }
             let kept = first.findSession.isActive
@@ -92,8 +92,8 @@ extension SelfTest {
 
         window.close()
         _ = await waitUntil(timeout: .seconds(10)) { window.isClosed }
-        for browser in CefRuntime.shared.browsers { browser.close(force: true) }
-        _ = await waitUntil { CefRuntime.shared.browsers.isEmpty }
+        for page in CefRuntime.shared.pages { page.close(force: true) }
+        _ = await waitUntil { CefRuntime.shared.pages.isEmpty }
     }
 
     private static func childDescriptions(_ window: CefChromeWindow) -> String {

@@ -72,7 +72,7 @@ extension SamplePage {
 
     private static let tourText = [
         "CefSwift embeds Chromium in a macOS app through the Chromium Embedded Framework.",
-        "Each CefBrowser is an observable model: its title, address and progress are properties a view reads.",
+        "Each CefPage is an observable model: its title, address and progress are properties a view reads.",
         "Pages like this one come from a CefSchemeHandler, so the gallery works offline.",
     ]
 

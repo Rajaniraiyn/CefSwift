@@ -21,14 +21,14 @@ extension SelfTest {
 
     static func sandboxChecks() async {
         let expected = CefRuntime.shared.configuration?.isSandboxEnabled == true
-        let browser = CefBrowser(url: URL(string: "selftest://edge/tab.html")!)
-        let view = hostWindowed(browser)
+        let page = CefPage(url: URL(string: "selftest://edge/tab.html")!)
+        let view = hostWindowed(page)
         defer {
-            browser.close(force: true)
+            page.close(force: true)
             view.removeFromSuperview()
         }
-        guard await loaded(browser, title: "tab") else {
-            check("sandbox: page loads", false, detail: browser.title)
+        guard await loaded(page, title: "tab") else {
+            check("sandbox: page loads", false, detail: page.title)
             return
         }
         // The Alerts helper posts system notifications for Chromium and, as

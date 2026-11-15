@@ -3,23 +3,23 @@ import CefSwiftUI
 import SwiftUI
 
 /// The address of the link under the pointer, at the page's lower left, in
-/// place of Chromium's status bubble: ``CefBrowser/statusText`` drawn over
+/// place of Chromium's status bubble: ``CefPage/statusText`` drawn over
 /// the page.
 struct StatusBubble: BrowserFeature {
-    func configure(_ configuration: inout CefBrowser.Configuration) {
+    func configure(_ configuration: inout CefPage.Configuration) {
         configuration.showsChromiumStatusBubble = false
     }
 
-    func pageOverlay(for browser: CefBrowser) -> some View {
-        Bubble(browser: browser)
+    func pageOverlay(for page: CefPage) -> some View {
+        Bubble(page: page)
     }
 
     private struct Bubble: View {
-        let browser: CefBrowser
+        let page: CefPage
 
         var body: some View {
-            if !browser.statusText.isEmpty {
-                Text(browser.statusText)
+            if !page.statusText.isEmpty {
+                Text(page.statusText)
                     .font(.caption)
                     .lineLimit(1)
                     .truncationMode(.middle)

@@ -9,8 +9,8 @@ import Testing
 struct DeadlineTests {
     struct TimedOut: Error {}
 
-    /// An await that ignores cancellation, as a browser's `ready()` does
-    /// while Chromium never creates the browser.
+    /// An await that ignores cancellation, as a page's `ready()` does
+    /// while Chromium never creates the page.
     @MainActor final class Stuck {
         var continuation: CheckedContinuation<Void, Never>?
         func wait() async { await withCheckedContinuation { continuation = $0 } }
@@ -25,7 +25,7 @@ struct DeadlineTests {
     @Test func passesTheOperationsError() async {
         await #expect(throws: CefError.self) {
             try await withDeadline(.seconds(5), timeoutError: TimedOut()) { () async throws -> Int in
-                throw CefError.browserClosed
+                throw CefError.pageClosed
             }
         }
     }
@@ -149,7 +149,7 @@ struct DeadlineTests {
 }
 
 /// `CefPendingOperations`: callers waiting for a script's result, a
-/// DevTools reply, a browser's creation.
+/// DevTools reply, a page's creation.
 @MainActor
 struct PendingOperationsTests {
     @Test func aCancelledWaiterResumesAtOnceAndItsLateResultIsDropped() async {
@@ -210,7 +210,7 @@ struct PendingOperationsTests {
         let pending = CefPendingOperations<Int>()
         let waiters = (0..<100).map { _ in Task { @MainActor in try await pending.wait() } }
         while pending.count < 100 { await Task.yield() }
-        pending.completeAll(.failure(CefError.browserClosed))
+        pending.completeAll(.failure(CefError.pageClosed))
         for waiter in waiters {
             let result = await waiter.result
             #expect(throws: CefError.self) { try result.get() }

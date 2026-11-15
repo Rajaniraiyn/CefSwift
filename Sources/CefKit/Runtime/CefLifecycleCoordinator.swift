@@ -2,21 +2,21 @@ import AppKit
 import CCef
 import Foundation
 
-extension CefBrowser {
+extension CefPage {
     /// Where a page is in its lifecycle, following the states of the web's
     /// Page Lifecycle (`document.visibilityState`, `document.hasFocus()`).
     ///
     /// | State | Page Lifecycle | When |
     /// |---|---|---|
-    /// | ``active`` | active | On screen, in the key window of the active app, and the browser's view has focus. |
+    /// | ``active`` | active | On screen, in the key window of the active app, and the page's view has focus. |
     /// | ``passive`` | passive | On screen without focus: another view, window or app has it. |
     /// | ``hidden`` | hidden | Not on screen: its window is covered, minimized or ordered out, the app is hidden, its tab is not selected, its view is hidden or out of a window, or it is not open yet. |
-    /// | ``discarded`` | discarded | Its page was discarded to free memory (``CefBrowser/discard()``). |
+    /// | ``discarded`` | discarded | Its page was discarded to free memory (``CefPage/discard()``). |
     ///
     /// The web's frozen state has no counterpart: Chromium's way of
     /// freezing a page from outside (`Page.setWebLifecycleState`) stops its
     /// timers but leaves other script running, and frees no memory;
-    /// ``CefBrowser/discard()`` frees the page instead.
+    /// ``CefPage/discard()`` frees the page instead.
     public enum Lifecycle: Sendable, Equatable {
         case active
         case passive
@@ -38,14 +38,14 @@ extension CefRuntime {
     /// ```
     ///
     /// While Low Power Mode is on, or the Mac reports serious or critical
-    /// thermal pressure, offscreen browsers draw at most
+    /// thermal pressure, offscreen pages draw at most
     /// ``reducedOffscreenFrameRate`` frames a second: on an animated page that
-    /// halves the CPU time a browser takes at 60 frames a second. Hidden
-    /// browsers draw nothing in any case, and windows Chromium draws itself
+    /// halves the CPU time a page takes at 60 frames a second. Hidden
+    /// pages draw nothing in any case, and windows Chromium draws itself
     /// keep the display's rate.
     public struct EnergyPolicy: Sendable, Equatable {
-        /// The highest frame rate offscreen browsers draw at while energy is
-        /// constrained; `nil` keeps each browser's own rate.
+        /// The highest frame rate offscreen pages draw at while energy is
+        /// constrained; `nil` keeps each page's own rate.
         public var reducedOffscreenFrameRate: Int?
 
         public init(reducedOffscreenFrameRate: Int? = 30) {
@@ -78,19 +78,19 @@ struct CefEnergyConditions: Equatable {
 }
 
 /// Turns window, app and system signals into what Chromium is told, and
-/// publishes each browser's ``CefBrowser/lifecycle``.
+/// publishes each page's ``CefPage/lifecycle``.
 ///
-/// - Visibility: Chromium hides a windowed browser's page itself when its
+/// - Visibility: Chromium hides a windowed page's content itself when its
 ///   window is covered by one of the session's windows, but not when the
 ///   window is minimized or ordered out or the app is hidden; the
 ///   coordinator hides Chromium's view whenever the window cannot be seen
-///   (`was_hidden` does nothing for windowed browsers). Offscreen views
+///   (`was_hidden` does nothing for windowed pages). Offscreen views
 ///   report their own visibility through `was_hidden`; Chrome-style
 ///   windows are Chromium's.
 /// - Energy: offscreen frame rates under ``CefRuntime/energyPolicy``.
-/// - Discarding: a discarded browser that comes on screen loads its page
+/// - Discarding: a discarded page that comes on screen loads its page
 ///   again. When to discard is the app's to decide
-///   (``CefBrowser/discard()``).
+///   (``CefPage/discard()``).
 ///
 /// Chromium watches memory pressure and system sleep itself, and turns
 /// App Nap off for the browser process (`NSAppSleepDisabled`), so none of
@@ -150,7 +150,7 @@ final class CefLifecycleCoordinator {
         responderObservations = [:]
     }
 
-    /// Updates every browser on the next turn of the run loop, once.
+    /// Updates every page on the next turn of the run loop, once.
     func setNeedsUpdate() {
         guard !isUpdateScheduled else { return }
         isUpdateScheduled = true
@@ -165,36 +165,36 @@ final class CefLifecycleCoordinator {
     func update(isAppUnhiding: Bool = false) {
         let conditions = conditions
         var windows = Set<ObjectIdentifier>()
-        for browser in CefRuntime.shared.browsers {
-            let window = browser.lifecycleWindow
+        for page in CefRuntime.shared.pages {
+            let window = page.lifecycleWindow
             if let window {
                 windows.insert(ObjectIdentifier(window))
                 observeFirstResponder(of: window)
             }
-            applyNativeViewVisibility(browser, window: window, isAppUnhiding: isAppUnhiding)
-            let lifecycle = Self.lifecycle(of: browser, in: window)
-            if browser.lifecycle != lifecycle { browser.lifecycle = lifecycle }
-            applyFrameRate(browser, conditions: conditions)
+            applyNativeViewVisibility(page, window: window, isAppUnhiding: isAppUnhiding)
+            let lifecycle = Self.lifecycle(of: page, in: window)
+            if page.lifecycle != lifecycle { page.lifecycle = lifecycle }
+            applyFrameRate(page, conditions: conditions)
         }
         responderObservations = responderObservations.filter { windows.contains($0.key) }
-        restoreDiscardedBrowsersOnScreen()
+        restoreDiscardedPagesOnScreen()
     }
 
-    // MARK: Discarded browsers
+    // MARK: Discarded pages
 
-    /// Restores discarded browsers that are on screen again.
-    private func restoreDiscardedBrowsersOnScreen() {
-        for browser in CefRuntime.shared.browsers where browser.isDiscarded && browser.isOnScreen {
-            switch browser.discardPhase {
+    /// Restores discarded pages that are on screen again.
+    private func restoreDiscardedPagesOnScreen() {
+        for page in CefRuntime.shared.pages where page.isDiscarded && page.isOnScreen {
+            switch page.discardPhase {
             case .closed:
-                browser.restore()
+                page.restore()
             case .discarded:
                 // Chromium loads a discarded tab again when it is shown; make
                 // sure, in case the tab was discarded while merely covered.
-                Task { @MainActor [weak browser] in
+                Task { @MainActor [weak page] in
                     try? await Task.sleep(for: .milliseconds(500))
-                    if let browser, browser.isDiscarded, browser.discardPhase == .discarded, browser.isOnScreen {
-                        browser.restore()
+                    if let page, page.isDiscarded, page.discardPhase == .discarded, page.isOnScreen {
+                        page.restore()
                     }
                 }
             default:
@@ -214,78 +214,78 @@ final class CefLifecycleCoordinator {
 
     // MARK: Lifecycle
 
-    static func lifecycle(of browser: CefBrowser, in window: NSWindow?) -> CefBrowser.Lifecycle {
-        if browser.isDiscarded { return .discarded }
-        guard browser.state == .live, let window, isVisible(browser, in: window) else { return .hidden }
-        return hasFocus(browser, in: window) ? .active : .passive
+    static func lifecycle(of page: CefPage, in window: NSWindow?) -> CefPage.Lifecycle {
+        if page.isDiscarded { return .discarded }
+        guard page.state == .live, let window, isVisible(page, in: window) else { return .hidden }
+        return hasFocus(page, in: window) ? .active : .passive
     }
 
-    private static func isVisible(_ browser: CefBrowser, in window: NSWindow) -> Bool {
+    private static func isVisible(_ page: CefPage, in window: NSWindow) -> Bool {
         guard window.occlusionState.contains(.visible), window.isVisible, !window.isMiniaturized else { return false }
-        if browser.isOffscreen {
-            guard !browser.isHostViewHidden, let host = browser.hostView else { return false }
+        if page.isOffscreen {
+            guard !page.isHostViewHidden, let host = page.hostView else { return false }
             return host.window === window && !host.isHiddenOrHasHiddenAncestor
         }
-        if let host = browser.hostView, host.window !== window || host.isHiddenOrHasHiddenAncestor { return false }
-        if let native = browser.nativeView, native.window == nil || native.isHiddenOrHasHiddenAncestor { return false }
+        if let host = page.hostView, host.window !== window || host.isHiddenOrHasHiddenAncestor { return false }
+        if let native = page.nativeView, native.window == nil || native.isHiddenOrHasHiddenAncestor { return false }
         return true
     }
 
-    private static func hasFocus(_ browser: CefBrowser, in window: NSWindow) -> Bool {
+    private static func hasFocus(_ page: CefPage, in window: NSWindow) -> Bool {
         guard NSApp.isActive, window.isKeyWindow, let responder = window.firstResponder as? NSView else { return false }
-        guard let root = browser.isOffscreen ? browser.hostView : browser.nativeView else { return false }
+        guard let root = page.isOffscreen ? page.hostView : page.nativeView else { return false }
         return responder === root || responder.isDescendant(of: root)
     }
 
-    // MARK: Windowed browsers
+    // MARK: Windowed pages
 
     /// Hides Chromium's view in a window that is minimized or ordered out,
     /// or while the app is hidden, which Chromium does not notice for a
     /// view in the app's own window; shows it again after.
-    private func applyNativeViewVisibility(_ browser: CefBrowser, window: NSWindow?, isAppUnhiding: Bool) {
-        guard browser.isWindowedInAppView, let native = browser.nativeView, let window else { return }
+    private func applyNativeViewVisibility(_ page: CefPage, window: NSWindow?, isAppUnhiding: Bool) {
+        guard page.isWindowedInAppView, let native = page.nativeView, let window else { return }
         // Covered windows Chromium mostly notices itself, but not when the
         // cover belongs to another space or app it does not track, and it
         // shows the page again whenever the view moves or shows; so any
         // window that cannot be seen counts.
         let shouldHide = !isAppUnhiding
             && (window.isMiniaturized || !window.isVisible || NSApp.isHidden || !window.occlusionState.contains(.visible))
-        if shouldHide, !browser.lifecycleHidNativeView, !native.isHidden {
+        if shouldHide, !page.lifecycleHidNativeView, !native.isHidden {
             if let responder = window.firstResponder as? NSView, responder === native || responder.isDescendant(of: native) {
-                browser.responderBeforeLifecycleHide = responder
+                page.responderBeforeLifecycleHide = responder
             }
             native.isHidden = true
-            browser.lifecycleHidNativeView = true
-        } else if !shouldHide, browser.lifecycleHidNativeView {
+            page.lifecycleHidNativeView = true
+        } else if !shouldHide, page.lifecycleHidNativeView {
             native.isHidden = false
-            browser.lifecycleHidNativeView = false
-            if let responder = browser.responderBeforeLifecycleHide, window.firstResponder === window {
+            page.lifecycleHidNativeView = false
+            if let responder = page.responderBeforeLifecycleHide, window.firstResponder === window {
                 window.makeFirstResponder(responder)
             }
-            browser.responderBeforeLifecycleHide = nil
+            page.responderBeforeLifecycleHide = nil
         }
     }
 
     // MARK: Energy
 
-    private func applyFrameRate(_ browser: CefBrowser, conditions: CefEnergyConditions) {
-        guard browser.isOffscreen, browser.state == .live, case .offscreen(let created) = browser.configuration.rendering
+    private func applyFrameRate(_ page: CefPage, conditions: CefEnergyConditions) {
+        guard page.isOffscreen, page.state == .live, case .offscreen(let created) = page.configuration.rendering
         else { return }
-        var rate = browser.offscreenFrameRate
+        var rate = page.offscreenFrameRate
         if conditions.isConstrained, let reduced = energyPolicy.reducedOffscreenFrameRate {
             rate = min(rate, reduced)
         }
-        // A rate below the one the browser was created with does not hold:
+        // A rate below the one the page was created with does not hold:
         // Chromium goes back to it now and then, while still reporting the
         // lower one. It is set again on every update and twice a second.
         let isReduced = rate < created
         if isReduced { needsFrameRateRefresh = true }
-        guard browser.appliedOffscreenFrameRate != rate || isReduced else { return }
-        browser.appliedOffscreenFrameRate = rate
-        browser.withHost { $0.pointee.set_windowless_frame_rate($0, Int32(rate)) }
+        guard page.appliedOffscreenFrameRate != rate || isReduced else { return }
+        page.appliedOffscreenFrameRate = rate
+        page.withHost { $0.pointee.set_windowless_frame_rate($0, Int32(rate)) }
     }
 
-    /// Set during an update when some browser runs below its own rate.
+    /// Set during an update when some page runs below its own rate.
     private var needsFrameRateRefresh = false {
         didSet { if needsFrameRateRefresh != oldValue { scheduleFrameRateRefresh() } }
     }
@@ -306,15 +306,15 @@ final class CefLifecycleCoordinator {
     }
 }
 
-extension CefBrowser {
-    /// The window whose state decides whether the browser can be seen.
+extension CefPage {
+    /// The window whose state decides whether the page can be seen.
     var lifecycleWindow: NSWindow? {
         if let window = hostView?.window { return window }
         if let window = CefWindow.hosting(self)?.window { return window }
         return nativeView?.window
     }
 
-    /// Whether this is an Alloy browser whose Chromium view sits in one of
+    /// Whether this is an Alloy page whose Chromium view sits in one of
     /// the app's views.
     var isWindowedInAppView: Bool {
         isEmbeddedView && !isOffscreen && !isChromeStyle

@@ -20,7 +20,7 @@ let package = Package(
             ],
             exclude: ["cefapp.json", "Browser.entitlements", "Browser-Distribution.entitlements"]
         ),
-        // The Browser example's WebKit tabs (SystemBrowser, SystemWebView):
+        // The Browser example's WebKit tabs (SystemPage, SystemWebView):
         // pages in the system's WKWebView, which plays H.264/AAC and
         // FairPlay content Chromium in CefSwift does not. Not CEF; shows
         // how an app puts WebKit beside CefKit with its public API.

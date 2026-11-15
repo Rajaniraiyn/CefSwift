@@ -1,19 +1,19 @@
 import AppKit
 
-/// Connects a ``CefOffscreenBrowserView`` to its browser's
+/// Connects a ``CefOffscreenPageView`` to its page's
 /// ``CefAccessibilityTree``: keeps one element per node, turns the tree on
 /// when an assistive app shows up, and posts AppKit notifications for
 /// Chromium's changes.
 @MainActor
 final class CefOffscreenAccessibilityBridge {
-    weak var view: CefOffscreenBrowserView?
+    weak var view: CefOffscreenPageView?
     private var elements: [CefAccessibilityNode.ID: CefOffscreenAccessibilityElement] = [:]
     private var voiceOverObservation: NSKeyValueObservation?
     private nonisolated(unsafe) var applicationObserver: NSObjectProtocol?
     private var layoutNotificationPending = false
     private var rootID: CefAccessibilityNode.ID?
 
-    init(view: CefOffscreenBrowserView) {
+    init(view: CefOffscreenPageView) {
         self.view = view
         voiceOverObservation = NSWorkspace.shared.observe(\.isVoiceOverEnabled) { [weak self] _, _ in
             DispatchQueue.main.async {
@@ -33,19 +33,19 @@ final class CefOffscreenAccessibilityBridge {
         if let applicationObserver { NotificationCenter.default.removeObserver(applicationObserver) }
     }
 
-    /// The tree of the view's browser, while it is being built.
+    /// The tree of the view's page, while it is being built.
     var tree: CefAccessibilityTree? {
-        guard let browser = view?.browser, browser.isAccessibilityEnabled else { return nil }
-        return browser.accessibilityTree
+        guard let page = view?.page, page.isAccessibilityEnabled else { return nil }
+        return page.accessibilityTree
     }
 
-    /// Asks the browser for its tree when an assistive app is present.
+    /// Asks the page for its tree when an assistive app is present.
     func requestTree() {
-        view?.browser?.requestAccessibilityTree()
+        view?.page?.requestAccessibilityTree()
     }
 
     /// Turns the tree on early when something already asked for it.
-    func browserDidChange() {
+    func pageDidChange() {
         let removed = elements.values
         elements = [:]
         rootID = nil
@@ -84,7 +84,7 @@ final class CefOffscreenAccessibilityBridge {
     }
 
     func perform(_ action: CefAccessibilityAction, on id: CefAccessibilityNode.ID) {
-        guard let view, let browser = view.browser else { return }
+        guard let view, let page = view.page else { return }
         switch action {
         case .focus, .press, .increment, .decrement, .setValue:
             // The page takes focus only while its view is first responder.
@@ -92,7 +92,7 @@ final class CefOffscreenAccessibilityBridge {
         case .scrollToVisible, .showMenu:
             break
         }
-        Task { await browser.performAccessibilityAction(action, on: id) }
+        Task { await page.performAccessibilityAction(action, on: id) }
     }
 
     // MARK: Notifications
@@ -158,10 +158,10 @@ final class CefOffscreenAccessibilityBridge {
             NSAccessibility.post(element: element, notification: notification)
         }
         NotificationCenter.default.post(
-            name: CefOffscreenBrowserView.didPostAccessibilityNotification, object: view,
+            name: CefOffscreenPageView.didPostAccessibilityNotification, object: view,
             userInfo: [
-                CefOffscreenBrowserView.accessibilityNotificationKey: notification,
-                CefOffscreenBrowserView.accessibilityElementKey: element,
+                CefOffscreenPageView.accessibilityNotificationKey: notification,
+                CefOffscreenPageView.accessibilityElementKey: element,
             ])
     }
 }

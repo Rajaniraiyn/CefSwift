@@ -52,7 +52,7 @@ extension SelfTest {
         CefRuntime.shared.registerSchemeHandler(scheme: "selftest", domain: "threads", handler: ThreadPages())
         CefRuntime.shared.registerSchemeHandler(scheme: "selftest", domain: "main-actor", handler: MainActorPages(title: "from the main actor"))
 
-        var configuration = CefBrowser.Configuration()
+        var configuration = CefPage.Configuration()
         configuration.requestFilter = CefRequestFilter { request in
             // On macOS 15 and later this asks the executor's checkIsolated(),
             // since the filter runs inside a CEF callback, not an actor job.
@@ -60,22 +60,22 @@ extension SelfTest {
             ioFilteredRequests += 1
             return request.url?.path == "/blocked" ? .block : .allow
         }
-        let browser = CefBrowser(url: URL(string: "selftest://threads/page.html")!, configuration: configuration)
-        let view = hostWindowed(browser)
-        _ = await loaded(browser, title: "threads")
+        let page = CefPage(url: URL(string: "selftest://threads/page.html")!, configuration: configuration)
+        let view = hostWindowed(page)
+        _ = await loaded(page, title: "threads")
 
         let filtered = await Task { @CefIOActor in ioFilteredRequests }.value
         check("threads: a request filter keeps state on CefIOActor without a lock", filtered >= 1, detail: "\(filtered)")
         await expect("threads: a request filter blocks on the IO thread") {
-            try await browser.evaluateJavaScript("fetch('/blocked').then(() => 'loaded', () => 'blocked')").stringValue == "blocked"
+            try await page.evaluateJavaScript("fetch('/blocked').then(() => 'loaded', () => 'blocked')").stringValue == "blocked"
         }
         await expect("threads: a streamed body arrives whole") {
-            try await browser.evaluateJavaScript("""
+            try await page.evaluateJavaScript("""
                 fetch('/stream').then(r => r.arrayBuffer()).then(b => b.byteLength)
                 """).intValue == ThreadPages.streamSize
         }
         await expect("threads: a streamed body without a length arrives whole") {
-            try await browser.evaluateJavaScript("""
+            try await page.evaluateJavaScript("""
                 fetch('/stream-unsized').then(r => r.arrayBuffer()).then(b => b.byteLength)
                 """).intValue == ThreadPages.streamSize
         }
@@ -89,7 +89,7 @@ extension SelfTest {
         ]
         for (path, header, expected) in ranges {
             await expect("threads: \(header) on \(path) gets 206 and those bytes") {
-                let reply = try await browser.evaluateJavaScript("""
+                let reply = try await page.evaluateJavaScript("""
                     fetch('\(path)', { headers: { Range: '\(header)' } })
                       .then(async r => [r.status, r.headers.get('content-range'), [...new Uint8Array(await r.arrayBuffer())]])
                     """)
@@ -102,18 +102,18 @@ extension SelfTest {
             }
         }
         await expect("threads: an unsatisfiable range gets 416") {
-            try await browser.evaluateJavaScript(
+            try await page.evaluateJavaScript(
                 "fetch('/file', { headers: { Range: 'bytes=\(size + 10)-' } }).then(r => r.status)").intValue == 416
         }
         await expect("threads: a file body arrives whole") {
-            try await browser.evaluateJavaScript("fetch('/file').then(r => r.arrayBuffer()).then(b => b.byteLength)").intValue
+            try await page.evaluateJavaScript("fetch('/file').then(r => r.arrayBuffer()).then(b => b.byteLength)").intValue
                 == ThreadPages.streamSize
         }
         await expect("threads: a main-actor scheme handler serves pages") {
-            try await browser.evaluateJavaScript("fetch('selftest://main-actor/x').then(r => r.text())").stringValue
+            try await page.evaluateJavaScript("fetch('selftest://main-actor/x').then(r => r.text())").stringValue
                 == "from the main actor"
         }
-        await closeHosted(browser, view)
+        await closeHosted(page, view)
     }
 
     /// Run while the app terminates, after `cef_shutdown()`: a job sent then

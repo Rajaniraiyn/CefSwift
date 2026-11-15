@@ -64,7 +64,7 @@ let package = Package(
             linkerSettings: [.linkedFramework("AppKit")]
         ),
         // Optional: WebAuthn answered by the app, or refused, instead of
-        // Chromium. A CefBrowserAttachment over the DevTools protocol.
+        // Chromium. A CefPageAttachment over the DevTools protocol.
         .target(
             name: "CefPasskeys",
             dependencies: ["CefKit"],

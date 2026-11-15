@@ -5,11 +5,11 @@ import Foundation
 /// Chromium builds does.
 ///
 /// The raw value is Chrome's command ID (`IDC_*`, from Chromium's
-/// `chrome_command_ids.h`). Alloy-style browsers (views) number the
+/// `chrome_command_ids.h`). Alloy-style pages (views) number the
 /// items CEF builds with CEF's `MENU_ID_*` values, and Chrome-style ones
 /// (``CefWindow``) number macOS's Speech and Writing Direction items with
 /// values that overlap those; CefKit reads either as the constant here,
-/// so ``copy`` or ``back`` is the same in every browser. The named
+/// so ``copy`` or ``back`` is the same in every page. The named
 /// constants cover the commands Chromium puts in context menus today.
 /// Any other value, such as one a later Chromium adds, is kept as it is
 /// (`init(rawValue:)`), so an item of that kind still shows and still
@@ -192,7 +192,7 @@ public struct CefContextMenuCommand: RawRepresentable, Hashable, Sendable, Custo
     ]
 
     /// The command an item Chromium numbered `commandID` runs, in a menu of
-    /// a Chrome-style browser or an Alloy-style one.
+    /// a Chrome-style page or an Alloy-style one.
     init(chromiumID commandID: Int, isChromeStyle: Bool) {
         let map = isChromeStyle ? Self.chromeTextServices : Self.alloyEquivalents
         self = map[commandID] ?? Self(rawValue: commandID)

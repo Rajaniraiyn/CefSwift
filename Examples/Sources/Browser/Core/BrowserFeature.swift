@@ -23,7 +23,7 @@ protocol BrowserFeature {
     /// Adjusts a new tab's browser before Chromium creates it: attachments,
     /// bridges, user scripts, context menu items. The profile is already
     /// chosen.
-    func configure(_ configuration: inout CefBrowser.Configuration)
+    func configure(_ configuration: inout CefPage.Configuration)
 
     /// Called for each new window, once the browser has dressed it: the
     /// windows the browser opens and those Chromium opens itself.
@@ -31,12 +31,12 @@ protocol BrowserFeature {
 
     /// Decides a main-frame navigation, or returns `nil` to leave it to the
     /// features after this one. Navigations no feature decides are allowed.
-    func decidePolicy(for navigation: CefNavigationAction, in browser: CefBrowser) -> CefNavigationDecision?
+    func decidePolicy(for navigation: CefNavigationAction, in page: CefPage) -> CefNavigationDecision?
 
     /// Answers a page's request for the camera, location and the like, or
     /// returns `nil` to leave it to the features after this one. Requests
     /// no feature answers are denied.
-    func decidePermission(for request: CefPermissionRequest, in browser: CefBrowser) async -> CefPermissionDecision?
+    func decidePermission(for request: CefPermissionRequest, in page: CefPage) async -> CefPermissionDecision?
 
     /// Menu bar commands.
     @CommandsBuilder func commands(for controller: BrowserController) -> MenuCommands
@@ -46,10 +46,10 @@ protocol BrowserFeature {
 
     /// Views for one place in a tab's toolbar. They can read the
     /// ``BrowserController`` from the environment.
-    @ViewBuilder func toolbarItems(_ placement: ToolbarPlacement, for browser: CefBrowser) -> ToolbarItems
+    @ViewBuilder func toolbarItems(_ placement: ToolbarPlacement, for page: CefPage) -> ToolbarItems
 
     /// A view laid over the page of every window, passing clicks through.
-    @ViewBuilder func pageOverlay(for browser: CefBrowser) -> PageOverlay
+    @ViewBuilder func pageOverlay(for page: CefPage) -> PageOverlay
 }
 
 /// The places in a tab's toolbar that features fill.
@@ -73,10 +73,10 @@ extension EnvironmentValues {
 
 extension BrowserFeature {
     func start(_ controller: BrowserController) {}
-    func configure(_ configuration: inout CefBrowser.Configuration) {}
+    func configure(_ configuration: inout CefPage.Configuration) {}
     func windowDidOpen(_ window: CefChromeWindow) {}
-    func decidePolicy(for navigation: CefNavigationAction, in browser: CefBrowser) -> CefNavigationDecision? { nil }
-    func decidePermission(for request: CefPermissionRequest, in browser: CefBrowser) async -> CefPermissionDecision? { nil }
+    func decidePolicy(for navigation: CefNavigationAction, in page: CefPage) -> CefNavigationDecision? { nil }
+    func decidePermission(for request: CefPermissionRequest, in page: CefPage) async -> CefPermissionDecision? { nil }
 }
 
 extension BrowserFeature where MenuCommands == EmptyCommands {
@@ -88,11 +88,11 @@ extension BrowserFeature where SettingsSection == EmptyView {
 }
 
 extension BrowserFeature where ToolbarItems == EmptyView {
-    func toolbarItems(_ placement: ToolbarPlacement, for browser: CefBrowser) -> EmptyView { EmptyView() }
+    func toolbarItems(_ placement: ToolbarPlacement, for page: CefPage) -> EmptyView { EmptyView() }
 }
 
 extension BrowserFeature where PageOverlay == EmptyView {
-    func pageOverlay(for browser: CefBrowser) -> EmptyView { EmptyView() }
+    func pageOverlay(for page: CefPage) -> EmptyView { EmptyView() }
 }
 
 // MARK: - A list of features
@@ -108,25 +108,25 @@ struct BrowserFeatures<Content: BrowserFeature>: BrowserFeature {
     }
 
     func start(_ controller: BrowserController) { content.start(controller) }
-    func configure(_ configuration: inout CefBrowser.Configuration) { content.configure(&configuration) }
+    func configure(_ configuration: inout CefPage.Configuration) { content.configure(&configuration) }
     func windowDidOpen(_ window: CefChromeWindow) { content.windowDidOpen(window) }
 
-    func decidePolicy(for navigation: CefNavigationAction, in browser: CefBrowser) -> CefNavigationDecision? {
-        content.decidePolicy(for: navigation, in: browser)
+    func decidePolicy(for navigation: CefNavigationAction, in page: CefPage) -> CefNavigationDecision? {
+        content.decidePolicy(for: navigation, in: page)
     }
 
-    func decidePermission(for request: CefPermissionRequest, in browser: CefBrowser) async -> CefPermissionDecision? {
-        await content.decidePermission(for: request, in: browser)
+    func decidePermission(for request: CefPermissionRequest, in page: CefPage) async -> CefPermissionDecision? {
+        await content.decidePermission(for: request, in: page)
     }
 
     func commands(for controller: BrowserController) -> Content.MenuCommands { content.commands(for: controller) }
     var settings: Content.SettingsSection { content.settings }
 
-    func toolbarItems(_ placement: ToolbarPlacement, for browser: CefBrowser) -> Content.ToolbarItems {
-        content.toolbarItems(placement, for: browser)
+    func toolbarItems(_ placement: ToolbarPlacement, for page: CefPage) -> Content.ToolbarItems {
+        content.toolbarItems(placement, for: page)
     }
 
-    func pageOverlay(for browser: CefBrowser) -> Content.PageOverlay { content.pageOverlay(for: browser) }
+    func pageOverlay(for page: CefPage) -> Content.PageOverlay { content.pageOverlay(for: page) }
 }
 
 @MainActor
@@ -151,7 +151,7 @@ struct FeaturePair<First: BrowserFeature, Second: BrowserFeature>: BrowserFeatur
         second.start(controller)
     }
 
-    func configure(_ configuration: inout CefBrowser.Configuration) {
+    func configure(_ configuration: inout CefPage.Configuration) {
         first.configure(&configuration)
         second.configure(&configuration)
     }
@@ -161,13 +161,13 @@ struct FeaturePair<First: BrowserFeature, Second: BrowserFeature>: BrowserFeatur
         second.windowDidOpen(window)
     }
 
-    func decidePolicy(for navigation: CefNavigationAction, in browser: CefBrowser) -> CefNavigationDecision? {
-        first.decidePolicy(for: navigation, in: browser) ?? second.decidePolicy(for: navigation, in: browser)
+    func decidePolicy(for navigation: CefNavigationAction, in page: CefPage) -> CefNavigationDecision? {
+        first.decidePolicy(for: navigation, in: page) ?? second.decidePolicy(for: navigation, in: page)
     }
 
-    func decidePermission(for request: CefPermissionRequest, in browser: CefBrowser) async -> CefPermissionDecision? {
-        if let decision = await first.decidePermission(for: request, in: browser) { return decision }
-        return await second.decidePermission(for: request, in: browser)
+    func decidePermission(for request: CefPermissionRequest, in page: CefPage) async -> CefPermissionDecision? {
+        if let decision = await first.decidePermission(for: request, in: page) { return decision }
+        return await second.decidePermission(for: request, in: page)
     }
 
     @CommandsBuilder func commands(for controller: BrowserController) -> some Commands {
@@ -180,13 +180,13 @@ struct FeaturePair<First: BrowserFeature, Second: BrowserFeature>: BrowserFeatur
         second.settings
     }
 
-    @ViewBuilder func toolbarItems(_ placement: ToolbarPlacement, for browser: CefBrowser) -> some View {
-        first.toolbarItems(placement, for: browser)
-        second.toolbarItems(placement, for: browser)
+    @ViewBuilder func toolbarItems(_ placement: ToolbarPlacement, for page: CefPage) -> some View {
+        first.toolbarItems(placement, for: page)
+        second.toolbarItems(placement, for: page)
     }
 
-    @ViewBuilder func pageOverlay(for browser: CefBrowser) -> some View {
-        first.pageOverlay(for: browser)
-        second.pageOverlay(for: browser)
+    @ViewBuilder func pageOverlay(for page: CefPage) -> some View {
+        first.pageOverlay(for: page)
+        second.pageOverlay(for: page)
     }
 }

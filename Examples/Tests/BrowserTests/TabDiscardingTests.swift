@@ -8,7 +8,7 @@ import Testing
 
     let now = ContinuousClock.now
 
-    func tab(_ id: Int, _ lifecycle: CefBrowser.Lifecycle, since seconds: Int, isLive: Bool = true) -> Tab {
+    func tab(_ id: Int, _ lifecycle: CefPage.Lifecycle, since seconds: Int, isLive: Bool = true) -> Tab {
         Tab(id: id, isLive: isLive, lifecycle: lifecycle, lifecycleChangedAt: now - .seconds(seconds))
     }
 

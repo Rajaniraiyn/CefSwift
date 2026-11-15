@@ -35,7 +35,7 @@ measurably changes them.
 Mojo handlers of Chromium's internal pages from hidden hosts. An earlier
 design opened each page's WebUI app in its host instead. Those hosts cost
 38 to 83 MB each, and their first call took as long as with the handlers.
-The Browser example, measured with `measure-services.py browser` (median of
+The Browser example, measured with `measure-services.py page` (median of
 three) on a build without the passkey and Chromium-panel code:
 
 | Browser example | Handlers: processes | Memory | WebUI apps: processes | Memory |
@@ -144,9 +144,9 @@ Measured and left alone:
   Chromium's AppKit views, not its stores.
 - **CEF's C API.** `cef_request_context_t` and the preference manager
   cover preferences and content settings. `get_navigation_entries` visits
-  one browser's back-forward list, not the profile's history.
+  one page's back-forward list, not the profile's history.
   `download_image` could fetch `chrome://favicon2` icons from a service
-  host's browser without the canvas, but each image is its own renderer
+  host's page without the canvas, but each image is its own renderer
   round trip (Chromium's image downloader runs in the renderer) with no
   batching, and the generic icon would have to be recognized in Swift.
   With the floor of a round trip at 0.13 ms against 0.50 ms for one icon
@@ -184,7 +184,7 @@ store) on CEF 156.0.28.
   it disabled. `fetch` of `chrome://extension-icon` from the host is
   refused by its CSP; `developerPrivate` gives icons as `data:` URLs anyway.
 - **What runs where.** Content scripts, `declarativeNetRequest` and
-  `webRequest` apply in every browser of the profile, Alloy-style views
+  `webRequest` apply in every page of the profile, Alloy-style views
   included; extension pages, popups and Chrome's extension UI need Chrome
   style. CEF makes each `CefWindow` its own Chromium `Browser` of type
   `popup` with one tab (`chrome.windows.getAll()` → `"popup"`), so
@@ -228,7 +228,7 @@ store) on CEF 156.0.28.
 
 ## Tab discarding: the capability, not a policy
 
-CefKit discards a browser only when asked (`CefBrowser.discard()`) and
+CefKit discards a page only when asked (`CefPage.discard()`) and
 restores it when it is shown or used. An earlier design also had a
 runtime-wide `discardPolicy` with a timer, memory-pressure handling and a
 per-browser exemption; how long a tab may stay hidden, what counts as
@@ -237,13 +237,13 @@ moved to the Browser example (`Features/TabDiscarding`), built from
 `lifecycle`, `lifecycleChangedAt`, `discard()` and Dispatch's memory
 pressure source.
 
-### Audio and form input for Alloy browsers
+### Audio and form input for Alloy pages
 
 Chromium's tab rules on `chrome://discards` were taken to cover only
-Chrome-style tabs, so the first version read a `CefWebView` browser's
+Chrome-style tabs, so the first version read a `CefWebView` page's
 main frame by script (`<audio>`/`<video>` playing, `<input>`/`<textarea>`
 edited). That missed other frames, Web Audio and `contenteditable`, and
-read the page; it was removed, and for a while Alloy browsers reported
+read the page; it was removed, and for a while Alloy pages reported
 neither blocker. Page scraping is a last resort, so the native routes
 were tried first, each against the official CEF 156.0.28 (Chromium
 156.0.8078.88) with SelfTest probes:
@@ -265,9 +265,9 @@ were tried first, each against the official CEF 156.0.28 (Chromium
   nodes as they are now. A `FrameNodeImpl` description has `frame_token`,
   the second half of CEF's frame identifier, whose first half is the
   render process id in hexadecimal (`"6-7BDA0EC0…"` and
-  `"7BDA0EC0…"`), so a browser's page is found exactly from its main
+  `"7BDA0EC0…"`), so a page's document is found exactly from its main
   frame. In the probe an audio element, Web Audio and a page muted with
-  `set_audio_muted` were all `is_audible: true` (muting the browser does not
+  `set_audio_muted` were all `is_audible: true` (muting the page does not
   make the page silent, as in Chrome); a playing `<video muted>`, and a page
   whose `play()` was refused for want of a gesture, `false`; a page paused
   a second earlier `false`, with `audible_change_time: "0 hr, 0 min, 1 sec"`;
@@ -363,34 +363,34 @@ same steps work. CEF delivers that session's messages to
 `on_dev_tools_message` but not to its typed callbacks (a reply never
 arrived until `CefDevTools` parsed them there), so `CefDevTools` takes
 messages with a top-level `sessionId` there, and drops their events so
-that listeners never mistake them for the browser's own. A check took
+that listeners never mistake them for the page's own. A check took
 2 to 14 ms measured, subframes included; it enables no domain.
 
 The page node's `PageLiveStateDecorator` data was also read, for
-blockers Alloy browsers do not report. It has `IsConnectedToUSBDevice`,
+blockers Alloy pages do not report. It has `IsConnectedToUSBDevice`,
 `…BluetoothDevice`, `…HidDevice`, `…SerialPort`, `IsCapturingVideo`,
 `…Audio`, `…Window`, `…Display`, `IsBeingMirrored`, `IsAutoDiscardable`,
 `IsPinnedTab` and `IsDevToolsOpen` (`true` in the probe, whose DevTools
 check had attached a session). None was added:
 capture is `.capturingMedia` already, from `on_media_access_change`, for
 both styles; mirroring is casting, which CEF does not have; pinning and
-auto-discardability are Chrome tab-strip state an Alloy browser does not
+auto-discardability are Chrome tab-strip state an Alloy page does not
 have, and its exemptions are the app's policy; and the device flags
 could not be checked without a device and a chooser the user answers, so
-they are not known to be exact for Alloy browsers. Picture in picture is
+they are not known to be exact for Alloy pages. Picture in picture is
 not in the graph's descriptions at all.
 
 ## Passkeys: a module on an attachment, not a CefKit option
 
-App-answered passkeys used to be `CefBrowser.Configuration.passkeys`, with
-passkey members on `CefBrowserDelegate` and a passkey case in CefKit's
+App-answered passkeys used to be `CefPage.Configuration.passkeys`, with
+passkey members on `CefPageDelegate` and a passkey case in CefKit's
 popup handling. They do not need CefKit's internals beyond a DevTools
 session that is in place before the first document, so they moved to the
-optional `CefPasskeys` module, built on `CefBrowserAttachment`. What made
+optional `CefPasskeys` module, built on `CefPageAttachment`. What made
 passkeys special in CefKit, holding the first document and refusing to
 let Chromium create native popups, became one general property an
 attachment declares (`preparesBeforeFirstDocument`): any attachment that
-must see every document from its first script needs both. A browser with
+must see every document from its first script needs both. A page with
 no such attachment keeps native popups and starts on its page at once.
 
 ## Chromium's own features: a module, not CefKit
@@ -461,7 +461,7 @@ observed, hidden and dismissed but not replaced.
 ### Chrome style and a dark page's canvas
 
 A `color-scheme: dark` page without a background of its own shows the
-browser's `backgroundColor` in Chrome style, where Alloy shows Blink's dark
+page's `backgroundColor` in Chrome style, where Alloy shows Blink's dark
 canvas. Blink paints that canvas only when the frame's base background is
 opaque; Chrome style leaves it transparent (the page's own frame reads
 transparent) and paints `kColorWebContentsBackground` behind it, which
@@ -486,33 +486,33 @@ host many tabs in one window were tried on CEF 156 (SelfTest's
 
 | Hosting | What Chromium sees | Result |
 |---|---|---|
-| (a) Several Chrome-style `cef_browser_view_t` in one `cef_window_t` | — | CEF refuses: `CefBrowserViewImpl::AddedToWidget` logs "Cannot add multiple Chrome style BrowserViews" and never creates the second browser; the first keeps working. Chromium's `BrowserWidget` holds one `BrowserView`. |
+| (a) Several Chrome-style `cef_browser_view_t` in one `cef_window_t` | — | CEF refuses: `CefBrowserViewImpl::AddedToWidget` logs "Cannot add multiple Chrome style BrowserViews" and never creates the second page; the first keeps working. Chromium's `BrowserWidget` holds one `BrowserView`. |
 | (b) One `CefWindow` per tab, attached as borderless child windows over the page area of one app window | One popup window of one tab per app tab | Works as AppKit (frame tracking, full screen, minimizing, the page taking the keyboard while the app window stays main, with an override of Chromium's `canBecomeMainWindow`), but Chromium's model is N one-tab windows: no indices, no groups. Built, measured and removed. |
 | (c) Native window tabbing with the system tab bar hidden | As (b) | macOS keeps the tab bar of a group of two or more tabs shown; `toggleTabBar(_:)` does nothing. No custom rail can replace it. |
-| (d) Alloy-style views in an ordinary `NSWindow` | Not tabs at all | `chrome.tabs` does not list Alloy browsers; no `chrome://` pages, extensions UI or history recording. |
+| (d) Alloy-style views in an ordinary `NSWindow` | Not tabs at all | `chrome.tabs` does not list Alloy pages; no `chrome://` pages, extensions UI or history recording. |
 | (e) The window Chrome draws (`openChromeWindow`) | A normal window with a real `TabStripModel` | Real tabs, pinning, groups, moves between windows. Chrome draws its own tab strip and toolbar. |
 
 Every Chrome-style `CefWindow` is its own Chromium `Browser` with one tab
 (`canExecute(.selectNextTab)` stays false even while macOS shows two of
 them as one tab group; CEF's `ChromeBrowserHostImpl` says views-hosted
-browsers hold a single tab), and `chrome.windows` reports it as a
+pages hold a single tab), and `chrome.windows` reports it as a
 `popup`, so `chrome.tabs.group` and `move` refuse its tabs. Only (e) makes
 the app's tabs Chromium's.
 
 In a window Chrome draws, measured:
 
 - `chrome.tabs.create({windowId})` adds tabs to it; each reaches the app
-  as a `CefBrowser` (`onBrowserCreated`).
+  as a `CefPage` (`onPageCreated`).
 - From the `chrome://bookmarks` WebUI, which Chromium grants `chrome.tabs`
   and `chrome.windows` (not `chrome.tabGroups`): `update` (active,
   pinned), `move` (within and between windows), `group` (with
   `createProperties.windowId`: the default target is the caller's window,
   a popup), `ungroup`, `duplicate` and `windows.create({tabId})` work. A
-  move between windows keeps the `CefBrowser`, its identifier and its
+  move between windows keeps the `CefPage`, its identifier and its
   page.
 - `chrome.tabs.remove` and `update({muted})` from that page ended the
-  browser process (status 70, nothing logged); `CefTabStrip` closes tabs
-  through CEF instead and leaves muting to `CefBrowser.isAudioMuted`.
+  browser process (status 70, nothing logged); `CefTabs` closes tabs
+  through CEF instead and leaves muting to `CefPage.isAudioMuted`.
 - `chrome://tab-strip-internals` loads, and `tab_strip_internals.mojom`'s
   `GetTabStripData()` returns every window's tree: pinned and unpinned
   collections, groups with their title, colour and collapsed state, tabs
@@ -535,8 +535,8 @@ In a window Chrome draws, measured:
   above the content view does, and the window buttons still work. An app
   can cover Chrome's strip and toolbar with its own this way.
 
-CefChromium's `CefChromeWindow`, `CefTab`, `CefTabGroup` and `CefTabStrip`
-are the result. Measured further (SelfTest `tabStrip`, and the
+CefChromium's `CefChromeWindow`, `CefTab`, `CefTabGroup` and `CefTabs`
+are the result. Measured further (SelfTest `tabs`, and the
 `extensions` probe's "tab strip and extensions" checks):
 
 - **No way to have Chromium leave the strip and toolbar out.** A normal
@@ -553,19 +553,19 @@ are the result. Measured further (SelfTest `tabStrip`, and the
   AppKit's first responder when it is already Chromium's content view, so
   CefChromium also looks at Chromium's focused accessibility element after
   each window update and moves focus to the app's views.
-- **Matching tabs with browsers exactly.** Neither `chrome.tabs` ids nor
-  `TabHandle`s are visible to CEF, and CEF's browser identifier is not the
+- **Matching tabs with pages exactly.** Neither `chrome.tabs` ids nor
+  `TabHandle`s are visible to CEF, and CEF's page identifier is not the
   tab id. DevTools' `Target.getTargetInfo` gives a target id no tab API
   shows; `Browser.getWindowForTarget` gives the window, but needs a DevTools
-  session on every tab. What is exact: a browser's view is in its tab's
+  session on every tab. What is exact: a page's view is in its tab's
   window (`nativeView.window`, background tabs' views included, hidden),
   shown only for the active tab; and `chrome.tabs` reports `mutedInfo` for
   every tab, which CEF sets (`set_audio_muted`). So: the active tab is the
-  browser shown in the window, a background tab the one browser in the
+  page shown in the window, a background tab the one page in the
   window with its address, and among background tabs of one address a
-  browser is muted for a moment to see which tab reports it. Matches are
+  page is muted for a moment to see which tab reports it. Matches are
   kept by `chrome.tabs` id, which survives moves between windows (the
-  `CefBrowser` does too).
+  `CefPage` does too).
 - **One listener crashes Chromium: `chrome.windows.onFocusChanged`.**
   Each `chrome.tabs` and `chrome.windows` event was listened to alone on
   the `chrome://bookmarks` host, then an incognito window opened and an
@@ -576,13 +576,13 @@ are the result. Measured further (SelfTest `tabStrip`, and the
   `onFocusChanged`, Chromium ended with `SIGTRAP` as the incognito window
   opened.
 - **Following without polling, and without a host at idle.** CEF and
-  AppKit already report most of what a tab strip shows: a browser created
-  (a new tab or window) or closed (`CefRuntime.browsers`), each page's
-  title, address, icon and loading (`CefBrowser`), the page a window shows
+  AppKit already report most of what a tab strip shows: a page created
+  (a new tab or window) or closed (`CefRuntime.pages`), each page's
+  title, address, icon and loading (`CefPage`), the page a window shows
   (the shown `WebContentsViewCocoa` changes: the active tab), every Chrome
-  command (`on_chrome_command`, Chrome's shortcuts included). `CefTabStrip`
+  command (`on_chrome_command`, Chrome's shortcuts included). `CefTabs`
   applies a closed tab and a new active tab at once, reads
-  `chrome.windows.getAll({populate: true})` only after a new browser, a
+  `chrome.windows.getAll({populate: true})` only after a new page, a
   window or tab command (`IDC_*` 34000–34999) or a change the app makes,
   and the internal page only for groups' names and colours and what
   Chromium can reopen. Each host closes 3 s after its last call (a
@@ -621,15 +621,15 @@ are the result. Measured further (SelfTest `tabStrip`, and the
 - **Tabs the app opens keep its configuration.** Chromium adds tabs to its
   windows only itself (`chrome.tabs.create`, its commands), with CefKit's
   default client and configuration. `CefChromeWindow.openTab` creates the
-  browser with the app's configuration in a window of its own, kept off
-  screen and transparent, then `chrome.tabs.move`s its tab in: the browser,
+  page with the app's configuration in a window of its own, kept off
+  screen and transparent, then `chrome.tabs.move`s its tab in: the page,
   its bridges and user scripts come along.
 - **Surfaces in these windows.** Chromium attaches its bubbles to a
   window it draws as it does to a `CefWindow` (child windows of
   `BrowserNativeWidgetWindow`), so the same controller follows both;
   CefChromium overrides that class's `addChildWindow:ordered:` and
   `removeChildWindow:` as it does `CefNSWindow`'s. Commands come through
-  CEF's command handler for every tab's browser. Tab search is a
+  CEF's command handler for every tab's page. Tab search is a
   `WebUIBubbleDialogView`, recognized by its page's host when its
   accessibility tree has it and otherwise by the command that opened it;
   the group editor is `TabGroupEditorBubbleView`. "Sharing this tab" is an
@@ -642,7 +642,7 @@ are the result. Measured further (SelfTest `tabStrip`, and the
   `crash1`/`crash2`). The tab restore service is saved and read at the
   next launch: a window closed with `IDC_CLOSE_WINDOW` is one entry with
   its tabs and their history; a tab closed through CEF, as CefKit's quit
-  closes every browser, is a loose tab. `tab_search.mojom`'s
+  closes every page, is a loose tab. `tab_search.mojom`'s
   `OpenRecentlyClosedEntry` reopens a given entry into the window of the
   page that asks (a CefWindow's is a popup, where a tab cannot stay), so
   CefChromium asks from a page in a Chrome window kept off screen and
@@ -721,7 +721,7 @@ having been checked without any request from CefSwift.
 Measured on 2026-11-13 with CEF 156.0.28 on an M3 MacBook, macOS 27.2, ad
 hoc signed bundles, `Scripts/measure-footprint.py --kinds relaunch`
 (median of five runs, physical footprint of the app and every helper,
-launch to the first `browser(_:didFinishLoadWithStatus:)`). Another build
+launch to the first `page(_:didFinishLoadWithStatus:)`). Another build
 ran on the same Mac at the time, so run-to-run spread is wider than in the guide's table.
 
 | App | Sandbox | Launch | Memory (range) |
@@ -897,7 +897,7 @@ the user data directory (`root_cache_path`). With the earlier layout,
     ERROR:cef/libcef/browser/chrome/chrome_browser_context.cc:116] Cannot create profile at path …/Profiles/<id>
 
 and got a new off-the-record profile instead, in windowed, offscreen and
-Chrome-style browsers alike, at the first launch and every later one:
+Chrome-style pages alike, at the first launch and every later one:
 the directory CefKit had made stayed empty, cookies, local storage and
 history lasted as long as the process, and CEF still reported the
 context initialized, so nothing in CefKit or SelfTest noticed. Moved to
@@ -922,15 +922,15 @@ option; the default profile is always `<root>/Default`.
 asynchronously; `on_request_context_initialized` reports it, 0.1–0.3 s
 after `cef_request_context_create_context` the first time, less once its
 directory exists. Until then `cef_browser_host_create_browser_sync`
-(windowed browsers) fails, `cef_browser_view_create` gives a view whose
-browser never appears (a `CefWindow` stayed empty, its browser
+(windowed pages) fails, `cef_browser_view_create` gives a view whose
+page never appears (a `CefWindow` stayed empty, its page
 `.pending`), and preferences read `nil` and refuse writes; the
 asynchronous `cef_browser_host_create_browser` (offscreen, Chrome's own
 window) waits by itself. An in-memory profile, incognito or a fall-back,
 is ready at once. CefKit waits for the callback before creating any
-browser on a new profile, then checks the context's `get_cache_path` and
+page on a new profile, then checks the context's `get_cache_path` and
 the directory, so a fall-back becomes `CefError.profileUnavailable`.
-SelfTest's `profileStorage` group creates browsers on brand-new profiles
+SelfTest's `profileStorage` group creates pages on brand-new profiles
 in each host, and runs two launches on one root to check what survives.
 
 ## System notifications at launch

@@ -4,7 +4,7 @@ import Testing
 
 @testable import CefKit
 
-/// Drag data leaving an offscreen browser.
+/// Drag data leaving an offscreen page.
 @MainActor
 struct OffscreenInputPassthroughTests {
 

@@ -13,7 +13,7 @@ final class BrowserWindow {
     let chrome: CefChromeWindow
 
     /// The browser of the active tab.
-    var activeBrowser: CefBrowser? { chrome.activeTab?.browser }
+    var activePage: CefPage? { chrome.activeTab?.page }
 
     init(chrome: CefChromeWindow, controller: BrowserController) {
         self.chrome = chrome
@@ -94,14 +94,14 @@ struct Toolbar: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            if let browser = window.activeTab?.browser {
-                NavigationButtons(browser: browser)
+            if let page = window.activeTab?.page {
+                NavigationButtons(page: page)
                 Spacer(minLength: 8)
-                controller.toolbarItems(.principal, for: browser)
+                controller.toolbarItems(.principal, for: page)
                     .frame(maxWidth: 640)
                 Spacer(minLength: 8)
                 HStack(spacing: 2) {
-                    controller.toolbarItems(.trailing, for: browser)
+                    controller.toolbarItems(.trailing, for: page)
                     if controller.tabsAtTheSide { NewTabButton(window: window) }
                 }
                 .buttonStyle(ToolbarIconButtonStyle())
@@ -111,7 +111,7 @@ struct Toolbar: View {
                 Spacer()
             }
         }
-        .id(window.activeTab?.browser.map(ObjectIdentifier.init))
+        .id(window.activeTab?.page.map(ObjectIdentifier.init))
         .padding(.horizontal, 8)
     }
 }
@@ -123,8 +123,8 @@ private struct PageOverlay: View {
 
     var body: some View {
         ZStack {
-            if let browser = window.activeTab?.browser {
-                controller.pageOverlay(for: browser).id(ObjectIdentifier(browser))
+            if let page = window.activeTab?.page {
+                controller.pageOverlay(for: page).id(ObjectIdentifier(page))
             }
         }
     }

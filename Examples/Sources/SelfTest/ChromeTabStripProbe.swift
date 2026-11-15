@@ -7,15 +7,15 @@ import AppKit
 /// `chrome://tab-strip-internals` reports.
 extension SelfTest {
     static func chromeTabStripProbe() async {
-        var created: [CefBrowser] = []
-        CefRuntime.shared.onBrowserCreated = { created.append($0) }
-        let first = CefRuntime.shared.openChromeWindow(url: page("a"))
+        var created: [CefPage] = []
+        CefRuntime.shared.onPageCreated = { created.append($0) }
+        let first = CefRuntime.shared.openChromeWindow(url: pageURL("a"))
         _ = await loaded(first, title: "a")
         guard let window = first.nativeView?.window else { return print("NOTE no window") }
         print("NOTE window \(type(of: window)) frame \(NSStringFromRect(window.frame)) style \(window.styleMask.rawValue)")
 
-        let host = CefBrowser(url: URL(string: "chrome://bookmarks/")!)
-        let hostWindow = CefWindow(browser: host)
+        let host = CefPage(url: URL(string: "chrome://bookmarks/")!)
+        let hostWindow = CefWindow(page: host)
         _ = await loaded(host)
         func run(_ label: String, _ script: String) async {
             do {
@@ -37,14 +37,14 @@ extension SelfTest {
         }
         await run("create", tabsOf("for (const u of ['chrome://version/?b', 'chrome://version/?c']) await chrome.tabs.create({windowId: a.windowId, url: u}); return 'ok'"))
         try? await Task.sleep(for: .seconds(1))
-        print("NOTE after create: created \(created.count), browsers \(CefRuntime.shared.browsers.map { "\($0.title)/\($0.lifecycle)" })")
+        print("NOTE after create: created \(created.count), browsers \(CefRuntime.shared.pages.map { "\($0.title)/\($0.lifecycle)" })")
         await run("pin", tabsOf("await chrome.tabs.update(tabs[0].id, {pinned: true}); return 'ok'"))
         await run("move", tabsOf("await chrome.tabs.move(tabs[2].id, {index: 1}); return 'ok'"))
         await run("group", tabsOf("return String(await chrome.tabs.group({tabIds: [tabs[1].id, tabs[2].id], createProperties: {windowId: a.windowId}}))"))
         await run("activate", tabsOf("await chrome.tabs.update(tabs[1].id, {active: true}); return 'ok'"))
         await run("duplicate", tabsOf("const t = await chrome.tabs.duplicate(tabs[2].id); return t.index + ' ' + t.windowId"))
         await run("ungroup", tabsOf("await chrome.tabs.ungroup([tabs[2].id]); return 'ok'"))
-        if let last = CefRuntime.shared.browsers.last(where: { $0.title == "About Version" }) {
+        if let last = CefRuntime.shared.pages.last(where: { $0.title == "About Version" }) {
             last.close()
             let closed = await waitUntil(timeout: .seconds(5)) { last.state == .closed }
             print("NOTE close a tab through CEF: closed \(closed)")
@@ -78,19 +78,19 @@ extension SelfTest {
             print("NOTE cover \(NSStringFromRect(coverFrame)): strip point hits cover \(hit === cover) (\(hit.map { "\(type(of: $0))" } ?? "-")), page point hits \(pageHit.map { "\(type(of: $0))" } ?? "-")")
         }
 
-        // A real move to another Chrome window: the same CefBrowser?
-        let second = CefRuntime.shared.openChromeWindow(url: page("z"))
+        // A real move to another Chrome window: the same CefPage?
+        let second = CefRuntime.shared.openChromeWindow(url: pageURL("z"))
         _ = await loaded(second, title: "z")
-        let before = CefRuntime.shared.browsers.first { $0.url?.absoluteString.hasSuffix("?c") == true }
+        let before = CefRuntime.shared.pages.first { $0.url?.absoluteString.hasSuffix("?c") == true }
         await run("move to window", tabsOf("const [z] = (await chrome.tabs.query({})).filter(t => t.title == 'z'); const [c] = tabs.filter(t => t.url.endsWith('?c')); await chrome.tabs.move(c.id, {windowId: z.windowId, index: -1}); return 'ok'"))
         try? await Task.sleep(for: .seconds(1))
-        let after = CefRuntime.shared.browsers.first { $0.url?.absoluteString.hasSuffix("?c") == true }
-        print("NOTE moved tab: same CefBrowser \(before != nil && before === after), state \(after.map { "\($0.state)" } ?? "-"), identifier \(before?.identifier ?? -1) -> \(after?.identifier ?? -1), window changed \(after?.nativeView?.window !== window), live browsers \(CefRuntime.shared.browsers.count)")
+        let after = CefRuntime.shared.pages.first { $0.url?.absoluteString.hasSuffix("?c") == true }
+        print("NOTE moved tab: same CefPage \(before != nil && before === after), state \(after.map { "\($0.state)" } ?? "-"), identifier \(before?.identifier ?? -1) -> \(after?.identifier ?? -1), window changed \(after?.nativeView?.window !== window), live browsers \(CefRuntime.shared.pages.count)")
         await run("query after move", query)
 
         // chrome://tab-strip-internals: every window's tab strip.
-        let internals = CefBrowser(url: URL(string: "chrome://tab-strip-internals/")!)
-        let internalsWindow = CefWindow(browser: internals)
+        let internals = CefPage(url: URL(string: "chrome://tab-strip-internals/")!)
+        let internalsWindow = CefWindow(page: internals)
         _ = await loaded(internals, timeout: .seconds(5))
         print("NOTE internals: url \(internals.url?.absoluteString ?? "-") title \(internals.title)")
         do {
@@ -112,7 +112,7 @@ extension SelfTest {
         } catch { print("NOTE internals data: error \(error)") }
         internalsWindow.close()
         hostWindow.close()
-        for open in CefRuntime.shared.browsers { open.close(force: true) }
-        _ = await waitUntil { CefRuntime.shared.browsers.isEmpty }
+        for open in CefRuntime.shared.pages { open.close(force: true) }
+        _ = await waitUntil { CefRuntime.shared.pages.isEmpty }
     }
 }

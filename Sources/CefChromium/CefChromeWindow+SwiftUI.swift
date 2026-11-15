@@ -79,7 +79,7 @@ extension CefTab {
         }
 
         /// The tab, if it is still open in `strip`.
-        @MainActor public func tab(in strip: CefTabStrip) -> CefTab? {
+        @MainActor public func tab(in strip: CefTabs) -> CefTab? {
             strip.tab(id)
         }
 

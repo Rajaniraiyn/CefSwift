@@ -21,29 +21,29 @@ private struct Viewport: Decodable {
 }
 
 private struct EvaluateJavaScriptView: View {
-    @State private var browser = CefBrowser(url: SamplePage.article.url)
+    @State private var page = CefPage(url: SamplePage.article.url)
     @State private var output = "Run a script."
 
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Button("Title") { run { try await browser.evaluateJavaScript("document.title").stringValue ?? "" } }
+                Button("Title") { run { try await page.evaluateJavaScript("document.title").stringValue ?? "" } }
                 Button("Count Headings") {
-                    run { "\(try await browser.evaluateJavaScript("document.querySelectorAll('h2').length").intValue ?? 0)" }
+                    run { "\(try await page.evaluateJavaScript("document.querySelectorAll('h2').length").intValue ?? 0)" }
                 }
                 Button("Await a Promise") {
-                    run { try await browser.evaluateJavaScript("new Promise(r => setTimeout(() => r('resolved after 0.5 s'), 500))").stringValue ?? "" }
+                    run { try await page.evaluateJavaScript("new Promise(r => setTimeout(() => r('resolved after 0.5 s'), 500))").stringValue ?? "" }
                 }
                 Button("Decode a Struct") {
                     run {
-                        let viewport = try await browser.evaluateJavaScript(
+                        let viewport = try await page.evaluateJavaScript(
                             "({ width: innerWidth, height: innerHeight, scale: devicePixelRatio })", as: Viewport.self)
                         return "\(viewport.width) × \(viewport.height) points at \(viewport.scale)×"
                     }
                 }
-                Button("Throw") { run { "\(try await browser.evaluateJavaScript("null.property"))" } }
+                Button("Throw") { run { "\(try await page.evaluateJavaScript("null.property"))" } }
                 Button("Time Out") {
-                    run { "\(try await browser.evaluateJavaScript("new Promise(() => {})", timeout: .seconds(1)))" }
+                    run { "\(try await page.evaluateJavaScript("new Promise(() => {})", timeout: .seconds(1)))" }
                 }
             }
             .padding(10)
@@ -54,13 +54,13 @@ private struct EvaluateJavaScriptView: View {
                 .padding(.bottom, 10)
                 .textSelection(.enabled)
             Divider()
-            CefWebView(browser)
+            CefWebView(page)
         }
         .reportReady {
-            try await browser.waitUntilLoaded(timeout: .seconds(30))
-            output = try await browser.evaluateJavaScript("'Ready: ' + document.title").stringValue ?? ""
+            try await page.waitUntilLoaded(timeout: .seconds(30))
+            output = try await page.evaluateJavaScript("'Ready: ' + document.title").stringValue ?? ""
         }
-        .onDisappear { browser.close(force: true) }
+        .onDisappear { page.close(force: true) }
     }
 
     private func run(_ script: @escaping () async throws -> String) {

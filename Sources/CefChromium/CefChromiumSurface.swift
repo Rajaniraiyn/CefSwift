@@ -19,7 +19,7 @@ import Observation
 /// ``CefWindow/chromiumSurfaces`` while it is presented.
 ///
 /// A surface you present yourself (``Presentation/custom``) carries what
-/// your interface needs: the ``browser``, the ``url`` it is about, the
+/// your interface needs: the ``page``, the ``url`` it is about, the
 /// ``anchorRect`` to place it at, and ``dismiss()``. Its ``state`` turns
 /// ``State/dismissed(_:)`` once, whoever ends it.
 @MainActor
@@ -52,7 +52,7 @@ public final class CefChromiumSurface: Identifiable {
         /// The downloads bubble.
         case downloads
         /// A permission prompt. CefSwift routes permission requests to
-        /// ``CefBrowserDelegate/browser(_:decidePermissionFor:)``, so Chromium
+        /// ``CefPageDelegate/page(_:decidePermissionFor:)``, so Chromium
         /// shows these only for requests that bypass the delegate.
         case permissionPrompt
         /// The translate bubble.
@@ -87,7 +87,7 @@ public final class CefChromiumSurface: Identifiable {
         case extensionInstallPrompt
         /// Chrome's tab search (``CefChromeCommand/searchTabs``, ⇧⌘A), in a
         /// ``CefChromeWindow``. The app can list and switch tabs itself
-        /// (``CefTabStrip``), so it can replace it.
+        /// (``CefTabs``), so it can replace it.
         case tabSearch
         /// Chrome's tab group editor bubble: the group's name, colour and
         /// commands, from ``CefChromeCommand/createTabGroup`` or a group
@@ -218,7 +218,7 @@ public final class CefChromiumSurface: Identifiable {
         /// Its kind's presentation changed, or it was hidden as it
         /// appeared.
         case presentation
-        /// Its window, and with it its browser, closed.
+        /// Its window, and with it its page, closed.
         case window
     }
 
@@ -227,8 +227,8 @@ public final class CefChromiumSurface: Identifiable {
     /// for untitled surfaces such as the find bar; for a custom status
     /// bubble, the status text when it appeared.
     public let title: String
-    /// The browser the surface belongs to.
-    public let browser: CefBrowser
+    /// The page the surface belongs to.
+    public let page: CefPage
     /// What the surface is about: the address a QR code encodes, the page to
     /// share or cast. For most surfaces, the page's address.
     public let url: URL?
@@ -253,7 +253,7 @@ public final class CefChromiumSurface: Identifiable {
     /// attaches the surface's ``window`` to it as a child window.
     @ObservationIgnored public var parentWindow: CefWindow? { host as? CefWindow }
     /// The ``CefChromeWindow`` the surface belongs to, if it is in one of
-    /// Chromium's own windows; ``browser`` is then the tab's.
+    /// Chromium's own windows; ``page`` is then the tab's.
     @ObservationIgnored public var chromeWindow: CefChromeWindow? { host as? CefChromeWindow }
     /// The window the surface belongs to.
     @ObservationIgnored weak var host: (any ChromiumSurfaceHost)?
@@ -261,12 +261,12 @@ public final class CefChromiumSurface: Identifiable {
     public nonisolated var id: ObjectIdentifier { ObjectIdentifier(self) }
 
     init(
-        kind: Kind, title: String, browser: CefBrowser, url: URL?,
+        kind: Kind, title: String, page: CefPage, url: URL?,
         window: NSWindow?, host: any ChromiumSurfaceHost
     ) {
         self.kind = kind
         self.title = title
-        self.browser = browser
+        self.page = page
         self.url = url
         self.window = window
         self.host = host
@@ -274,8 +274,8 @@ public final class CefChromiumSurface: Identifiable {
 
     /// Ends the surface (``Dismissal/app``). Chromium's surfaces close as
     /// pressing Esc in them would, which cancels what they ask (a sign-in
-    /// dialog cancels the sign-in); a custom find bar ends the browser's
-    /// ``CefBrowser/findSession``; your own interface for a custom surface
+    /// dialog cancels the sign-in); a custom find bar ends the page's
+    /// ``CefPage/findSession``; your own interface for a custom surface
     /// closes when ``state`` turns ``State/dismissed(_:)``. Chromium's
     /// surfaces without ``Capabilities/dismiss`` close only when Chromium
     /// is done with them, so for them this does nothing.
@@ -290,15 +290,15 @@ public final class CefChromiumSurface: Identifiable {
             state = .dismissed(.app)
         }
         if let window, window.isVisible {
-            Self.closeNatively(window, kind: kind, browser: browser)
+            Self.closeNatively(window, kind: kind, page: page)
         }
     }
 
     /// Closes Chromium's window for a surface the way its own controls do.
-    static func closeNatively(_ window: NSWindow, kind: Kind, browser: CefBrowser) {
+    static func closeNatively(_ window: NSWindow, kind: Kind, page: CefPage) {
         switch kind {
         case .findBar:
-            browser.execute(CefChromeCommand(rawValue: Int(IDC_CLOSE_FIND_OR_STOP)))
+            page.execute(CefChromeCommand(rawValue: Int(IDC_CLOSE_FIND_OR_STOP)))
         case .statusBubble, .fullscreenNotice, .autofillSuggestions:
             // Chromium shows and hides these itself and reuses their windows.
             break
@@ -309,7 +309,7 @@ public final class CefChromiumSurface: Identifiable {
             Task { @MainActor [weak window] in
                 for _ in 0..<20 {
                     guard let window, window.isVisible else { return }
-                    if let page = pageView(in: window.contentView) { window.makeFirstResponder(page) }
+                    if let webContents = pageView(in: window.contentView) { window.makeFirstResponder(webContents) }
                     sendEscape(to: window)
                     try? await Task.sleep(for: .milliseconds(250))
                 }

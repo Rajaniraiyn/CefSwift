@@ -19,14 +19,14 @@ struct ChromiumPanels: BrowserFeature {
         window.setCustomPresentation(for: .cast) { surface in CastPicker(surface: surface) }
     }
 
-    @ViewBuilder func toolbarItems(_ placement: ToolbarPlacement, for browser: CefBrowser) -> some View {
+    @ViewBuilder func toolbarItems(_ placement: ToolbarPlacement, for page: CefPage) -> some View {
         if placement == .trailing {
             // The QR code bubble (Chromium's or the browser's) opens under
             // this button, and the share menu under the next.
-            Button("QR Code", systemImage: "qrcode") { browser.execute(.createQRCode) }
+            Button("QR Code", systemImage: "qrcode") { page.execute(.createQRCode) }
                 .help("Create QR Code for This Page")
                 .chromiumSurfaceAnchor([.qrCode], alignment: .trailing)
-            Button("Share", systemImage: "square.and.arrow.up") { browser.execute(.showSharingHub) }
+            Button("Share", systemImage: "square.and.arrow.up") { page.execute(.showSharingHub) }
                 .chromiumSurfaceAnchor([.share])
         }
     }
@@ -86,7 +86,7 @@ private struct QRCodePanel: View {
 /// Cast devices, from the media router of the browser's profile.
 private struct CastPicker: View {
     let surface: CefChromiumSurface
-    private var router: CefMediaRouter { (surface.browser.configuration.profile ?? .default).mediaRouter }
+    private var router: CefMediaRouter { (surface.page.configuration.profile ?? .default).mediaRouter }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -102,10 +102,10 @@ private struct CastPicker: View {
             // Mirroring a tab needs Chromium's own dialog.
             Button("Use Chromium's Cast Dialog…") {
                 guard let window = surface.chromeWindow else { return }
-                let browser = surface.browser
+                let page = surface.page
                 surface.dismiss()
                 window.setCustomPresentation(for: .cast, nil)
-                browser.execute(.castMedia)
+                page.execute(.castMedia)
             }
             .buttonStyle(.link)
         }

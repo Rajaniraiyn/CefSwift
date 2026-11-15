@@ -20,7 +20,7 @@ enum ExtensionPopup {
     private static var current: (id: CefExtension.ID, window: CefWindow)?
     private static var resignObserver: NSObjectProtocol?
 
-    static func toggle(for item: CefExtension, from anchor: NSView, in browser: CefBrowser) {
+    static func toggle(for item: CefExtension, from anchor: NSView, in page: CefPage) {
         if let current {
             let wasSame = current.id == item.id
             close()
@@ -28,18 +28,18 @@ enum ExtensionPopup {
         }
         guard let url = item.action?.popupURL else {
             let fallback = item.optionsURL ?? ExtensionLinks.details(item.id)
-            _ = browser.load(fallback)
+            _ = page.load(fallback)
             return
         }
-        var configuration = CefBrowser.Configuration()
-        configuration.profile = browser.configuration.profile
-        let popupBrowser = CefBrowser(url: url, configuration: configuration)
+        var configuration = CefPage.Configuration()
+        configuration.profile = page.configuration.profile
+        let popupPage = CefPage(url: url, configuration: configuration)
         var windowConfiguration = CefWindow.Configuration()
         windowConfiguration.isFrameless = true
         windowConfiguration.titleFollowsPage = false
         let size = CGSize(width: 320, height: 240)
         windowConfiguration.frame = frame(of: size, under: anchor)
-        let window = CefWindow(browser: popupBrowser, configuration: windowConfiguration)
+        let window = CefWindow(page: popupPage, configuration: windowConfiguration)
         window.contentCornerRadius = 10
         window.onClose = { if current?.window === window { current = nil } }
         current = (item.id, window)
@@ -51,7 +51,7 @@ enum ExtensionPopup {
                 forName: NSWindow.didResignKeyNotification, object: nsWindow, queue: .main
             ) { _ in MainActor.assumeIsolated { close() } }
         }
-        Task { await fit(window, browser: popupBrowser, under: anchor) }
+        Task { await fit(window, page: popupPage, under: anchor) }
     }
 
     static func close() {
@@ -63,9 +63,9 @@ enum ExtensionPopup {
 
     /// Sizes the window to the popup's page, within Chrome's limits for
     /// popups (25 × 25 to 800 × 600 points).
-    private static func fit(_ window: CefWindow, browser: CefBrowser, under anchor: NSView) async {
-        guard (try? await browser.waitUntilLoaded(timeout: .seconds(5))) != nil,
-              let size = try? await browser.evaluateJavaScript(
+    private static func fit(_ window: CefWindow, page: CefPage, under anchor: NSView) async {
+        guard (try? await page.waitUntilLoaded(timeout: .seconds(5))) != nil,
+              let size = try? await page.evaluateJavaScript(
                   "[document.documentElement.scrollWidth, document.documentElement.scrollHeight]"),
               let width = size[0].doubleValue, let height = size[1].doubleValue
         else { return }

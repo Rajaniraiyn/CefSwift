@@ -3,7 +3,7 @@ import CefBase
 
 /// Bridges, user scripts and script evaluation, implemented in the
 /// renderer with the V8 API: the renderer half of `CefBridge`,
-/// `CefUserScript` and `CefBrowser.evaluateJavaScript`.
+/// `CefUserScript` and `CefPage.evaluateJavaScript`.
 ///
 /// A browser's configuration (its bridges and user scripts) arrives in the
 /// browser's `extra_info`, so the first document already has it, and
@@ -237,7 +237,7 @@ final class PageScripting: CefRendererExtension {
 
     /// Runs a user script. An exception it throws is reported on the
     /// page's console, which the browser process hears as any console
-    /// message (``CefBrowserDelegate/browser(_:didLog:)``), named as a
+    /// message (``CefPageDelegate/page(_:didLog:)``), named as a
     /// user script's with its line.
     private func run(_ script: Script, in context: V8Context) {
         if case .failure(let error) = context.run(script.runnableSource) {
@@ -467,7 +467,7 @@ final class PageScripting: CefRendererExtension {
         payload.send(CefPageScriptingMessage.evaluated, from: frame.raw, to: PID_BROWSER)
     }
 
-    /// Runs a script for `CefBrowser.evaluateJavaScript` and sends its
+    /// Runs a script for `CefPage.evaluateJavaScript` and sends its
     /// result back; a promise is awaited first.
     private func evaluate(_ payload: CefWirePayload, in frame: CefRendererFrame) {
         var reader = payload.reader

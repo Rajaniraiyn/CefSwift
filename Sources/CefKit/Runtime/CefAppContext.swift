@@ -9,13 +9,13 @@ final class CefAppContext: @unchecked Sendable {
     let configuration: CefRuntime.Configuration
     let customSchemes: [CefCustomScheme]
     let pump: CefMessagePump
-    /// The client for browsers created through Chrome's own UI (+1, held
+    /// The client for pages created through Chrome's own UI (+1, held
     /// for the process lifetime).
     let defaultClient: UnsafeMutablePointer<cef_client_t>
     private let stringOverrides: [Int32: String]
 
     /// The Chromium feature that discards a tab in place
-    /// (``CefBrowser/discard()``). On by default; listing it in
+    /// (``CefPage/discard()``). On by default; listing it in
     /// ``CefRuntime/Configuration/disabledFeatures`` turns it off.
     static let webContentsDiscardFeature = "WebContentsDiscard"
 
@@ -56,7 +56,7 @@ final class CefAppContext: @unchecked Sendable {
             CefThreadExecutor.all.forEach { $0.start() }
             // The default profile's pages use a context sharing the global
             // one's storage; made once the global one exists, it has
-            // initialized before the first browser needs it.
+            // initialized before the first page needs it.
             MainActor.assumeIsolated { _ = CefProfile.default.requestContext() }
         }
         process.pointee.on_schedule_message_pump_work = { s, delayMS in
@@ -147,9 +147,9 @@ final class CefAppContext: @unchecked Sendable {
         if !unpacked.isEmpty {
             commandLine.appendSwitch("load-extension", value: unpacked.joined(separator: ","))
         }
-        // Discarding a tab then keeps its WebContents, and so its CefBrowser
+        // Discarding a tab then keeps its WebContents, and so its CefPage
         // and back/forward list. Without it Chromium replaces the
-        // WebContents, which CEF reports as the browser closing and a new
+        // WebContents, which CEF reports as the page closing and a new
         // one opening.
         if !disabledFeatures.contains(Self.webContentsDiscardFeature) {
             enabledFeatures.insert(Self.webContentsDiscardFeature)

@@ -57,7 +57,7 @@ struct CefStoredPermissionAnswer: Equatable {
     }
 }
 
-extension CefBrowser {
+extension CefPage {
     /// What the profile stores about `request`'s kinds for its origin.
     func storedAnswer(to request: CefPermissionRequest) -> CefStoredPermissionAnswer {
         let settings = profile.siteSettings

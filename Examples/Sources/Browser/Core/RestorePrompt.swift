@@ -3,12 +3,12 @@ import CefChromium
 import SwiftUI
 
 /// After the browser quit unexpectedly: a small panel under the top bar
-/// offering to reopen the windows it had (`CefTabStrip.previousSession`),
+/// offering to reopen the windows it had (`CefTabs.previousSession`),
 /// which goes away on its own once used, dismissed or the window closes.
 /// It asks nothing modal: the new window works meanwhile.
 @MainActor
 enum RestorePrompt {
-    static func show(in window: CefChromeWindow, session: CefTabStrip.PreviousSession, controller: BrowserController) {
+    static func show(in window: CefChromeWindow, session: CefTabs.PreviousSession, controller: BrowserController) {
         guard let parent = window.window else { return }
         let panel = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
         panel.isOpaque = false

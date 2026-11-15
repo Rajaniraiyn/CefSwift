@@ -156,8 +156,8 @@ enum SelfTest {
     static let checkGroups: [(name: String, run: @MainActor () async -> Void)] = [
         ("capabilities", { capabilityChecks() }),
         ("sandbox", sandboxChecks),
-        ("windowed", windowedBrowserChecks),
-        ("offscreen", offscreenBrowserChecks),
+        ("windowed", windowedPageChecks),
+        ("offscreen", offscreenPageChecks),
         ("hosting", hostingChecks),
         ("tooltips", tooltipChecks),
         ("popups", popupBlockingChecks),
@@ -205,7 +205,7 @@ enum SelfTest {
         ("chromiumTabs", chromiumTabChecks),
         ("chromeWindow", chromeWindowChecks),
         ("tabHosting", tabHostingChecks),
-        ("tabStrip", tabStripChecks),
+        ("tabs", tabsChecks),
         ("chromeWindowSurfaces", chromeWindowSurfaceChecks),
         ("session", sessionRestoreChecks),
         ("operations", operationChecks),
@@ -235,7 +235,7 @@ enum SelfTest {
         await censusChecks(baseline: baseline)
         // After the census: these stay open for the quit.
         if selectedGroups.contains(where: { $0.name == "discard" }) {
-            await discardBrowsersForQuitting()
+            await discardPagesForQuitting()
         }
         if selectedGroups.contains(where: { $0.name == "urlRequest" }) {
             await requestsStalledForQuitting()
@@ -264,17 +264,17 @@ enum SelfTest {
         }
     }
 
-    /// Shows `browser` in a windowed view that fills the test window, less
+    /// Shows `page` in a windowed view that fills the test window, less
     /// `inset` points at the top and bottom.
-    static func hostWindowed(_ browser: CefBrowser, inset: CGFloat = 0) -> CefWindowedBrowserView {
-        let view = CefWindowedBrowserView(browser: browser)
+    static func hostWindowed(_ page: CefPage, inset: CGFloat = 0) -> CefWindowedPageView {
+        let view = CefWindowedPageView(page: page)
         host(view, inset: inset)
         return view
     }
 
-    /// Shows `browser` in an offscreen view, as ``hostWindowed(_:inset:)``.
-    static func hostOffscreen(_ browser: CefBrowser, inset: CGFloat = 0) -> CefOffscreenBrowserView {
-        let view = CefOffscreenBrowserView(browser: browser)
+    /// Shows `page` in an offscreen view, as ``hostWindowed(_:inset:)``.
+    static func hostOffscreen(_ page: CefPage, inset: CGFloat = 0) -> CefOffscreenPageView {
+        let view = CefOffscreenPageView(page: page)
         host(view, inset: inset)
         return view
     }
@@ -285,10 +285,10 @@ enum SelfTest {
         window.contentView!.addSubview(view)
     }
 
-    /// Closes a hosted browser, waits until it has closed and removes its view.
-    static func closeHosted(_ browser: CefBrowser, _ view: NSView) async {
-        browser.close(force: true)
-        _ = await waitUntil { browser.state == .closed }
+    /// Closes a hosted page, waits until it has closed and removes its view.
+    static func closeHosted(_ page: CefPage, _ view: NSView) async {
+        page.close(force: true)
+        _ = await waitUntil { page.state == .closed }
         view.removeFromSuperview()
     }
 
@@ -301,27 +301,27 @@ enum SelfTest {
         return condition()
     }
 
-    /// Whether `browser` finishes loading what it loads within `timeout`
-    /// (``CefBrowser/waitUntilLoaded(timeout:)``), showing `title` when one
+    /// Whether `page` finishes loading what it loads within `timeout`
+    /// (``CefPage/waitUntilLoaded(timeout:)``), showing `title` when one
     /// is given.
-    static func loaded(_ browser: CefBrowser, title: String? = nil, timeout: Duration = .seconds(15)) async -> Bool {
-        guard (try? await browser.waitUntilLoaded(timeout: timeout)) != nil else { return false }
-        return title.map { browser.title == $0 } ?? true
+    static func loaded(_ page: CefPage, title: String? = nil, timeout: Duration = .seconds(15)) async -> Bool {
+        guard (try? await page.waitUntilLoaded(timeout: timeout)) != nil else { return false }
+        return title.map { page.title == $0 } ?? true
     }
 
-    /// Whether every one of `browsers` finishes loading within `timeout`,
+    /// Whether every one of `pages` finishes loading within `timeout`,
     /// as ``loaded(_:title:timeout:)``.
-    static func allLoaded(_ browsers: [CefBrowser], title: String? = nil, timeout: Duration = .seconds(15)) async -> Bool {
+    static func allLoaded(_ pages: [CefPage], title: String? = nil, timeout: Duration = .seconds(15)) async -> Bool {
         var all = true
-        for browser in browsers where !(await loaded(browser, title: title, timeout: timeout)) { all = false }
+        for page in pages where !(await loaded(page, title: title, timeout: timeout)) { all = false }
         return all
     }
 
-    /// Loads `url` in `browser` and returns whether that navigation finishes
+    /// Loads `url` in `page` and returns whether that navigation finishes
     /// within `timeout`, showing `title` when one is given.
-    static func load(_ url: URL, in browser: CefBrowser, title: String? = nil, timeout: Duration = .seconds(15)) async -> Bool {
-        guard (try? await browser.load(url).waitUntilLoaded(timeout: timeout)) != nil else { return false }
-        return title.map { browser.title == $0 } ?? true
+    static func load(_ url: URL, in page: CefPage, title: String? = nil, timeout: Duration = .seconds(15)) async -> Bool {
+        guard (try? await page.load(url).waitUntilLoaded(timeout: timeout)) != nil else { return false }
+        return title.map { page.title == $0 } ?? true
     }
 
     static func waitUntilAsync(timeout: Duration = .seconds(10), _ condition: () async -> Bool) async -> Bool {
@@ -359,7 +359,7 @@ struct StaticPage: CefSchemeHandler {
         case "/second.html":
             html = "<title>second</title><h1>second</h1>"
         case "/compat.html":
-            // What bot-detection pages read about the browser, at document
+            // What bot-detection pages read about the page, at document
             // start (CompatibilityChecks.swift).
             html = """
                 <title>compat</title>

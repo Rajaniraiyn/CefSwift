@@ -2,7 +2,7 @@ import CefChromium
 import CefSwiftUI
 import SwiftUI
 
-/// An app shell, not a browser: one window of Chromium's tabs used as the
+/// An app shell, not a page: one window of Chromium's tabs used as the
 /// app's sections, with fixed app chrome and no tab interface at all. Each
 /// section keeps its page alive in the background, as a tab does, and the
 /// app switches between them by command.

@@ -38,31 +38,31 @@ extension SelfTest {
             return
         }
         defer { server.stop() }
-        let browser = CefBrowser(url: URL(string: "http://127.0.0.1:\(server.port)/page")!)
+        let page = CefPage(url: URL(string: "http://127.0.0.1:\(server.port)/page")!)
         var configuration = CefWindow.Configuration()
         configuration.frame = CGRect(x: 160, y: 160, width: 900, height: 640)
         var policy = CefChromiumSurface.Policy()
         policy[.statusBubble] = .hidden
         policy[.zoom] = .hidden
         configuration.chromiumSurfacePolicy = policy
-        let window = CefWindow(browser: browser, configuration: configuration)
+        let window = CefWindow(page: page, configuration: configuration)
         window.show()
         defer { window.close() }
-        guard await loaded(browser, title: "page"), let nsWindow = window.window else {
-            check("surfaces: status bubble off at creation: page loads", false, detail: browser.title)
+        guard await loaded(page, title: "page"), let nsWindow = window.window else {
+            check("surfaces: status bubble off at creation: page loads", false, detail: page.title)
             return
         }
         check("surfaces: chromiumSurfacePolicy starts as the configuration's", window.chromiumSurfacePolicy[.statusBubble] == .hidden)
         nsWindow.orderFrontRegardless()
         var hovered = false
         for _ in 0..<5 where !hovered {
-            _ = try? await browser.devTools.send("Input.dispatchMouseEvent", ["type": "mouseMoved", "x": 1, "y": 1])
-            let point = try? await browser.evaluateJavaScript(
+            _ = try? await page.devTools.send("Input.dispatchMouseEvent", ["type": "mouseMoved", "x": 1, "y": 1])
+            let point = try? await page.evaluateJavaScript(
                 "(() => { const r = document.getElementById('link').getBoundingClientRect(); return [r.x + 4, r.y + 4]; })()")
-            _ = try? await browser.devTools.send("Input.dispatchMouseEvent", [
+            _ = try? await page.devTools.send("Input.dispatchMouseEvent", [
                 "type": "mouseMoved", "x": .number(point?[0].doubleValue ?? 0), "y": .number(point?[1].doubleValue ?? 0),
             ])
-            hovered = await waitUntil(timeout: .seconds(2)) { !browser.statusText.isEmpty }
+            hovered = await waitUntil(timeout: .seconds(2)) { !page.statusText.isEmpty }
         }
         // Chromium shows its bubble a moment after the address arrives.
         try? await Task.sleep(for: .milliseconds(800))
@@ -72,9 +72,9 @@ extension SelfTest {
                  because: "the test window is covered, so Chromium does not hover the page", .environment)
         } else {
             check("surfaces: a status bubble hidden at creation is never created, and statusText still follows the pointer",
-                  hovered && attached == 0, detail: "statusText '\(browser.statusText)', \(attached) Chromium windows")
+                  hovered && attached == 0, detail: "statusText '\(page.statusText)', \(attached) Chromium windows")
         }
-        browser.execute(.zoomIn)
+        page.execute(.zoomIn)
         try? await Task.sleep(for: .milliseconds(500))
         let zoomWindows = (nsWindow.childWindows ?? []).filter { NSStringFromClass(type(of: $0)) == "NativeWidgetMacNSWindow" }
         check("surfaces: a zoom bubble hidden at creation does not appear", zoomWindows.isEmpty,
@@ -88,10 +88,10 @@ extension SelfTest {
         }
         defer { server.stop() }
         let pageURL = URL(string: "http://127.0.0.1:\(server.port)/page")!
-        let browser = CefBrowser(url: pageURL)
+        let page = CefPage(url: pageURL)
         var configuration = CefWindow.Configuration()
         configuration.frame = CGRect(x: 160, y: 160, width: 900, height: 640)
-        let window = CefWindow(browser: browser, configuration: configuration)
+        let window = CefWindow(page: page, configuration: configuration)
         var announced: [CefChromiumSurface.Kind] = []
         window.onChromiumSurface = { announced.append($0.kind) }
         // In window coordinates: a control wider than the bubble, near the
@@ -99,7 +99,7 @@ extension SelfTest {
         let anchorRect = CGRect(x: 240, y: 560, width: 400, height: 24)
         window.chromiumSurfacePolicy.anchor = .rect(anchorRect, alignment: .leading)
         window.show()
-        _ = await loaded(browser, title: "page")
+        _ = await loaded(page, title: "page")
         guard let nsWindow = window.window else { return }
 
         // A SwiftUI view in the toolbar registers itself as an anchor (and
@@ -117,7 +117,7 @@ extension SelfTest {
         }
 
         // Native, anchored.
-        browser.execute(.createQRCode)
+        page.execute(.createQRCode)
         check("surfaces: QR code recognized and announced",
               await waitUntil { window.chromiumSurfaces.contains { $0.kind == .qrCode } && announced.contains(.qrCode) },
               detail: "\(window.chromiumSurfaces.map { "\($0.kind) '\($0.title)'" })")
@@ -149,14 +149,14 @@ extension SelfTest {
 
         // Hidden.
         window.chromiumSurfacePolicy[.qrCode] = .hidden
-        browser.execute(.createQRCode)
+        page.execute(.createQRCode)
         try? await Task.sleep(for: .milliseconds(800))
         check("surfaces: a hidden kind never shows", visibleSurfaceWindows().isEmpty && window.chromiumSurfaces.isEmpty)
 
         // Custom, from the command.
         var presented: [CefChromiumSurface] = []
         window.setCustomPresentation(for: .qrCode) { presented.append($0) }
-        browser.execute(.createQRCode)
+        page.execute(.createQRCode)
         check("surfaces: a custom QR code gets the page's address",
               presented.count == 1 && presented[0].url == pageURL && presented[0].window == nil
                   && visibleSurfaceWindows().isEmpty)
@@ -171,7 +171,7 @@ extension SelfTest {
         }
         window.presentationForChromiumSurface = { $0.kind == .qrCode ? .custom : nil }
         presented = []
-        browser.execute(.createQRCode)
+        page.execute(.createQRCode)
         check("surfaces: Chromium's surface replaced as it appears",
               await waitUntil(timeout: .seconds(5)) { presented.count == 1 }
                   && presented.first?.url == pageURL && visibleSurfaceWindows().isEmpty,
@@ -183,12 +183,12 @@ extension SelfTest {
         // Share: Chromium has none without its toolbar; custom here.
         window.setCustomPresentation(for: .share) { presented.append($0) }
         presented = []
-        browser.execute(.showSharingHub)
+        page.execute(.showSharingHub)
         check("surfaces: share goes to the app", presented.first?.kind == .share && presented.first?.url == pageURL)
         presented.first?.dismiss()
 
         // Find: Chromium's bar, then the app's.
-        browser.execute(.find)
+        page.execute(.find)
         check("surfaces: find bar recognized",
               await waitUntil(timeout: .seconds(5)) { window.chromiumSurfaces.contains { $0.kind == .findBar } },
               detail: "\(window.chromiumSurfaces.map { "\($0.kind) '\($0.title)'" })")
@@ -205,8 +205,8 @@ extension SelfTest {
         }
         window.setCustomPresentation(for: .findBar) { presented.append($0) }
         presented = []
-        browser.execute(.find)
-        let session = browser.findSession
+        page.execute(.find)
+        let session = page.findSession
         check("surfaces: a custom find bar starts a find session",
               presented.first?.kind == .findBar && session.isActive && visibleSurfaceWindows().isEmpty)
         // The page has "page" three times in its text.
@@ -252,16 +252,16 @@ extension SelfTest {
         check("media router: discovery does not start when off", !CefProfile.default.mediaRouter.isDiscovering)
         window.setCustomPresentation(for: .cast) { presented.append($0) }
         presented = []
-        browser.execute(.castMedia)
+        page.execute(.castMedia)
         check("surfaces: a custom Cast picker gets the page", presented.first?.kind == .cast && presented.first?.url == pageURL)
         presented.first?.dismiss()
 
         // Status bubble, from a pointer over a link.
         func hoverLink() async {
-            _ = try? await browser.devTools.send("Input.dispatchMouseEvent", ["type": "mouseMoved", "x": 1, "y": 1])
-            let point = try? await browser.evaluateJavaScript(
+            _ = try? await page.devTools.send("Input.dispatchMouseEvent", ["type": "mouseMoved", "x": 1, "y": 1])
+            let point = try? await page.evaluateJavaScript(
                 "(() => { const r = document.getElementById('link').getBoundingClientRect(); return [r.x + 4, r.y + 4]; })()")
-            _ = try? await browser.devTools.send("Input.dispatchMouseEvent", [
+            _ = try? await page.devTools.send("Input.dispatchMouseEvent", [
                 "type": "mouseMoved", "x": .number(point?[0].doubleValue ?? 0), "y": .number(point?[1].doubleValue ?? 0),
             ])
         }
@@ -274,12 +274,12 @@ extension SelfTest {
             await hoverLink()
             bubbleShown = await waitUntil(timeout: .seconds(2)) { window.chromiumSurfaces.contains { $0.kind == .statusBubble } }
         }
-        if !bubbleShown, browser.statusText.isEmpty, !nsWindow.occlusionState.contains(.visible) {
+        if !bubbleShown, page.statusText.isEmpty, !nsWindow.occlusionState.contains(.visible) {
             skip("surfaces: status bubble recognized",
                  because: "the test window is covered, so Chromium does not hover the page", .environment)
         } else {
             check("surfaces: status bubble recognized", bubbleShown,
-                  detail: "\(browser.statusText) \(window.chromiumSurfaces.map { "\($0.kind)" }), "
+                  detail: "\(page.statusText) \(window.chromiumSurfaces.map { "\($0.kind)" }), "
                       + "occlusion \(nsWindow.occlusionState.rawValue)")
         }
         // CefChromium's SwiftUI status bubble hides Chromium's and takes the
@@ -287,14 +287,14 @@ extension SelfTest {
         window.setStatusBubble { Text($0) }
         check("surfaces: an app's status bubble is the page overlay",
               window.pageOverlay != nil && window.chromiumSurfacePolicy[.statusBubble] == .hidden)
-        _ = try? await browser.devTools.send("Input.dispatchMouseEvent", ["type": "mouseMoved", "x": 1, "y": 1])
+        _ = try? await page.devTools.send("Input.dispatchMouseEvent", ["type": "mouseMoved", "x": 1, "y": 1])
         try? await Task.sleep(for: .milliseconds(600))
         // Chromium fades its bubble in by raising its window's alpha, so
         // sample across the fade rather than once.
         var shown = false
         for _ in 0..<5 where !shown {
             await hoverLink()
-            shown = await waitUntil(timeout: .seconds(2)) { !browser.statusText.isEmpty }
+            shown = await waitUntil(timeout: .seconds(2)) { !page.statusText.isEmpty }
         }
         var leaks: [String] = []
         for _ in 0..<25 {
@@ -302,7 +302,7 @@ extension SelfTest {
             try? await Task.sleep(for: .milliseconds(40))
         }
         check("surfaces: an app's status bubble keeps Chromium's hidden throughout its fade",
-              shown && leaks.isEmpty, detail: "\(browser.statusText) \(leaks.prefix(3))")
+              shown && leaks.isEmpty, detail: "\(page.statusText) \(leaks.prefix(3))")
         window.pageOverlay = nil
         window.chromiumSurfacePolicy.presentations[.statusBubble] = nil
 
@@ -311,9 +311,9 @@ extension SelfTest {
         func findBarShows() -> Bool {
             nsWindow.titlebarAccessoryViewControllers.contains { !$0.isHidden && $0.view.frame.height > 0 }
         }
-        browser.execute(.find)
+        page.execute(.find)
         check("surfaces: SwiftUI find bar shows under the toolbar", await waitUntil(timeout: .seconds(3)) { findBarShows() })
-        browser.findSession.end()
+        page.findSession.end()
         check("surfaces: SwiftUI find bar hides when the session ends",
               await waitUntil(timeout: .seconds(3)) { !findBarShows() && window.chromiumSurfaces.isEmpty })
 
@@ -326,15 +326,15 @@ extension SelfTest {
     /// Chrome-style windows swipe with Chrome's `HistorySwiper`; these
     /// checks drive its `HistoryOverlayController` as the swiper does.
     static func chromeSwipeChecks() async {
-        var configuration = CefBrowser.Configuration()
+        var configuration = CefPage.Configuration()
         configuration.allowsBackForwardNavigationGestures = true
         configuration.showsChromiumNavigationGestureIndicator = false
-        let browser = CefBrowser(url: URL(string: "selftest://app/second.html")!, configuration: configuration)
-        let window = CefWindow(browser: browser)
+        let page = CefPage(url: URL(string: "selftest://app/second.html")!, configuration: configuration)
+        let window = CefWindow(page: page)
         let pageOverlay = NSView()
         window.pageOverlay = pageOverlay
         window.show()
-        _ = await loaded(browser, title: "second")
+        _ = await loaded(page, title: "second")
         guard let contentView = window.window?.contentView,
               let overlay = CefTesting.beginChromeSwipe(in: window, forward: false)
         else {
@@ -350,37 +350,37 @@ extension SelfTest {
               detail: "\(hit.map { NSStringFromClass(type(of: $0)) } ?? "nil")")
         CefTesting.updateChromeSwipe(overlay, amount: 0.4, finished: false)
         check("swipe: Chrome's progress reaches navigationGestureProgress",
-              abs(browser.navigationGestureProgress + 0.4) < 0.001, detail: "\(browser.navigationGestureProgress)")
+              abs(page.navigationGestureProgress + 0.4) < 0.001, detail: "\(page.navigationGestureProgress)")
         check("swipe: Chromium's arrow stays hidden when turned off", !showsChromiumArrow(in: contentView))
         CefTesting.updateChromeSwipe(overlay, amount: 0.9, finished: true)
-        check("swipe: Chrome's commit point is -1", browser.navigationGestureProgress <= -1,
-              detail: "\(browser.navigationGestureProgress)")
+        check("swipe: Chrome's commit point is -1", page.navigationGestureProgress <= -1,
+              detail: "\(page.navigationGestureProgress)")
         CefTesting.endChromeSwipe(overlay)
-        check("swipe: progress returns to 0", browser.navigationGestureProgress == 0)
+        check("swipe: progress returns to 0", page.navigationGestureProgress == 0)
         check("swipe: Chrome's render widget delegate can be asked", historySwipingAllowed(in: contentView) != nil)
         window.pageOverlay = nil
         check("page overlay: removed when cleared", pageOverlay.superview == nil)
         window.close()
         _ = await waitUntil { window.isClosed }
 
-        var chromiumArrow = CefBrowser.Configuration()
+        var chromiumArrow = CefPage.Configuration()
         chromiumArrow.allowsBackForwardNavigationGestures = true
-        let arrowBrowser = CefBrowser(url: URL(string: "selftest://app/second.html")!, configuration: chromiumArrow)
-        let arrowWindow = CefWindow(browser: arrowBrowser)
+        let arrowPage = CefPage(url: URL(string: "selftest://app/second.html")!, configuration: chromiumArrow)
+        let arrowWindow = CefWindow(page: arrowPage)
         arrowWindow.show()
-        _ = await loaded(arrowBrowser, title: "second")
+        _ = await loaded(arrowPage, title: "second")
         if let contentView = arrowWindow.window?.contentView,
            let overlay = CefTesting.beginChromeSwipe(in: arrowWindow, forward: false) {
             CefTesting.updateChromeSwipe(overlay, amount: 0.4, finished: false)
             check("swipe: Chromium's arrow shows by default", showsChromiumArrow(in: contentView),
-                  detail: "\(abs(arrowBrowser.navigationGestureProgress))")
+                  detail: "\(abs(arrowPage.navigationGestureProgress))")
             CefTesting.endChromeSwipe(overlay)
         }
         arrowWindow.close()
         _ = await waitUntil { arrowWindow.isClosed }
 
-        let plain = CefBrowser(url: URL(string: "selftest://app/second.html")!)
-        let plainWindow = CefWindow(browser: plain)
+        let plain = CefPage(url: URL(string: "selftest://app/second.html")!)
+        let plainWindow = CefWindow(page: plain)
         plainWindow.show()
         _ = await loaded(plain, title: "second")
         if let contentView = plainWindow.window?.contentView {

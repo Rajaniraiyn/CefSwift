@@ -77,10 +77,10 @@ extension SelfTest {
             _ = try await icon.value
             return true
         }
-        let hostBrowsers = CefRuntime.shared.openServiceBrowsers
+        let hostPages = CefRuntime.shared.openServicePages
         check("service hosts: no host attaches a DevTools session",
-              !hostBrowsers.isEmpty && hostBrowsers.allSatisfy { !$0.devTools.isAttached && $0.devTools.sentMessageCount == 0 },
-              detail: hostBrowsers.map { "\($0.url?.absoluteString ?? "?"): attached \($0.devTools.isAttached), " +
+              !hostPages.isEmpty && hostPages.allSatisfy { !$0.devTools.isAttached && $0.devTools.sentMessageCount == 0 },
+              detail: hostPages.map { "\($0.url?.absoluteString ?? "?"): attached \($0.devTools.isAttached), " +
                   "\($0.devTools.sentMessageCount) sent" }.joined(separator: "; "))
         let running = profile.runningServiceHosts
         check("service hosts: one per WebUI host", running == ["bookmarks", "history", "most-visited", "omnibox"],
@@ -122,10 +122,10 @@ extension SelfTest {
         var changes = 0
         let watcher = Task { for await _ in profile.bookmarks.changes { changes += 1 } }
         defer { watcher.cancel() }
-        let manager = CefWindow(browser: CefBrowser(url: URL(string: "chrome://bookmarks/strings.m.js")!))
-        _ = await loaded(manager.browser)
+        let manager = CefWindow(page: CefPage(url: URL(string: "chrome://bookmarks/strings.m.js")!))
+        _ = await loaded(manager.page)
         try? await Task.sleep(for: .milliseconds(500))
-        let created = try? await manager.browser.evaluateJavaScript(
+        let created = try? await manager.page.evaluateJavaScript(
             "chrome.bookmarks.create({ title: 'CefSwift Watched', url: 'https://selftest.invalid/watched' }).then(b => b.id)")
         check("bookmarks: a change made elsewhere arrives through the file, with no host",
               await waitUntil(timeout: .seconds(8)) { changes > 0 } && profile.runningServiceHosts.isEmpty,
@@ -134,7 +134,7 @@ extension SelfTest {
             try await profile.bookmarks.recent(limit: 1).first?.title == "CefSwift Watched"
         }
         if let id = created?.stringValue {
-            _ = try? await manager.browser.evaluateJavaScript("chrome.bookmarks.remove('\(id)').then(() => true)")
+            _ = try? await manager.page.evaluateJavaScript("chrome.bookmarks.remove('\(id)').then(() => true)")
         }
         manager.close()
         _ = await waitUntil { manager.isClosed }

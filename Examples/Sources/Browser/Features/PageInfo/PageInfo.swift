@@ -8,11 +8,11 @@ import SwiftUI
 /// location and the like are asked about in a sheet, which can remember
 /// the answer for the site.
 struct PageInfo: BrowserFeature {
-    @ViewBuilder func toolbarItems(_ placement: ToolbarPlacement, for browser: CefBrowser) -> some View {
-        if placement == .addressFieldLeading { PageInfoButton(browser: browser) }
+    @ViewBuilder func toolbarItems(_ placement: ToolbarPlacement, for page: CefPage) -> some View {
+        if placement == .addressFieldLeading { PageInfoButton(page: page) }
     }
 
-    func decidePermission(for request: CefPermissionRequest, in browser: CefBrowser) async -> CefPermissionDecision? {
+    func decidePermission(for request: CefPermissionRequest, in page: CefPage) async -> CefPermissionDecision? {
         let alert = NSAlert()
         alert.messageText = "Allow \(request.origin) to use \(request.kinds.summary)?"
         alert.addButton(withTitle: "Allow")
@@ -20,7 +20,7 @@ struct PageInfo: BrowserFeature {
         // Screen capture is decided per request, never remembered.
         alert.showsSuppressionButton = request.kinds.isDisjoint(with: [.screenCapture, .systemAudioCapture])
         alert.suppressionButton?.title = "Remember for this website"
-        guard let window = browser.hostWindow else { return .deny }
+        guard let window = page.hostWindow else { return .deny }
         let allowed = await alert.beginSheetModal(for: window) == .alertFirstButtonReturn
         let remembers = alert.suppressionButton?.state == .on
         switch (allowed, remembers) {
@@ -35,18 +35,18 @@ struct PageInfo: BrowserFeature {
 /// The badge at the start of the address field; clicking it shows the
 /// site's page info.
 private struct PageInfoButton: View {
-    let browser: CefBrowser
+    let page: CefPage
     @Environment(BrowserController.self) private var controller
     @Environment(\.isEditingAddress) private var isEditingAddress
     @State private var isShowing = false
 
     var body: some View {
-        if !isEditingAddress, !controller.isStartPage(browser.url), let security = SiteSecurity(browser: browser) {
+        if !isEditingAddress, !controller.isStartPage(page.url), let security = SiteSecurity(page: page) {
             Button { isShowing.toggle() } label: { security.badge }
                 .buttonStyle(.borderless)
                 .help("Show page info")
                 .popover(isPresented: $isShowing, arrowEdge: .bottom) {
-                    PageInfoView(browser: browser)
+                    PageInfoView(page: page)
                 }
                 .task {
                     // -showPageInfo YES, for screenshots.
@@ -62,9 +62,9 @@ private struct PageInfoButton: View {
 enum SiteSecurity {
     case secure, notSecure, app
 
-    @MainActor init?(browser: CefBrowser) {
-        let url = browser.url
-        switch browser.connectionSecurity?.level {
+    @MainActor init?(page: CefPage) {
+        let url = page.url
+        switch page.connectionSecurity?.level {
         case .secure: self = .secure
         case .partiallySecure, .notSecure: self = .notSecure
         case .local: if BrowserPages.isInternal(url) { self = .app } else { return nil }

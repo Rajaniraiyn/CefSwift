@@ -3,7 +3,7 @@ import CefKit
 import LocalAuthentication
 
 /// The native passkey sheet behind the default
-/// ``CefPasskeyDelegate/browser(_:decidePasskeyFor:)``.
+/// ``CefPasskeyDelegate/page(_:decidePasskeyFor:)``.
 ///
 /// It names the site, asks the user to confirm, and verifies the user with
 /// a ``CefUserVerifier`` before answering: by default Touch ID or the
@@ -26,7 +26,7 @@ public enum CefPasskeyPresenter {
     /// Cancelling the calling task dismisses the sheet, or ends the user
     /// verification, and returns ``CefPasskeyDecision/deny``. The
     /// controller cancels the delegate's call when the page navigates or
-    /// the browser closes.
+    /// the page closes.
     public static func present(
         _ request: CefPasskeyRequest, in window: NSWindow?, verifier: CefUserVerifier = .deviceOwner
     ) async -> CefPasskeyDecision {

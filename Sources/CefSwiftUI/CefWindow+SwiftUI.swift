@@ -13,7 +13,7 @@ extension CefWindow {
     ///
     /// Each closure runs once, when you call this method, to build its view.
     /// The views it builds stay live: SwiftUI re-renders them as the
-    /// observable state they read changes, so bind them to ``browser`` or
+    /// observable state they read changes, so bind them to ``page`` or
     /// your own models rather than passing values captured at call time.
     /// Call the method again to replace the toolbar.
     ///
@@ -22,9 +22,9 @@ extension CefWindow {
     ///
     /// ```swift
     /// window.setToolbar {
-    ///     NavigationButtons(browser: browser)
+    ///     NavigationButtons(page: page)
     /// } principal: {
-    ///     AddressField(browser: browser)
+    ///     AddressField(page: page)
     /// } trailing: {
     ///     Button("New Tab", systemImage: "plus", action: openTab)
     /// }
@@ -52,8 +52,8 @@ extension CefWindow {
     /// bar — a favicon, a loading spinner, an audio indicator.
     ///
     /// `content` runs once; the view it builds updates with the observable
-    /// state it reads, such as ``CefBrowser/favicon`` and
-    /// ``CefBrowser/isLoading``. The accessory is installed as soon as the
+    /// state it reads, such as ``CefPage/favicon`` and
+    /// ``CefPage/isLoading``. The accessory is installed as soon as the
     /// window exists.
     public func setTabAccessory(@ViewBuilder _ content: () -> some View) {
         let hosting = NSHostingView(rootView: content())
@@ -68,17 +68,17 @@ extension CefWindow {
     ///
     /// `content` runs once, as ``setToolbar(leading:principal:trailing:)``'s
     /// closures do; the view it builds updates with the observable state it
-    /// reads in its `body`, such as ``CefBrowser/navigationGestureProgress``
-    /// or ``CefBrowser/statusText``. Call the method again to replace it, or
+    /// reads in its `body`, such as ``CefPage/navigationGestureProgress``
+    /// or ``CefPage/statusText``. Call the method again to replace it, or
     /// set ``CefWindow/pageOverlay`` to `nil` to remove it.
     ///
     /// ```swift
-    /// window.setPageOverlay { SwipeIndicator(browser: window.browser) }
+    /// window.setPageOverlay { SwipeIndicator(page: window.page) }
     ///
     /// struct SwipeIndicator: View {
-    ///     let browser: CefBrowser
+    ///     let page: CefPage
     ///     var body: some View {
-    ///         let progress = browser.navigationGestureProgress
+    ///         let progress = page.navigationGestureProgress
     ///         Image(systemName: progress < 0 ? "chevron.left" : "chevron.right")
     ///             .frame(maxWidth: .infinity, alignment: progress < 0 ? .leading : .trailing)
     ///             .opacity(min(1, abs(progress)))

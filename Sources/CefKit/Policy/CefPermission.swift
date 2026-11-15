@@ -129,7 +129,7 @@ public enum CefPermissionDecision: Sendable, Equatable {
 }
 
 /// A permission request a page makes, delivered to its delegate's
-/// ``CefBrowserDelegate/browser(_:decidePermissionFor:)`` and, by
+/// ``CefPageDelegate/page(_:decidePermissionFor:)`` and, by
 /// default, from there to its profile's
 /// ``CefProfileDelegate/profile(_:decidePermissionFor:in:)``.
 ///
@@ -170,7 +170,7 @@ public struct CefPermissionRequest: Sendable, Equatable {
     /// `nil` when CEF's origin is not an address with a host (an opaque
     /// origin), which nothing can be stored for.
     @MainActor
-    init?(kinds: CefPermissionRequest.Kinds, origin: String, frame: CefFrame?, in page: CefBrowser) {
+    init?(kinds: CefPermissionRequest.Kinds, origin: String, frame: CefFrame?, in page: CefPage) {
         guard let url = URL(string: origin), url.scheme != nil, url.host() != nil else { return nil }
         self.init(
             kinds: kinds, origin: URL(string: CefSiteSettings.origin(of: url)) ?? url,

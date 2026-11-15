@@ -35,7 +35,7 @@ extension CefRuntime.Configuration.Services {
         /// ``CefRuntime/Configuration/Services/componentUpdates`` says.
         ///
         /// CefSwift asks for the CDM as soon as the app creates its first
-        /// browser; ``CefRuntime/installWidevine()`` waits for it.
+        /// page; ``CefRuntime/installWidevine()`` waits for it.
         case automatic
         /// As ``automatic``, with a Widevine CDM your app carries, installed
         /// into the profile directory before Chromium starts so protected media
@@ -170,10 +170,10 @@ extension CefRuntime {
     /// ``CefRuntime/WidevineState/unavailable`` when protected media is
     /// ``CefRuntime/Configuration/Services/ProtectedMedia/disabled``.
     ///
-    /// CefSwift already asks when the app creates its first browser; call
+    /// CefSwift already asks when the app creates its first page; call
     /// this to wait for the CDM, or to try again after
     /// ``CefRuntime/WidevineState/failed``. Chromium's update service fetches
-    /// nothing until a browser exists, so before that the request waits.
+    /// nothing until a page exists, so before that the request waits.
     /// The download takes from a few seconds to tens of seconds. Pages that asked for Widevine earlier and were refused need
     /// to ask again (usually a reload).
     ///

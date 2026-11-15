@@ -71,7 +71,7 @@ extension CefRuntime {
         /// for; ``CefRuntime/locale`` is the result.
         public var localization: CefRuntime.Localization = .application
 
-        /// How the browser names itself to sites: the `User-Agent` header and
+        /// How the page names itself to sites: the `User-Agent` header and
         /// `navigator.userAgent`. Chromium's own by default. See
         /// ``CefRuntime/UserAgent`` for what each choice does to client hints.
         public var userAgent: CefRuntime.UserAgent = .chromium
@@ -89,8 +89,8 @@ extension CefRuntime {
         public var persistsSessionCookies: Bool = false
 
         /// Whether offscreen rendering is available, which
-        /// ``CefBrowser/Rendering/offscreen(frameRate:)`` browsers require. Offscreen
-        /// browsers always use Alloy style.
+        /// ``CefPage/Rendering/offscreen(frameRate:)`` pages require. Offscreen
+        /// pages always use Alloy style.
         public var isOffscreenRenderingEnabled: Bool = false
 
         /// Explicit path to `Chromium Embedded Framework.framework`. When `nil`
@@ -117,7 +117,7 @@ extension CefRuntime {
         /// default. See ``CefRuntime/EnterprisePolicy``.
         public var enterprisePolicy: CefRuntime.EnterprisePolicy = .disabled
 
-        /// Custom URL schemes registered in every CEF process (browser, renderer,
+        /// Custom URL schemes registered in every CEF process (page, renderer,
         /// GPU, …). Declare schemes here, then serve them with
         /// ``CefRuntime/registerSchemeHandler(scheme:domain:handler:)``.
         public var customSchemes: [CefCustomScheme] = []
@@ -192,8 +192,8 @@ extension CefRuntime {
         /// ```
         public var profiles = CefProfile.Configuration()
 
-        /// Who asks for the credentials a site or proxy wants: the browser
-        /// delegate's ``CefBrowserDelegate/browser(_:credentialFor:)`` (by
+        /// Who asks for the credentials a site or proxy wants: the page
+        /// delegate's ``CefPageDelegate/page(_:credentialFor:)`` (by
         /// default a native sheet), or Chromium's own dialog. See
         /// ``CefRuntime/AuthenticationPromptPolicy``.
         public var authenticationPrompt: CefRuntime.AuthenticationPromptPolicy = .delegate
@@ -309,7 +309,7 @@ extension CefRuntime {
         /// translation on; background networking and Chrome's default features
         /// on; preloading, third-party cookies, hyperlink auditing, HTTPS-First,
         /// DNS over HTTPS, the password manager and autofill as Chromium decides;
-        /// extensions and internal pages available to Chrome-style browsers;
+        /// extensions and internal pages available to Chrome-style pages;
         /// offscreen rendering off; the sandbox on.
         public static var chrome: CefRuntime.Configuration {
             var configuration = CefRuntime.Configuration()

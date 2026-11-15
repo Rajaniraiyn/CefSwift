@@ -25,11 +25,11 @@ private enum Scene: String, CaseIterable, Identifiable {
 }
 
 private struct AnimationView: View {
-    @State private var windowed = CefBrowser(url: AnimationDemo.page.url)
-    @State private var offscreen: CefBrowser = {
-        var configuration = CefBrowser.Configuration()
+    @State private var windowed = CefPage(url: AnimationDemo.page.url)
+    @State private var offscreen: CefPage = {
+        var configuration = CefPage.Configuration()
         configuration.rendering = .offscreen(frameRate: 120)
-        return CefBrowser(url: AnimationDemo.page.url, configuration: configuration)
+        return CefPage(url: AnimationDemo.page.url, configuration: configuration)
     }()
     @State private var scene = Scene.resize
     @State private var settles = false
@@ -274,17 +274,17 @@ extension AnimationDemo {
 /// thumbnails; the focused one grows to full size.
 private struct PreviewGrid: View {
     let focused: Bool
-    @State private var browsers: [CefBrowser] = AnimationDemo.previews.map { page in
-        var configuration = CefBrowser.Configuration()
+    @State private var pages: [CefPage] = AnimationDemo.previews.map { sample in
+        var configuration = CefPage.Configuration()
         configuration.rendering = .offscreen(frameRate: 30)
-        return CefBrowser(url: page.url, configuration: configuration)
+        return CefPage(url: sample.url, configuration: configuration)
     }
 
     var body: some View {
         let columns = [GridItem(.adaptive(minimum: 220), spacing: 16)]
         LazyVGrid(columns: columns, spacing: 16) {
-            ForEach(browsers.indices, id: \.self) { index in
-                CefWebView(browsers[index])
+            ForEach(pages.indices, id: \.self) { index in
+                CefWebView(pages[index])
                     .offscreenPageSize(CGSize(width: 1280, height: 800))
                     .offscreenFramePlacement(.aspectFit)
                     .aspectRatio(1.6, contentMode: .fit)
@@ -294,7 +294,7 @@ private struct PreviewGrid: View {
                     .zIndex(index == 0 ? 1 : 0)
             }
         }
-        .onDisappear { browsers.forEach { $0.close(force: true) } }
+        .onDisappear { pages.forEach { $0.close(force: true) } }
     }
 }
 

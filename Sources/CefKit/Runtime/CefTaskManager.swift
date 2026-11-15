@@ -195,35 +195,35 @@ public final class CefTaskManager {
         setTasks(Self.assignProcesses(raw))
     }
 
-    /// The main task of `browser`: the renderer showing its page, whose
-    /// CPU and memory it shares with any browser in the same process
-    /// (``browsers(in:)``).
-    public func task(for browser: CefBrowser) -> Task? {
+    /// The main task of `page`: the renderer showing its page, whose
+    /// CPU and memory it shares with any page in the same process
+    /// (``pages(in:)``).
+    public func task(for page: CefPage) -> Task? {
         keepRefreshing()
-        guard browser.identifier >= 0, let manager = manager() else { return nil }
-        let identifier = manager.pointee.get_task_id_for_browser_id(manager, browser.identifier)
+        guard page.identifier >= 0, let manager = manager() else { return nil }
+        let identifier = manager.pointee.get_task_id_for_browser_id(manager, page.identifier)
         guard identifier >= 0 else { return nil }
         if let task = tasks.first(where: { $0.id == identifier }) { return task }
         snapshot()
         return storedTasks.first { $0.id == identifier }
     }
 
-    /// The browsers whose main task is in the group `process` names. Several
-    /// browsers can share one renderer, whose memory is theirs together;
+    /// The pages whose main task is in the group `process` names. Several
+    /// pages can share one renderer, whose memory is theirs together;
     /// since the grouping is an estimate, the list can also include a
-    /// browser of a separate renderer that reported the same figures.
-    public func browsers(in process: Process.ID) -> [CefBrowser] {
+    /// page of a separate renderer that reported the same figures.
+    public func pages(in process: Process.ID) -> [CefPage] {
         keepRefreshing()
         guard let manager = manager() else { return [] }
         let identifiers = Set(storedTasks.filter { $0.process == process }.map(\.id))
-        return CefRuntime.shared.browsers.filter { browser in
-            browser.identifier >= 0
-                && identifiers.contains(manager.pointee.get_task_id_for_browser_id(manager, browser.identifier))
+        return CefRuntime.shared.pages.filter { page in
+            page.identifier >= 0
+                && identifiers.contains(manager.pointee.get_task_id_for_browser_id(manager, page.identifier))
         }
     }
 
     /// Ends `task`'s process, as Chrome's End Process does. Pages it showed
-    /// report ``CefBrowserDelegate/browser(_:renderProcessDidTerminate:)``.
+    /// report ``CefPageDelegate/page(_:renderProcessDidTerminate:)``.
     /// Returns whether Chromium ended it; it does not end the browser
     /// process or tasks whose ``Task/canTerminate`` is `false`.
     @discardableResult

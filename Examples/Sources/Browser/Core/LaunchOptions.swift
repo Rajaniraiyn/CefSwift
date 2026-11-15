@@ -52,17 +52,17 @@ struct LaunchOptions {
                 ? await controller.openStartupWindows()
                 : await controller.openWindow(url: urls.first, isPrivate: opensPrivateTabs)
             else { return }
-            var last = window.tabs.first?.browser
+            var last = window.tabs.first?.page
             for url in urls.dropFirst() {
-                last = await controller.openTabNow(url: url, isPrivate: opensPrivateTabs)?.browser ?? last
+                last = await controller.openTabNow(url: url, isPrivate: opensPrivateTabs)?.page ?? last
             }
             if let directory = UserDefaults.standard.string(forKey: "railScreenshots") {
                 await RailScreenshots.capture(window, controller: controller, into: URL(fileURLWithPath: directory))
                 return
             }
-            guard let browser = last, script != nil || focusesAddressBar else { return }
-            _ = try? await browser.waitUntilLoaded(timeout: .seconds(10))
-            if let script { _ = try? await browser.evaluateJavaScript(script, userGesture: true) }
+            guard let page = last, script != nil || focusesAddressBar else { return }
+            _ = try? await page.waitUntilLoaded(timeout: .seconds(10))
+            if let script { _ = try? await page.evaluateJavaScript(script, userGesture: true) }
             if focusesAddressBar {
                 // Focus goes to the key window, so wait for the app to be active.
                 // Chromium focuses the page as the window becomes key.

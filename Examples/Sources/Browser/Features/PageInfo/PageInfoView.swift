@@ -4,7 +4,7 @@ import SwiftUI
 
 /// A site's page info: who it is, how it is connected, and what it may use.
 struct PageInfoView: View {
-    let browser: CefBrowser
+    let page: CefPage
     @State private var settings: [CefSitePermission: CefSitePermission.Setting] = [:]
 
     /// The permissions listed for every site; others appear once the site
@@ -14,20 +14,20 @@ struct PageInfoView: View {
     ]
 
     private var origin: URL? {
-        guard let url = browser.url, let scheme = url.scheme, let host = url.host() else { return nil }
+        guard let url = page.url, let scheme = url.scheme, let host = url.host() else { return nil }
         return URL(string: "\(scheme)://\(host)\(url.port.map { ":\($0)" } ?? "")")
     }
 
-    private var siteSettings: CefSiteSettings { (browser.configuration.profile ?? .default).siteSettings }
+    private var siteSettings: CefSiteSettings { (page.configuration.profile ?? .default).siteSettings }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(origin?.host() ?? browser.url?.absoluteString ?? "")
+                Text(origin?.host() ?? page.url?.absoluteString ?? "")
                     .font(.headline)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                ConnectionSummary(browser: browser)
+                ConnectionSummary(page: page)
             }
             if origin != nil {
                 Divider()
@@ -100,11 +100,11 @@ struct PageInfoView: View {
 
 /// How the page is connected, and its certificate.
 struct ConnectionSummary: View {
-    let browser: CefBrowser
+    let page: CefPage
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            switch browser.connectionSecurity?.level {
+            switch page.connectionSecurity?.level {
             case .secure:
                 Label("Connection is secure", systemImage: "lock.fill").foregroundStyle(.secondary)
             case .partiallySecure:
@@ -115,11 +115,11 @@ struct ConnectionSummary: View {
             case .local, nil:
                 Label("Page of this app", systemImage: "gearshape.fill").foregroundStyle(.secondary)
             }
-            if let security = browser.connectionSecurity, let certificate = security.certificate {
+            if let security = page.connectionSecurity, let certificate = security.certificate {
                 Text(Self.details(of: security, certificate))
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Button("Show Certificate") { Self.show(certificate, from: browser) }
+                Button("Show Certificate") { Self.show(certificate, from: page) }
                     .buttonStyle(.link)
                     .font(.caption)
             }
@@ -140,8 +140,8 @@ struct ConnectionSummary: View {
     }
 
     /// The system's certificate sheet, with the chain the site sent.
-    private static func show(_ certificate: CefCertificate, from browser: CefBrowser) {
-        guard let window = browser.hostWindow else { return }
+    private static func show(_ certificate: CefCertificate, from page: CefPage) {
+        guard let window = page.hostWindow else { return }
         SFCertificatePanel.shared().beginSheet(
             for: window, modalDelegate: nil, didEnd: nil, contextInfo: nil,
             certificates: certificate.secCertificateChain, showGroup: true)

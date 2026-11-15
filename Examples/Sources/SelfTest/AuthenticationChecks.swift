@@ -20,11 +20,11 @@ extension SelfTest {
         let recorder = Recorder()
         recorder.credentialQueue = [CefCredential(username: "ada", password: "wrong")]
         recorder.credential = right
-        let browser = CefBrowser(url: url, delegate: recorder)
-        let window = CefWindow(browser: browser)
+        let page = CefPage(url: url, delegate: recorder)
+        let window = CefWindow(page: page)
         window.show()
         check("authentication: the delegate answers the challenge (Chrome style)",
-              await waitUntil { browser.title == "authorized" }, detail: "title '\(browser.title)', \(recorder.challenges)")
+              await waitUntil { page.title == "authorized" }, detail: "title '\(page.title)', \(recorder.challenges)")
         let expected = CefAuthenticationChallenge(
             url: url, isProxy: false, host: "127.0.0.1", port: Int(server.port),
             realm: "selftest", scheme: "basic")
@@ -39,23 +39,23 @@ extension SelfTest {
 
         // Cancelling shows the server's own 401 page.
         let cancelling = Recorder()
-        browser.delegate = cancelling
-        browser.load(URL(string: "http://localhost:\(server.port)/private")!)
+        page.delegate = cancelling
+        page.load(URL(string: "http://localhost:\(server.port)/private")!)
         check("authentication: answering nil cancels the sign-in",
-              await waitUntil { browser.title == "denied" } && cancelling.challenges.count == 1,
-              detail: "title '\(browser.title)', \(cancelling.challenges.count) challenges")
+              await waitUntil { page.title == "denied" } && cancelling.challenges.count == 1,
+              detail: "title '\(page.title)', \(cancelling.challenges.count) challenges")
 
-        // Without a delegate: the native sheet, dismissed when the browser
+        // Without a delegate: the native sheet, dismissed when the page
         // navigates away.
-        browser.delegate = nil
-        browser.load(URL(string: "http://localhost:\(server.port)/private?sheet")!)
+        page.delegate = nil
+        page.load(URL(string: "http://localhost:\(server.port)/private?sheet")!)
         let sheetShown = await waitUntil { window.window?.attachedSheet != nil }
         check("authentication: without a delegate, a native sheet asks", sheetShown)
-        browser.load(URL(string: "selftest://edge/tab.html")!)
+        page.load(URL(string: "selftest://edge/tab.html")!)
         check("authentication: the sheet dismisses itself when the page navigates away",
-              await waitUntil { window.window?.attachedSheet == nil && browser.title == "tab" }
-                && browser.pendingDecisionCount == 0,
-              detail: "title '\(browser.title)', \(browser.pendingDecisionCount) pending")
+              await waitUntil { window.window?.attachedSheet == nil && page.title == "tab" }
+                && page.pendingDecisionCount == 0,
+              detail: "title '\(page.title)', \(page.pendingDecisionCount) pending")
         window.close()
         check("authentication: the window closes", await waitUntil { window.isClosed })
 
@@ -64,10 +64,10 @@ extension SelfTest {
         embeddedRecorder.credential = right
         // A profile of its own: Chromium keeps the credentials it was given
         // for the server, and would not ask again.
-        var embeddedOptions = CefBrowser.Configuration()
+        var embeddedOptions = CefPage.Configuration()
         embeddedOptions.profile = .incognito()
-        let embedded = CefBrowser(url: url, configuration: embeddedOptions, delegate: embeddedRecorder)
-        let view = CefWindowedBrowserView(browser: embedded)
+        let embedded = CefPage(url: url, configuration: embeddedOptions, delegate: embeddedRecorder)
+        let view = CefWindowedPageView(page: embedded)
         view.frame = SelfTest.window.contentView!.bounds
         SelfTest.window.contentView!.addSubview(view)
         check("authentication (embedded): the delegate answers the challenge",
@@ -95,19 +95,19 @@ extension SelfTest {
     /// A proxy that wants credentials: the challenge says so.
     static func proxyAuthenticationChecks(server: LocalServer) async {
         let profile = CefProfile.incognito()
-        var configuration = CefBrowser.Configuration()
+        var configuration = CefPage.Configuration()
         configuration.profile = profile
         let recorder = Recorder()
         recorder.credential = CefCredential(username: "grace", password: "hopper")
-        let browser = CefBrowser(url: URL(string: "about:blank")!, configuration: configuration, delegate: recorder)
-        let view = CefWindowedBrowserView(browser: browser)
+        let page = CefPage(url: URL(string: "about:blank")!, configuration: configuration, delegate: recorder)
+        let view = CefWindowedPageView(page: page)
         view.frame = SelfTest.window.contentView!.bounds
         SelfTest.window.contentView!.addSubview(view)
         defer {
-            browser.close(force: true)
+            page.close(force: true)
             view.removeFromSuperview()
         }
-        guard await loaded(browser) else {
+        guard await loaded(page) else {
             check("authentication (proxy): browser starts", false)
             return
         }
@@ -117,9 +117,9 @@ extension SelfTest {
             check("authentication (proxy): the profile takes the proxy", false, detail: "\(error)")
             return
         }
-        browser.load(URL(string: "http://proxied.invalid/")!)
+        page.load(URL(string: "http://proxied.invalid/")!)
         check("authentication (proxy): the delegate answers the proxy's challenge",
-              await waitUntil { browser.title == "proxied" }, detail: "title '\(browser.title)', \(recorder.challenges)")
+              await waitUntil { page.title == "proxied" }, detail: "title '\(page.title)', \(recorder.challenges)")
         check("authentication (proxy): the challenge is the proxy's",
               recorder.challenges.first.map {
                   $0.isProxy && $0.host == "127.0.0.1" && $0.port == Int(server.port) && $0.realm == "selftest-proxy"
@@ -139,8 +139,8 @@ extension SelfTest {
 
         let recorder = Recorder()
         recorder.credential = CefCredential(username: "ada", password: "lovelace")
-        let browser = CefBrowser(url: url, delegate: recorder)
-        let window = CefWindow(browser: browser)
+        let page = CefPage(url: url, delegate: recorder)
+        let window = CefWindow(page: page)
         window.show()
         check("Chromium's sign-in dialog appears",
               await waitUntil { window.window?.childWindows?.isEmpty == false })
@@ -150,8 +150,8 @@ extension SelfTest {
         if let signIn = window.chromiumSurfaces.first(where: { $0.kind == .signIn }) {
             signIn.dismiss()
             check("surfaces: dismissing the sign-in dialog cancels it",
-                  await waitUntil { signIn.window?.isVisible != true && window.chromiumSurfaces.isEmpty && browser.title == "denied" },
-                  detail: browser.title)
+                  await waitUntil { signIn.window?.isVisible != true && window.chromiumSurfaces.isEmpty && page.title == "denied" },
+                  detail: page.title)
         }
         check("the delegate is not asked", recorder.challenges.isEmpty, detail: "\(recorder.challenges)")
         window.close()
@@ -160,8 +160,8 @@ extension SelfTest {
         // Alloy style: the load fails with ERR_INVALID_AUTH_CREDENTIALS and
         // Chromium shows its sign-in window on its own.
         let embeddedRecorder = Recorder()
-        let embedded = CefBrowser(url: url, delegate: embeddedRecorder)
-        let view = CefWindowedBrowserView(browser: embedded)
+        let embedded = CefPage(url: url, delegate: embeddedRecorder)
+        let view = CefWindowedPageView(page: embedded)
         view.frame = SelfTest.window.contentView!.bounds
         SelfTest.window.contentView!.addSubview(view)
         let failed = await waitUntil { embeddedRecorder.loadErrors.contains { $0.code == -338 } }

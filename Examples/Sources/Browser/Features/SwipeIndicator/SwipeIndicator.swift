@@ -6,26 +6,26 @@ import SwiftUI
 /// where releasing navigates, as a rubber band does, and fills with the
 /// accent color from that point on.
 ///
-/// It follows `CefBrowser.navigationGestureProgress`: 0 at rest, toward -1
+/// It follows `CefPage.navigationGestureProgress`: 0 at rest, toward -1
 /// while swiping back and toward 1 while swiping forward. It is laid over
 /// the page, and Chromium's own arrow is turned off
 /// (`showsChromiumNavigationGestureIndicator`). The swipes themselves are
 /// the browser's (`allowsBackForwardNavigationGestures`); without this
 /// feature they show Chromium's arrow.
 struct SwipeIndicator: BrowserFeature {
-    func configure(_ configuration: inout CefBrowser.Configuration) {
+    func configure(_ configuration: inout CefPage.Configuration) {
         configuration.showsChromiumNavigationGestureIndicator = false
     }
 
-    func pageOverlay(for browser: CefBrowser) -> some View {
-        Indicator(browser: browser)
+    func pageOverlay(for page: CefPage) -> some View {
+        Indicator(page: page)
     }
 
     private struct Indicator: View {
-        let browser: CefBrowser
+        let page: CefPage
 
         var body: some View {
-            SwipeIndicatorCircle(progress: browser.navigationGestureProgress)
+            SwipeIndicatorCircle(progress: page.navigationGestureProgress)
         }
     }
 }

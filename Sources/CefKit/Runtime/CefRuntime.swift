@@ -5,7 +5,7 @@ import Observation
 import CefBase
 
 /// Process-wide CEF lifecycle: loading the framework, `cef_initialize`, the
-/// message pump, the set of live browsers, and shutdown.
+/// message pump, the set of live pages, and shutdown.
 ///
 /// SwiftUI apps get all of this from `CefSwiftApp`. In an AppKit app, call
 /// ``initialize(configuration:)`` first thing in `main`, before anything
@@ -22,7 +22,7 @@ public final class CefRuntime {
         case notStarted
         /// ``initialize(configuration:)`` is running.
         case starting
-        /// Chromium is running; browsers can be created.
+        /// Chromium is running; pages can be created.
         case running
         /// The app is quitting and Chromium is shutting down.
         case stopping
@@ -54,17 +54,17 @@ public final class CefRuntime {
     /// bundle has strings for. `nil` until Chromium runs.
     public private(set) var locale: String?
 
-    /// Every live browser in the process, in creation order — including
+    /// Every live page in the process, in creation order — including
     /// popups and tabs opened through Chrome's own UI.
-    public private(set) var browsers: [CefBrowser] = []
+    public private(set) var pages: [CefPage] = []
 
-    /// Called for each browser Chromium creates on its own initiative: a
+    /// Called for each page Chromium creates on its own initiative: a
     /// native popup, a DevTools window, a tab or window opened through
-    /// Chrome's UI. Assign a delegate here to manage those browsers.
+    /// Chrome's UI. Assign a delegate here to manage those pages.
     ///
-    /// A browser ``onChromeTab`` decides about reaches this closure only
+    /// A page ``onChromeTab`` decides about reaches this closure only
     /// when the answer is ``CefChromeTabDecision/showInChromeWindow``.
-    @ObservationIgnored public var onBrowserCreated: ((CefBrowser) -> Void)?
+    @ObservationIgnored public var onPageCreated: ((CefPage) -> Void)?
 
     /// Called when the app is launched again while it is running — from
     /// the command line, or by another app — with the new launch's
@@ -95,7 +95,7 @@ public final class CefRuntime {
     @ObservationIgnored var messagePump: CefMessagePump?
     @ObservationIgnored private var appContext: CefAppContext?
     @ObservationIgnored private var settings: MappedCefSettings?
-    @ObservationIgnored private var browsersByIdentifier: [Int32: CefBrowser] = [:]
+    @ObservationIgnored private var pagesByIdentifier: [Int32: CefPage] = [:]
     @ObservationIgnored private var isTerminationRequested = false
     @ObservationIgnored private var hasRequestedWidevine = false
     /// The Widevine fetch in progress; ``installWidevine()`` callers share it.
@@ -103,8 +103,8 @@ public final class CefRuntime {
 
     private init() {}
 
-    /// Initializes CEF in the browser (main) process. Call once, on the main
-    /// thread, before creating browsers and before anything else creates
+    /// Initializes CEF in the page (main) process. Call once, on the main
+    /// thread, before creating pages and before anything else creates
     /// `NSApp` — CEF needs the application object to be a `CefApplication`,
     /// which this installs.
     ///
@@ -142,9 +142,9 @@ public final class CefRuntime {
         try Self.verifyAPIHash()
 
         let pump = CefMessagePump()
-        // Browsers created through Chrome's own UI have no CefBrowser asking
+        // Pages created through Chrome's own UI have no CefPage asking
         // for them; this client adopts them as they appear.
-        let defaultClient = CefBrowserClient(browser: nil, chromeToolbar: configuration.chromeToolbar)
+        let defaultClient = CefBrowserClient(page: nil, chromeToolbar: configuration.chromeToolbar)
         let context = CefAppContext(
             configuration: configuration, pump: pump, defaultClient: defaultClient.makeClient())
         let frameworkDirectory = frameworkBinary.deletingLastPathComponent()
@@ -196,20 +196,20 @@ public final class CefRuntime {
 
     /// Opens a window drawn entirely by Chrome — tab strip, omnibox, menus,
     /// extension toolbar — showing `url`. The fastest route to a complete
-    /// browser; trim or rebrand it with ``CefRuntime/Configuration/chromeToolbar`` and
+    /// page; trim or rebrand it with ``CefRuntime/Configuration/chromeToolbar`` and
     /// ``CefRuntime/Configuration/productName``.
     ///
     /// Tabs and windows the user opens from there are reported through
-    /// ``onBrowserCreated`` and listed in ``browsers``. The returned
-    /// browser holds `delegate` weakly, like ``CefBrowser/delegate``; keep
+    /// ``onPageCreated`` and listed in ``pages``. The returned
+    /// page holds `delegate` weakly, like ``CefPage/delegate``; keep
     /// your own reference to it.
     @discardableResult
     public func openChromeWindow(
-        url: URL, frame: CGRect? = nil, configuration: CefBrowser.Configuration = .init(), delegate: CefBrowserDelegate? = nil
-    ) -> CefBrowser {
-        let browser = CefBrowser(url: url, configuration: configuration, delegate: delegate)
-        browser.createInChromeUIWindow(frame: frame)
-        return browser
+        url: URL, frame: CGRect? = nil, configuration: CefPage.Configuration = .init(), delegate: CefPageDelegate? = nil
+    ) -> CefPage {
+        let page = CefPage(url: url, configuration: configuration, delegate: delegate)
+        page.createInChromeUIWindow(frame: frame)
+        return page
     }
 
     // MARK: Custom scheme handlers
@@ -285,7 +285,7 @@ public final class CefRuntime {
     @ObservationIgnored private(set) var schemeHandlers: [RegisteredSchemeHandler] = []
 
     /// Shuts Chromium down, at the end of a quit that
-    /// ``handleTerminationRequest()`` started once every browser and window
+    /// ``handleTerminationRequest()`` started once every page and window
     /// has gone. Never from inside a Chromium callback, and never with a
     /// CEF window left, which crashes `cef_shutdown()`.
     ///
@@ -299,13 +299,13 @@ public final class CefRuntime {
     /// ``State/stopped`` and a later ``initialize(configuration:)`` throws.
     func shutDownChromium() {
         guard state == .running || state == .stopping else { return }
-        guard hasNoBrowsers, CefWindow.liveCount == 0, messagePump?.isPerformingWork != true else {
-            CefLog.error("CefSwift: shutdown deferred: \(browsers.count + serviceBrowsers.count) browsers, "
+        guard hasNoPages, CefWindow.liveCount == 0, messagePump?.isPerformingWork != true else {
+            CefLog.error("CefSwift: shutdown deferred: \(pages.count + servicePages.count) browsers, "
                          + "\(CefWindow.liveCount) windows still open")
             return
         }
         state = .stopping
-        closeBrowsersAwaitingProfiles()
+        closePagesAwaitingProfiles()
         requestsInFlightAtShutdown = URLRequestRegistry.shared.count
         let participants = shutdownParticipants.compactMap(\.participant)
         shutdownParticipants = []
@@ -339,7 +339,7 @@ public final class CefRuntime {
     @ObservationIgnored private var shutdownParticipants: [WeakShutdownParticipant] = []
 
     /// Called once as the app starts to quit, before the runtime closes
-    /// the browsers: a module built on CefKit closes what it keeps its own
+    /// the pages: a module built on CefKit closes what it keeps its own
     /// way first. Chromium is still fully running.
     package func whenQuitStarts(_ observer: @escaping @MainActor () -> Void) {
         terminationObservers.append(observer)
@@ -347,21 +347,21 @@ public final class CefRuntime {
 
     @ObservationIgnored private var terminationObservers: [@MainActor () -> Void] = []
 
-    // MARK: Browser registry / termination
+    // MARK: Page registry / termination
 
-    func register(_ browser: CefBrowser) {
+    func register(_ page: CefPage) {
         lifecycleCoordinator.setNeedsUpdate()
-        // A DevTools window's browser comes and goes like any other.
-        defer { CefBrowser.refreshDevToolsStates() }
-        browsersByIdentifier[browser.identifier] = browser
-        // Internal-page service browsers stay out of the public list. A
-        // browser restored after a discard is listed already.
-        if serviceBrowserIDs.contains(browser.id) {
-            serviceBrowsers.append(browser)
-        } else if !browsers.contains(where: { $0 === browser }) {
-            browsers.append(browser)
+        // A DevTools window's page comes and goes like any other.
+        defer { CefPage.refreshDevToolsStates() }
+        pagesByIdentifier[page.identifier] = page
+        // Internal-page service pages stay out of the public list. A
+        // page restored after a discard is listed already.
+        if servicePageIDs.contains(page.id) {
+            servicePages.append(page)
+        } else if !pages.contains(where: { $0 === page }) {
+            pages.append(page)
         }
-        // Chromium's update service starts fetching once a browser exists;
+        // Chromium's update service starts fetching once a page exists;
         // ask for Widevine then rather than at its first scheduled run, a
         // minute after launch.
         if !hasRequestedWidevine, let configuration, configuration.services.protectedMedia != .disabled {
@@ -370,45 +370,45 @@ public final class CefRuntime {
         }
     }
 
-    /// A browser discarded by closing its Chromium browser: Chromium's
-    /// identifier goes, the browser stays in ``browsers``.
-    func forgetIdentifier(of browser: CefBrowser) {
-        if browsersByIdentifier[browser.identifier] === browser {
-            browsersByIdentifier[browser.identifier] = nil
+    /// A page discarded by closing its Chromium page: Chromium's
+    /// identifier goes, the page stays in ``pages``.
+    func forgetIdentifier(of page: CefPage) {
+        if pagesByIdentifier[page.identifier] === page {
+            pagesByIdentifier[page.identifier] = nil
         }
         continueTerminationIfReady()
     }
 
-    func unregister(_ browser: CefBrowser) {
-        defer { CefBrowser.refreshDevToolsStates() }
-        browsersByIdentifier[browser.identifier] = nil
-        browser.lifecycle = .hidden
-        if browsers.contains(where: { $0 === browser }) {
-            browsers.removeAll { $0 === browser }
-            let profile = browser.configuration.profile ?? .default
-            if !browsers.contains(where: { ($0.configuration.profile ?? .default) === profile }) {
-                profile.lastBrowserDidClose()
+    func unregister(_ page: CefPage) {
+        defer { CefPage.refreshDevToolsStates() }
+        pagesByIdentifier[page.identifier] = nil
+        page.lifecycle = .hidden
+        if pages.contains(where: { $0 === page }) {
+            pages.removeAll { $0 === page }
+            let profile = page.configuration.profile ?? .default
+            if !pages.contains(where: { ($0.configuration.profile ?? .default) === profile }) {
+                profile.lastPageDidClose()
             }
         }
-        serviceBrowsers.removeAll { $0 === browser }
-        serviceBrowserIDs.remove(browser.id)
+        servicePages.removeAll { $0 === page }
+        servicePageIDs.remove(page.id)
         continueTerminationIfReady()
     }
 
-    /// Resumes a quit that was waiting for browsers and their windows to
-    /// close. Chromium finishes destroying a window after its browser has
+    /// Resumes a quit that was waiting for pages and their windows to
+    /// close. Chromium finishes destroying a window after its page has
     /// gone, and shutting down before that, or from inside one of its
     /// callbacks, crashes in `cef_shutdown()`; so `terminate:` is retried
     /// from the run loop once nothing is left.
     func continueTerminationIfReady() {
-        guard isTerminationRequested, hasNoBrowsers, CefWindow.liveCount == 0 else { return }
+        guard isTerminationRequested, hasNoPages, CefWindow.liveCount == 0 else { return }
         DispatchQueue.main.async {
             self.replyToQuitEvent(cancelled: false)
             NSApp.terminate(nil)
         }
     }
 
-    private var hasNoBrowsers: Bool { browsers.isEmpty && serviceBrowsers.isEmpty }
+    private var hasNoPages: Bool { pages.isEmpty && servicePages.isEmpty }
 
     /// Whether the profile requests in flight have been cancelled and have
     /// released their CEF references, the last step before shutdown.
@@ -455,10 +455,10 @@ public final class CefRuntime {
     }
 
     /// The quit Apple Event (from logging out, restarting, shutting down,
-    /// or another app) the app is answering by closing its browsers.
+    /// or another app) the app is answering by closing its pages.
     @ObservationIgnored private var suspendedQuitEvent: NSAppleEventManager.SuspensionID?
 
-    /// Holds back the reply to a quit Apple Event until the browsers have
+    /// Holds back the reply to a quit Apple Event until the pages have
     /// closed, as `NSApplication.TerminateReply.terminateLater` does. The
     /// sender, such as loginwindow, then waits for the answer instead of
     /// reading an early reply.
@@ -484,19 +484,19 @@ public final class CefRuntime {
         manager.resume(withSuspensionID: suspension)
     }
 
-    func browser(withIdentifier identifier: Int32) -> CefBrowser? {
-        browsersByIdentifier[identifier]
+    func page(withIdentifier identifier: Int32) -> CefPage? {
+        pagesByIdentifier[identifier]
     }
 
     /// Called from `CefApplication.terminate(_:)`. Quitting closes every
-    /// browser first (so pages can run `beforeunload` and state is flushed),
+    /// page first (so pages can run `beforeunload` and state is flushed),
     /// then terminates once the last one is gone.
     func handleTerminationRequest() -> Bool {
         guard isRunning else { return true }
-        // Browsers waiting for a profile Chromium is still loading are in
+        // Pages waiting for a profile Chromium is still loading are in
         // no list below, and their profile could load during the quit:
-        // they close now, and their ready() throws browserClosed.
-        closeBrowsersAwaitingProfiles()
+        // they close now, and their ready() throws pageClosed.
+        closePagesAwaitingProfiles()
         if !isTerminationRequested {
             // Modules close what they keep their own way first: CefChromium
             // closes Chromium's windows as windows, which Chromium records.
@@ -505,11 +505,11 @@ public final class CefRuntime {
             observers.forEach { $0() }
         }
         isTerminationRequested = true
-        // Browsers discarded by closing them have nothing left in Chromium.
-        for browser in browsers where browser.isDiscarded && browser.raw == nil {
-            browser.handleClosed()
+        // Pages discarded by closing them have nothing left in Chromium.
+        for page in pages where page.isDiscarded && page.raw == nil {
+            page.handleClosed()
         }
-        if hasNoBrowsers {
+        if hasNoPages {
             // Not from inside Chromium's message loop work, where a Chrome
             // command or a page may have asked to quit.
             guard CefWindow.liveCount == 0, messagePump?.isPerformingWork != true else {
@@ -530,75 +530,75 @@ public final class CefRuntime {
             return true
         }
         suspendQuitEventIfNeeded()
-        for browser in browsers {
-            browser.close()
+        for page in pages {
+            page.close()
         }
-        for browser in serviceBrowsers {
-            browser.close(force: true)
+        for page in servicePages {
+            page.close(force: true)
         }
         return false
     }
 
-    // MARK: Browsers waiting for their profile
+    // MARK: Pages waiting for their profile
 
-    private struct WeakBrowser {
-        weak var browser: CefBrowser?
+    private struct WeakPage {
+        weak var page: CefPage?
     }
 
-    /// Browsers whose creation waits for their profile to load: Chromium
-    /// has nothing of them yet, so they are not in ``browsers``.
-    @ObservationIgnored private var browsersAwaitingProfiles: [WeakBrowser] = []
+    /// Pages whose creation waits for their profile to load: Chromium
+    /// has nothing of them yet, so they are not in ``pages``.
+    @ObservationIgnored private var pagesAwaitingProfiles: [WeakPage] = []
 
-    func browserAwaitsProfile(_ browser: CefBrowser) {
-        browsersAwaitingProfiles.removeAll { $0.browser == nil }
-        guard !browsersAwaitingProfiles.contains(where: { $0.browser === browser }) else { return }
-        browsersAwaitingProfiles.append(WeakBrowser(browser: browser))
+    func pageAwaitsProfile(_ page: CefPage) {
+        pagesAwaitingProfiles.removeAll { $0.page == nil }
+        guard !pagesAwaitingProfiles.contains(where: { $0.page === page }) else { return }
+        pagesAwaitingProfiles.append(WeakPage(page: page))
     }
 
-    func browserStoppedAwaitingProfile(_ browser: CefBrowser) {
-        browsersAwaitingProfiles.removeAll { $0.browser == nil || $0.browser === browser }
+    func pageStoppedAwaitingProfile(_ page: CefPage) {
+        pagesAwaitingProfiles.removeAll { $0.page == nil || $0.page === page }
     }
 
-    /// The number of browsers waiting for their profile. For tests.
-    @_spi(Testing) public var browsersAwaitingProfilesCount: Int {
-        browsersAwaitingProfiles.filter { $0.browser != nil }.count
+    /// The number of pages waiting for their profile. For tests.
+    @_spi(Testing) public var pagesAwaitingProfilesCount: Int {
+        pagesAwaitingProfiles.filter { $0.page != nil }.count
     }
 
-    private func closeBrowsersAwaitingProfiles() {
-        let waiting = browsersAwaitingProfiles.compactMap(\.browser)
-        browsersAwaitingProfiles = []
-        // Each closes as a browser not created yet does: `handleClosed()`.
+    private func closePagesAwaitingProfiles() {
+        let waiting = pagesAwaitingProfiles.compactMap(\.page)
+        pagesAwaitingProfiles = []
+        // Each closes as a page not created yet does: `handleClosed()`.
         waiting.forEach { $0.close(force: true) }
     }
 
-    // MARK: Service browsers (internal-page data APIs)
+    // MARK: Service pages (internal-page data APIs)
 
-    /// Live service browsers: hidden, created by CefKit itself, and left out
-    /// of ``browsers``.
-    @ObservationIgnored private var serviceBrowsers: [CefBrowser] = []
+    /// Live service pages: hidden, created by CefKit itself, and left out
+    /// of ``pages``.
+    @ObservationIgnored private var servicePages: [CefPage] = []
 
-    /// The hidden browsers of internal-page services that are open.
-    @_spi(Testing) public var openServiceBrowsers: [CefBrowser] { serviceBrowsers }
-    @ObservationIgnored private var serviceBrowserIDs: Set<CefBrowser.ID> = []
+    /// The hidden pages of internal-page services that are open.
+    @_spi(Testing) public var openServicePages: [CefPage] { servicePages }
+    @ObservationIgnored private var servicePageIDs: Set<CefPage.ID> = []
 
-    /// Marks `browser` as a service browser. Call before it is created.
-    func registerServiceBrowser(_ browser: CefBrowser) {
-        serviceBrowserIDs.insert(browser.id)
+    /// Marks `page` as a service page. Call before it is created.
+    func registerServicePage(_ page: CefPage) {
+        servicePageIDs.insert(page.id)
     }
 
-    /// Whether `browser` is one of CefKit's hidden service browsers, which
+    /// Whether `page` is one of CefKit's hidden service pages, which
     /// get none of their profile's page policy.
-    func isServiceBrowser(_ browser: CefBrowser) -> Bool {
-        serviceBrowserIDs.contains(browser.id)
+    func isServicePage(_ page: CefPage) -> Bool {
+        servicePageIDs.contains(page.id)
     }
 
-    /// Whether the app is quitting, so no new service browsers should start.
+    /// Whether the app is quitting, so no new service pages should start.
     package var isTerminating: Bool { isTerminationRequested }
 
     // MARK: Energy policy
 
     /// When CefKit spends less energy on its own. `.automatic`, the
-    /// default, lowers offscreen browsers' frame rate to 30 while Low Power
+    /// default, lowers offscreen pages' frame rate to 30 while Low Power
     /// Mode is on or the Mac is under serious thermal pressure.
     ///
     /// ```swift
@@ -622,9 +622,9 @@ public final class CefRuntime {
     }
 
     /// Follows windows, the app and the system, and publishes each
-    /// browser's ``CefBrowser/lifecycle``.
+    /// page's ``CefPage/lifecycle``.
     @ObservationIgnored private(set) lazy var lifecycleCoordinator = CefLifecycleCoordinator()
 
-    /// Discards Chrome-style browsers through Chromium's own tab discarding.
+    /// Discards Chrome-style pages through Chromium's own tab discarding.
     @ObservationIgnored private(set) lazy var tabDiscarder = CefTabDiscarder()
 }

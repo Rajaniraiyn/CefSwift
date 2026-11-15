@@ -4,7 +4,7 @@ import CefKit
 import IOSurface
 import QuartzCore
 
-/// Checks and a benchmark of what `CefOffscreenBrowserView` presents: the
+/// Checks and a benchmark of what `CefOffscreenPageView` presents: the
 /// page paints a frame number into its background colour on every
 /// animation frame. Each surface the view presents is read as it becomes
 /// the layer's contents, and a 2 ms timer reads the presented surface again,
@@ -43,7 +43,7 @@ extension SelfTest {
         // reports only that block as damaged.
         for scale in [1, 2] {
             guard let damaged = await CompositorStage(
-                points: CGSize(width: 1280 / scale, height: 800 / scale), page: .damage)
+                points: CGSize(width: 1280 / scale, height: 800 / scale), scene: .damage)
             else {
                 check("compositor: the damage page loads", false)
                 return
@@ -51,7 +51,7 @@ extension SelfTest {
             let steady = await damaged.animate(for: .seconds(3), resizing: false)
             let resizing = await damaged.animate(for: .seconds(2), resizing: true)
             damaged.close()
-            _ = await waitUntil { damaged.browser.state == .closed }
+            _ = await waitUntil { damaged.page.state == .closed }
             check("compositor: every presented frame of a partly damaged page is whole (\(scale == 1 ? "1280×800" : "640×400") points)",
                   steady.inconsistent == 0 && steady.mutated == 0 && steady.presented > 30 && steady.samplesTaken > 100
                       && resizing.mutated == 0,
@@ -62,7 +62,7 @@ extension SelfTest {
 
 extension Benchmarks {
     /// `compositor`: presented frames a second, CPU, mouse-to-screen
-    /// latency and memory of `CefOffscreenBrowserView`, for 1280×800,
+    /// latency and memory of `CefOffscreenPageView`, for 1280×800,
     /// 2560×1600 and 5120×3200 pixel surfaces (1280×800 and 2560×1600 views
     /// at 1× and 2×; the screen is 2×, so the 1× sizes are views of half
     /// the size).
@@ -76,15 +76,15 @@ extension Benchmarks {
             ("2560x1600 @2x", CGSize(width: 2560, height: 1600)),
         ]
         let only = UserDefaults.standard.string(forKey: "compositorSize")
-        let page = CompositorStage.Page(rawValue: UserDefaults.standard.string(forKey: "compositorPage") ?? "") ?? .full
+        let scene = CompositorStage.Page(rawValue: UserDefaults.standard.string(forKey: "compositorPage") ?? "") ?? .full
         // `-compositorCopy whole` measures copying whole frames.
-        CefOffscreenBrowserView.copiesWholeFrames = UserDefaults.standard.string(forKey: "compositorCopy") == "whole"
-        let copy = CefOffscreenBrowserView.copiesWholeFrames ? "whole" : "damage"
+        CefOffscreenPageView.copiesWholeFrames = UserDefaults.standard.string(forKey: "compositorCopy") == "whole"
+        let copy = CefOffscreenPageView.copiesWholeFrames ? "whole" : "damage"
         for (label, points) in sizes where only == nil || label.hasPrefix(only!) {
             for run in 1...2 {
                 let memory = MemorySampler()
                 memory.start()
-                guard let stage = await CompositorStage(points: points, page: page) else {
+                guard let stage = await CompositorStage(points: points, scene: scene) else {
                     print("bench error: \(label) did not load")
                     continue
                 }
@@ -93,10 +93,10 @@ extension Benchmarks {
                 let animated = await stage.animate(for: .seconds(3), resizing: false)
                 let used = ProcessCPU.used(from: cpuStart, to: ProcessCPU.sample())
                 memory.stop()
-                let latencies = page == .full ? await stage.mouseLatencies(count: 30) : []
+                let latencies = scene == .full ? await stage.mouseLatencies(count: 30) : []
                 let resized = await stage.animate(for: .seconds(2), resizing: true)
                 print(String(
-                    format: "bench compositor \(page.rawValue) copy \(copy) %@ run %d (%.0fx%.0f px): presented %.1f/s, rAF %.1f/s, app CPU %.1f%%, all CPU %.1f%%; mouse to screen median %.1f ms, p90 %.1f ms (%d); peak footprint while animating +%.0f MB; changed on screen %d, torn %d; while resizing changed %d, torn %d of %d",
+                    format: "bench compositor \(scene.rawValue) copy \(copy) %@ run %d (%.0fx%.0f px): presented %.1f/s, rAF %.1f/s, app CPU %.1f%%, all CPU %.1f%%; mouse to screen median %.1f ms, p90 %.1f ms (%d); peak footprint while animating +%.0f MB; changed on screen %d, torn %d; while resizing changed %d, torn %d of %d",
                     label, run, animated.pixelSize.width, animated.pixelSize.height,
                     animated.presentedPerSecond, animated.rafPerSecond,
                     used.app / animated.seconds * 100, used.total / animated.seconds * 100,
@@ -105,7 +105,7 @@ extension Benchmarks {
                     memory.peakMB - memory.startMB, animated.mutated, animated.torn,
                     resized.mutated, resized.torn, resized.presented) + "; inconsistent \(animated.inconsistent + resized.inconsistent)")
                 stage.close()
-                _ = await SelfTest.waitUntil { CefRuntime.shared.browsers.isEmpty }
+                _ = await SelfTest.waitUntil { CefRuntime.shared.pages.isEmpty }
                 try? await Task.sleep(for: .seconds(1))
             }
         }
@@ -113,7 +113,7 @@ extension Benchmarks {
     }
 }
 
-/// An offscreen browser showing the frame-number page in a window of its
+/// An offscreen page showing the frame-number page in a window of its
 /// own. Key-value observation of the layer's `contents` notes each frame
 /// the view presents and the number in it; a timer reads the number in the
 /// presented surface back, so a surface written while the layer shows it
@@ -121,8 +121,8 @@ extension Benchmarks {
 @MainActor
 final class CompositorStage {
     let window: NSWindow
-    let view: CefOffscreenBrowserView
-    let browser: CefBrowser
+    let view: CefOffscreenPageView
+    let page: CefPage
     private var timer: Timer?
     private var observation: NSKeyValueObservation?
     private var samples: [Sample] = []
@@ -164,10 +164,10 @@ final class CompositorStage {
         case damage
     }
 
-    let page: Page
+    let scene: Page
 
-    init?(points: CGSize, page: Page = .full) async {
-        self.page = page
+    init?(points: CGSize, scene: Page = .full) async {
+        self.scene = scene
         let screen = NSScreen.main?.frame ?? .zero
         // Borderless, so a view larger than the screen keeps its size.
         window = NSWindow(
@@ -175,15 +175,15 @@ final class CompositorStage {
             styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.level = .floating
-        var configuration = CefBrowser.Configuration()
+        var configuration = CefPage.Configuration()
         configuration.rendering = .offscreen(frameRate: 120)
-        browser = CefBrowser(url: URL(string: "selftest://bench/\(page.rawValue).html")!, configuration: configuration)
-        view = CefOffscreenBrowserView(browser: browser)
+        page = CefPage(url: URL(string: "selftest://bench/\(scene.rawValue).html")!, configuration: configuration)
+        view = CefOffscreenPageView(page: page)
         view.frame = window.contentView!.bounds
         view.autoresizingMask = [.width, .height]
         window.contentView!.addSubview(view)
         window.orderFrontRegardless()
-        guard await SelfTest.waitUntil({ browser.title == page.rawValue }) else { return nil }
+        guard await SelfTest.waitUntil({ page.title == scene.rawValue }) else { return nil }
         observation = view.layer?.sublayers?.first?.observe(\.contents, options: [.new]) { [weak self] _, _ in
             // Set on the main thread, in the view's paint callback.
             MainActor.assumeIsolated { self?.presented(self?.contentLayer?.contents) }
@@ -199,7 +199,7 @@ final class CompositorStage {
         timer?.invalidate()
         timer = nil
         observation = nil
-        browser.close(force: true)
+        page.close(force: true)
         view.removeFromSuperview()
         window.close()
     }
@@ -212,7 +212,7 @@ final class CompositorStage {
             return
         }
         let surface = contents as! IOSurfaceRef
-        if page == .damage {
+        if scene == .damage {
             shown = Self.readGrid(surface).map { (surface, $0.reduce(0) { ($0 &* 67) &+ $1 }) }
         } else {
             shown = Self.readCodes(surface).map { (surface, $0.0) }
@@ -224,7 +224,7 @@ final class CompositorStage {
         guard recording, let shown, let contents = contentLayer?.contents,
               (contents as CFTypeRef) === shown.surface
         else { return }
-        if page == .damage {
+        if scene == .damage {
             guard let grid = Self.readGrid(shown.surface) else { return }
             let hash = grid.reduce(0) { ($0 &* 67) &+ $1 }
             samples.append(Sample(
@@ -291,7 +291,7 @@ final class CompositorStage {
         samples = []
         presentations = 0
         let original = window.frame
-        _ = try? await browser.evaluateJavaScript("window.__animate = true; window.__rafs = 0")
+        _ = try? await page.evaluateJavaScript("window.__animate = true; window.__rafs = 0")
         recording = true
         let start = ContinuousClock.now
         var step = 0
@@ -307,7 +307,7 @@ final class CompositorStage {
             try? await Task.sleep(for: .milliseconds(resizing ? 40 : 100))
         }
         recording = false
-        let rafs = (try? await browser.evaluateJavaScript("window.__animate = false; window.__rafs"))?.doubleValue ?? 0
+        let rafs = (try? await page.evaluateJavaScript("window.__animate = false; window.__rafs"))?.doubleValue ?? 0
         if resizing { window.setFrame(original, display: true) }
         var result = Result()
         result.seconds = (ContinuousClock.now - start).seconds
@@ -338,7 +338,7 @@ final class CompositorStage {
             samples = []
             recording = true
             let sent = CACurrentMediaTime()
-            browser.sendMouseMove(to: CGPoint(x: x, y: 60), modifiers: [])
+            page.sendMouseMove(to: CGPoint(x: x, y: 60), modifiers: [])
             _ = await SelfTest.waitUntil(timeout: .milliseconds(500)) { self.samples.contains { $0.top == code } }
             recording = false
             if let seen = samples.first(where: { $0.top == code }) { latencies.append((seen.time - sent) * 1000) }

@@ -52,7 +52,7 @@ extension NSDragOperation {
     }
 }
 
-/// What the page is dragging when it starts a drag from an offscreen browser.
+/// What the page is dragging when it starts a drag from an offscreen page.
 public struct CefDragData: Sendable, Equatable {
     /// Whether the drag is a hyperlink.
     public var isLink: Bool
@@ -97,7 +97,7 @@ public struct CefDragData: Sendable, Equatable {
 
 // MARK: - Drag input
 
-extension CefBrowser {
+extension CefPage {
 
     // MARK: Dragging into the page
 

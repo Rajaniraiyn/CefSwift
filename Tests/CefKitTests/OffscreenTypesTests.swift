@@ -6,7 +6,7 @@ import Testing
 @testable import CefKit
 
 /// Drag operations, drag data, paint elements, cursors, view geometry and
-/// the input events sent to offscreen browsers.
+/// the input events sent to offscreen pages.
 @MainActor
 struct OffscreenTypesTests {
 

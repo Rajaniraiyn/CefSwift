@@ -176,22 +176,22 @@ private actor ProbeActor {
     }
 
     @Test func lifecycleVisibility() {
-        #expect(CefBrowser.Lifecycle.active.isVisible && CefBrowser.Lifecycle.passive.isVisible)
-        #expect(!CefBrowser.Lifecycle.hidden.isVisible && !CefBrowser.Lifecycle.discarded.isVisible)
+        #expect(CefPage.Lifecycle.active.isVisible && CefPage.Lifecycle.passive.isVisible)
+        #expect(!CefPage.Lifecycle.hidden.isVisible && !CefPage.Lifecycle.discarded.isVisible)
     }
 
     @MainActor @Test func lifecycleChangedAtMovesOnlyWithTheLifecycle() async throws {
-        let browser = CefBrowser()
-        let created = browser.lifecycleChangedAt
+        let page = CefPage()
+        let created = page.lifecycleChangedAt
         try await Task.sleep(for: .milliseconds(5))
-        browser.lifecycle = .hidden
-        #expect(browser.lifecycleChangedAt == created)
-        browser.lifecycle = .active
-        let shown = browser.lifecycleChangedAt
+        page.lifecycle = .hidden
+        #expect(page.lifecycleChangedAt == created)
+        page.lifecycle = .active
+        let shown = page.lifecycleChangedAt
         #expect(shown > created)
         try await Task.sleep(for: .milliseconds(5))
-        browser.lifecycle = .hidden
-        #expect(browser.lifecycleChangedAt > shown)
+        page.lifecycle = .hidden
+        #expect(page.lifecycleChangedAt > shown)
     }
 }
 

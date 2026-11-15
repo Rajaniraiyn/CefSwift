@@ -58,11 +58,11 @@ enum RailScreenshots {
         await shoot("4-overflow")
 
         // The find bar along the top of the page, in place of Chromium's.
-        window.activeTab?.browser?.execute(.find)
+        window.activeTab?.page?.execute(.find)
         await settle()
-        window.activeTab?.browser?.findSession.text = "Article"
+        window.activeTab?.page?.findSession.text = "Article"
         await shoot("4b-find-bar")
-        window.activeTab?.browser?.findSession.end()
+        window.activeTab?.page?.findSession.end()
 
         NSApp.appearance = NSAppearance(named: .darkAqua)
         await shoot("5-dark")

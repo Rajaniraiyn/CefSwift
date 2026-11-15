@@ -4,23 +4,23 @@ import CefSwiftUI
 import SwiftUI
 
 /// Favicons, toolbars and zoom, where a bridge is installed, when a
-/// profile's hidden service browsers close, and what a second launch does.
+/// profile's hidden service pages close, and what a second launch does.
 extension SelfTest {
     static let relaunchEnvironmentKey = "CEFSWIFT_SELFTEST_RELAUNCH_ROOT"
 
     // MARK: Favicons
 
     static func faviconChecks() async {
-        let browser = CefBrowser(url: URL(string: "selftest://edge/favicon.html")!)
-        let window = CefWindow(browser: browser)
+        let page = CefPage(url: URL(string: "selftest://edge/favicon.html")!)
+        let window = CefWindow(page: page)
         window.show()
-        check("favicon: downloaded as an image", await waitUntil { browser.favicon != nil },
-              detail: "\(String(describing: browser.faviconURL))")
-        if let favicon = browser.favicon {
+        check("favicon: downloaded as an image", await waitUntil { page.favicon != nil },
+              detail: "\(String(describing: page.faviconURL))")
+        if let favicon = page.favicon {
             let color = favicon.representations.compactMap { $0 as? NSBitmapImageRep }.first?
                 .colorAt(x: 4, y: 4)?.usingColorSpace(.sRGB)
             check("favicon: the page's icon, sized in points",
-                  browser.faviconURL?.lastPathComponent == "icon.png" && favicon.size.width <= 32
+                  page.faviconURL?.lastPathComponent == "icon.png" && favicon.size.width <= 32
                       && (color?.redComponent ?? 0) > 0.9 && (color?.greenComponent ?? 1) < 0.3,
                   detail: "\(favicon.size) \(String(describing: color))")
         }
@@ -32,15 +32,15 @@ extension SelfTest {
             try await history.favicon(for: URL(string: "https://never-visited.invalid/")!) == nil
         }
         // tab.html declares no icon; its default /favicon.ico is not an image.
-        browser.load(URL(string: "selftest://edge/tab.html")!)
+        page.load(URL(string: "selftest://edge/tab.html")!)
         check("favicon: reset when a new page loads", await waitUntil {
-            browser.title == "tab" && browser.faviconURL?.lastPathComponent != "icon.png"
+            page.title == "tab" && page.faviconURL?.lastPathComponent != "icon.png"
         })
         try? await Task.sleep(for: .milliseconds(500))
-        check("favicon: none for a page without one", browser.favicon == nil)
-        browser.goBack()
-        check("favicon: back again shows the icon", await waitUntil { browser.favicon != nil },
-              detail: "\(String(describing: browser.faviconURL))")
+        check("favicon: none for a page without one", page.favicon == nil)
+        page.goBack()
+        check("favicon: back again shows the icon", await waitUntil { page.favicon != nil },
+              detail: "\(String(describing: page.faviconURL))")
         window.close()
         _ = await waitUntil { window.isClosed }
     }
@@ -48,36 +48,36 @@ extension SelfTest {
     // MARK: Toolbar and zoom
 
     static func toolbarAndZoomChecks() async {
-        let browser = CefBrowser(url: URL(string: "selftest://app/second.html")!)
-        let window = CefWindow(browser: browser)
+        let page = CefPage(url: URL(string: "selftest://app/second.html")!)
+        let window = CefWindow(page: page)
         let renders = RenderLog()
-        window.setToolbar { TitleProbe(browser: browser, log: renders) }
-        window.setTabAccessory { TitleProbe(browser: browser, log: renders) }
+        window.setToolbar { TitleProbe(page: page, log: renders) }
+        window.setTabAccessory { TitleProbe(page: page, log: renders) }
         window.show()
-        _ = await loaded(browser, title: "second")
+        _ = await loaded(page, title: "second")
         check("toolbar: installed in the window",
               window.window?.toolbar?.items.count == 5 && window.window?.tab.accessoryView != nil)
         check("toolbar: its views follow the browser's state", await waitUntil { renders.titles.last == "second" },
               detail: "\(renders.titles)")
 
-        let zoom = ZoomObserver(browser)
-        browser.zoomLevel = 1
+        let zoom = ZoomObserver(page)
+        page.zoomLevel = 1
         check("zoom: a level set reads back and is observed",
-              await waitUntil { browser.zoomLevel == 1 && zoom.changes == 1 },
-              detail: "\(browser.zoomLevel), \(zoom.changes) changes")
-        browser.execute(.zoomIn)
+              await waitUntil { page.zoomLevel == 1 && zoom.changes == 1 },
+              detail: "\(page.zoomLevel), \(zoom.changes) changes")
+        page.execute(.zoomIn)
         check("zoom: Chrome's zoom commands are observed",
-              await waitUntil { browser.zoomLevel > 1 && zoom.changes >= 2 },
-              detail: "\(browser.zoomLevel)")
-        browser.load(URL(string: "selftest://edge/tab.html")!)
+              await waitUntil { page.zoomLevel > 1 && zoom.changes >= 2 },
+              detail: "\(page.zoomLevel)")
+        page.load(URL(string: "selftest://edge/tab.html")!)
         check("zoom: each site keeps its own level", await waitUntil {
-            browser.title == "tab" && !browser.isLoading && browser.zoomLevel == 0
-        }, detail: "\(browser.zoomLevel)")
-        browser.goBack()
+            page.title == "tab" && !page.isLoading && page.zoomLevel == 0
+        }, detail: "\(page.zoomLevel)")
+        page.goBack()
         check("zoom: returning to a site restores its level", await waitUntil {
-            browser.title == "second" && browser.zoomLevel > 1
-        }, detail: "\(browser.zoomLevel)")
-        browser.zoomLevel = 0
+            page.title == "second" && page.zoomLevel > 1
+        }, detail: "\(page.zoomLevel)")
+        page.zoomLevel = 0
 
         window.close()
         _ = await waitUntil { window.isClosed }
@@ -97,28 +97,28 @@ extension SelfTest {
         let probe = CefBridge(name: "probe")
         probe.access = .anyFrame
         probe.handle("origin") { (_: CefJSON, call: CefBridge.Call) in call.origin }
-        var configuration = CefBrowser.Configuration()
+        var configuration = CefPage.Configuration()
         configuration.bridges = [bridge, probe]
-        let browser = CefBrowser(url: URL(string: "selftest://app/second.html")!, configuration: configuration)
-        let window = CefWindow(browser: browser)
+        let page = CefPage(url: URL(string: "selftest://app/second.html")!, configuration: configuration)
+        let window = CefWindow(page: page)
         window.show()
-        _ = await loaded(browser, title: "second")
+        _ = await loaded(page, title: "second")
         await expect("bridge scope: a permitted origin gets the bridge, not its raw binding") {
-            try await browser.evaluateJavaScript(
+            try await page.evaluateJavaScript(
                 "typeof __cefswift_scoped === 'undefined' ? scoped.ping() : 'binding visible'").stringValue == "pong"
         }
-        await hostlessFrameChecks(browser, bridge: bridge)
-        _ = await load(URL(string: "selftest://edge/tab.html")!, in: browser, title: "tab")
+        await hostlessFrameChecks(page, bridge: bridge)
+        _ = await load(URL(string: "selftest://edge/tab.html")!, in: page, title: "tab")
         await expect("bridge scope: other origins have no global at all") {
-            try await browser.evaluateJavaScript(
+            try await page.evaluateJavaScript(
                 "typeof scoped === 'undefined' && typeof __cefswift_scoped === 'undefined'").boolValue == true
         }
         bridge.access = .anyFrame
         try? await Task.sleep(for: .milliseconds(200))
-        browser.reload()
+        page.reload()
         await expect("bridge scope: widening access installs it on the next load") {
             await waitUntilAsync {
-                (try? await browser.evaluateJavaScript("typeof scoped === 'object' && document.readyState === 'complete'").boolValue) == true
+                (try? await page.evaluateJavaScript("typeof scoped === 'object' && document.readyState === 'complete'").boolValue) == true
             }
         }
         window.close()
@@ -130,7 +130,7 @@ extension SelfTest {
     /// establishes from their parent or address; an opaque `data:` frame
     /// does not, and its calls carry `"null"`. On an HTTP page;
     /// ``bridgeOriginChecks()`` covers `file:` and custom schemes.
-    private static func hostlessFrameChecks(_ browser: CefBrowser, bridge: CefBridge) async {
+    private static func hostlessFrameChecks(_ page: CefPage, bridge: CefBridge) async {
         guard let server = try? await LocalServer.start() else {
             skip("bridge scope: hostless frames", because: "could not start a local HTTP server", .environment)
             return
@@ -141,9 +141,9 @@ extension SelfTest {
         bridge.access = .origins(["selftest://app", origin])
         defer { bridge.access = previousAccess }
         try? await Task.sleep(for: .milliseconds(200))
-        browser.load(URL(string: "\(origin)/page")!)
-        guard await waitUntil({ browser.title == "page" && !browser.isLoading }) else {
-            check("bridge scope: hostless frames", false, detail: "the HTTP page did not load: \(browser.title)")
+        page.load(URL(string: "\(origin)/page")!)
+        guard await waitUntil({ page.title == "page" && !page.isLoading }) else {
+            check("bridge scope: hostless frames", false, detail: "the HTTP page did not load: \(page.title)")
             return
         }
         let script = """
@@ -179,7 +179,7 @@ extension SelfTest {
         }
         let outcomes: [String: Outcome]
         do {
-            outcomes = try await browser.evaluateJavaScript(script, as: [String: Outcome].self)
+            outcomes = try await page.evaluateJavaScript(script, as: [String: Outcome].self)
         } catch {
             check("bridge scope: hostless frames", false, detail: "\(error)")
             return
@@ -188,16 +188,16 @@ extension SelfTest {
             let outcome = outcomes[name]
             check("bridge scope: a \(name) frame of a permitted page calls with its parent's origin",
                   outcome?.scoped == "pong" && outcome?.origin == origin,
-                  detail: "\(outcome.map(\.description) ?? "none"); frames \(browser.frames.map { $0.url?.absoluteString ?? "nil" })")
+                  detail: "\(outcome.map(\.description) ?? "none"); frames \(page.frames.map { $0.url?.absoluteString ?? "nil" })")
         }
-        guard await waitUntil({ browser.frames.contains { $0.url?.scheme == "data" } }),
-              let dataFrame = browser.frames.first(where: { $0.url?.scheme == "data" })
+        guard await waitUntil({ page.frames.contains { $0.url?.scheme == "data" } }),
+              let dataFrame = page.frames.first(where: { $0.url?.scheme == "data" })
         else {
             check("bridge scope: a data: frame has an opaque origin", false, detail: "no data: frame")
             return
         }
         await expect("bridge scope: a data: frame has an opaque origin and no scoped bridge") {
-            let result = try await browser.evaluateJavaScript(
+            let result = try await page.evaluateJavaScript(
                 "typeof scoped === 'undefined' ? probe.origin() : 'scoped visible'", in: dataFrame)
             return (result.stringValue == "null", "\(result)")
         }
@@ -226,8 +226,8 @@ extension SelfTest {
     /// The reports of a page and of a `srcdoc`, a sandboxed `srcdoc` and a
     /// `data:` frame in it, and of a frame at `subframe` (a page that posts
     /// its report as `subframe`) when given.
-    static func originReports(in browser: CefBrowser, subframe: URL? = nil) async throws -> [String: OriginReport] {
-        try await browser.evaluateJavaScript("""
+    static func originReports(in page: CefPage, subframe: URL? = nil) async throws -> [String: OriginReport] {
+        try await page.evaluateJavaScript("""
             (async () => {
               const report = () => \(originReportScript);
               const child = name => `<script>${report.toString().slice(6)}.then(r => parent.postMessage({ name: '${name}', r }, '*'));<\\/script>`;
@@ -265,27 +265,27 @@ extension SelfTest {
         let probe = CefBridge(name: "probe")
         probe.access = .anyFrame
         probe.handle("origin") { (_: CefJSON, call: CefBridge.Call) in call.origin }
-        var configuration = CefBrowser.Configuration()
+        var configuration = CefPage.Configuration()
         configuration.bridges = [scoped, probe]
-        let browser = CefBrowser(url: file, configuration: configuration)
-        let window = CefWindow(browser: browser)
+        let page = CefPage(url: file, configuration: configuration)
+        let window = CefWindow(page: page)
         window.show()
         // The page's origin when it reaches the `.origins` bridge; `nil`
         // when it must not (an opaque origin, even with "null" listed).
-        let cases: [(page: URL, label: String, origin: String?)] = [
+        let cases: [(pageURL: URL, label: String, origin: String?)] = [
             (file, "a top-level file: page", "file://"),
             (URL(string: "selftest://app/second.html")!, "a standard custom scheme page", "selftest://app"),
             (URL(string: "selftest-local://app/second.html")!, "a .local custom scheme page", "selftest-local://app"),
             (URL(string: "selftest-plain:/second.html")!, "a non-standard custom scheme page", nil),
         ]
-        for (page, label, origin) in cases {
-            guard await load(page, in: browser) else {
-                check("bridge origins: \(label) loads", false, detail: browser.title)
+        for (pageURL, label, origin) in cases {
+            guard await load(pageURL, in: page) else {
+                check("bridge origins: \(label) loads", false, detail: page.title)
                 continue
             }
             let reports: [String: OriginReport]
             do {
-                reports = try await originReports(in: browser, subframe: page.isFileURL ? fileFrame : nil)
+                reports = try await originReports(in: page, subframe: pageURL.isFileURL ? fileFrame : nil)
             } catch {
                 check("bridge origins: \(label) reports", false, detail: "\(error)")
                 continue
@@ -298,14 +298,14 @@ extension SelfTest {
             // srcdoc children of a standard scheme inherit its origin; every
             // other child here is opaque.
             var children = ["sandboxed", "data"]
-            if page.scheme == "selftest" {
+            if pageURL.scheme == "selftest" {
                 check("bridge origins: a srcdoc frame of \(label) inherits its origin",
                       reports["srcdoc"]?.scoped == "pong" && reports["srcdoc"]?.established == origin,
                       detail: reports["srcdoc"].map(\.description) ?? "no report")
             } else {
                 children.append("srcdoc")
             }
-            if page.isFileURL { children.append("subframe") }
+            if pageURL.isFileURL { children.append("subframe") }
             for name in children {
                 let child = reports[name]
                 check("bridge origins: a \(name) frame of \(label) is opaque",
@@ -326,13 +326,13 @@ extension SelfTest {
         let wire = CefBridge(name: "wire")
         wire.handle("read") { (value: Read) in "\(value.a.count):\(value.a.allSatisfy { $0 == 7 })" }
         wire.handle("echo") { (value: CefJSON) in value }
-        var configuration = CefBrowser.Configuration()
+        var configuration = CefPage.Configuration()
         configuration.bridges = [wire]
-        let browser = CefBrowser(url: URL(string: "selftest://app/second.html")!, configuration: configuration)
-        let window = CefWindow(browser: browser)
+        let page = CefPage(url: URL(string: "selftest://app/second.html")!, configuration: configuration)
+        let window = CefWindow(page: page)
         window.show()
-        guard await waitUntil({ browser.title == "second" }) else {
-            check("bridge wire: page loads", false, detail: browser.title)
+        guard await waitUntil({ page.title == "second" }) else {
+            check("bridge wire: page loads", false, detail: page.title)
             window.close()
             return
         }
@@ -340,14 +340,14 @@ extension SelfTest {
         await expect("bridge wire: a large ArrayBuffer survives a later getter transferring it") {
             // `transfer` moves the bytes to a new buffer and frees the old
             // memory, which a deferred copy would read after.
-            let result = try await browser.evaluateJavaScript("""
+            let result = try await page.evaluateJavaScript("""
                 (() => { \(large)
                   return wire.read({ get a() { return big; }, get b() { big.transfer(16); return 1; } }); })()
                 """).stringValue
             return (result == "\(4 << 20):true", result ?? "nil")
         }
         await expect("bridge wire: a large ArrayBuffer survives a later getter detaching it by postMessage") {
-            let result = try await browser.evaluateJavaScript("""
+            let result = try await page.evaluateJavaScript("""
                 (() => { \(large)
                   return wire.read({ get a() { return big; },
                     get b() { new MessageChannel().port1.postMessage(big, [big]); return big.byteLength; } }); })()
@@ -355,24 +355,24 @@ extension SelfTest {
             return (result == "\(4 << 20):true", result ?? "nil")
         }
         await expect("bridge wire: a large ArrayBuffer read last travels intact") {
-            let result = try await browser.evaluateJavaScript("(() => { \(large) return wire.read({ b: 2, a: big }); })()")
+            let result = try await page.evaluateJavaScript("(() => { \(large) return wire.read({ b: 2, a: big }); })()")
                 .stringValue
             return (result == "\(4 << 20):true", result ?? "nil")
         }
         await expect("bridge wire: a throwing getter rejects the call") {
-            let result = try await browser.evaluateJavaScript("""
+            let result = try await page.evaluateJavaScript("""
                 wire.echo({ ok: 1, get bad() { throw new Error('getter boom'); } }).then(() => 'resolved', e => e.message)
                 """).stringValue
             return (result?.contains("getter boom") == true, result ?? "nil")
         }
         await expect("bridge wire: a Proxy whose ownKeys trap throws rejects the call") {
-            let result = try await browser.evaluateJavaScript("""
+            let result = try await page.evaluateJavaScript("""
                 wire.echo(new Proxy({}, { ownKeys() { throw new Error('keys boom'); } })).then(() => 'resolved', e => e.message)
                 """).stringValue
             return (result?.contains("keys boom") == true, result ?? "nil")
         }
         await expect("bridge wire: only own enumerable properties travel") {
-            let result = try await browser.evaluateJavaScript("""
+            let result = try await page.evaluateJavaScript("""
                 wire.echo(Object.create({ inherited: 1 }, { own: { value: 2, enumerable: true }, hidden: { value: 3 } }))
                   .then(v => JSON.stringify(v))
                 """).stringValue
@@ -380,30 +380,30 @@ extension SelfTest {
         }
         await expect("bridge wire: a throwing getter fails an evaluation") {
             do {
-                _ = try await browser.evaluateJavaScript("({ ok: 1, get bad() { throw new Error('eval boom'); } })")
+                _ = try await page.evaluateJavaScript("({ ok: 1, get bad() { throw new Error('eval boom'); } })")
                 return (false, "resolved")
             } catch let error as CefJavaScriptError {
                 return (error.message.contains("eval boom"), error.message)
             }
         }
         await expect("bridge wire: the page still works after the failures") {
-            try await browser.evaluateJavaScript("wire.echo([1, 'two'])").arrayValue?.count == 2
+            try await page.evaluateJavaScript("wire.echo([1, 'two'])").arrayValue?.count == 2
         }
         window.close()
         _ = await waitUntil { window.isClosed }
     }
 
-    // MARK: Service browsers
+    // MARK: Service pages
 
     static func serviceLifetimeChecks() async {
         weak var released: CefProfile?
         do {
             let profile = CefProfile.incognito()
             released = profile
-            var configuration = CefBrowser.Configuration()
+            var configuration = CefPage.Configuration()
             configuration.profile = profile
-            let window = CefWindow(browser: CefBrowser(url: URL(string: "selftest://app/second.html")!, configuration: configuration))
-            check("service lifetime: incognito tab loads", await loaded(window.browser, title: "second"))
+            let window = CefWindow(page: CefPage(url: URL(string: "selftest://app/second.html")!, configuration: configuration))
+            check("service lifetime: incognito tab loads", await loaded(window.page, title: "second"))
             // Starts the profile's suggestions host.
             await expect("service lifetime: incognito suggestions answer") {
                 try await !profile.autocomplete.suggestions(for: "cefswift").isEmpty
@@ -465,8 +465,8 @@ extension SelfTest {
         }, detail: "\(received)")
         try? await Task.sleep(for: .seconds(1))
         check("relaunch: no window of Chromium's appears",
-              NSApp.windows.filter(\.isVisible).count == visibleBefore && CefRuntime.shared.browsers.isEmpty,
-              detail: "\(NSApp.windows.filter(\.isVisible).map(\.title)), \(CefRuntime.shared.browsers.count) browsers")
+              NSApp.windows.filter(\.isVisible).count == visibleBefore && CefRuntime.shared.pages.isEmpty,
+              detail: "\(NSApp.windows.filter(\.isVisible).map(\.title)), \(CefRuntime.shared.pages.count) browsers")
     }
 }
 
@@ -476,30 +476,30 @@ final class RenderLog {
     var titles: [String] = []
 }
 
-/// Shows a browser's title and logs each render.
+/// Shows a page's title and logs each render.
 struct TitleProbe: View {
-    let browser: CefBrowser
+    let page: CefPage
     let log: RenderLog
 
     var body: some View {
-        let _ = log.titles.append(browser.title)
-        Text(browser.title)
+        let _ = log.titles.append(page.title)
+        Text(page.title)
     }
 }
 
-/// Counts changes to a browser's observable zoom level.
+/// Counts changes to a page's observable zoom level.
 @MainActor
 final class ZoomObserver {
-    let browser: CefBrowser
+    let page: CefPage
     private(set) var changes = 0
 
-    init(_ browser: CefBrowser) {
-        self.browser = browser
+    init(_ page: CefPage) {
+        self.page = page
         observe()
     }
 
     private func observe() {
-        withObservationTracking { _ = browser.zoomLevel } onChange: { [weak self] in
+        withObservationTracking { _ = page.zoomLevel } onChange: { [weak self] in
             Task { @MainActor in
                 self?.changes += 1
                 self?.observe()

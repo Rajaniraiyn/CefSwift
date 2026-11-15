@@ -2,7 +2,7 @@ import CefSwiftUI
 import SwiftUI
 
 /// When a page asks for a permission its site settings leave to the user,
-/// the delegate's `browser(_:decidePermissionFor:)` decides, and may take
+/// the delegate's `page(_:decidePermissionFor:)` decides, and may take
 /// its time: here it waits for the app's own prompt. `.alwaysAllow` and
 /// `.alwaysDeny` also store the answer in `profile.siteSettings`, which the
 /// app can read and change for each origin.
@@ -32,28 +32,28 @@ private struct PermissionsView: View {
                     .padding(10)
                     .background(.yellow.opacity(0.2))
                 }
-                CefWebView(model.browser)
+                CefWebView(model.page)
             }
             .frame(minWidth: 380)
             SiteSettingsList(origin: PermissionModel.page.localURL)
                 .frame(minWidth: 240, maxWidth: 320)
         }
-        .readyWhenLoaded(model.browser)
+        .readyWhenLoaded(model.page)
         .onDisappear {
             model.answer(.dismiss)
-            model.browser.close(force: true)
+            model.page.close(force: true)
         }
     }
 }
 
 @MainActor
 @Observable
-private final class PermissionModel: CefBrowserDelegate {
+private final class PermissionModel: CefPageDelegate {
     private(set) var pending: CefPermissionRequest?
     @ObservationIgnored private var reply: CheckedContinuation<CefPermissionDecision, Never>?
-    @ObservationIgnored lazy var browser = CefBrowser(url: Self.page.localURL, delegate: self)
+    @ObservationIgnored lazy var page = CefPage(url: Self.page.localURL, delegate: self)
 
-    func browser(_ browser: CefBrowser, decidePermissionFor request: CefPermissionRequest) async -> CefPermissionDecision {
+    func page(_ page: CefPage, decidePermissionFor request: CefPermissionRequest) async -> CefPermissionDecision {
         answer(.dismiss)  // one question at a time
         pending = request
         // The request is cancelled when the page navigates away or closes.

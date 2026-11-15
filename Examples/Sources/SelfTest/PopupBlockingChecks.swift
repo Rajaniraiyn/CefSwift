@@ -7,10 +7,10 @@ import CefKit
 // then the default window-open decision denies it in Alloy style.
 extension SelfTest {
     @MainActor
-    private final class WindowOpenRecorder: CefBrowserDelegate {
+    private final class WindowOpenRecorder: CefPageDelegate {
         var requests: [CefWindowOpenRequest] = []
 
-        func browser(_ browser: CefBrowser, decideWindowOpenFor request: CefWindowOpenRequest) -> CefWindowOpenDecision {
+        func page(_ page: CefPage, decideWindowOpenFor request: CefWindowOpenRequest) -> CefWindowOpenDecision {
             requests.append(request)
             return .default(for: request)
         }
@@ -34,7 +34,7 @@ extension SelfTest {
         defer { settings.reset(origin: origin) }
 
         // Alloy style: and the default denies it, so the page stays.
-        let alloy = CefBrowser(url: page)
+        let alloy = CefPage(url: page)
         let alloyRecorder = WindowOpenRecorder()
         alloy.delegate = alloyRecorder
         let view = hostWindowed(alloy)
@@ -60,10 +60,10 @@ extension SelfTest {
 
         // Chrome style: Chromium's popup blocker stops it before the
         // delegate unless the popups site setting allows it.
-        let chrome = CefBrowser(url: page)
+        let chrome = CefPage(url: page)
         let chromeRecorder = WindowOpenRecorder()
         chrome.delegate = chromeRecorder
-        let window = CefWindow(browser: chrome)
+        let window = CefWindow(page: chrome)
         var popups: [CefWindow] = []
         window.onPopup = { popup in popups.append(popup) }
         window.show()

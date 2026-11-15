@@ -3,34 +3,34 @@ import CefKit
 import Testing
 
 /// The host views through CefKit's public API alone: an AppKit app hosts a
-/// browser without importing SwiftUI or CefSwiftUI.
+/// page without importing SwiftUI or CefSwiftUI.
 @MainActor
 struct AppKitHostingTests {
-    @Test func windowedViewShowsItsBrowser() {
-        let browser = CefBrowser(url: URL(string: "about:blank")!)
-        let view = CefWindowedBrowserView(browser: browser)
-        #expect(view.browser === browser)
+    @Test func windowedViewShowsItsPage() {
+        let page = CefPage(url: URL(string: "about:blank")!)
+        let view = CefWindowedPageView(page: page)
+        #expect(view.page === page)
 
-        let other = CefBrowser(url: URL(string: "about:blank")!)
-        view.browser = other
-        #expect(view.browser === other)
-        view.browser = nil
-        #expect(view.browser == nil)
+        let other = CefPage(url: URL(string: "about:blank")!)
+        view.page = other
+        #expect(view.page === other)
+        view.page = nil
+        #expect(view.page == nil)
     }
 
-    @Test func offscreenViewShowsItsBrowser() {
-        var configuration = CefBrowser.Configuration()
+    @Test func offscreenViewShowsItsPage() {
+        var configuration = CefPage.Configuration()
         configuration.rendering = .offscreen
-        let browser = CefBrowser(url: URL(string: "about:blank")!, configuration: configuration)
-        let view = CefOffscreenBrowserView(browser: browser)
-        #expect(view.browser === browser)
+        let page = CefPage(url: URL(string: "about:blank")!, configuration: configuration)
+        let view = CefOffscreenPageView(page: page)
+        #expect(view.page === page)
         #expect(view.isFlipped)
 
-        // Not in a window, so Chromium is never asked to create the browser.
+        // Not in a window, so Chromium is never asked to create the page.
         let container = NSView(frame: NSRect(x: 0, y: 0, width: 320, height: 240))
         container.addSubview(view)
         #expect(view.window == nil)
-        view.browser = nil
-        #expect(view.browser == nil)
+        view.page = nil
+        #expect(view.page == nil)
     }
 }

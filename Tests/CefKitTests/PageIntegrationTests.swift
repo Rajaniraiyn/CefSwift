@@ -52,23 +52,23 @@ import UniformTypeIdentifiers
 
 @MainActor @Suite struct FrameListTests {
     @Test func attachDetachAndMainFrameChanges() {
-        let browser = CefBrowser(url: URL(string: "about:blank")!)
-        browser.frameDidAttach(CefFrame(id: "child", url: nil, isMain: false, parentID: "main"))
-        browser.frameDidAttach(CefFrame(id: "main", url: URL(string: "https://a.example/"), isMain: true))
-        #expect(browser.frames.map(\.id) == ["main", "child"])
-        #expect(browser.mainFrame?.id == "main")
+        let page = CefPage(url: URL(string: "about:blank")!)
+        page.frameDidAttach(CefFrame(id: "child", url: nil, isMain: false, parentID: "main"))
+        page.frameDidAttach(CefFrame(id: "main", url: URL(string: "https://a.example/"), isMain: true))
+        #expect(page.frames.map(\.id) == ["main", "child"])
+        #expect(page.mainFrame?.id == "main")
 
-        browser.frameDidUpdate("child", url: URL(string: "https://b.example/"))
-        #expect(browser.frame(withID: "child")?.url?.host == "b.example")
+        page.frameDidUpdate("child", url: URL(string: "https://b.example/"))
+        #expect(page.frame(withID: "child")?.url?.host == "b.example")
 
-        browser.frameDidAttach(CefFrame(id: "main2", url: nil, isMain: false))
-        browser.mainFrameDidChange(from: "main", to: "main2")
-        #expect(browser.mainFrame?.id == "main2")
-        #expect(browser.frame(withID: "main")?.isMain == false)
+        page.frameDidAttach(CefFrame(id: "main2", url: nil, isMain: false))
+        page.mainFrameDidChange(from: "main", to: "main2")
+        #expect(page.mainFrame?.id == "main2")
+        #expect(page.frame(withID: "main")?.isMain == false)
 
-        browser.frameDidDetach("child")
-        #expect(browser.frame(withID: "child") == nil)
-        #expect(browser.frames.count == 2)
+        page.frameDidDetach("child")
+        #expect(page.frame(withID: "child") == nil)
+        #expect(page.frames.count == 2)
     }
 }
 
@@ -78,7 +78,7 @@ import UniformTypeIdentifiers
         override var canBecomeKeyView: Bool { true }
     }
 
-    @Test func skipsTheBrowsersOwnSubviews() {
+    @Test func skipsThePagesOwnSubviews() {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 100), styleMask: [], backing: .buffered, defer: true)
         let before = KeyView(frame: NSRect(x: 0, y: 0, width: 10, height: 10))
         let host = KeyView(frame: NSRect(x: 20, y: 0, width: 100, height: 100))
@@ -90,16 +90,16 @@ import UniformTypeIdentifiers
         host.nextKeyView = inner
         inner.nextKeyView = after
         after.nextKeyView = before
-        #expect(CefBrowser.keyView(after: host, forward: true) === after)
-        #expect(CefBrowser.keyView(after: host, forward: false) === before)
-        #expect(CefBrowser.firstAcceptingResponder(in: host) === host)
+        #expect(CefPage.keyView(after: host, forward: true) === after)
+        #expect(CefPage.keyView(after: host, forward: false) === before)
+        #expect(CefPage.firstAcceptingResponder(in: host) === host)
     }
 
-    @Test func aLoopWithOnlyTheBrowserHasNoTarget() {
+    @Test func aLoopWithOnlyThePageHasNoTarget() {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 100), styleMask: [], backing: .buffered, defer: true)
         let host = KeyView(frame: NSRect(x: 0, y: 0, width: 100, height: 100))
         window.contentView!.addSubview(host)
         host.nextKeyView = host
-        #expect(CefBrowser.keyView(after: host, forward: true) == nil)
+        #expect(CefPage.keyView(after: host, forward: true) == nil)
     }
 }

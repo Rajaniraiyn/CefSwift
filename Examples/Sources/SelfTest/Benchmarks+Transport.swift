@@ -33,17 +33,17 @@ extension Benchmarks {
 
     static func bridge() async {
         let bridge = TransportBench.makeBridge()
-        var configuration = CefBrowser.Configuration()
+        var configuration = CefPage.Configuration()
         configuration.bridges = [bridge]
-        let browser = CefBrowser(url: URL(string: "selftest://bench/bridge.html")!, configuration: configuration)
-        let view = CefWindowedBrowserView(browser: browser)
+        let page = CefPage(url: URL(string: "selftest://bench/bridge.html")!, configuration: configuration)
+        let view = CefWindowedPageView(page: page)
         view.frame = SelfTest.window.contentView!.bounds
         SelfTest.window.contentView!.addSubview(view)
         defer {
-            browser.close(force: true)
+            page.close(force: true)
             view.removeFromSuperview()
         }
-        guard await SelfTest.waitUntil({ browser.title == "bridge" }) else {
+        guard await SelfTest.waitUntil({ page.title == "bridge" }) else {
             print("bench error: bridge page did not load")
             return
         }
@@ -57,7 +57,7 @@ extension Benchmarks {
                 memory.start()
                 meter.start()
                 MallocCounter.start()
-                let result = try? await browser.evaluateJavaScript("runBench('\(kind)', \(count))", as: BenchResult.self)
+                let result = try? await page.evaluateJavaScript("runBench('\(kind)', \(count))", as: BenchResult.self)
                 let allocations = MallocCounter.stop()
                 meter.stop()
                 memory.stop()
@@ -77,30 +77,30 @@ extension Benchmarks {
     // MARK: Evaluation
 
     static func evaluate() async {
-        let browser = CefBrowser(url: URL(string: "selftest://bench/bridge.html")!)
-        let view = CefWindowedBrowserView(browser: browser)
+        let page = CefPage(url: URL(string: "selftest://bench/bridge.html")!)
+        let view = CefWindowedPageView(page: page)
         view.frame = SelfTest.window.contentView!.bounds
         SelfTest.window.contentView!.addSubview(view)
         defer {
-            browser.close(force: true)
+            page.close(force: true)
             view.removeFromSuperview()
         }
-        guard await SelfTest.waitUntil({ browser.title == "bridge" }) else {
+        guard await SelfTest.waitUntil({ page.title == "bridge" }) else {
             print("bench error: page did not load")
             return
         }
         for run in 1...2 {
             await measureEvaluation("int", run: run, count: 2000) {
-                _ = try await browser.evaluateJavaScript("41 + 1", as: Int.self)
+                _ = try await page.evaluateJavaScript("41 + 1", as: Int.self)
             }
             await measureEvaluation("twenty", run: run, count: 1000) {
-                _ = try await browser.evaluateJavaScript("makeTwenty(1)", as: TransportBench.Twenty.self)
+                _ = try await page.evaluateJavaScript("makeTwenty(1)", as: TransportBench.Twenty.self)
             }
             await measureEvaluation("many", run: run, count: 20) {
-                _ = try await browser.evaluateJavaScript("makeMany(10000)", as: [TransportBench.Small].self)
+                _ = try await page.evaluateJavaScript("makeMany(10000)", as: [TransportBench.Small].self)
             }
             await measureEvaluation("json-many", run: run, count: 20) {
-                _ = try await browser.evaluateJavaScript("makeMany(10000)")
+                _ = try await page.evaluateJavaScript("makeMany(10000)")
             }
         }
     }
@@ -155,11 +155,11 @@ extension Benchmarks {
     static func accessibilityIngest() async {
         for run in 1...4 {
             CefDiagnostics.accessibilityIngestion = run % 2 == 1 ? .json : .valueCopy
-            var configuration = CefBrowser.Configuration()
+            var configuration = CefPage.Configuration()
             configuration.rendering = .offscreen
             configuration.offscreenAccessibility = .enabled
-            let browser = CefBrowser(url: URL(string: "selftest://bench/axlarge.html")!, configuration: configuration)
-            let view = CefOffscreenBrowserView(browser: browser)
+            let page = CefPage(url: URL(string: "selftest://bench/axlarge.html")!, configuration: configuration)
+            let view = CefOffscreenPageView(page: page)
             view.frame = SelfTest.window.contentView!.bounds
             CefDiagnostics.reset()
             let meter = MainThreadMeter()
@@ -169,7 +169,7 @@ extension Benchmarks {
             let start = ContinuousClock.now
             SelfTest.window.contentView!.addSubview(view)
             _ = await SelfTest.waitUntil(timeout: .seconds(60)) {
-                browser.accessibilityTree.nodeCount > 15000 && browser.accessibilityTree.isLoaded
+                page.accessibilityTree.nodeCount > 15000 && page.accessibilityTree.isLoaded
             }
             let ready = (ContinuousClock.now - start).benchMilliseconds
             meter.stop()
@@ -178,10 +178,10 @@ extension Benchmarks {
             let background = CefDiagnostics.counter(.accessibilityIngestBackground)
             print(String(
                 format: "bench axingest run %d (\(CefDiagnostics.accessibilityIngestion)): %d nodes ready at %.0f ms; ingest on main %.1f ms in %d updates (largest share of main busy %.0f ms); background %.1f ms; peak footprint +%.0f MB",
-                run, browser.accessibilityTree.nodeCount, ready, Double(main.nanoseconds) / 1e6, main.count,
+                run, page.accessibilityTree.nodeCount, ready, Double(main.nanoseconds) / 1e6, main.count,
                 meter.busy.benchMilliseconds, Double(background.nanoseconds) / 1e6, memory.peakMB - memory.startMB))
-            browser.close(force: true)
-            _ = await SelfTest.waitUntil { browser.state == .closed }
+            page.close(force: true)
+            _ = await SelfTest.waitUntil { page.state == .closed }
             view.removeFromSuperview()
         }
     }
@@ -190,18 +190,18 @@ extension Benchmarks {
 
     static func devToolsEvents() async {
         for run in 1...2 {
-            let browser = CefBrowser(url: URL(string: "selftest://bench/bridge.html")!)
-            let view = CefWindowedBrowserView(browser: browser)
+            let page = CefPage(url: URL(string: "selftest://bench/bridge.html")!)
+            let view = CefWindowedPageView(page: page)
             view.frame = SelfTest.window.contentView!.bounds
             SelfTest.window.contentView!.addSubview(view)
-            _ = await SelfTest.waitUntil { browser.title == "bridge" }
-            _ = try? await browser.devTools.send("Runtime.enable")
+            _ = await SelfTest.waitUntil { page.title == "bridge" }
+            _ = try? await page.devTools.send("Runtime.enable")
             CefDiagnostics.reset()
             let meter = MainThreadMeter()
             meter.start()
             MallocCounter.start()
             let start = ContinuousClock.now
-            _ = try? await browser.evaluateJavaScript("for (let i = 0; i < 20000; i++) console.log('event', i, {a: i}); 1")
+            _ = try? await page.evaluateJavaScript("for (let i = 0; i < 20000; i++) console.log('event', i, {a: i}); 1")
             // Wait for the events to drain.
             _ = await SelfTest.waitUntil(timeout: .seconds(30)) { CefDiagnostics.counter(.devToolsEvent).count >= 20000 }
             let elapsed = (ContinuousClock.now - start).benchMilliseconds
@@ -212,8 +212,8 @@ extension Benchmarks {
                 format: "bench devtools run %d: %d events in %.0f ms, CefKit %.2f µs each; main thread busy %.0f ms; main-thread allocations %.1f per event",
                 run, events.count, elapsed, events.microsecondsEach, meter.busy.benchMilliseconds,
                 Double(allocations) / Double(max(events.count, 1))))
-            browser.close(force: true)
-            _ = await SelfTest.waitUntil { browser.state == .closed }
+            page.close(force: true)
+            _ = await SelfTest.waitUntil { page.state == .closed }
             view.removeFromSuperview()
         }
     }

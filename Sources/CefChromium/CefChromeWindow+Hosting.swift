@@ -88,7 +88,7 @@ final class ChromeWindowHost {
             observedPage = page
             // Chromium shows another tab's page: that tab is active now.
             window.strip.windowDidShowPage(page, in: window)
-            window.surfaceController?.shownBrowserDidChange()
+            window.surfaceController?.shownPageDidChange()
             page.postsFrameChangedNotifications = true
             observers.append(NotificationCenter.default.addObserver(
                 forName: NSView.frameDidChangeNotification, object: page, queue: .main
@@ -146,7 +146,7 @@ final class ChromeWindowHost {
         }
     }
 
-    private static func isVertical(_ layout: CefTabStrip.Layout) -> Bool {
+    private static func isVertical(_ layout: CefTabs.Layout) -> Bool {
         if case .vertical = layout { return true }
         return false
     }
@@ -180,7 +180,7 @@ final class ChromeWindowHost {
         guard let nsWindow, let window else { return }
         if let first = [window.topBar, window.sidebar].compactMap({ $0 }).lazy.compactMap(Self.firstKeyView(in:)).first {
             nsWindow.makeFirstResponder(first)
-        } else if let page = window.activeTab?.browser?.nativeView, let target = Self.firstKeyView(in: page) {
+        } else if let page = window.activeTab?.page?.nativeView, let target = Self.firstKeyView(in: page) {
             nsWindow.makeFirstResponder(target)
         }
     }

@@ -55,27 +55,27 @@ import CefBase
     }
 
     @Test func interruptedDownloadsKeepTheirControl() {
-        let browser = CefBrowser(configuration: Self.configuration(profile: .incognito()))
+        let page = CefPage(configuration: Self.configuration(profile: .incognito()))
         func update(_ state: CefDownload.State) {
             let control = CefRef(adopting: cefAllocate(cef_download_item_callback_t.self, owner: NSObject()))
-            browser.applyDownload(CefDownload.Snapshot(id: 7, receivedBytes: 10, state: state), control: control)
+            page.applyDownload(CefDownload.Snapshot(id: 7, receivedBytes: 10, state: state), control: control)
         }
         update(.interrupted(.networkDisconnected))
-        let download = try! #require(browser.downloads.first)
+        let download = try! #require(page.downloads.first)
         #expect(download.control != nil && download.canResume)
         update(.paused)
         #expect(download.control != nil)
         update(.completed)
         #expect(download.control == nil)
-        #expect(browser.downloads.count == 1 && !download.canResume)
+        #expect(page.downloads.count == 1 && !download.canResume)
     }
 
-    /// One object per download, updated in place, listed by its browser and
+    /// One object per download, updated in place, listed by its page and
     /// its profile.
     @Test func updatesKeepOneObjectPerDownload() {
         let profile = CefProfile.incognito()
-        let first = CefBrowser(configuration: Self.configuration(profile: profile))
-        let second = CefBrowser(configuration: Self.configuration(profile: profile))
+        let first = CefPage(configuration: Self.configuration(profile: profile))
+        let second = CefPage(configuration: Self.configuration(profile: profile))
         first.applyDownload(CefDownload.Snapshot(id: 1, suggestedFilename: "a.zip", mimeType: "application/zip",
                                                  receivedBytes: 10, expectedBytes: 40, bytesPerSecond: 10), control: nil)
         second.applyDownload(CefDownload.Snapshot(id: 2, suggestedFilename: "b.txt"), control: nil)
@@ -89,51 +89,51 @@ import CefBase
         #expect(download.bytesPerSecond == 0 && download.estimatedTimeRemaining == nil && download.fractionCompleted == 1)
         #expect(profile.downloads.map(\.suggestedFilename) == ["a.zip", "b.txt"])
         #expect(second.downloads.map(\.suggestedFilename) == ["b.txt"])
-        #expect(download.browser === first)
+        #expect(download.page === first)
     }
 
     /// Removal takes finished downloads out of both lists, and keeps one
     /// that can still go on.
     @Test func removingDownloadsKeepsThoseThatCanGoOn() {
         let profile = CefProfile.incognito()
-        let browser = CefBrowser(configuration: Self.configuration(profile: profile))
+        let page = CefPage(configuration: Self.configuration(profile: profile))
         let control = CefRef(adopting: cefAllocate(cef_download_item_callback_t.self, owner: NSObject()))
-        browser.applyDownload(CefDownload.Snapshot(id: 1, suggestedFilename: "done.zip", state: .completed), control: nil)
-        browser.applyDownload(CefDownload.Snapshot(id: 2, suggestedFilename: "going.zip"), control: control)
-        browser.applyDownload(CefDownload.Snapshot(id: 3, suggestedFilename: "paused.zip", state: .paused), control: control)
-        browser.applyDownload(CefDownload.Snapshot(id: 4, suggestedFilename: "stuck.zip", state: .interrupted(.networkFailed)),
+        page.applyDownload(CefDownload.Snapshot(id: 1, suggestedFilename: "done.zip", state: .completed), control: nil)
+        page.applyDownload(CefDownload.Snapshot(id: 2, suggestedFilename: "going.zip"), control: control)
+        page.applyDownload(CefDownload.Snapshot(id: 3, suggestedFilename: "paused.zip", state: .paused), control: control)
+        page.applyDownload(CefDownload.Snapshot(id: 4, suggestedFilename: "stuck.zip", state: .interrupted(.networkFailed)),
                               control: nil)
-        browser.applyDownload(CefDownload.Snapshot(id: 5, suggestedFilename: "gone.zip", state: .cancelled), control: nil)
+        page.applyDownload(CefDownload.Snapshot(id: 5, suggestedFilename: "gone.zip", state: .cancelled), control: nil)
 
         profile.removeDownloads { $0.state == .cancelled || $0.state == .inProgress }
         #expect(profile.downloads.map(\.suggestedFilename) == ["done.zip", "going.zip", "paused.zip", "stuck.zip"])
-        #expect(browser.downloads.map(\.suggestedFilename) == profile.downloads.map(\.suggestedFilename))
+        #expect(page.downloads.map(\.suggestedFilename) == profile.downloads.map(\.suggestedFilename))
 
         profile.removeFinishedDownloads()
         #expect(profile.downloads.map(\.suggestedFilename) == ["going.zip", "paused.zip"])
-        #expect(browser.downloads.map(\.suggestedFilename) == ["going.zip", "paused.zip"])
+        #expect(page.downloads.map(\.suggestedFilename) == ["going.zip", "paused.zip"])
 
         // A later report of a removed download makes it anew.
-        browser.applyDownload(CefDownload.Snapshot(id: 1, suggestedFilename: "done.zip", state: .completed), control: nil)
-        #expect(profile.downloads.count == 3 && browser.downloads.count == 3)
+        page.applyDownload(CefDownload.Snapshot(id: 1, suggestedFilename: "done.zip", state: .completed), control: nil)
+        #expect(profile.downloads.count == 3 && page.downloads.count == 3)
     }
 
     @Test func downloadsCarryTheirOriginAndDates() {
-        let browser = CefBrowser(configuration: Self.configuration(profile: .incognito()))
+        let page = CefPage(configuration: Self.configuration(profile: .incognito()))
         let start = Date(timeIntervalSince1970: 1_800_000_000)
-        browser.applyDownload(CefDownload.Snapshot(
+        page.applyDownload(CefDownload.Snapshot(
             id: 9, url: URL(string: "https://cdn.example/f.zip"), originalURL: URL(string: "https://example.com/get"),
             startDate: start), control: nil)
-        let download = try! #require(browser.downloads.first)
+        let download = try! #require(page.downloads.first)
         #expect(download.originalURL?.host() == "example.com" && download.startDate == start && download.endDate == nil)
-        browser.applyDownload(CefDownload.Snapshot(
+        page.applyDownload(CefDownload.Snapshot(
             id: 9, url: URL(string: "https://cdn.example/f.zip"), startDate: start, endDate: start + 5, state: .completed),
             control: nil)
         #expect(download.originalURL?.host() == "example.com" && download.endDate == start + 5)
     }
 
-    static func configuration(profile: CefProfile) -> CefBrowser.Configuration {
-        var configuration = CefBrowser.Configuration()
+    static func configuration(profile: CefProfile) -> CefPage.Configuration {
+        var configuration = CefPage.Configuration()
         configuration.profile = profile
         return configuration
     }
@@ -164,9 +164,9 @@ import CefBase
     /// policy; a profile delegate's own answer wins over it.
     @Test func profileDelegateFollowsThePolicyUnlessItDecides() async {
         let profile = CefProfile.incognito()
-        let browser = CefBrowser(configuration: CefDownloadStateTests.configuration(profile: profile))
-        browser.applyDownload(CefDownload.Snapshot(id: 3, suggestedFilename: "r.pdf"), control: nil)
-        let download = browser.downloads[0]
+        let page = CefPage(configuration: CefDownloadStateTests.configuration(profile: profile))
+        page.applyDownload(CefDownload.Snapshot(id: 3, suggestedFilename: "r.pdf"), control: nil)
+        let download = page.downloads[0]
         let standard = profile.effectiveDelegate
         profile.downloadPolicy = .folder(folder)
         #expect(await standard.profile(profile, decideDestinationFor: download) == .saveInFolder(folder))
@@ -184,15 +184,15 @@ import CefBase
     /// the page's profile's delegate, which denies by default.
     @Test func permissionsFallBackFromThePageToItsProfile() async {
         let profile = CefProfile.incognito()
-        let browser = CefBrowser(configuration: CefDownloadStateTests.configuration(profile: profile))
+        let page = CefPage(configuration: CefDownloadStateTests.configuration(profile: profile))
         let request = CefPermissionRequest(kinds: .geolocation, origin: URL(string: "https://maps.example")!)
-        #expect(await CefDefaultBrowserDelegate.shared.browser(browser, decidePermissionFor: request) == .deny)
+        #expect(await CefDefaultPageDelegate.shared.page(page, decidePermissionFor: request) == .deny)
         let profileDelegate = AllowsGeolocation()
         profile.delegate = profileDelegate
-        #expect(await CefDefaultBrowserDelegate.shared.browser(browser, decidePermissionFor: request) == .allow)
-        #expect(profileDelegate.pages == [ObjectIdentifier(browser)])
+        #expect(await CefDefaultPageDelegate.shared.page(page, decidePermissionFor: request) == .allow)
+        #expect(profileDelegate.pages == [ObjectIdentifier(page)])
         // A page delegate's own answer wins.
-        #expect(await DeniesEverything().browser(browser, decidePermissionFor: request) == .deny)
+        #expect(await DeniesEverything().page(page, decidePermissionFor: request) == .deny)
     }
 
     @Test func cancelAndAskResolveToThemselves() {
@@ -246,7 +246,7 @@ private final class AllowsGeolocation: CefProfileDelegate {
     var pages: [ObjectIdentifier] = []
 
     func profile(
-        _ profile: CefProfile, decidePermissionFor request: CefPermissionRequest, in page: CefBrowser
+        _ profile: CefProfile, decidePermissionFor request: CefPermissionRequest, in page: CefPage
     ) async -> CefPermissionDecision {
         pages.append(ObjectIdentifier(page))
         return request.kinds == .geolocation ? .allow : .deny
@@ -254,8 +254,8 @@ private final class AllowsGeolocation: CefProfileDelegate {
 }
 
 @MainActor
-private final class DeniesEverything: CefBrowserDelegate {
-    func browser(_ browser: CefBrowser, decidePermissionFor request: CefPermissionRequest) async -> CefPermissionDecision {
+private final class DeniesEverything: CefPageDelegate {
+    func page(_ page: CefPage, decidePermissionFor request: CefPermissionRequest) async -> CefPermissionDecision {
         .deny
     }
 }

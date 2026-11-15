@@ -133,27 +133,27 @@ extension SelfTest {
     // MARK: Cookies shared with pages
 
     static func cookieRequestChecks(base: String, profile: CefProfile) async {
-        var browserConfiguration = CefBrowser.Configuration()
-        browserConfiguration.profile = profile
-        let browser = CefBrowser(url: URL(string: "\(base)/page")!, configuration: browserConfiguration)
-        let view = hostWindowed(browser)
+        var pageConfiguration = CefPage.Configuration()
+        pageConfiguration.profile = profile
+        let page = CefPage(url: URL(string: "\(base)/page")!, configuration: pageConfiguration)
+        let view = hostWindowed(page)
         defer {
-            browser.close(force: true)
+            page.close(force: true)
             view.removeFromSuperview()
         }
-        guard await loaded(browser, title: "page") else {
-            check("urlRequest: the cookie page loads", false, detail: "title '\(browser.title)'")
+        guard await loaded(page, title: "page") else {
+            check("urlRequest: the cookie page loads", false, detail: "title '\(page.title)'")
             return
         }
         do {
-            _ = try await browser.evaluateJavaScript("document.cookie = 'fromPage=yes; path=/'; 0")
+            _ = try await page.evaluateJavaScript("document.cookie = 'fromPage=yes; path=/'; 0")
             let (_, response) = try await profile.data(from: URL(string: "\(base)/echo?cookies")!)
             let cookies = response.value(forHTTPHeaderField: "X-Echo-Cookie") ?? ""
             check("urlRequest: a cookie a page set is sent with the request", cookies.contains("fromPage=yes"),
                   detail: "Cookie: '\(cookies)'")
 
             _ = try await profile.data(from: URL(string: "\(base)/set-cookie")!)
-            let seen = try await browser.evaluateJavaScript("document.cookie").stringValue ?? ""
+            let seen = try await page.evaluateJavaScript("document.cookie").stringValue ?? ""
             check("urlRequest: a cookie the request received is visible to the page", seen.contains("fromRequest=yes"),
                   detail: "document.cookie '\(seen)'")
 

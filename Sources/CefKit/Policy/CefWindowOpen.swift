@@ -89,7 +89,7 @@ public struct CefPopupFeatures: Sendable, Equatable {
     /// The requested size of the page area (`width`, `height`). `nil` when
     /// the page did not ask for one; a dimension it left out is 0.
     public var size: CGSize?
-    /// Whether the page asked for a popup without browser controls.
+    /// Whether the page asked for a popup without page controls.
     public var isPopup: Bool
 
     public init(origin: CGPoint? = nil, size: CGSize? = nil, isPopup: Bool = false) {
@@ -110,7 +110,7 @@ public struct CefPopupFeatures: Sendable, Equatable {
 }
 
 /// A page's request to open a link, popup or window, passed to
-/// ``CefBrowserDelegate/browser(_:decideWindowOpenFor:)``.
+/// ``CefPageDelegate/page(_:decideWindowOpenFor:)``.
 public struct CefWindowOpenRequest: Sendable, Equatable {
     /// The URL to open; `nil` for a blank popup.
     public var targetURL: URL?
@@ -122,11 +122,11 @@ public struct CefWindowOpenRequest: Sendable, Equatable {
     public var hasUserGesture: Bool
     /// The window features the page requested.
     public var features: CefPopupFeatures
-    /// Whether the requesting browser renders offscreen. Offscreen browsers
+    /// Whether the requesting page renders offscreen. Offscreen pages
     /// cannot host native popups; see
     /// ``CefWindowOpenDecision/allowNativePopup``.
     public var isSourceOffscreen: Bool
-    /// Whether the requesting browser uses Chrome style, where Chromium can
+    /// Whether the requesting page uses Chrome style, where Chromium can
     /// open tabs and windows itself.
     public var isSourceChromeStyle: Bool
 
@@ -150,36 +150,36 @@ public struct CefWindowOpenRequest: Sendable, Equatable {
 }
 
 /// What to do with a ``CefWindowOpenRequest``, returned from
-/// ``CefBrowserDelegate/browser(_:decideWindowOpenFor:)``.
+/// ``CefPageDelegate/page(_:decideWindowOpenFor:)``.
 public enum CefWindowOpenDecision: Sendable, Equatable {
     /// Ignore the request.
     case deny
-    /// Load the URL in the requesting browser. Does nothing when the request
+    /// Load the URL in the requesting page. Does nothing when the request
     /// has no URL.
-    case openInCurrentBrowser
+    case openInCurrentPage
     /// Let Chromium open the popup, tab or window itself. For offscreen
-    /// browsers, which cannot host a native popup, this acts as
-    /// ``openInCurrentBrowser``, or ``deny`` when there is no URL. For a
-    /// browser with an attachment that must prepare before the first
-    /// document, CefKit opens the URL in a browser of its own instead,
+    /// pages, which cannot host a native popup, this acts as
+    /// ``openInCurrentPage``, or ``deny`` when there is no URL. For a
+    /// page with an attachment that must prepare before the first
+    /// document, CefKit opens the URL in a page of its own instead,
     /// which the page cannot script; see
-    /// ``CefBrowserAttachment/preparesBeforeFirstDocument``.
+    /// ``CefPageAttachment/preparesBeforeFirstDocument``.
     case allowNativePopup
     /// You opened the content yourself, for example in a new
     /// ``CefWindow``; Chromium does nothing more.
     case handled
 
     /// The action taken when the delegate does not implement
-    /// ``CefBrowserDelegate/browser(_:decideWindowOpenFor:)``: Chrome-style
-    /// browsers open tabs and windows natively; other browsers deny a
+    /// ``CefPageDelegate/page(_:decideWindowOpenFor:)``: Chrome-style
+    /// pages open tabs and windows natively; other browsers deny a
     /// request without a user gesture, load the URL in place, and allow a
     /// blank popup only when not offscreen. Return it from your own
     /// implementation for requests you don't handle.
     ///
-    /// Chromium's popup blocker stops a Chrome-style browser's popups
+    /// Chromium's popup blocker stops a Chrome-style page's popups
     /// without a gesture before the delegate is asked, unless the
     /// ``CefSitePermission/popups`` site setting allows them; Alloy-style
-    /// browsers have no popup blocker, so the delegate sees every request,
+    /// pages have no popup blocker, so the delegate sees every request,
     /// and this default keeps a script's `window.open` from navigating the
     /// page away.
     public static func `default`(for request: CefWindowOpenRequest) -> CefWindowOpenDecision {
@@ -188,7 +188,7 @@ public enum CefWindowOpenDecision: Sendable, Equatable {
         }
         guard request.hasUserGesture else { return .deny }
         if request.targetURL != nil {
-            return .openInCurrentBrowser
+            return .openInCurrentPage
         }
         return request.isSourceOffscreen ? .deny : .allowNativePopup
     }
@@ -196,12 +196,12 @@ public enum CefWindowOpenDecision: Sendable, Equatable {
 
 /// The window-open behavior CefSwift applies.
 enum CefWindowOpenPolicy {
-    /// The action actually taken for `action`: for offscreen browsers,
+    /// The action actually taken for `action`: for offscreen pages,
     /// ``CefWindowOpenDecision/allowNativePopup`` becomes
-    /// ``CefWindowOpenDecision/openInCurrentBrowser``, or
+    /// ``CefWindowOpenDecision/openInCurrentPage``, or
     /// ``CefWindowOpenDecision/deny`` when there is no URL.
     static func resolve(_ action: CefWindowOpenDecision, for request: CefWindowOpenRequest) -> CefWindowOpenDecision {
         guard action == .allowNativePopup, request.isSourceOffscreen else { return action }
-        return request.targetURL != nil ? .openInCurrentBrowser : .deny
+        return request.targetURL != nil ? .openInCurrentPage : .deny
     }
 }

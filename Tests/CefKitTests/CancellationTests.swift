@@ -96,24 +96,24 @@ struct CancellationTests {
     }
 }
 
-/// The page's tooltip: what the browser reports, and who shows it.
+/// The page's tooltip: what the page reports, and who shows it.
 @MainActor
 struct TooltipTests {
     @Test func theCustomPolicySuppressesChromiumsTooltip() {
-        let browser = CefBrowser()
-        #expect(browser.tooltipDidChange("Hello") == false)
-        #expect(browser.tooltip?.text == "Hello")
-        browser.tooltipPolicy = .custom
-        #expect(browser.tooltipDidChange("Again") == true)
-        #expect(browser.tooltip?.text == "Again")
-        #expect(browser.tooltipDidChange("") == true)
-        #expect(browser.tooltip == nil)
+        let page = CefPage()
+        #expect(page.tooltipDidChange("Hello") == false)
+        #expect(page.tooltip?.text == "Hello")
+        page.tooltipPolicy = .custom
+        #expect(page.tooltipDidChange("Again") == true)
+        #expect(page.tooltip?.text == "Again")
+        #expect(page.tooltipDidChange("") == true)
+        #expect(page.tooltip == nil)
     }
 
     @Test func navigatingHidesIt() {
-        let browser = CefBrowser()
-        _ = browser.tooltipDidChange("Hello")
-        browser.mainFrameDidStartLoading(URL(string: "https://example.com/"))
-        #expect(browser.tooltip == nil)
+        let page = CefPage()
+        _ = page.tooltipDidChange("Hello")
+        page.mainFrameDidStartLoading(URL(string: "https://example.com/"))
+        #expect(page.tooltip == nil)
     }
 }

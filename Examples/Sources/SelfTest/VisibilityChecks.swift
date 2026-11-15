@@ -37,10 +37,10 @@ extension SelfTest {
     // MARK: Paths
 
     private static func windowedVisibilityChecks() async {
-        let browser = CefBrowser(url: twoColourPage)
-        let view = hostWindowed(browser)
-        defer { browser.close(force: true); view.removeFromSuperview() }
-        guard await loaded(browser) else { return check("visibility (windowed): loads", false) }
+        let page = CefPage(url: twoColourPage)
+        let view = hostWindowed(page)
+        defer { page.close(force: true); view.removeFromSuperview() }
+        guard await loaded(page) else { return check("visibility (windowed): loads", false) }
         await expectVisible("visibility (windowed): the page is on screen, edge to edge", in: view)
 
         // What SwiftUI's effects set on a container's layer: Chromium's
@@ -91,13 +91,13 @@ extension SelfTest {
     /// The sizes an animation gives a view, fractional, on every refresh:
     /// Chromium's frame layer must stay the view's size.
     private static func windowedResizeDriftChecks() async {
-        let browser = CefBrowser(url: twoColourPage)
-        let view = CefWindowedBrowserView(browser: browser)
+        let page = CefPage(url: twoColourPage)
+        let view = CefWindowedPageView(page: page)
         let content = window.contentView!
         view.frame = CGRect(x: 20, y: 20, width: 300, height: 260)
         content.addSubview(view)
-        defer { browser.close(force: true); view.removeFromSuperview() }
-        guard await loaded(browser) else { return check("visibility (windowed resize): loads", false) }
+        defer { page.close(force: true); view.removeFromSuperview() }
+        guard await loaded(page) else { return check("visibility (windowed resize): loads", false) }
         for (from, to) in [(CGSize(width: 300, height: 260), CGSize(width: 520, height: 470)),
                            (CGSize(width: 520, height: 470), CGSize(width: 300, height: 260))] {
             for step in 0...60 {
@@ -119,45 +119,45 @@ extension SelfTest {
     /// A page taken out of its view and shown in a new one, again and
     /// again, as SwiftUI does when it removes and inserts a `CefWebView`.
     private static func windowedRehostingChecks() async {
-        let browser = CefBrowser(url: twoColourPage)
-        var view = hostWindowed(browser)
-        defer { browser.close(force: true); view.removeFromSuperview() }
-        guard await loaded(browser) else { return check("visibility (windowed re-hosting): loads", false) }
+        let page = CefPage(url: twoColourPage)
+        var view = hostWindowed(page)
+        defer { page.close(force: true); view.removeFromSuperview() }
+        guard await loaded(page) else { return check("visibility (windowed re-hosting): loads", false) }
         for _ in 0..<5 {
             view.removeFromSuperview()
-            view.browser = nil
+            view.page = nil
             try? await Task.sleep(for: .milliseconds(100))
-            view = hostWindowed(browser)
+            view = hostWindowed(page)
             try? await Task.sleep(for: .milliseconds(100))
         }
         try? await Task.sleep(for: .milliseconds(500))
         check("visibility (windowed re-hosting): the page is live and in its fifth view",
-              browser.state == .live && browser.nativeView?.superview === view && browser.nativeView?.isHiddenOrHasHiddenAncestor == false,
-              detail: "state \(browser.state), in view \(browser.nativeView?.superview === view)")
+              page.state == .live && page.nativeView?.superview === view && page.nativeView?.isHiddenOrHasHiddenAncestor == false,
+              detail: "state \(page.state), in view \(page.nativeView?.superview === view)")
         await expectVisible("visibility (windowed re-hosting): the page is on screen after five moves", in: view)
     }
 
     private static func offscreenVisibilityChecks() async {
-        var configuration = CefBrowser.Configuration()
+        var configuration = CefPage.Configuration()
         configuration.rendering = .offscreen
-        let browser = CefBrowser(url: twoColourPage, configuration: configuration)
-        let view = hostOffscreen(browser)
-        defer { browser.close(force: true); view.removeFromSuperview() }
-        guard await loaded(browser) else { return check("visibility (offscreen): loads", false) }
+        let page = CefPage(url: twoColourPage, configuration: configuration)
+        let view = hostOffscreen(page)
+        defer { page.close(force: true); view.removeFromSuperview() }
+        guard await loaded(page) else { return check("visibility (offscreen): loads", false) }
         await expectVisible("visibility (offscreen): the page is on screen, edge to edge", in: view)
     }
 
     private static func cefWindowVisibilityChecks() async {
-        let browser = CefBrowser(url: twoColourPage)
-        let cefWindow = CefWindow(browser: browser)
+        let page = CefPage(url: twoColourPage)
+        let cefWindow = CefWindow(page: page)
         cefWindow.show()
         defer { cefWindow.close() }
-        guard await loaded(browser), await waitUntil(timeout: .seconds(5), { cefWindow.window.flatMap(pageView(in:)) != nil }),
-              let page = cefWindow.window.flatMap(pageView(in:))
+        guard await loaded(page), await waitUntil(timeout: .seconds(5), { cefWindow.window.flatMap(pageView(in:)) != nil }),
+              let pageNSView = cefWindow.window.flatMap(pageView(in:))
         else { return check("visibility (CefWindow): loads and shows its page", false) }
-        await expectVisible("visibility (CefWindow): the page is on screen, edge to edge", in: page)
+        await expectVisible("visibility (CefWindow): the page is on screen, edge to edge", in: pageNSView)
         cefWindow.close()
-        _ = await waitUntil { cefWindow.isClosed && browser.state == .closed }
+        _ = await waitUntil { cefWindow.isClosed && page.state == .closed }
     }
 
     private static func chromeWindowVisibilityChecks() async {
@@ -168,8 +168,8 @@ extension SelfTest {
             return check("visibility (CefChromeWindow): opens", false, detail: "\(error)")
         }
         defer { chromeWindow.close() }
-        _ = await waitUntil(timeout: .seconds(10)) { chromeWindow.window != nil && chromeWindow.activeTab?.browser != nil }
-        if let browser = chromeWindow.activeTab?.browser { _ = await loaded(browser) }
+        _ = await waitUntil(timeout: .seconds(10)) { chromeWindow.window != nil && chromeWindow.activeTab?.page != nil }
+        if let page = chromeWindow.activeTab?.page { _ = await loaded(page) }
         chromeWindow.window?.makeKeyAndOrderFront(nil)
         for showsChromeUI in [true, false] {
             let label = showsChromeUI ? "with Chrome's UI" : "under the app's top bar"
@@ -179,18 +179,18 @@ extension SelfTest {
             }
             _ = await waitUntil(timeout: .seconds(3)) { showsChromeUI || chromeWindow.topBarHeight > 0 }
             try? await Task.sleep(for: .milliseconds(500))
-            guard let nsWindow = chromeWindow.window, let page = pageView(in: nsWindow) else {
+            guard let nsWindow = chromeWindow.window, let pageNSView = pageView(in: nsWindow) else {
                 check("visibility (CefChromeWindow, \(label)): shows its page", false)
                 continue
             }
             // Capture-free: nothing opaque of the library's over the page.
             let covering = opaqueLibraryViews(in: nsWindow).filter { view in
-                view.convert(view.bounds, to: nil).intersection(page.convert(page.bounds, to: nil)).width > 1
-                    && view.convert(view.bounds, to: nil).intersection(page.convert(page.bounds, to: nil)).height > 1
+                view.convert(view.bounds, to: nil).intersection(pageNSView.convert(pageNSView.bounds, to: nil)).width > 1
+                    && view.convert(view.bounds, to: nil).intersection(pageNSView.convert(pageNSView.bounds, to: nil)).height > 1
             }
             check("visibility (CefChromeWindow, \(label)): no opaque view of the library's lies over the page",
                   covering.isEmpty, detail: covering.map { "\(type(of: $0)) \($0.frame)" }.joined(separator: ", "))
-            await expectVisible("visibility (CefChromeWindow, \(label)): the page is on screen, edge to edge", in: page)
+            await expectVisible("visibility (CefChromeWindow, \(label)): the page is on screen, edge to edge", in: pageNSView)
         }
     }
 

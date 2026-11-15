@@ -452,7 +452,7 @@ enum Doctor {
                     fix: "add \"passkeys\" or \"bluetooth\" to capabilities."))
         features.append(.init(status: .info, title: "passkeys: Touch ID",
                     detail: "unavailable: CEF 156 looks for the keychain group \"\(group)\", which has no team " +
-                        "prefix, so no provisioning profile can authorize it. Use CefBrowser.PasskeyPolicy.app with " +
+                        "prefix, so no provisioning profile can authorize it. Use CefPasskeyController.Policy.app with " +
                         "CefKeychainPasskeyStore for passkeys verified with Touch ID."))
         features.append(iCloud
             ? .init(status: .ok, title: "passkeys: iCloud Keychain", detail: "available.")

@@ -151,7 +151,7 @@ import Testing
     }
 }
 
-/// What a host document has installed, as `CefServiceHostBrowser` keeps
+/// What a host document has installed, as `CefServiceHostPage` keeps
 /// it: recorded only for a script that was sent, so a call cancelled
 /// before its script left (as during the host's start-up) leaves the next
 /// call to install the runtime.

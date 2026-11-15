@@ -20,7 +20,7 @@ final class StartPage: BrowserFeature {
     init() {
         bridge.access = .origins(["browser://start"])
         bridge.handle("load") { [weak self] (_: CefJSON, call: CefBridge.Call) in
-            await self?.content(isPrivate: call.browser.isPrivate)
+            await self?.content(isPrivate: call.page.isPrivate)
         }
     }
 
@@ -33,7 +33,7 @@ final class StartPage: BrowserFeature {
         }
     }
 
-    func configure(_ configuration: inout CefBrowser.Configuration) {
+    func configure(_ configuration: inout CefPage.Configuration) {
         configuration.bridges.append(bridge)
     }
 

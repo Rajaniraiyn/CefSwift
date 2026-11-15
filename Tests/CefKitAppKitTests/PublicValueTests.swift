@@ -7,13 +7,13 @@ import Testing
 struct PublicValueTests {
     let url = URL(string: "https://example.com/")!
 
-    @Test func browserEventValues() {
+    @Test func pageEventValues() {
         #expect(CefLoadError(code: -105, message: "net::ERR_NAME_NOT_RESOLVED", url: url).url == url)
         #expect(CefLoadError(code: -3, message: "aborted").isCancellation)
         #expect(CefConsoleMessage(level: .warning, text: "hi").line == 0)
         #expect(!CefNavigationAction(url: url).hasUserGesture)
         #expect(CefJavaScriptError(message: "boom").description == "boom")
-        #expect(CefBrowser.FindResult(matchCount: 3, activeMatchIndex: 1).isFinal)
+        #expect(CefPage.FindResult(matchCount: 3, activeMatchIndex: 1).isFinal)
         #expect(CefDevToolsError(method: "Page.reload", code: -32000, message: "x").description == "Page.reload failed (-32000): x")
         #expect(CefMediaRouteError(message: "no sink").description == "no sink")
         #expect(CefAccessibilityChanges.Event(type: "focus").node == nil)

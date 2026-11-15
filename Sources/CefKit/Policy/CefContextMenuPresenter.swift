@@ -1,23 +1,23 @@
 import AppKit
 import Foundation
 
-/// The native menu behind ``CefBrowserDelegate/browser(_:runContextMenu:for:)``:
+/// The native menu behind ``CefPageDelegate/page(_:runContextMenu:for:)``:
 /// an `NSMenu` of the ``CefContextMenu``, opened as a context menu at the
 /// click, with the system's additions such as Services. Call it from your
 /// own delegate to keep the stock menu for some clicks.
 @MainActor
 public enum CefContextMenuPresenter {
-    /// Shows `menu` at `target`'s location in `browser`'s view and returns
+    /// Shows `menu` at `target`'s location in `page`'s view and returns
     /// the item the user chose, or `nil` when the menu closes without a
     /// choice. Cancelling the calling task closes the menu.
     public static func present(
-        _ menu: CefContextMenu, for target: CefContextMenuTarget, in browser: CefBrowser
+        _ menu: CefContextMenu, for target: CefContextMenuTarget, in page: CefPage
     ) async -> CefContextMenu.Item? {
-        guard !Task.isCancelled, let view = contentView(of: browser), let window = view.window else { return nil }
+        guard !Task.isCancelled, let view = contentView(of: page), let window = view.window else { return nil }
         let nsMenu = makeMenu(for: menu)
         guard !nsMenu.items.isEmpty else { return nil }
         // An offscreen page's points follow the frame as the view shows it.
-        let offscreen = view as? CefOffscreenBrowserView
+        let offscreen = view as? CefOffscreenPageView
         let point = offscreen.map { $0.windowPoint(fromView: $0.viewPoint(fromPage: target.location)) }
             ?? view.convert(viewPoint(of: target.location, in: view), to: nil)
         let event = NSEvent.mouseEvent(
@@ -75,10 +75,10 @@ public enum CefContextMenuPresenter {
 
     /// The view Chromium's page is drawn in, which the menu's point is
     /// relative to: the offscreen host, or Chromium's own view under the
-    /// browser's, which takes first responder when clicked.
-    static func contentView(of browser: CefBrowser) -> NSView? {
-        if browser.isOffscreen { return browser.hostView }
-        guard let native = browser.nativeView else { return browser.hostView }
+    /// page's, which takes first responder when clicked.
+    static func contentView(of page: CefPage) -> NSView? {
+        if page.isOffscreen { return page.hostView }
+        guard let native = page.nativeView else { return page.hostView }
         if let responder = native.window?.firstResponder as? NSView, responder.isDescendant(of: native) {
             return responder
         }
