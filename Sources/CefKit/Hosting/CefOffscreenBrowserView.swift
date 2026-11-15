@@ -363,7 +363,9 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
     private func updateScale(onlyIfChanged: Bool = false) {
         guard let window else { return }
         let scale = window.backingScaleFactor
-        let screen = window.screen.map(ObjectIdentifier.init)
+        // By display, not by object: AppKit may hand out a new `NSScreen`
+        // for the same display (it does on CI's virtual machines).
+        let screen = (window.screen?.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value
         guard !onlyIfChanged || scale != lastBackingScale || screen != lastScreen else { return }
         lastBackingScale = scale
         lastScreen = screen
@@ -373,7 +375,7 @@ public final class CefOffscreenBrowserView: NSView, CefOffscreenHost {
         commitPageSize(force: true)
     }
     private var lastBackingScale: CGFloat = 0
-    private var lastScreen: ObjectIdentifier?
+    private var lastScreen: UInt32?
 
     private func hostBrowserIfPossible() {
         guard !isTornDown, window != nil, let browser else { return }
