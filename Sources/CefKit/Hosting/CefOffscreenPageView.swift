@@ -393,7 +393,7 @@ public final class CefOffscreenPageView: NSView, CefOffscreenHost {
     /// resize policy says.
     private func geometryDidChange() {
         updateContentFrame()
-        guard targetPageSize != committedPageSize else { return }
+        guard !Self.sameForChromium(targetPageSize, committedPageSize) else { return }
         if Self.resizesOnEveryFrameChange {
             commitPageSize(force: true)
             return
@@ -445,7 +445,7 @@ public final class CefOffscreenPageView: NSView, CefOffscreenHost {
     /// Tells Chromium the page's size, if it changed or `force` is set.
     private func commitPageSize(force: Bool) {
         let size = targetPageSize
-        guard force || size != committedPageSize else { return }
+        guard force || !Self.sameForChromium(size, committedPageSize) else { return }
         committedPageSize = size
         lastCommit = CACurrentMediaTime()
         page?.hostViewDidResize()
@@ -697,6 +697,13 @@ public final class CefOffscreenPageView: NSView, CefOffscreenHost {
         // As Chromium reports a windowed page's screen (ui/display/mac).
         info.screenColorDepth = screen.canRepresent(.p3) ? 30 : 24
         return info
+    }
+
+    /// Whether Chromium sees two sizes as one: it gets whole points
+    /// (`cef_rect_t`), and under a `scaleEffect` SwiftUI may move the
+    /// view's size by fractions of a point on every refresh (macOS 15).
+    static func sameForChromium(_ a: CGSize, _ b: CGSize) -> Bool {
+        a.width.rounded() == b.width.rounded() && a.height.rounded() == b.height.rounded()
     }
 
     private static func nonEmpty(_ size: CGSize) -> CGSize {

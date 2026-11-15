@@ -24,6 +24,15 @@ struct OffscreenGeometryTests {
         #expect(CefOffscreenPageView.rect(placing: .zero, in: bounds, .aspectFit) == bounds)
     }
 
+    /// Chromium gets whole points, so a change under half a point is no
+    /// resize (SwiftUI's `scaleEffect` makes such changes on macOS 15).
+    @Test func subpointChangesAreNoResize() {
+        let size = CGSize(width: 460, height: 440)
+        #expect(CefOffscreenPageView.sameForChromium(size, CGSize(width: 460.3, height: 439.8)))
+        #expect(!CefOffscreenPageView.sameForChromium(size, CGSize(width: 461, height: 440)))
+        #expect(!CefOffscreenPageView.sameForChromium(size, CGSize(width: 460, height: 440.6)))
+    }
+
     @Test func pagePointsFollowThePlacedFrame() {
         let view = offscreenView()
         view.frame = bounds
