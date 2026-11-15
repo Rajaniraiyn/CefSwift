@@ -25,13 +25,12 @@ swift test --sanitize=address --build-system native
 The default build system links the helper-startup library without the
 Address Sanitizer runtime, so that one uses the native build system.
 
-The Command Line Tools are enough; Xcode is not required, except for the
-Xcode example. `CefKitTests`
-covers CefKit and its AppKit views, `CefPasskeysTests` the passkeys
-library, `CefChromiumTests` the CefChromium library, `CefKitAppKitTests` hosts a page through CefKit's public API
-alone (no SwiftUI), and `CefBundlingTests` the bundling logic: signing,
-entitlements, bundle assembly, `cef doctor`, and the Xcode build phase
-driven by a fake Xcode environment; none of them starts Chromium.
+The Command Line Tools are enough; only the Xcode example needs Xcode.
+`CefKitTests` covers CefKit and its AppKit views, `CefPasskeysTests` and
+`CefChromiumTests` those libraries, `CefKitAppKitTests` hosts a page through
+CefKit's public API alone (no SwiftUI), and `CefBundlingTests` covers
+signing, entitlements, bundle assembly, `cef doctor` and the Xcode build
+phase, driven by a fake Xcode environment. None of them starts Chromium.
 
 The bundling logic is the `CefBundling` library target, which the
 `cefswift` tool (`Sources/CefSwiftTool`) wraps. SwiftPM lets a command
@@ -73,9 +72,9 @@ swift package --package-path Examples \
 open Examples/dist/Browser.app
 ```
 
-The other products are `Gallery`, `Minimal`, `Compat` and `SelfTest`. The plugin keeps its cache
-in the invoking package, so the Examples package downloads CEF into
-`Examples/.cef/`. [Examples/README.md](Examples/README.md) lists the launch
+The other products are `Gallery`, `Minimal`, `Compat` and `SelfTest`. The
+plugin keeps its cache in the invoking package, so the Examples package
+downloads CEF into `Examples/.cef/`. [Examples/README.md](Examples/README.md) lists the launch
 arguments.
 
 `Scripts/check-xcode-example.sh` builds the Xcode example
@@ -109,8 +108,7 @@ seen. CI runs it on every pull request. Add a check in
 `Examples/Sources/SelfTest` for new behavior that crosses into CEF.
 
 - `SELFTEST_ONLY=passkeys,discard` runs only the named groups of checks
-  (`SelfTest.checkGroups` lists them), which is quicker while you work on
-  one area.
+  (`SelfTest.checkGroups` lists them).
 - Each group has a deadline (`SelfTest.groupDeadlines`, 60 seconds unless
   listed). A group that outlives it fails with its name, and the next
   group runs. A last-resort watchdog exits with 124.
@@ -122,9 +120,9 @@ seen. CI runs it on every pull request. Add a check in
   whose names start with an entry of `SELFTEST_EXPECTED_SKIPS` (separated
   by semicolons), which CI uses for what a virtual machine cannot run.
 - `SELFTEST_ISOLATED=1` runs each group in a process of its own, with its
-  own cache directory, and kills one that outlives its deadline; no group
-  then depends on what an earlier one left behind. It takes longer, and CI
-  uses it.
+  own cache directory, and kills one that outlives its deadline, so no
+  group depends on what an earlier one left behind. It is slower; CI uses
+  it.
 - `SELFTEST_JSON=<path>` writes every result, each group's time and the
   skip counts as JSON.
 
@@ -145,10 +143,10 @@ Scripts/measure-footprint.py Examples/dist/Minimal.app --runs 5
 
 The script prints the median of each kind of run and the footprint of
 each process kind. Numbers drift by a few MiB within minutes on the same
-Mac (the GPU process most), and by more between sessions, so compare
-builds measured in alternation, not with a figure from another day; and
-compare per process, since a change usually shows in one process. Note
-the power source and the machine's load. CI's Footprint step measures
+Mac (the GPU process most), and by more between sessions. Compare builds
+measured in alternation, never with a figure from another day, and compare
+per process, since a change usually shows in one. Note the power source and
+the machine's load. CI's Footprint step measures
 both examples on its virtual machine, writes the numbers to the run
 summary, and fails only above wide bounds that a gross regression crosses.
 
@@ -233,8 +231,7 @@ pin.
 
 Public API follows the [Swift API Design
 Guidelines](https://www.swift.org/documentation/api-design-guidelines/), with
-these conventions on top. Follow them for new API, so that the library keeps
-reading as one.
+these conventions on top, which new API follows too.
 
 - **CEF's and Chromium's terms win over product words.** CefSwift embeds
   CEF; it is not a browser framework, so a name says what CEF or Chromium
@@ -289,21 +286,21 @@ reading as one.
   event is `did…`/`…Did…`. A request a native sheet can answer has a
   `Cef…Presenter`, whose `present` shows that sheet and returns the answer.
   `credentialFor:`, `shouldProceedDespite:`, `selectClientCertificateFor:`
-  and `pageIsUnresponsive` are deliberately not `decide…For:`: each
-  supplies a value (a credential, a certificate, whether to proceed, what to
-  do with a hung page) rather than allowing or denying a request, so do not
-  rename them or wrap their answers in new enums for uniformity.
+  and `pageIsUnresponsive` are not `decide…For:` on purpose: each supplies
+  a value (a credential, a certificate, whether to proceed, what to do with
+  a hung page) rather than allowing or denying a request. Do not rename
+  them or wrap their answers in new enums.
 - **Optional modules** (`CefPasskeys`, `CefChromium`) depend on CefKit
   (and on CefKit's own C layer, `CCef` and `CefBase`, only for Chromium's
   identifiers) and name their types as CefKit does
   (`CefPasskeyController`, `CefPasskeyStore`, `CefBookmarks`).
   CefKit never names them: a module plugs in through an extension point
-  (`CefPageAttachment`, per-profile or
-  per-window module state, a Chrome-command interceptor, the service-host
-  engine) and gets its own delegate (`CefPasskeyDelegate`) rather than
-  members on `CefPageDelegate`. What it needs from CefKit and apps
-  should not use is `package`, not public; what no other module uses any
-  more goes back to internal.
+  (`CefPageAttachment`, per-profile or per-window module state, a
+  Chrome-command interceptor, the service-host engine) and gets its own
+  delegate (`CefPasskeyDelegate`) rather than members on
+  `CefPageDelegate`. What it needs from CefKit and apps should not use is
+  `package`, not public; what no other module uses any more goes back to
+  internal.
 - **What an app could write itself stays out of the library**: UI copy
   (names to show for permissions), product defaults, and heuristics for
   when to use a capability belong in the app, or in `Examples` to show

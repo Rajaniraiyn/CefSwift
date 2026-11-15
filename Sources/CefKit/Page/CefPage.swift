@@ -34,8 +34,8 @@ extension CefPage {
 /// `CefPage` wraps CEF's `cef_browser_t` (Chromium's WebContents).
 ///
 /// A `CefPage` is an observable model object. Create it up front, bind UI
-/// to its state, and hand it to a `CefWebView` or ``CefWindow`` — the
-/// underlying Chromium page is created when it is first shown.
+/// to its state, and hand it to a `CefWebView` or ``CefWindow``. The
+/// Chromium page is created when it is first shown.
 ///
 /// ```swift
 /// @State private var page = CefPage(url: URL(string: "https://example.com")!)

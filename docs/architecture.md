@@ -5,12 +5,7 @@ How CefSwift works inside, and why. For how to use it, see the
 
 CefSwift is a library for embedding CEF in a macOS app. The core, `CefKit`,
 wraps CEF's C API and the Chromium behavior an embedder has to work with or
-around: the runtime and its processes, pages and their handlers,
-profiles, AppKit host views, CEF Views windows, offscreen rendering and its
-accessibility, discarding. `CefSwiftUI` adds SwiftUI. `CefPasskeys` and
-`CefChromium` are optional modules that reach Chromium internals some apps
-want. Browser-product decisions (UI, defaults, heuristics) live in the
-examples.
+around; the other modules and the examples build on it:
 
 | Where | What | Examples |
 |---|---|---|
@@ -1340,7 +1335,7 @@ second.
 
 **Services as modules.** A `CefServiceHost.Module` names the hosts that can
 serve it and a JavaScript `setup` that builds a service object once per
-document — a bound Mojo remote, or an extension API with listeners. A
+document (a bound Mojo remote, or an extension API with listeners). A
 call runs a function, `async (service, args, context) => value`, against
 that object in the host's renderer and decodes its value into the caller's
 type; a module that serves from several hosts (favicons) uses whichever of
@@ -1397,8 +1392,8 @@ text, since `AutocompleteController::Start` stops every provider (their
 network requests included) before it runs, and no provider answers empty
 input.
 
-**Host failures.** A call whose host stops before it answers — the
-renderer crashed, or the host was closed — throws `"… stopped
+**Host failures.** A call whose host stops before it answers (the
+renderer crashed, or the host was closed) throws `"… stopped
 responding"`, unless the call is idempotent (reads), which is then made
 once more on a new host. A call that times out is not repeated: it closes
 the host, and waiting as long again would double the delay.

@@ -33,11 +33,11 @@ Chrome, under the browser's own tab rail and toolbar.
   through `CefRuntime.onPageCreated`. Popups (`window.open` with
   features) are Chromium's own popup windows, which show the site's
   address.
-- `BrowserWindow`: dresses each window: Chrome's tab strip and toolbar
-  covered (`showsChromeUI = false`) by the browser's top bar — the
-  `TabRail` beside the window buttons and the toolbar, bound to the active
-  tab — or, with View › Tabs at the Side, a sidebar; the features' views
-  over the active tab's page.
+- `BrowserWindow`: dresses each window. The browser's top bar (the
+  `TabRail` beside the window buttons, and the toolbar, bound to the active
+  tab) or, with View › Tabs at the Side, a sidebar covers Chrome's tab
+  strip and toolbar (`showsChromeUI = false`); the features' views go over
+  the active tab's page.
 - `TabRail/`: the tab rail, a view of `CefChromeWindow.tabs` and `groups`
   across the top or down the side (one model, two layouts): favicons,
   titles, sound, muted, asleep and private indicators, close buttons,
@@ -51,7 +51,9 @@ Chrome, under the browser's own tab rail and toolbar.
 - `BrowserFeature`: the points a feature plugs into, each with a default
   that does nothing.
 - `BrowserScene`: the Settings window and the menu bar, filled with the
-  features' rows and commands; the example's runtime configuration (`CefRuntime.Configuration.page`, the library's `.chrome` under the example's name, with its scheme).
+  features' rows and commands; the example's runtime configuration
+  (`CefRuntime.Configuration.browser`: the library's `.chrome` under the
+  example's name, with its scheme).
 - Reopening what closed: File › Reopen Closed Tab (⌘⇧T) and File ›
   Recently Closed, tabs and whole windows (with their tab counts), each
   reopened as Chromium closed it (`CefTabs.reopen`); Settings › On
@@ -80,11 +82,11 @@ Chrome, under the browser's own tab rail and toolbar.
 | `Appearance` | Settings › Appearance, for the windows and the pages | `CefProfile.setColorScheme` |
 | `Downloads` | A toolbar button listing downloads | `CefPage.downloads` |
 | `Extensions` | Pinned extension actions in the toolbar and a menu of the rest; each action's popup page under its button, in a small Chrome-style window of its own (Chromium opens action popups only from its own toolbar); a Manage Extensions window that lists, turns on and off, removes and loads extensions and opens the Chrome Web Store | `CefExtensions` |
-| `TabDiscarding` | Memory Saver: background tabs put to sleep after a while or under memory pressure; Settings › Put tabs to sleep; a button that wakes them. Background tabs are Chromium's real background tabs now, so Chromium's own discarding applies to them too | `discard()`, `lifecycle` |
+| `TabDiscarding` | Memory Saver: background tabs put to sleep after a while or under memory pressure; Settings › Put tabs to sleep; a button that wakes them. Background tabs are Chromium's real background tabs, so Chromium's own discarding applies to them too | `discard()`, `lifecycle` |
 | `ChromiumPanels` | QR code and Share buttons and View › Cast: Chromium's bubbles under the buttons, or the browser's own QR code and Cast panels (Settings, `-customChromiumPanels YES`) | `chromiumSurfaceAnchor`, `CefChromeWindow.setCustomPresentation`, `CefMediaRouter` |
 | `ChromiumPages` | `chrome://settings` without what does nothing in an embedded Chromium, an About page of the browser's own, and a Browser menu of Chromium's pages | `CefUserScript.styleSheet`, navigation policy |
 | `Playground` | `browser://playground/` (Help › Playground): popups, a download, a page that asks before leaving, an unreachable site, Widevine and FairPlay test streams | `CefSchemeHandler` |
-| `WebKitTabs` | Streaming services (Netflix, Disney+ and others) in windows shown by the system's WebKit, which plays FairPlay; View › Open in WebKit, and "Open in Chromium" back. A WebKit page is not a Chromium tab: it opens in a separate window of its own beside the browser window, with no entry in the rail, no tab groups and no place in Recently Closed; the menus that navigate reach it while it is in front | `Sources/SystemEngine` |
+| `WebKitTabs` | Streaming services (Netflix, Disney+ and others) in windows shown by the system's WebKit, which plays FairPlay; View › Open in WebKit, and "Open in Chromium" back. A WebKit page is not a Chromium tab: it opens in its own window beside the browser window, with no entry in the rail, no tab groups and no place in Recently Closed; the menus that navigate reach it while it is in front | `Sources/SystemEngine` |
 | `Passkeys` | Passkeys answered by Chromium or by the browser itself, and the saved passkeys, in Settings | `CefPasskeyController` |
 | `TaskManager` | Window › Task Manager | `CefTaskManager` |
 | `SingleInstance` | Launching the app again opens a tab, or one for each URL or file passed | `CefRuntime.onRelaunch` |
@@ -130,10 +132,10 @@ nowhere to appear; without `StartPage`, new tabs open `about:blank`.
 
 ## Gallery
 
-A library of 30 small examples (`Sources/Gallery`), each showing one
-capability in one file of SwiftUI and CefSwift code you can copy:
-`Demos/<Name>Demo.swift`. The sidebar groups them and launches each; the
-detail shows the running demo, what it shows, and its file.
+30 small examples (`Sources/Gallery`), each showing one capability in one
+file of SwiftUI and CefSwift code you can copy: `Demos/<Name>Demo.swift`.
+The sidebar groups them and launches each; the detail shows the running
+demo, what it shows, and its file.
 
 - **Web Views**: observable state and awaited loads; offscreen rendering
   under SwiftUI; windowed and offscreen pages under animations and

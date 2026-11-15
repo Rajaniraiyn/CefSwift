@@ -19,8 +19,8 @@ import SwiftUI
 /// `.windowed` (the default) embeds Chromium's own native view; `.offscreen`
 /// composites the page in a layer so SwiftUI content can overlap it.
 ///
-/// A view created with ``init(_:)`` never closes the page you gave it —
-/// it can leave the hierarchy and come back, or move to another view. Call
+/// A view created with ``init(_:)`` never closes the page you gave it, so
+/// the page can leave the hierarchy and come back, or move to another view. Call
 /// ``CefPage/close(force:)`` when you are done with it. A view created
 /// with ``init(url:configuration:)`` closes its page when it goes away.
 public struct CefWebView: View {

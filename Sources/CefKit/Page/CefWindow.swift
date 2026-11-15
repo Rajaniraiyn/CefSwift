@@ -4,7 +4,7 @@ import Foundation
 import Observation
 import CefBase
 
-/// A top-level window hosting one **Chrome-style** page — the full Chrome
+/// A top-level window hosting one **Chrome-style** page: the full Chrome
 /// runtime, with `chrome://settings`, `chrome://extensions`, history,
 /// downloads, password and autofill UI, extensions, and PDF/print preview.
 ///
@@ -33,7 +33,7 @@ import CefBase
 /// Tabs that are Chromium's own, which `chrome.tabs` and tab groups see,
 /// live in the windows ``CefRuntime/openChromeWindow(url:frame:configuration:delegate:)``
 /// opens; CefChromium's `CefChromeWindow` hosts them with the app's own
-/// tab interface over Chrome's. Use `CefWindow` for one page in a window.
+/// tab interface over Chrome's.
 @MainActor
 @Observable
 public final class CefWindow: Identifiable {

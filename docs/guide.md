@@ -1239,7 +1239,7 @@ where page.lifecycle == .hidden && .now - page.lifecycleChangedAt > .seconds(60 
 
 The Browser example's Memory Saver (`Examples/Sources/Browser/Features/TabDiscarding`)
 is a complete one, with exemptions left to the app: a tab the user pinned is
-simply never passed to `discard()`.
+never passed to `discard()`.
 
 Only a page that is off screen can be discarded: a window tab that is
 not selected, a hidden or minimized window, or a `CefWebView` that is
@@ -3214,14 +3214,14 @@ for try await result in profile.autocomplete.results(for: "cef") {
   what Chrome's address bar would show, ranked, each suggestion with a
   `kind` (history, bookmark, open tab, search, …), `detail` (a page's
   title), `relevance`, `inlineCompletion` and `isBookmarked`. Results come
-  as Chromium's providers answer — local matches within a few milliseconds,
-  the search engine's when the network answers — and the last one
-  `isComplete`. `suggestions(for:)` returns just that last one.
+  as Chromium's providers answer (local matches within a few milliseconds,
+  the search engine's when the network answers), and the last one
+  `isComplete`. `suggestions(for:)` returns only that last one.
   Search-engine suggestions come from the network; filter on `kind` to keep
   only local results.
 - The latest query wins. Starting one ends the profile's query still
-  running — its stream finishes, `suggestions(for:)` throws
-  `CancellationError` — and Chromium stops working on it, so query on every
+  running (its stream finishes, `suggestions(for:)` throws
+  `CancellationError`), and Chromium stops working on it, so query on every
   keystroke without debouncing. Ending the consuming task does the same.
 
 Suggestions as you type, in SwiftUI: `.task(id:)` ends the stream for the
@@ -3267,8 +3267,8 @@ for try await result in profile.autocomplete.results(following: texts) {
 ```
 
 CEF has no API for any of this. CefChromium uses the services Chromium's own
-pages use — `chrome.bookmarks`, and the Mojo handlers of the history, new
-tab and `chrome://omnibox` pages — from hidden service hosts, one renderer
+pages use (`chrome.bookmarks`, and the Mojo handlers of the history, new
+tab and `chrome://omnibox` pages) from hidden service hosts, one renderer
 process each. A host starts on the first call that needs it, in about a
 tenth of a second, and closes 30 seconds after its last call, when macOS
 runs low on memory, and when its profile's last page closes, which lets
@@ -3320,8 +3320,8 @@ reads history when the menu bar opens, so at launch it starts no host.
 
 ### Chromium's tabs: windows, tabs and groups
 
-Tabs that are Chromium's own — what `chrome.tabs`, `chrome.tabGroups`,
-recently closed tabs and moving tabs between windows see — live in the
+Tabs that are Chromium's own (what `chrome.tabs`, `chrome.tabGroups`,
+recently closed tabs and moving tabs between windows see) live in the
 windows Chrome draws. CefChromium models them in three pieces, each
 usable alone, all `@Observable`:
 
@@ -3336,13 +3336,13 @@ follows Chromium from first use, so a tab interface draws Chromium's model
 instead of keeping one: changes made by the app, by Chrome's commands and
 shortcuts and by extensions all show up the same way.
 
-`CefTabs` follows the events CEF and AppKit deliver anyway — a page
+`CefTabs` follows the events CEF and AppKit deliver anyway (a page
 created or closed, each page's title, address, icon and loading, the page
-a window shows, every Chrome command — and reads Chromium's tab model, in
+a window shows, every Chrome command) and reads Chromium's tab model, in
 a hidden service host, only when one of them reports a change to its
 structure; the host closes a few seconds after. While nothing changes no
-host runs. Two things CEF does not report — sound starting or stopping in
-a tab, and an extension moving, pinning or grouping tabs — show at the
+host runs. Two things CEF does not report (sound starting or stopping in
+a tab, and an extension moving, pinning or grouping tabs) show at the
 next read, or at once with `strip.observesChromiumEvents = true`, which
 keeps one host listening to `chrome.tabs`' events (one renderer, about
 30 MB). The Browser example turns it on while it is the active app.
@@ -3486,7 +3486,7 @@ record the measurements.
 Chromium keeps what closed, newest first, with each tab's history:
 `strip.recentlyClosed` lists it (tabs, windows and groups, with
 `tabCount`, `closedAt`, and for a tab its `windowID` and `index`), and
-`strip.reopen(item)` brings one back as Chromium closed it — a tab in its
+`strip.reopen(item)` brings one back as Chromium closed it: a tab in its
 window at its place, a window with all its tabs and groups. The page is a
 new `CefPage`, with its back and forward history. `reopenClosed(in:)`
 is ⌘⇧T: the newest entry. Closing tabs updates the list; call
@@ -3505,7 +3505,7 @@ if let tab = strip.recentlyClosed.first(where: { $0.kind == .tab }) {
 }
 ```
 
-**After a relaunch.** CEF restores nothing by itself at startup — Chrome's
+**After a relaunch.** CEF restores nothing by itself at startup. Chrome's
 `session.restore_on_startup` is not acted on, and after a crash Chromium
 lists nothing from the previous run and shows no "Restore pages?" bubble.
 CefChromium keeps the facts instead: `strip.previousSession` says how the

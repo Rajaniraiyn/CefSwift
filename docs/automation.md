@@ -182,8 +182,8 @@ What CI verifies, and what it does not:
   on a schedule rather than per pull request, given what those runners
   cost. (`cef bundle` cannot cross-bundle: it bundles for the architecture
   SwiftPM builds for.)
-- One toolchain: whichever Xcode the runner image selects. The oldest
-  Swift 6 toolchain the package claims is not built with.
+- One toolchain: whichever Xcode the runner image selects. CI does not
+  build with the oldest Swift 6 toolchain the package claims.
 
 ## Releases
 

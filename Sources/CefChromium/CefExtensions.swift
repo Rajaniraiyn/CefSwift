@@ -3,18 +3,20 @@ import CefKit
 import Foundation
 import Observation
 
-/// The extensions of a ``CefProfile`` — the ones `chrome://extensions`
+/// The extensions of a ``CefProfile``: the ones `chrome://extensions`
 /// lists, and Chrome's extensions menu and toolbar show in Chrome-style
 /// windows.
 ///
 /// ```swift
 /// let extensions = CefProfile.default.extensions
-/// for item in try await extensions.refresh() { print(item.name, item.isEnabled) }
-/// try await extensions.setEnabled(false, for: item.id)
+/// for item in try await extensions.refresh() {
+///     print(item.name, item.isEnabled)
+///     if item.name == "Unwanted" { try await extensions.setEnabled(false, for: item.id) }
+/// }
 /// ```
 ///
-/// ``installed`` is the list as last read: reading starts on first use, and
-/// the list stays current while the app uses it — after each change made
+/// ``installed`` is the list as last read. Reading starts on first use, and
+/// the list stays current while the app uses it: after each change made
 /// here, and as Chromium reports installs, updates and removals, including
 /// the user's in Chrome's own interface. ``changes`` yields after each.
 ///

@@ -25,20 +25,21 @@ import Observation
 /// ## Following Chromium
 ///
 /// `CefTabs` follows the events CEF and AppKit already deliver for every
-/// tab — a page created or closed, a page's title, address, icon and
-/// loading, the page a window shows, every Chrome command — and reads
+/// tab (a page created or closed, a page's title, address, icon and
+/// loading, the page a window shows, every Chrome command). It reads
 /// Chromium's tab model only when one of them reports a change to its
 /// structure: a new tab or window, a tab command (⌘⇧T, ⌃Tab, moving and
-/// pinning), or a change made through `CefTabs`. Each read is one call to
-/// a hidden service host — `chrome.tabs` and `chrome.windows` on Chromium's
-/// own `chrome://bookmarks` page, which Chromium grants those extension
-/// APIs, and, for groups' names and colours and what Chromium can reopen,
-/// `tab_strip_internals.mojom` (`chrome://tab-strip-internals`) — which
-/// closes a few seconds after the last one. While nothing changes, no host
-/// runs.
+/// pinning), or a change made through `CefTabs`.
 ///
-/// What CEF does not report — sound starting or stopping in a tab, and an
-/// extension moving, pinning or grouping tabs — shows at the next read, or
+/// Each read is one call to a hidden service host: `chrome.tabs` and
+/// `chrome.windows` on Chromium's own `chrome://bookmarks` page, which
+/// Chromium grants those extension APIs, and, for groups' names and colours
+/// and what Chromium can reopen, `tab_strip_internals.mojom`
+/// (`chrome://tab-strip-internals`). The host closes a few seconds after
+/// the last read, so while nothing changes, none runs.
+///
+/// What CEF does not report (sound starting or stopping in a tab, and an
+/// extension moving, pinning or grouping tabs) shows at the next read, or
 /// at once while ``observesChromiumEvents`` is on.
 ///
 /// Windows CefKit hosts (``CefWindow``, one tab each, which Chromium

@@ -2,9 +2,9 @@
 
 CefSwift embeds Chromium in macOS apps written in Swift, through the
 [Chromium Embedded Framework](https://github.com/chromiumembedded/cef) (CEF).
-It is a general embedding library: use it for an app shell whose sections
-are web pages, for a web browser, or for any app that shows web content.
-It exposes what CEF and Chromium can do as Swift types: pages in SwiftUI
+Use it for an app shell whose sections are web pages, for a web browser,
+or for any app that shows web content. It exposes CEF and Chromium as
+Swift types: pages in SwiftUI
 and AppKit views, windowed or offscreen; Chrome-style windows with
 Chrome's own pages; Chromium's own tabbed windows under your own tab
 interface; profiles, requests, DevTools, custom schemes and a JavaScript
@@ -12,9 +12,9 @@ bridge.
 
 ![The Browser example: a tab rail and toolbar over Chromium's tabs, showing swift.org](docs/images/browser.png)
 
-CefSwift uses the official prebuilt CEF distribution, downloaded at the
-version `CEF_VERSION.json` pins. It does not support custom CEF builds.
-CefSwift is pre-1.0; its API can change between releases.
+CefSwift uses the official prebuilt CEF distribution at the version
+`CEF_VERSION.json` pins; custom CEF builds are not supported. It is
+pre-1.0, and its API can change between releases.
 
 ## Modules
 
@@ -34,7 +34,7 @@ An app depends on `CefSwiftUI`, or on `CefKit` alone for AppKit, and adds
 ## Getting started
 
 An app that embeds Chromium is an app bundle with Chromium's framework and
-five helper apps inside. Build it with SwiftPM or with Xcode. Both run the
+five helper apps inside. Build it with SwiftPM or with Xcode: both run the
 same `cefswift` tool to add the framework and helpers, sign them and check
 the result, so the bundles are the same. [Bundling](docs/bundling.md)
 covers each track.

@@ -153,13 +153,14 @@ The phase (`Scripts/xcode-embed.sh`, then `cefswift embed`):
   warnings in the Issue navigator (`CEF_DOCTOR = NO` turns them off).
 
 When nothing that decides these parts has changed, an incremental build
-leaves them as they are (what decides them: the CEF version and
-framework, the architectures, the app's Info.plist and localizations,
-every entitlement and its value, the signing identity, keychain and
-flags, the trimming settings, cefapp.json's contents, and the helper and
-`cefswift` as built), without running SwiftPM, and the phase takes
-about 2 seconds, most of it `cef doctor`'s checks (measured with the Xcode
-example on an M3; the whole incremental build took 3.7 s). Xcode then signs the app, sealing everything inside.
+leaves them as they are and does not run SwiftPM. What decides them: the
+CEF version and framework, the architectures, the app's Info.plist and
+localizations, every entitlement and its value, the signing identity,
+keychain and flags, the trimming settings, cefapp.json's contents, and the
+helper and `cefswift` as built. The phase then takes about 2 seconds, most
+of it `cef doctor`'s checks (measured with the Xcode example on an M3; the
+whole incremental build took 3.7 s). Xcode then signs the app, sealing
+everything inside.
 
 The app's own entitlements stay Xcode's (`CODE_SIGN_ENTITLEMENTS` and the
 entitlement build settings). When a capability or the signature needs one
@@ -270,8 +271,7 @@ Both tracks download the official CEF distribution that `CEF_VERSION.json`
 pins (the minimal flavor, for the build machine's architecture) from
 `cef-builds.spotifycdn.com`, check its size and SHA-1, convert the
 framework to the versioned layout, and keep it in the cache: `.cef/` in the
-package for SwiftPM, `CEF_CACHE_DIR` for Xcode. An app that depends on
-CefSwift uses the version CefSwift pins.
+package for SwiftPM, `CEF_CACHE_DIR` for Xcode.
 
 Packaging the framework as an XCFramework binary target, so Xcode embeds
 and signs it itself, is proposed separately and not part of this release.
@@ -631,8 +631,8 @@ generate code at run time, which the hardened runtime allows only with
 Library validation, part of the hardened runtime, loads a library only when
 it carries the process's team identifier (or Apple's). With a team
 signature that holds for every library, since the plugin signs each one,
-the startup library and CEF's own included, with the app's identity; no part
-needs `com.apple.security.cs.disable-library-validation`, except for
+the startup library and CEF's own included, with the app's identity. No part
+needs `com.apple.security.cs.disable-library-validation` except for
 Google's Widevine CDM. Chromium downloads the CDM at run time, Google's team
 signs it, and it loads into the base helper (`<App> Helper.app`, in the
 utility process `media.mojom.CdmServiceBroker`), where a team signature's
