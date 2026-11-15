@@ -3,8 +3,10 @@ import Foundation
 /// Discards Chrome-style tabs through the Mojo interface behind
 /// `chrome://discards`, from a hidden service host on that page.
 ///
-/// Chromium's own discard policies never pick a CefKit tab: each is the
-/// active tab of its own Chromium window, and the active tab is protected.
+/// Chromium's own discard policies never pick a browser in a `CefWindow` or
+/// a CefKit view: each is the active tab of its own Chromium window, and
+/// the active tab is protected. Background tabs of a Chromium-drawn window
+/// (`CefChromeWindow`) are ordinary Chromium tabs to those policies.
 /// A discard with the `EXTERNAL` reason — the one `chrome.tabs.discard()`
 /// uses — skips those rules, so CefKit applies its own
 /// (``CefBrowser/discardBlockers()``) and reads Chromium's protections from

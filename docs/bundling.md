@@ -170,8 +170,8 @@ The app executable is not linked to the framework, as `cef bundle` links
 it (the helpers are): CefKit loads the framework with `dlopen`, so the app
 process holds the framework's 12 MB of fixed-up pointers privately (see
 [architecture](architecture.md#loading-the-framework-at-launch)). Linking
-the app needs the framework before the target links, which a binary
-framework product gives Xcode ([Where CEF comes from](#where-cef-comes-from)).
+the app needs the framework before the target links, which only a binary
+framework product would give Xcode.
 
 ### Signing in Xcode
 
@@ -218,7 +218,7 @@ A CEF distribution, and so the framework the phase embeds, holds one
 architecture, so the target builds for the Mac it builds on
 (`ARCHS = $(NATIVE_ARCH_ACTUAL)`); `swift package cef bundle` does the
 same. An app for both Apple silicon and Intel needs a universal framework,
-which the XCFramework of [pull request #27](#where-cef-comes-from) is.
+which this release does not provide.
 
 ## Settings
 
@@ -273,17 +273,8 @@ framework to the versioned layout, and keep it in the cache: `.cef/` in the
 package for SwiftPM, `CEF_CACHE_DIR` for Xcode. An app that depends on
 CefSwift uses the version CefSwift pins.
 
-[Pull request #27](https://github.com/Rajaniraiyn/CefSwift/pull/27), not
-merged, packages the same official framework, both architectures, as an
-XCFramework binary target that SwiftPM and Xcode fetch and verify
-themselves (`ChromiumEmbeddedFramework`). With it, an Xcode target adds
-that product, so Xcode embeds and signs the framework (Embed & Sign), links
-the app to it, and builds universal apps; the build phase then sets
-`CEF_EMBED_FRAMEWORK = NO`, keeps Xcode's copy, and adds the startup
-library and helpers, which no binary target can provide: their names and
-bundle identifiers derive from the app's, and the helper must link the
-startup library before the framework. The SwiftPM track would take the
-framework from the same binary target instead of `.cef/`.
+Packaging the framework as an XCFramework binary target, so Xcode embeds
+and signs it itself, is proposed separately and not part of this release.
 
 ## Per-product settings
 
