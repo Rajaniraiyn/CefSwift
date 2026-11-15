@@ -4,7 +4,7 @@ import Testing
 
 @testable import CefKit
 
-/// Where `CefOffscreenBrowserView` draws a frame of another size than the
+/// Where `CefOffscreenPageView` draws a frame of another size than the
 /// view, and how page points and view points map onto each other.
 @MainActor
 struct OffscreenGeometryTests {
@@ -12,16 +12,16 @@ struct OffscreenGeometryTests {
     private let page = CGSize(width: 1200, height: 600)
 
     @Test func placements() {
-        #expect(CefOffscreenBrowserView.rect(placing: page, in: bounds, .stretch) == bounds)
-        #expect(CefOffscreenBrowserView.rect(placing: page, in: bounds, .topLeading)
+        #expect(CefOffscreenPageView.rect(placing: page, in: bounds, .stretch) == bounds)
+        #expect(CefOffscreenPageView.rect(placing: page, in: bounds, .topLeading)
             == CGRect(x: 0, y: 0, width: 1200, height: 600))
         // 1200×600 into 400×300: fitted by width, filled by height.
-        #expect(CefOffscreenBrowserView.rect(placing: page, in: bounds, .aspectFit)
+        #expect(CefOffscreenPageView.rect(placing: page, in: bounds, .aspectFit)
             == CGRect(x: 0, y: 50, width: 400, height: 200))
-        #expect(CefOffscreenBrowserView.rect(placing: page, in: bounds, .aspectFill)
+        #expect(CefOffscreenPageView.rect(placing: page, in: bounds, .aspectFill)
             == CGRect(x: -100, y: 0, width: 600, height: 300))
         // Nothing to place yet: the view's bounds.
-        #expect(CefOffscreenBrowserView.rect(placing: .zero, in: bounds, .aspectFit) == bounds)
+        #expect(CefOffscreenPageView.rect(placing: .zero, in: bounds, .aspectFit) == bounds)
     }
 
     @Test func pagePointsFollowThePlacedFrame() {
@@ -56,9 +56,9 @@ struct OffscreenGeometryTests {
         #expect(!view.keepsLastFrameWhenMoved)
     }
 
-    private func offscreenView() -> CefOffscreenBrowserView {
-        var configuration = CefBrowser.Configuration()
+    private func offscreenView() -> CefOffscreenPageView {
+        var configuration = CefPage.Configuration()
         configuration.rendering = .offscreen
-        return CefOffscreenBrowserView(browser: CefBrowser(url: URL(string: "about:blank")!, configuration: configuration))
+        return CefOffscreenPageView(page: CefPage(url: URL(string: "about:blank")!, configuration: configuration))
     }
 }

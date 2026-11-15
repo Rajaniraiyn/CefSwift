@@ -25,7 +25,7 @@ import Observation
 /// watches the profile's `Extensions` directory and `Preferences` file to
 /// notice what changed, and reads again.
 ///
-/// Extensions run in Chrome-style browsers (``CefWindow``,
+/// Extensions run in Chrome-style pages (``CefWindow``,
 /// ``CefRuntime/openChromeWindow(url:frame:configuration:delegate:)``);
 /// their content scripts and network rules also apply to Alloy-style views.
 /// An incognito profile has no extensions of its own: its

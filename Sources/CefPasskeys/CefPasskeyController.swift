@@ -1,7 +1,7 @@
 import CefKit
 
 /// Answers the WebAuthn requests (passkeys and security keys) of the
-/// browsers it is attached to, instead of Chromium.
+/// pages it is attached to, instead of Chromium.
 ///
 /// Without a controller, Chromium answers with its own dialog and
 /// authenticators: security keys, phones, and iCloud Keychain when the app
@@ -11,18 +11,18 @@ import CefKit
 ///
 /// ```swift
 /// let passkeys = CefPasskeyController(policy: .app(CefKeychainPasskeyStore()))
-/// var configuration = CefBrowser.Configuration()
+/// var configuration = CefPage.Configuration()
 /// configuration.attachments.append(passkeys)
-/// let browser = CefBrowser(url: URL(string: "https://example.com")!, configuration: configuration)
+/// let page = CefPage(url: URL(string: "https://example.com")!, configuration: configuration)
 /// ```
 ///
-/// One controller can serve many browsers. Its ``delegate`` decides each
+/// One controller can serve many pages. Its ``delegate`` decides each
 /// request; without one, ``CefPasskeyPresenter`` asks the user.
 ///
 /// ## How it works, and what a page can see
 ///
-/// The controller drives the DevTools Protocol of each browser
-/// (``CefBrowser/devTools``): `WebAuthn.enable` puts the pages in a virtual
+/// The controller drives the DevTools Protocol of each page
+/// (``CefPage/devTools``): `WebAuthn.enable` puts the pages in a virtual
 /// authenticator environment, so Chromium's dialog, security keys and
 /// iCloud Keychain are out of the picture, and the `Debugger` domain stops
 /// each document at its `navigator.credentials.create()` and `.get()`
@@ -32,20 +32,20 @@ import CefKit
 /// arguments, each document is paused briefly as it starts, and the
 /// page's own `debugger` statements pause it until the controller resumes
 /// it, all of which a page can time. Sites that look for automation may
-/// treat such a browser differently; leave passkeys to Chromium (no
+/// treat such a page differently; leave passkeys to Chromium (no
 /// controller) where that matters.
 ///
 /// The controller takes each document's calls over before its first
 /// script runs (``preparesBeforeFirstDocument``). So a page's popups, new
-/// tabs and windows that the browser delegate lets Chromium open
-/// (``CefWindowOpenDecision/allowNativePopup``) open instead in a browser
+/// tabs and windows that the page delegate lets Chromium open
+/// (``CefWindowOpenDecision/allowNativePopup``) open instead in a page
 /// CefKit creates with the opener's configuration, which the page cannot
 /// script: `window.open` returns `null`, the popup has no `window.opener`,
-/// and a popup without a URL is refused. Browsers Chromium opens without a
+/// and a popup without a URL is refused. Pages Chromium opens without a
 /// page asking, such as a tab from Chrome's own UI, have the default
 /// configuration and so no controller.
 @MainActor
-public final class CefPasskeyController: CefBrowserAttachment {
+public final class CefPasskeyController: CefPageAttachment {
     /// Who answers the requests.
     public enum Policy {
         /// The app, from this store, through the ``CefPasskeyController/delegate``.
@@ -54,7 +54,7 @@ public final class CefPasskeyController: CefBrowserAttachment {
         case disabled
     }
 
-    /// Who answers the requests of the browsers the controller serves.
+    /// Who answers the requests of the pages the controller serves.
     public let policy: Policy
 
     /// Decides each request, for ``Policy/app(_:)``; held weakly. When
@@ -71,39 +71,39 @@ public final class CefPasskeyController: CefBrowserAttachment {
         self.delegate = delegate
     }
 
-    /// Each browser's DevTools session state.
+    /// Each page's DevTools session state.
     private var sessions: [ObjectIdentifier: CefPasskeySession] = [:]
 
-    // MARK: CefBrowserAttachment
+    // MARK: CefPageAttachment
 
     /// `true`: no page may call `navigator.credentials` before the
     /// controller is in place.
     public var preparesBeforeFirstDocument: Bool { true }
 
-    public func browserDidCreate(_ browser: CefBrowser) async {
-        await start(browser)
+    public func pageDidCreate(_ page: CefPage) async {
+        await start(page)
     }
 
-    /// A browser discarded by closing it starts again here, since its
-    /// DevTools state went with the old Chromium browser.
-    public func browserDidRestore(_ browser: CefBrowser) async {
-        await start(browser)
+    /// A page discarded by closing it starts again here, since its
+    /// DevTools state went with the old Chromium page.
+    public func pageDidRestore(_ page: CefPage) async {
+        await start(page)
     }
 
-    public func browserDidClose(_ browser: CefBrowser) {
-        sessions.removeValue(forKey: ObjectIdentifier(browser))?.stop()
+    public func pageDidClose(_ page: CefPage) {
+        sessions.removeValue(forKey: ObjectIdentifier(page))?.stop()
     }
 
-    private func start(_ browser: CefBrowser) async {
-        guard browser.state == .live else { return }
-        let key = ObjectIdentifier(browser)
+    private func start(_ page: CefPage) async {
+        guard page.state == .live else { return }
+        let key = ObjectIdentifier(page)
         sessions[key]?.stop()
-        let session = CefPasskeySession(browser: browser, controller: self)
+        let session = CefPasskeySession(page: page, controller: self)
         sessions[key] = session
         do {
             try await session.start()
         } catch {
-            CefLog.error("passkeys: setup failed for browser \(browser.identifier): \(error)")
+            CefLog.error("passkeys: setup failed for browser \(page.identifier): \(error)")
         }
     }
 }
@@ -112,26 +112,26 @@ public final class CefPasskeyController: CefBrowserAttachment {
 ///
 /// The page stays stopped at its `navigator.credentials` call until you
 /// answer, as it does for `alert()`; JavaScript you evaluate in it
-/// meanwhile waits too. When the page navigates away or the browser closes
+/// meanwhile waits too. When the page navigates away or the page closes
 /// first, the call's task is cancelled and its answer ignored.
 @MainActor
 public protocol CefPasskeyDelegate: AnyObject {
     /// Answer a page's request to register or use a passkey. The default
     /// asks the user with ``CefPasskeyPresenter``.
-    func browser(_ browser: CefBrowser, decidePasskeyFor request: CefPasskeyRequest) async -> CefPasskeyDecision
+    func page(_ page: CefPage, decidePasskeyFor request: CefPasskeyRequest) async -> CefPasskeyDecision
     /// The passkey store failed while a request was answered. A failed
     /// availability check or read refuses the page's call; a failed save
     /// happens after the page has its answer and carries the passkey that
     /// was not saved. The default logs the error.
-    func browser(_ browser: CefBrowser, passkeyStoreDidFail error: CefPasskeyStoreError)
+    func page(_ page: CefPage, passkeyStoreDidFail error: CefPasskeyStoreError)
 }
 
 extension CefPasskeyDelegate {
-    public func browser(_ browser: CefBrowser, decidePasskeyFor request: CefPasskeyRequest) async -> CefPasskeyDecision {
-        await CefPasskeyPresenter.present(request, in: browser.hostWindow)
+    public func page(_ page: CefPage, decidePasskeyFor request: CefPasskeyRequest) async -> CefPasskeyDecision {
+        await CefPasskeyPresenter.present(request, in: page.hostWindow)
     }
 
-    public func browser(_ browser: CefBrowser, passkeyStoreDidFail error: CefPasskeyStoreError) {
+    public func page(_ page: CefPage, passkeyStoreDidFail error: CefPasskeyStoreError) {
         CefLog.error("passkeys: \(error)")
     }
 }

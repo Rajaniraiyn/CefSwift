@@ -106,7 +106,7 @@ package struct CefProcessMessage: Sendable, Equatable {
     }
 }
 
-/// The page-scripting protocol between `CefBrowser`/`CefBridge` in the
+/// The page-scripting protocol between `CefPage`/`CefBridge` in the
 /// browser process and `PageScripting` in the helper's renderer.
 ///
 /// `configure` and `sync` are ``CefProcessMessage``s, sent once per

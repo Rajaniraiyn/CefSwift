@@ -3,7 +3,7 @@ import CCef
 import Foundation
 
 /// The cursor a page asks for, delivered to offscreen hosts through
-/// ``CefOffscreenHost/offscreenDidChangeCursor(_:)``. Windowed browsers set
+/// ``CefOffscreenHost/offscreenDidChangeCursor(_:)``. Windowed pages set
 /// the cursor themselves.
 public enum CefCursorType: Sendable, Equatable {
     case pointer

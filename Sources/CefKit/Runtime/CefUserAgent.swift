@@ -9,7 +9,7 @@ extension CefRuntime {
     /// (`Sec-CH-UA` headers and `navigator.userAgentData`). CEF is built as
     /// Chromium, so its client hints name the brand `Chromium` and a GREASE
     /// brand, never `Google Chrome`, whatever this says; only the DevTools
-    /// protocol's `Emulation.setUserAgentOverride` changes them, per browser.
+    /// protocol's `Emulation.setUserAgentOverride` changes them, per page.
     ///
     /// Many sites, bot protection among them, compare the two and check that
     /// the `User-Agent` names a browser engine they know. Every choice here
@@ -27,7 +27,7 @@ extension CefRuntime {
         /// Your product's token in place of `Chrome/<version>`: `…
         /// (KHTML, like Gecko) MyApp/1.0 Safari/537.36` (CEF's
         /// `user_agent_product`). Sites that look for a `Chrome/` token treat
-        /// such a browser as an unknown one.
+        /// such a page as an unknown one.
         case replacingProduct(String)
         /// This exact string. Chromium then sends only the low-entropy client
         /// hints (brands, mobile, platform), and `getHighEntropyValues()` has

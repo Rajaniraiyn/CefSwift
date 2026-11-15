@@ -8,9 +8,9 @@ import CefBase
 ///
 /// Each download is one object for its whole life, updated in place as
 /// Chromium reports progress, so a view showing it, or a download manager
-/// holding it, follows it by observation. ``CefBrowser/downloads`` lists the
-/// downloads a browser started, ``CefProfile/downloads`` those of every
-/// browser of a profile.
+/// holding it, follows it by observation. ``CefPage/downloads`` lists the
+/// downloads a page started, ``CefProfile/downloads`` those of every
+/// page of a profile.
 ///
 /// ```swift
 /// ForEach(CefProfile.default.downloads) { download in
@@ -96,15 +96,15 @@ public final class CefDownload: Identifiable {
     /// The current transfer rate in bytes per second; 0 when not receiving.
     public private(set) var bytesPerSecond: Int64
     public private(set) var state: State
-    /// The browser that started the download, while it is open.
-    public private(set) weak var browser: CefBrowser?
+    /// The page that started the download, while it is open.
+    public private(set) weak var page: CefPage?
 
     /// Chromium's identifier, unique within the download's profile.
     @ObservationIgnored let chromiumID: UInt32
     /// The profile whose policy applies; it holds the download in its list.
     @ObservationIgnored weak var profile: CefProfile?
     /// Pauses, resumes and cancels the download; Chromium hands a new one
-    /// with each update. Kept while the download can go on and its browser
+    /// with each update. Kept while the download can go on and its page
     /// is open.
     var control: CefRef<cef_download_item_callback_t>?
 
@@ -129,7 +129,7 @@ public final class CefDownload: Identifiable {
     }
 
     /// Whether ``resume()`` can continue the download: it is paused or
-    /// interrupted, and the browser that started it is open.
+    /// interrupted, and the page that started it is open.
     public var canResume: Bool {
         switch state {
         case .paused, .interrupted: control != nil
@@ -152,7 +152,7 @@ public final class CefDownload: Identifiable {
         control.map { $0.pointer.pointee.cancel($0.pointer) }
     }
 
-    init(_ snapshot: Snapshot, browser: CefBrowser?, profile: CefProfile?) {
+    init(_ snapshot: Snapshot, page: CefPage?, profile: CefProfile?) {
         chromiumID = snapshot.id
         url = snapshot.url
         originalURL = snapshot.originalURL
@@ -165,7 +165,7 @@ public final class CefDownload: Identifiable {
         expectedBytes = snapshot.expectedBytes
         bytesPerSecond = snapshot.bytesPerSecond
         state = snapshot.state
-        self.browser = browser
+        self.page = page
         self.profile = profile
     }
 

@@ -9,8 +9,8 @@ import Observation
 // recognized, then shown and placed, replaced, or hidden according to the
 // window's chromiumSurfacePolicy. A window's ChromiumSurfaceController holds
 // all of it, made on first use (see ChromiumSurfaces.activate()). The same
-// controller serves a CefWindow (one browser) and a CefChromeWindow (its
-// tabs' browsers, the active one at a time), through ChromiumSurfaceHost.
+// controller serves a CefWindow (one page) and a CefChromeWindow (its
+// tabs' pages, the active one at a time), through ChromiumSurfaceHost.
 
 extension CefWindow {
     /// How Chromium's own interface is presented in this window: its
@@ -100,7 +100,7 @@ extension CefWindow {
 extension CefWindow: ChromiumSurfaceHost {
     var surfaceController: ChromiumSurfaceController? { existingModuleState(ChromiumSurfaceController.self) }
     var surfaceNSWindow: NSWindow? { window }
-    var surfaceBrowser: CefBrowser? { browser }
+    var surfacePage: CefPage? { page }
     var isSurfaceHostClosed: Bool { isClosed }
     func withSurfaceNSWindow(_ body: @escaping @MainActor (NSWindow) -> Void) { withWindow(body) }
     func defaultSurfaceAnchor(for kind: CefChromiumSurface.Kind) -> CefChromiumSurface.Anchor? { nil }
@@ -111,7 +111,7 @@ extension CefWindow.Configuration {
     /// ``CefWindow/chromiumSurfacePolicy`` starts as this, or with every
     /// surface ``CefChromiumSurface/Presentation/native`` when `nil`.
     /// A status bubble or zoom bubble hidden or custom here is never
-    /// created, as the browser starts with Chromium's own switched off
+    /// created, as the page starts with Chromium's own switched off
     /// (`cef_browser_settings_t`); hiding one later keeps Chromium's window
     /// invisible instead. Popups start with every surface native.
     @MainActor
@@ -162,27 +162,27 @@ enum ChromiumSurfaces {
         isActive = true
         CefSurfaceTracker.install()
         CefWindow.addChromeCommandInterceptor { window, command in
-            window.surfaces.handleSurfaceCommand(command, in: window.browser)
+            window.surfaces.handleSurfaceCommand(command, in: window.page)
         }
         // The tabs of Chromium's own windows, once a window uses surfaces.
-        CefBrowser.addChromeCommandInterceptor { browser, command in
-            guard let nsWindow = browser.nativeView?.window,
+        CefPage.addChromeCommandInterceptor { page, command in
+            guard let nsWindow = page.nativeView?.window,
                   let surfaces = ChromeWindowHost.window(for: nsWindow)?.surfaceController
             else { return false }
-            return surfaces.handleSurfaceCommand(command, in: browser)
+            return surfaces.handleSurfaceCommand(command, in: page)
         }
     }
 }
 
 /// A window Chromium attaches surfaces to: a ``CefWindow``, or a
-/// ``CefChromeWindow``, whose browser is its active tab's.
+/// ``CefChromeWindow``, whose page is its active tab's.
 @MainActor
 protocol ChromiumSurfaceHost: AnyObject {
     /// The controller, once the window's surface API was used.
     var surfaceController: ChromiumSurfaceController? { get }
     var surfaceNSWindow: NSWindow? { get }
-    /// The browser whose page the window shows now.
-    var surfaceBrowser: CefBrowser? { get }
+    /// The page the window shows now.
+    var surfacePage: CefPage? { get }
     var isSurfaceHostClosed: Bool { get }
     /// Runs `body` with the window's `NSWindow`, now or once it exists.
     func withSurfaceNSWindow(_ body: @escaping @MainActor (NSWindow) -> Void)
@@ -236,17 +236,17 @@ final class ChromiumSurfaceController: CefWindowParticipant {
     @ObservationIgnored private var anchorObserver: NSObjectProtocol?
     @ObservationIgnored private var isPlacingSurface = false
     @ObservationIgnored private var isClosed = false
-    /// The browser whose page the window showed last.
-    @ObservationIgnored private weak var shownBrowser: CefBrowser?
+    /// The page the window showed last.
+    @ObservationIgnored private weak var shownPage: CefPage?
 
     init(host: any ChromiumSurfaceHost, policy: CefChromiumSurface.Policy?) {
         self.host = host
         self.policy = policy ?? CefChromiumSurface.Policy()
-        shownBrowser = host.surfaceBrowser
+        shownPage = host.surfacePage
     }
 
-    /// The browser whose page the window shows now.
-    private var browser: CefBrowser? { host?.surfaceBrowser }
+    /// The page the window shows now.
+    private var page: CefPage? { host?.surfacePage }
 
     func setCustomPresentation(for kind: CefChromiumSurface.Kind, _ present: (@MainActor (CefChromiumSurface) -> Void)?) {
         guard kind.capabilities.contains(.replace) else { return }
@@ -262,7 +262,7 @@ final class ChromiumSurfaceController: CefWindowParticipant {
         return host?.defaultSurfaceAnchor(for: kind)
     }
 
-    /// Follows the window's frame and the browser's status text, and takes
+    /// Follows the window's frame and the page's status text, and takes
     /// up the surfaces Chromium attached before CefChromium was first used.
     func start() {
         guard let host, !host.isSurfaceHostClosed else { return }
@@ -299,10 +299,10 @@ final class ChromiumSurfaceController: CefWindowParticipant {
     /// The window shows another tab: Chromium closes the bubbles about the
     /// tab it left and keeps its find bar for when it comes back, so the
     /// app's interface for them does the same.
-    func shownBrowserDidChange() {
-        guard !isClosed, let browser, browser !== shownBrowser else { return }
-        shownBrowser = browser
-        for surface in surfaces where surface.window == nil && surface.browser !== browser {
+    func shownPageDidChange() {
+        guard !isClosed, let page, page !== shownPage else { return }
+        shownPage = page
+        for surface in surfaces where surface.window == nil && surface.page !== page {
             switch surface.kind {
             case .findBar, .statusBubble: break
             default: end(surface, .chromium)
@@ -370,7 +370,7 @@ final class ChromiumSurfaceController: CefWindowParticipant {
 
     private func recognize(_ child: NSWindow, alpha: CGFloat, attempt: Int) {
         let id = ObjectIdentifier(child)
-        guard let host, let browser, !isClosed else {
+        guard let host, let page, !isClosed else {
             child.alphaValue = alpha
             widgets[id] = nil
             return
@@ -387,9 +387,9 @@ final class ChromiumSurfaceController: CefWindowParticipant {
             }
             return
         }
-        let url = kind == .qrCode ? recognized.text.flatMap(URL.init(string:)) ?? browser.url : browser.url
+        let url = kind == .qrCode ? recognized.text.flatMap(URL.init(string:)) ?? page.url : page.url
         let surface = CefChromiumSurface(
-            kind: kind, title: recognized.title, browser: browser, url: url, window: child, host: host)
+            kind: kind, title: recognized.title, page: page, url: url, window: child, host: host)
         let presentation = presentation(for: surface)
         surface.presentation = presentation
         switch presentation {
@@ -401,16 +401,16 @@ final class ChromiumSurfaceController: CefWindowParticipant {
             followAnchors()
             onSurface?(surface)
         case .hidden:
-            suppress(child, kind: kind, browser: browser)
+            suppress(child, kind: kind, page: page)
             surface.state = .dismissed(.presentation)
             onSurface?(surface)
         case .custom:
-            suppress(child, kind: kind, browser: browser)
+            suppress(child, kind: kind, page: page)
             // The command that opened it may have presented the app's
             // interface already; the status bubble follows statusText.
-            let presented = surfaces.contains { $0.kind == kind && $0.window == nil && $0.browser === browser }
+            let presented = surfaces.contains { $0.kind == kind && $0.window == nil && $0.page === page }
             if !presented, kind != .statusBubble {
-                presentCustom(kind: kind, browser: browser, url: url, title: recognized.title)
+                presentCustom(kind: kind, page: page, url: url, title: recognized.title)
             }
         }
     }
@@ -431,11 +431,11 @@ final class ChromiumSurfaceController: CefWindowParticipant {
     /// Keeps Chromium's window for a surface off screen and ends what it
     /// asks. Status bubbles and fullscreen notices stay invisible, as
     /// Chromium reuses their windows.
-    private func suppress(_ child: NSWindow, kind: CefChromiumSurface.Kind, browser: CefBrowser) {
+    private func suppress(_ child: NSWindow, kind: CefChromiumSurface.Kind, page: CefPage) {
         widgets[ObjectIdentifier(child)]?.phase = .suppressed(kind)
         CefSurfaceTracker.setHidden(child, true)
         child.ignoresMouseEvents = true
-        CefChromiumSurface.closeNatively(child, kind: kind, browser: browser)
+        CefChromiumSurface.closeNatively(child, kind: kind, page: page)
     }
 
     /// Keeps a native surface listed and placed until it closes.
@@ -469,8 +469,8 @@ final class ChromiumSurfaceController: CefWindowParticipant {
         surface.state = .dismissed(reason)
         surfaceObservers.removeValue(forKey: surface.id)?.forEach(NotificationCenter.default.removeObserver)
         surfaces.removeAll { $0 === surface }
-        if surface.window == nil, surface.kind == .findBar, surface.browser.findSession.isActive {
-            surface.browser.findSession.end()
+        if surface.window == nil, surface.kind == .findBar, surface.page.findSession.isActive {
+            surface.page.findSession.end()
         }
         if !surfaces.contains(where: { $0.window != nil }) { stopFollowingAnchors() }
     }
@@ -488,10 +488,10 @@ final class ChromiumSurfaceController: CefWindowParticipant {
             }
             if let child = surface.window {
                 // Chromium's: hidden, or handed to the app.
-                suppress(child, kind: surface.kind, browser: surface.browser)
+                suppress(child, kind: surface.kind, page: surface.page)
                 end(surface, .presentation)
                 if presentation == .custom, surface.kind != .statusBubble {
-                    presentCustom(kind: surface.kind, browser: surface.browser, url: surface.url, title: surface.title)
+                    presentCustom(kind: surface.kind, page: surface.page, url: surface.url, title: surface.title)
                 }
             } else {
                 // The app's: Chromium shows the next one, or none.
@@ -556,24 +556,24 @@ final class ChromiumSurfaceController: CefWindowParticipant {
     // MARK: Custom surfaces
 
     /// Hands a surface to the app's presenter, or to `onChromiumSurface`.
-    private func presentCustom(kind: CefChromiumSurface.Kind, browser: CefBrowser, url: URL?, title: String) {
+    private func presentCustom(kind: CefChromiumSurface.Kind, page: CefPage, url: URL?, title: String) {
         guard let host, !isClosed else { return }
         let current = surfaces.filter { $0.kind == kind && $0.window == nil }
-        if kind == .findBar, current.contains(where: { $0.browser === browser }) {
+        if kind == .findBar, current.contains(where: { $0.page === page }) {
             // ⌘F again: the find bar stays, with its search.
             return
         }
         // One custom surface of a kind at a time (a find bar per tab): a
         // second replaces the first.
-        current.filter { kind != .findBar || $0.browser === browser }.forEach { end($0, .replaced) }
-        let surface = CefChromiumSurface(kind: kind, title: title, browser: browser, url: url, window: nil, host: host)
+        current.filter { kind != .findBar || $0.page === page }.forEach { end($0, .replaced) }
+        let surface = CefChromiumSurface(kind: kind, title: title, page: page, url: url, window: nil, host: host)
         surface.presentation = .custom
         surfaces.append(surface)
         if kind == .findBar {
-            browser.findSession.begin()
+            page.findSession.begin()
             followFindSession(of: surface)
         } else if kind != .statusBubble {
-            followNavigation(of: surface, from: browser.url)
+            followNavigation(of: surface, from: page.url)
         }
         if let present = customPresenters[kind] {
             present(surface)
@@ -584,10 +584,10 @@ final class ChromiumSurfaceController: CefWindowParticipant {
         onSurface?(surface)
     }
 
-    /// A custom find bar ends with the browser's find session.
+    /// A custom find bar ends with the page's find session.
     private func followFindSession(of surface: CefChromiumSurface) {
         guard surface.state == .presented else { return }
-        let session = surface.browser.findSession
+        let session = surface.page.findSession
         let isActive = withObservationTracking {
             session.isActive
         } onChange: { [weak self, weak surface] in
@@ -603,9 +603,9 @@ final class ChromiumSurfaceController: CefWindowParticipant {
     /// as Chromium's bubbles do.
     private func followNavigation(of surface: CefChromiumSurface, from start: URL?) {
         guard surface.state == .presented else { return }
-        let browser = surface.browser
+        let page = surface.page
         let url = withObservationTracking {
-            browser.url
+            page.url
         } onChange: { [weak self, weak surface] in
             Task { @MainActor in
                 guard let self, let surface else { return }
@@ -625,12 +625,12 @@ final class ChromiumSurfaceController: CefWindowParticipant {
 
     /// With the status bubble ``CefChromiumSurface/Presentation/custom``, a
     /// custom surface is presented while the shown page's
-    /// ``CefBrowser/statusText`` is not empty.
+    /// ``CefPage/statusText`` is not empty.
     private func followStatusText() {
-        guard !isClosed, policy[.statusBubble] == .custom, !isFollowingStatusText, let browser else { return }
+        guard !isClosed, policy[.statusBubble] == .custom, !isFollowingStatusText, let page else { return }
         isFollowingStatusText = true
         let text = withObservationTracking {
-            browser.statusText
+            page.statusText
         } onChange: { [weak self] in
             Task { @MainActor in
                 self?.isFollowingStatusText = false
@@ -638,11 +638,11 @@ final class ChromiumSurfaceController: CefWindowParticipant {
             }
         }
         let current = surfaces.first { $0.kind == .statusBubble && $0.window == nil }
-        if text.isEmpty || current?.browser !== browser {
+        if text.isEmpty || current?.page !== page {
             if let current { end(current, .chromium) }
         }
         if !text.isEmpty, !surfaces.contains(where: { $0.kind == .statusBubble && $0.window == nil }) {
-            presentCustom(kind: .statusBubble, browser: browser, url: browser.url, title: text)
+            presentCustom(kind: .statusBubble, page: page, url: page.url, title: text)
         }
     }
 
@@ -666,20 +666,20 @@ final class ChromiumSurfaceController: CefWindowParticipant {
         }
     }
 
-    /// Runs a command in `browser` that opens a surface the app replaces or
+    /// Runs a command in `page` that opens a surface the app replaces or
     /// hides, without Chromium showing its own. Returns whether it was
     /// handled.
-    func handleSurfaceCommand(_ command: CefChromeCommand, in browser: CefBrowser) -> Bool {
+    func handleSurfaceCommand(_ command: CefChromeCommand, in page: CefPage) -> Bool {
         guard !isClosed else { return false }
         lastCommand = (command, .now)
         // ⌘G and ⇧⌘G move through a custom find bar's matches.
-        if case .custom = policy[.findBar], browser.findSession.isActive {
+        if case .custom = policy[.findBar], page.findSession.isActive {
             switch command.rawValue {
             case Int(IDC_FIND_NEXT):
-                browser.findSession.next()
+                page.findSession.next()
                 return true
             case Int(IDC_FIND_PREVIOUS):
-                browser.findSession.previous()
+                page.findSession.previous()
                 return true
             default:
                 break
@@ -694,7 +694,7 @@ final class ChromiumSurfaceController: CefWindowParticipant {
             // Zooming still zooms; only its bubble is hidden.
             return kind != .zoom
         case .custom:
-            presentCustom(kind: kind, browser: browser, url: browser.url, title: browser.title)
+            presentCustom(kind: kind, page: page, url: page.url, title: page.title)
             guard kind == .zoom else { return true }
             // Chromium still zooms, its bubble off or suppressed.
             passingOn = command.rawValue
@@ -703,7 +703,7 @@ final class ChromiumSurfaceController: CefWindowParticipant {
         case .native:
             // Chromium has no share menu without its toolbar: macOS's.
             guard kind == .share, host is CefWindow else { return false }
-            presentCustom(kind: kind, browser: browser, url: browser.url, title: browser.title)
+            presentCustom(kind: kind, page: page, url: page.url, title: page.title)
             return true
         }
     }

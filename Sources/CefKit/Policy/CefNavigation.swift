@@ -2,7 +2,7 @@ import CCef
 import Foundation
 
 /// Whether a navigation may proceed, returned from
-/// ``CefBrowserDelegate/browser(_:decidePolicyFor:)``.
+/// ``CefPageDelegate/page(_:decidePolicyFor:)``.
 public enum CefNavigationDecision: Sendable, Equatable {
     /// Let the navigation proceed.
     case allow
@@ -12,7 +12,7 @@ public enum CefNavigationDecision: Sendable, Equatable {
 
 /// How a navigation started, Chromium's transition type: of a
 /// ``CefNavigationAction`` about to happen, and of a page in the
-/// ``CefBrowser/backForwardList``.
+/// ``CefPage/backForwardList``.
 public struct CefNavigationTransition: Sendable, Hashable {
     /// What started the navigation.
     public enum Source: Sendable, Hashable {
@@ -67,8 +67,8 @@ public struct CefNavigationTransition: Sendable, Hashable {
     }
 }
 
-/// Why a browser's render process ended, delivered to
-/// ``CefBrowserDelegate/browser(_:renderProcessDidTerminate:)``.
+/// Why a page's render process ended, delivered to
+/// ``CefPageDelegate/page(_:renderProcessDidTerminate:)``.
 public enum CefTerminationReason: Sendable, Equatable {
     /// The process exited with a non-zero status.
     case abnormal
@@ -96,7 +96,7 @@ public enum CefTerminationReason: Sendable, Equatable {
 }
 
 /// An HTTP authentication challenge delivered to
-/// ``CefBrowserDelegate/browser(_:credentialFor:)``.
+/// ``CefPageDelegate/page(_:credentialFor:)``.
 public struct CefAuthenticationChallenge: Sendable, Equatable {
     /// The full address of the request that is challenged, such as
     /// `http://intranet.example/reports`.

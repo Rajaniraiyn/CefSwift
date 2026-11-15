@@ -110,7 +110,7 @@ public struct CefResourceRequest: Sendable, Equatable {
     /// The frame that made the request; `nil` for a request with no
     /// frame: a service worker's or a shared worker's.
     public var frame: CefFrame?
-    /// The ``CefBrowser/identifier`` of the page that made the request;
+    /// The ``CefPage/identifier`` of the page that made the request;
     /// `nil` when no page did.
     public var pageIdentifier: Int32?
     /// The page URL that initiated the request, when known. Parsed when
@@ -218,7 +218,7 @@ public enum CefResourceRequestAction: Sendable, Equatable {
 /// Set one on a profile, for every request its pages, service workers and
 /// shared workers make (``CefProfile/requestFilter``), or on one page,
 /// replacing the profile's for that page's requests
-/// (``CefBrowser/Configuration/requestFilter``):
+/// (``CefPage/Configuration/requestFilter``):
 ///
 /// ```swift
 /// profile.requestFilter = CefRequestFilter(hosts: ["ads.example", "tracker.example"]) { _ in .block }
@@ -353,7 +353,7 @@ enum CefResourceRequestHandlers {
     /// not want it, nor the external-protocol check, which only
     /// navigations need. IO thread.
     static func handler(
-        filter: CefCompiledRequestFilter?, browser: UnsafeMutablePointer<cef_browser_t>?,
+        filter: CefCompiledRequestFilter?, page: UnsafeMutablePointer<cef_browser_t>?,
         request: UnsafeMutablePointer<cef_request_t>?, isNavigation: Bool,
         initiator: UnsafePointer<cef_string_t>?
     ) -> UnsafeMutablePointer<cef_resource_request_handler_t>? {
@@ -372,7 +372,7 @@ enum CefResourceRequestHandlers {
         guard wanted else { return isNavigation ? navigationHandler.retained() : nil }
         let owner = FilteredRequest(
             filter: filter, isNavigation: isNavigation,
-            pageIdentifier: browser.map { $0.pointee.get_identifier($0) },
+            pageIdentifier: page.map { $0.pointee.get_identifier($0) },
             initiator: initiator.flatMap { CefStringUtil.string(from: $0).nilIfEmpty })
         return owner.makeHandler()
     }
@@ -407,19 +407,19 @@ enum CefResourceRequestHandlers {
     /// IO thread. Chromium never opens another app itself: the page's
     /// delegate decides on the main actor, and CefKit opens the URL.
     static func installProtocolExecution(on h: UnsafeMutablePointer<cef_resource_request_handler_t>) {
-        h.pointee.on_protocol_execution = { _, browser, frame, request, allowOSExecution in
+        h.pointee.on_protocol_execution = { _, page, frame, request, allowOSExecution in
             allowOSExecution?.pointee = 0
-            let identifier = browser.map { $0.pointee.get_identifier($0) }
+            let identifier = page.map { $0.pointee.get_identifier($0) }
             let frameURL = frame.flatMap { CefStringUtil.takingUserFree($0.pointee.get_url($0)) }.flatMap(URL.init(string:))
             let isMainFrame = frame.map { $0.pointee.is_main($0) != 0 } ?? true
             let url = request.flatMap { CefStringUtil.takingUserFree($0.pointee.get_url($0)) }.flatMap(URL.init(string:))
-            cefRelease(browser)
+            cefRelease(page)
             cefRelease(frame)
             cefRelease(request)
             guard let identifier, let url else { return }
             let externalRequest = CefExternalProtocolRequest(url: url, frameURL: frameURL, isMainFrame: isMainFrame)
             Task { @MainActor in
-                CefRuntime.shared.browser(withIdentifier: identifier)?.handleExternalProtocol(externalRequest)
+                CefRuntime.shared.page(withIdentifier: identifier)?.handleExternalProtocol(externalRequest)
             }
         }
     }
@@ -450,13 +450,13 @@ private final class FilteredRequest: @unchecked Sendable {
     func makeHandler() -> UnsafeMutablePointer<cef_resource_request_handler_t> {
         let h = cefAllocate(cef_resource_request_handler_t.self, owner: self)
         if isNavigation { CefResourceRequestHandlers.installProtocolExecution(on: h) }
-        h.pointee.on_before_resource_load = { s, browser, frame, request, callback in
+        h.pointee.on_before_resource_load = { s, page, frame, request, callback in
             let started = CefDiagnostics.start()
             var filterTime: UInt64 = 0
             defer {
                 if started != 0 { CefDiagnostics.record(.requestFilterOverhead, since: started &+ filterTime) }
             }
-            cefRelease(browser)
+            cefRelease(page)
             cefRelease(callback)
             let frameValue = frame.map(CefFrame.init(reading:))
             cefRelease(frame)
@@ -511,20 +511,20 @@ private final class FilteredRequest: @unchecked Sendable {
             }
             return RV_CONTINUE
         }
-        h.pointee.get_cookie_access_filter = { s, browser, frame, request in
-            cefRelease(browser)
+        h.pointee.get_cookie_access_filter = { s, page, frame, request in
+            cefRelease(page)
             cefRelease(frame)
             cefRelease(request)
             guard let owner = cefOwner(FilteredRequest.self, s) else { return nil }
             let filter = cefAllocate(cef_cookie_access_filter_t.self, owner: owner)
-            filter.pointee.can_send_cookie = { s, browser, frame, request, _ in
-                cefRelease(browser)
+            filter.pointee.can_send_cookie = { s, page, frame, request, _ in
+                cefRelease(page)
                 cefRelease(frame)
                 cefRelease(request)
                 return cefOwner(FilteredRequest.self, s)?.cookieAccess.contains(.send) == false ? 0 : 1
             }
-            filter.pointee.can_save_cookie = { s, browser, frame, request, response, _ in
-                cefRelease(browser)
+            filter.pointee.can_save_cookie = { s, page, frame, request, response, _ in
+                cefRelease(page)
                 cefRelease(frame)
                 cefRelease(request)
                 cefRelease(response)

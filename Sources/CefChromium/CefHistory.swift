@@ -71,8 +71,8 @@ extension CefHistory {
 /// let tiles = try await history.topSites()
 /// ```
 ///
-/// Chromium records visits made in Chrome-style browsers (``CefWindow``
-/// and Chrome UI windows). Browsers embedded with `CefWebView` use the Alloy
+/// Chromium records visits made in Chrome-style pages (``CefWindow``
+/// and Chrome UI windows). Pages embedded with `CefWebView` use the Alloy
 /// style, which keeps no history. An incognito profile has none either: its
 /// methods throw.
 ///
@@ -197,7 +197,7 @@ public final class CefHistory {
     /// it was last visited — at `size` points, or `nil` when it has none.
     ///
     /// For pages that are not open, such as history entries, bookmarks and
-    /// most-visited sites. An open page's icon is ``CefBrowser/favicon``.
+    /// most-visited sites. An open page's icon is ``CefPage/favicon``.
     /// For a list, ``favicons(for:size:)`` asks for all of them at once.
     public func favicon(for pageURL: URL, size: Int = 16) async throws -> NSImage? {
         try await favicons(for: [pageURL], size: size)[pageURL]

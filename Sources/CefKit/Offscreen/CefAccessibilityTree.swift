@@ -1,9 +1,9 @@
 import CoreGraphics
 import Foundation
 
-/// The accessibility tree of an offscreen browser's page, kept up to date
+/// The accessibility tree of an offscreen page's document, kept up to date
 /// from the updates Chromium sends while
-/// ``CefBrowser/isAccessibilityEnabled`` is on.
+/// ``CefPage/isAccessibilityEnabled`` is on.
 ///
 /// Chromium keeps one tree per frame; this object joins them, so that an
 /// `<iframe>` node's children are the root of its frame's tree. Two views
@@ -31,7 +31,7 @@ public final class CefAccessibilityTree {
     /// The tree of the main frame's document.
     public private(set) var mainTreeID: String?
 
-    /// The ratio of Chromium's pixels to the host view's points. The browser
+    /// The ratio of Chromium's pixels to the host view's points. The page
     /// keeps it in step with its host.
     public internal(set) var deviceScaleFactor: CGFloat = 1 {
         didSet { if deviceScaleFactor != oldValue { frameCache = [:] } }
@@ -297,7 +297,7 @@ public final class CefAccessibilityTree {
 
     /// Applies the main document's scroll position, in Chromium's pixels.
     /// Chromium's scroll updates do not reach CEF's accessibility handler,
-    /// so the browser passes on what the render handler reports.
+    /// so the page passes on what the render handler reports.
     @discardableResult
     func applyDocumentScroll(_ offset: CGPoint) -> CefAccessibilityChanges {
         var changes = CefAccessibilityChanges()
@@ -316,7 +316,7 @@ public final class CefAccessibilityTree {
     }
 
     /// Forgets every node, as when accessibility is turned off or the
-    /// browser closes.
+    /// page closes.
     @discardableResult
     func removeAll() -> CefAccessibilityChanges {
         var changes = CefAccessibilityChanges()

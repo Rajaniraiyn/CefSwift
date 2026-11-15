@@ -8,13 +8,13 @@ import Foundation
 extension CefContextMenu {
     /// Chromium's menu as CefKit shows it with no configuration.
     ///
-    /// Chrome-style browsers get Chrome's menu. Chrome's commands that open
+    /// Chrome-style pages get Chrome's menu. Chrome's commands that open
     /// something reach the app as they do from a page: tabs and windows
-    /// through ``CefBrowserDelegate/browser(_:decideWindowOpenFor:)``,
+    /// through ``CefPageDelegate/page(_:decideWindowOpenFor:)``,
     /// Chromium's own pages through ``CefRuntime/onChromeTab``, files
     /// through the download decisions.
     ///
-    /// Alloy-style browsers get CEF's short menu (navigation, editing,
+    /// Alloy-style pages get CEF's short menu (navigation, editing,
     /// spelling, print, source) completed with the items Chrome shows for
     /// links, images, audio, video, selections and fields, which CefKit runs
     /// through CEF the same ways, copying to the general pasteboard.
@@ -28,9 +28,9 @@ extension CefContextMenu {
         var menu = menu
         if !isChromeStyle {
             menu.items.insert(contentsOf: alloyLeadingItems(for: target), at: 0)
-            menu.handle(.viewSource) { browser, target in
-                guard let page = target.pageURL, let source = URL(string: "view-source:" + page.absoluteString) else { return }
-                browser.openFromContextMenu(source, disposition: .newForegroundTab)
+            menu.handle(.viewSource) { page, target in
+                guard let pageURL = target.pageURL, let source = URL(string: "view-source:" + pageURL.absoluteString) else { return }
+                page.openFromContextMenu(source, disposition: .newForegroundTab)
             }
             menu.appendSection(alloyTextServiceItems(for: target))
         }
@@ -97,7 +97,7 @@ extension CefContextMenu {
 
     /// Speech and Writing Direction submenus for an Alloy-style menu, as
     /// Chrome shows them; empty when Chromium's view does not answer them,
-    /// as an offscreen browser's does not.
+    /// as an offscreen page's does not.
     static func alloyTextServiceItems(for target: CefContextMenuTarget) -> [Item] {
         func item(_ command: CefContextMenuCommand, _ stringID: Int32) -> Item {
             Item(command, stringID) { _, _ in }
@@ -129,15 +129,15 @@ extension CefContextMenu {
         var sections: [[Item]] = []
         if let link = target.linkURL {
             sections.append([
-                Item(.openLinkInNewTab, IDS_CONTENT_CONTEXT_OPENLINKNEWTAB) { browser, _ in
-                    browser.openFromContextMenu(link, disposition: .newBackgroundTab)
+                Item(.openLinkInNewTab, IDS_CONTENT_CONTEXT_OPENLINKNEWTAB) { page, _ in
+                    page.openFromContextMenu(link, disposition: .newBackgroundTab)
                 },
-                Item(.openLinkInNewWindow, IDS_CONTENT_CONTEXT_OPENLINKNEWWINDOW) { browser, _ in
-                    browser.openFromContextMenu(link, disposition: .newWindow)
+                Item(.openLinkInNewWindow, IDS_CONTENT_CONTEXT_OPENLINKNEWWINDOW) { page, _ in
+                    page.openFromContextMenu(link, disposition: .newWindow)
                 },
             ])
             sections.append([
-                Item(.saveLinkAs, IDS_CONTENT_CONTEXT_SAVELINKAS) { browser, _ in browser.startDownload(link) },
+                Item(.saveLinkAs, IDS_CONTENT_CONTEXT_SAVELINKAS) { page, _ in page.startDownload(link) },
                 Item(.copyLinkAddress, IDS_CONTENT_CONTEXT_COPYLINKLOCATION) { _, _ in copyToPasteboard(link) },
             ])
         }
@@ -145,12 +145,12 @@ extension CefContextMenu {
             switch target.mediaType {
             case .image:
                 sections.append([
-                    Item(.openImageInNewTab, IDS_CONTENT_CONTEXT_OPENIMAGENEWTAB) { browser, _ in
-                        browser.openFromContextMenu(source, disposition: .newBackgroundTab)
+                    Item(.openImageInNewTab, IDS_CONTENT_CONTEXT_OPENIMAGENEWTAB) { page, _ in
+                        page.openFromContextMenu(source, disposition: .newBackgroundTab)
                     },
-                    Item(.saveImageAs, IDS_CONTENT_CONTEXT_SAVEIMAGEAS) { browser, _ in browser.startDownload(source) },
-                    Item(.copyImage, IDS_CONTENT_CONTEXT_COPYIMAGE) { browser, _ in
-                        guard let image = await browser.downloadImage(source) else { return }
+                    Item(.saveImageAs, IDS_CONTENT_CONTEXT_SAVEIMAGEAS) { page, _ in page.startDownload(source) },
+                    Item(.copyImage, IDS_CONTENT_CONTEXT_COPYIMAGE) { page, _ in
+                        guard let image = await page.downloadImage(source) else { return }
                         NSPasteboard.general.clearContents()
                         NSPasteboard.general.writeObjects([image])
                     },
@@ -159,13 +159,13 @@ extension CefContextMenu {
             case .video, .audio:
                 let isVideo = target.mediaType == .video
                 var items = [
-                    Item(.openMediaInNewTab, isVideo ? IDS_CONTENT_CONTEXT_OPENVIDEONEWTAB : IDS_CONTENT_CONTEXT_OPENAUDIONEWTAB) { browser, _ in
-                        browser.openFromContextMenu(source, disposition: .newBackgroundTab)
+                    Item(.openMediaInNewTab, isVideo ? IDS_CONTENT_CONTEXT_OPENVIDEONEWTAB : IDS_CONTENT_CONTEXT_OPENAUDIONEWTAB) { page, _ in
+                        page.openFromContextMenu(source, disposition: .newBackgroundTab)
                     },
                 ]
                 if target.mediaState.contains(.canSave) {
-                    items.append(Item(.saveMediaAs, isVideo ? IDS_CONTENT_CONTEXT_SAVEVIDEOAS : IDS_CONTENT_CONTEXT_SAVEAUDIOAS) { browser, _ in
-                        browser.startDownload(source)
+                    items.append(Item(.saveMediaAs, isVideo ? IDS_CONTENT_CONTEXT_SAVEVIDEOAS : IDS_CONTENT_CONTEXT_SAVEAUDIOAS) { page, _ in
+                        page.startDownload(source)
                     })
                 }
                 items.append(Item(.copyMediaAddress, isVideo ? IDS_CONTENT_CONTEXT_COPYVIDEOLOCATION : IDS_CONTENT_CONTEXT_COPYAUDIOLOCATION) { _, _ in
@@ -179,8 +179,8 @@ extension CefContextMenu {
         let selection = target.selectedText.trimmingCharacters(in: .whitespacesAndNewlines)
         if !selection.isEmpty, let title = localized(IDS_CONTENT_CONTEXT_LOOK_UP) {
             sections.append([
-                Item(command: .lookUp, title: title.replacingOccurrences(of: "$1", with: truncated(selection))) { browser, target in
-                    guard let view = CefContextMenuPresenter.contentView(of: browser) else { return }
+                Item(command: .lookUp, title: title.replacingOccurrences(of: "$1", with: truncated(selection))) { page, target in
+                    guard let view = CefContextMenuPresenter.contentView(of: page) else { return }
                     view.showDefinition(
                         for: NSAttributedString(string: selection),
                         at: CefContextMenuPresenter.viewPoint(of: target.location, in: view))
@@ -232,18 +232,18 @@ extension CefContextMenu.Item {
 
 // MARK: - What the items do
 
-extension CefBrowser {
+extension CefPage {
     /// Opens `url` as a link the user chose to open somewhere else: asks
-    /// ``CefBrowserDelegate/browser(_:decideWindowOpenFor:)``, as a page's
+    /// ``CefPageDelegate/page(_:decideWindowOpenFor:)``, as a page's
     /// `target=_blank` link does, and carries out the answer.
     func openFromContextMenu(_ url: URL, disposition: CefWindowOpenDisposition) {
         let request = CefWindowOpenRequest(
             targetURL: url, disposition: disposition, hasUserGesture: true,
             isSourceOffscreen: isOffscreen, isSourceChromeStyle: isChromeStyle)
-        let decided = (delegate ?? CefDefaultBrowserDelegate.shared).browser(self, decideWindowOpenFor: request)
+        let decided = (delegate ?? CefDefaultPageDelegate.shared).page(self, decideWindowOpenFor: request)
         switch CefWindowOpenPolicy.resolve(decided, for: request) {
-        case .allowNativePopup: openPopupInNewBrowser(request)
-        case .openInCurrentBrowser: load(url)
+        case .allowNativePopup: openPopupInNewPage(request)
+        case .openInCurrentPage: load(url)
         case .deny, .handled: break
         }
     }

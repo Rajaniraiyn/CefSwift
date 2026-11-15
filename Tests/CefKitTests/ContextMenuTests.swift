@@ -9,7 +9,7 @@ import Testing
 /// the changes apps make.
 @MainActor
 struct ContextMenuTests {
-    /// A menu as Chromium builds one for a link in a Chrome-style browser.
+    /// A menu as Chromium builds one for a link in a Chrome-style page.
     static func chromeLinkMenu() -> CefContextMenu {
         func item(_ id: Int32, _ title: String, enabled: Bool = true) -> CefContextMenu.Item {
             CefContextMenu.Item(chromiumID: Int(id), title: title, isEnabled: enabled, isChromeStyle: true)
@@ -120,7 +120,7 @@ struct ContextMenuTests {
     }
 
     @Test func customizationsComposeInOrder() {
-        var configuration = CefBrowser.Configuration.ContextMenu()
+        var configuration = CefPage.Configuration.ContextMenu()
         configuration.customize { menu, _ in menu.remove(.inspectElement) }
         configuration.customize { menu, target in
             if target.linkURL != nil {
@@ -152,7 +152,7 @@ struct ContextMenuTests {
     }
 
     @Test func inspectIsAddedOnlyWhenMissing() {
-        var configuration = CefBrowser.Configuration.ContextMenu()
+        var configuration = CefPage.Configuration.ContextMenu()
         configuration.showsInspectElement = true
         let chrome = configuration.menu(from: Self.chromeLinkMenu(), for: CefContextMenuTarget(), isChromeStyle: true)
         #expect(chrome.items.filter { $0.command == .inspectElement || $0.title == "Inspect" }.count == 1)
@@ -160,7 +160,7 @@ struct ContextMenuTests {
             from: CefContextMenu([CefContextMenu.Item(chromiumID: Int(MENU_ID_COPY.rawValue), title: "Copy", isChromeStyle: false)]),
             for: CefContextMenuTarget(), isChromeStyle: false)
         #expect(alloy.items.last?.command == .inspectElement)
-        #expect(alloy.items.map(\.title).last == CefBrowser.Configuration.ContextMenu.inspectTitle)
+        #expect(alloy.items.map(\.title).last == CefPage.Configuration.ContextMenu.inspectTitle)
     }
 
     @Test func normalizingDropsStraySeparatorsAndEmptySubmenus() {

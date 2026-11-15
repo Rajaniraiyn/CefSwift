@@ -16,7 +16,7 @@ extension CefChromeWindow {
     /// ```
     ///
     /// Each surface belongs to the tab it was opened in
-    /// (``CefChromiumSurface/browser``). As Chromium does, switching tabs
+    /// (``CefChromiumSurface/page``). As Chromium does, switching tabs
     /// closes the bubbles about the tab left (your interface for them is
     /// dismissed too) and keeps a find bar for when the tab comes back.
     ///
@@ -72,14 +72,14 @@ extension CefChromeWindow {
 extension CefChromeWindow: ChromiumSurfaceHost {
     var surfaceNSWindow: NSWindow? { window }
 
-    /// The browser whose page Chromium shows: the active tab's, or, before
+    /// The page Chromium shows: the active tab's, or, before
     /// it is matched, the one whose page the window shows.
-    var surfaceBrowser: CefBrowser? {
-        if let browser = activeTab?.browser { return browser }
-        if let page = window?.contentView.flatMap(ChromeWindowHost.page(in:)),
-           let shown = CefRuntime.shared.browsers.first(where: { browser in
-               guard let view = browser.nativeView else { return false }
-               return view === page || view.isDescendant(of: page)
+    var surfacePage: CefPage? {
+        if let page = activeTab?.page { return page }
+        if let shownView = window?.contentView.flatMap(ChromeWindowHost.page(in:)),
+           let shown = CefRuntime.shared.pages.first(where: { page in
+               guard let view = page.nativeView else { return false }
+               return view === shownView || view.isDescendant(of: shownView)
            }) {
             return shown
         }

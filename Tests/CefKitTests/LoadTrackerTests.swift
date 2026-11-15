@@ -118,16 +118,16 @@ struct LoadTrackerTests {
         #expect(second.outcome == nil)
     }
 
-    @Test func aCloseHoldsTheAbortUntilTheBrowserCloses() async {
+    @Test func aCloseHoldsTheAbortUntilThePageCloses() async {
         let tracker = CefLoadTracker()
         let navigation = tracker.request(a, shownURL: nil)
         tracker.navigationWillStart(url: a, transition: direct, isRedirect: false, isCancelled: false)
-        tracker.browserWillClose()
+        tracker.pageWillClose()
         tracker.mainFrameDidFail(CefLoadError(code: -3, message: "ERR_ABORTED", url: a))
         tracker.loadingDidChange(isLoading: false, currentURL: nil)
         await settle()
         #expect(navigation.outcome == nil)
-        tracker.browserDidClose()
+        tracker.pageDidClose()
         await #expect { try await navigation.waitUntilLoaded() } throws: { Self.isClosed($0) }
     }
 
@@ -207,7 +207,7 @@ struct LoadTrackerTests {
         let waits = [waiting(started), waiting(asked)]
         let settled = Task { @MainActor in try await tracker.waitUntilSettled() }
         await settle()
-        tracker.browserDidClose()
+        tracker.pageDidClose()
         for wait in waits {
             await #expect { try await wait.value } throws: { Self.isClosed($0) }
         }
@@ -257,6 +257,6 @@ struct LoadTrackerTests {
     }
 
     static func isClosed(_ error: any Error) -> Bool {
-        if case .browserClosed? = error as? CefError { true } else { false }
+        if case .pageClosed? = error as? CefError { true } else { false }
     }
 }

@@ -7,13 +7,13 @@ import Testing
 @MainActor
 struct EventStreamTests {
     @Test func devToolsEventsKeepABoundedNumberByDefault() async {
-        let browser = CefBrowser()
-        let bounded = browser.devTools.events("Network.dataReceived")
-        let everything = browser.devTools.events("Network.dataReceived", bufferingPolicy: .unbounded)
+        let page = CefPage()
+        let bounded = page.devTools.events("Network.dataReceived")
+        let everything = page.devTools.events("Network.dataReceived", bufferingPolicy: .unbounded)
         for index in 0..<1_500 {
-            browser.devTools.received(event: "Network.dataReceived", params: Data(#"{"index":\#(index)}"#.utf8))
+            page.devTools.received(event: "Network.dataReceived", params: Data(#"{"index":\#(index)}"#.utf8))
         }
-        browser.devTools.invalidate()
+        page.devTools.invalidate()
         var kept: [Int] = []
         for await event in bounded { kept.append(event["index"].intValue ?? -1) }
         var all = 0

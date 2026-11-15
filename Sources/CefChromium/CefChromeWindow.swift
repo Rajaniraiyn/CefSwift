@@ -26,14 +26,14 @@ import Observation
 /// Use it for windows of several tabs that are Chromium's own: what
 /// extensions do with `chrome.tabs` and `chrome.tabGroups`, Chrome's tab
 /// commands, recently closed tabs and moving tabs between windows (which
-/// keeps each tab's ``CefBrowser``) then all work. For one page in a window
+/// keeps each tab's ``CefPage``) then all work. For one page in a window
 /// of the app's design, use ``CefWindow``: a CEF Views window, which
 /// Chromium counts as a popup window of one tab. For a page inside the
 /// app's own views, use `CefWebView`: those pages are not Chromium tabs.
 ///
-/// The profile's ``CefTabStrip`` lists every such window, including those
+/// The profile's ``CefTabs`` lists every such window, including those
 /// Chromium opens on its own, such as a window `chrome.windows.create`
-/// opens; ``CefTabStrip/onWindowOpened`` sees each.
+/// opens; ``CefTabs/onWindowOpened`` sees each.
 @MainActor
 @Observable
 public final class CefChromeWindow: Identifiable {
@@ -45,8 +45,8 @@ public final class CefChromeWindow: Identifiable {
     }
 
     public nonisolated let id: ID
-    /// The profile's tab strip, which lists the window.
-    public let strip: CefTabStrip
+    /// The profile's ``CefTabs``, which lists the window.
+    public let strip: CefTabs
     /// The profile the window's tabs belong to.
     public var profile: CefProfile { strip.profile }
 
@@ -69,13 +69,13 @@ public final class CefChromeWindow: Identifiable {
 
     /// The AppKit window Chromium shows the window in. Chromium owns its
     /// lifetime: close it with ``close()``. `nil` until known, which is
-    /// as soon as the window's active tab is matched with its browser.
+    /// as soon as the window's active tab is matched with its page.
     public private(set) var window: NSWindow?
 
     /// Called once the window has closed.
     @ObservationIgnored public var onClose: (() -> Void)?
 
-    init(id: ID, strip: CefTabStrip) {
+    init(id: ID, strip: CefTabs) {
         self.id = id
         self.strip = strip
     }
@@ -85,14 +85,14 @@ public final class CefChromeWindow: Identifiable {
     /// Opens a new window of `profile` showing `url`, and returns it once
     /// Chromium lists it.
     ///
-    /// The first tab's browser is made with `configuration` and
+    /// The first tab's page is made with `configuration` and
     /// `delegate`, as ``CefRuntime/openChromeWindow(url:frame:configuration:delegate:)``
-    /// makes one; it is held weakly, like ``CefBrowser/delegate``.
+    /// makes one; it is held weakly, like ``CefPage/delegate``.
     public static func open(
         url: URL, profile: CefProfile = .default, frame: CGRect? = nil,
-        configuration: CefBrowser.Configuration = .init(), delegate: CefBrowserDelegate? = nil
+        configuration: CefPage.Configuration = .init(), delegate: CefPageDelegate? = nil
     ) async throws -> CefChromeWindow {
-        let strip = profile.tabStrip
+        let strip = profile.tabs
         var configuration = configuration
         configuration.profile = profile
         return try await strip.openWindow(
@@ -102,46 +102,46 @@ public final class CefChromeWindow: Identifiable {
     /// Opens `url` in a new tab of this window, at `index` (by default the
     /// end), and returns the tab.
     ///
-    /// The tab's browser is made with `configuration` and `delegate`, so
+    /// The tab's page is made with `configuration` and `delegate`, so
     /// its bridges, user scripts and attachments are there from the first
-    /// page: Chromium only adds tabs to its windows itself, so the browser
+    /// page: Chromium only adds tabs to its windows itself, so the page
     /// starts in a window of its own, kept off screen, and Chromium then
-    /// moves its tab here, which keeps the browser.
+    /// moves its tab here, which keeps the page.
     @discardableResult
     public func openTab(
         _ url: URL, at index: Int? = nil, isActive: Bool = true,
-        configuration: CefBrowser.Configuration = .init(), delegate: CefBrowserDelegate? = nil
+        configuration: CefPage.Configuration = .init(), delegate: CefPageDelegate? = nil
     ) async throws -> CefTab {
-        guard !isClosed else { throw CefTabStrip.Error.tabClosed }
+        guard !isClosed else { throw CefTabs.Error.tabClosed }
         var configuration = configuration
         configuration.profile = profile
         let frame = CGRect(x: -20_000, y: -20_000, width: max(bounds.width, 800), height: max(bounds.height, 600))
-        let (holder, browser, hider) = try await strip.openWindow(
+        let (holder, page, hider) = try await strip.openWindow(
             url: url, frame: frame, configuration: configuration, delegate: delegate, isTransient: true)
         defer {
             hider?.stop()
-            strip.transientBrowsers.remove(ObjectIdentifier(browser))
+            strip.transientPages.remove(ObjectIdentifier(page))
         }
         let id = try await strip.adoptSingleTab(of: holder.id, into: self, at: index, isActive: isActive)
-        strip.bind(browser, to: id)
+        strip.bind(page, to: id)
         await strip.nextRead()
         if isActive { window?.makeKeyAndOrderFront(nil) }
-        guard let tab = strip.tab(id) else { throw CefTabStrip.Error.tabClosed }
+        guard let tab = strip.tab(id) else { throw CefTabs.Error.tabClosed }
         return tab
     }
 
     /// Opens `url` in a new tab Chromium makes itself, as
-    /// `chrome.tabs.create` does: its browser has CefKit's default
+    /// `chrome.tabs.create` does: its page has CefKit's default
     /// configuration (no bridges, user scripts or attachments) and reaches
-    /// the app through ``CefRuntime/onBrowserCreated``.
+    /// the app through ``CefRuntime/onPageCreated``.
     @discardableResult
     public func openChromiumTab(_ url: URL, at index: Int? = nil, isActive: Bool = true) async throws -> CefTab {
         try await strip.chromiumTab(url, in: self, at: index, isActive: isActive)
     }
 
     /// Closes the window with all its tabs, as Chrome's Close Window does:
-    /// Chromium keeps it in ``CefTabStrip/recentlyClosed`` as one entry,
-    /// which ``CefTabStrip/reopen(_:)`` brings back whole. Pages'
+    /// Chromium keeps it in ``CefTabs/recentlyClosed`` as one entry,
+    /// which ``CefTabs/reopen(_:)`` brings back whole. Pages'
     /// `beforeunload` handlers may keep it open.
     public func close() {
         strip.close(self)
@@ -166,7 +166,7 @@ public final class CefChromeWindow: Identifiable {
     ///
     /// Chromium lays out its window itself, so the covered area is the
     /// height Chrome's tab strip and toolbar take (and, with tabs at the
-    /// side, the width of its vertical tab strip, ``CefTabStrip/layout``);
+    /// side, the width of its vertical tab strip, ``CefTabs/layout``);
     /// ``topBarHeight`` and ``sidebarWidth`` report it, and the page is in
     /// ``contentFrame``.
     public var showsChromeUI = true {
@@ -181,7 +181,7 @@ public final class CefChromeWindow: Identifiable {
     }
 
     /// The app's view along the leading edge, over Chrome's vertical tab
-    /// strip, while ``CefTabStrip/layout`` puts tabs at the side.
+    /// strip, while ``CefTabs/layout`` puts tabs at the side.
     public var sidebar: NSView? {
         didSet { if sidebar !== oldValue { oldValue?.removeFromSuperview(); host?.update() } }
     }
@@ -231,7 +231,7 @@ public final class CefChromeWindow: Identifiable {
         host?.update()
         // Chromium's read can tell of another active tab before AppKit's
         // next window update shows its page.
-        surfaceController?.shownBrowserDidChange()
+        surfaceController?.shownPageDidChange()
     }
 
     /// The window's `NSWindow` is known.
@@ -246,7 +246,7 @@ public final class CefChromeWindow: Identifiable {
         announceIfNeeded()
     }
 
-    /// Hands the window to ``CefTabStrip/onWindowOpened``, once, when it
+    /// Hands the window to ``CefTabs/onWindowOpened``, once, when it
     /// is known and not a transient one.
     func announceIfNeeded() {
         guard !announced, !isTransient, window != nil, !isClosed else { return }
@@ -267,7 +267,7 @@ public final class CefChromeWindow: Identifiable {
     }
 }
 
-extension CefTabStrip {
+extension CefTabs {
     /// Where Chrome's windows put their tabs; a profile preference.
     public enum Layout: Hashable, Sendable {
         /// Across the top, Chrome's default.
@@ -301,53 +301,53 @@ extension CefTabStrip {
         }
     }
 
-    /// Opens a window for a browser the app makes, and returns it once
-    /// Chromium lists it, with the browser matched with its one tab.
+    /// Opens a window for a page the app makes, and returns it once
+    /// Chromium lists it, with the page matched with its one tab.
     func openWindow(
-        url: URL, frame: CGRect?, configuration: CefBrowser.Configuration, delegate: CefBrowserDelegate?, isTransient: Bool
-    ) async throws -> (window: CefChromeWindow, browser: CefBrowser, hider: ChromeWindowHider?) {
+        url: URL, frame: CGRect?, configuration: CefPage.Configuration, delegate: CefPageDelegate?, isTransient: Bool
+    ) async throws -> (window: CefChromeWindow, page: CefPage, hider: ChromeWindowHider?) {
         startFollowing()
-        let browser = CefRuntime.shared.openChromeWindow(url: url, frame: frame, configuration: configuration, delegate: delegate)
-        let hider = isTransient ? ChromeWindowHider(browser: browser) : nil
-        if isTransient { transientBrowsers.insert(ObjectIdentifier(browser)) }
+        let page = CefRuntime.shared.openChromeWindow(url: url, frame: frame, configuration: configuration, delegate: delegate)
+        let hider = isTransient ? ChromeWindowHider(page: page) : nil
+        if isTransient { transientPages.insert(ObjectIdentifier(page)) }
         let deadline = ContinuousClock.now + .seconds(20)
         while ContinuousClock.now < deadline {
-            guard browser.state != .closed else { throw Error.chromium("Chromium closed the new window's browser.") }
-            // The window of one tab in the new browser's NSWindow, which no
-            // other window has: Chromium lists it once the browser exists.
-            if let nsWindow = browser.nativeView?.window {
+            guard page.state != .closed else { throw Error.chromium("Chromium closed the new window's browser.") }
+            // The window of one tab in the new page's NSWindow, which no
+            // other window has: Chromium lists it once the page exists.
+            if let nsWindow = page.nativeView?.window {
                 let known = allWindows.first { $0.window === nsWindow }
                 let new = known.map { [$0] } ?? allWindows.filter { window in
                     window.window == nil && window.tabs.count == 1
-                        && (window.tabs[0].browser === browser || window.tabs[0].browser == nil)
+                        && (window.tabs[0].page === page || window.tabs[0].page == nil)
                 }
                 if new.count == 1, let window = new.first, window.tabs.count == 1 {
-                    bind(browser, to: window.tabs[0].id)
+                    bind(page, to: window.tabs[0].id)
                     window.isTransient = isTransient
                     window.attach(to: nsWindow)
-                    return (window, browser, hider)
+                    return (window, page, hider)
                 }
             }
             await nextRead()
             try await Task.sleep(for: .milliseconds(30))
         }
         hider?.stop()
-        browser.close(force: true)
+        page.close(force: true)
         throw Error.chromium("Chromium did not open the window.")
     }
 }
 
-/// Keeps the window Chromium makes for one browser off screen and unseen,
+/// Keeps the window Chromium makes for one page off screen and unseen,
 /// until ``stop()``: the window a new tab starts in before Chromium moves
 /// it to the window it belongs in.
 @MainActor
 final class ChromeWindowHider {
-    private weak var browser: CefBrowser?
+    private weak var page: CefPage?
     private var observer: NSObjectProtocol?
     private let alreadyVisible: Set<ObjectIdentifier>
 
-    init(browser: CefBrowser) {
-        self.browser = browser
+    init(page: CefPage) {
+        self.page = page
         alreadyVisible = Set(NSApp.windows.filter(\.isVisible).map(ObjectIdentifier.init))
         observer = NotificationCenter.default.addObserver(
             forName: NSWindow.didUpdateNotification, object: nil, queue: .main
@@ -358,7 +358,7 @@ final class ChromeWindowHider {
     }
 
     private func update() {
-        guard let window = browser?.nativeView?.window, !alreadyVisible.contains(ObjectIdentifier(window)) else { return }
+        guard let window = page?.nativeView?.window, !alreadyVisible.contains(ObjectIdentifier(window)) else { return }
         if window.alphaValue > 0 { window.alphaValue = 0 }
         window.ignoresMouseEvents = true
         window.isExcludedFromWindowsMenu = true

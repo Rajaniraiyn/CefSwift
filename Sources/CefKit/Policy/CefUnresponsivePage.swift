@@ -2,14 +2,14 @@ import AppKit
 import CCef
 import CefBase
 
-extension CefBrowser {
+extension CefPage {
     /// Who answers when a page stops responding.
     public enum UnresponsivePagePolicy: Sendable, Equatable {
-        /// Chrome-style browsers show Chromium's own “Page Unresponsive”
+        /// Chrome-style pages show Chromium's own “Page Unresponsive”
         /// dialog; other browsers ask
-        /// ``CefBrowserDelegate/browserPageIsUnresponsive(_:)``.
+        /// ``CefPageDelegate/pageIsUnresponsive(_:)``.
         case automatic
-        /// Every browser asks the delegate, and Chromium shows no dialog.
+        /// Every page asks the delegate, and Chromium shows no dialog.
         case delegate
     }
 }
@@ -27,17 +27,17 @@ public enum CefUnresponsivePageDecision: Sendable, Equatable {
 }
 
 /// The native sheet behind the default
-/// ``CefBrowserDelegate/browserPageIsUnresponsive(_:)``.
+/// ``CefPageDelegate/pageIsUnresponsive(_:)``.
 @MainActor
 public enum CefUnresponsivePagePresenter {
-    /// Asks whether to wait for `browser`'s page or reload it, as a sheet
+    /// Asks whether to wait for `page`'s page or reload it, as a sheet
     /// on `window`, or a modal alert without one. Dismisses itself, as
     /// ``CefUnresponsivePageDecision/wait``, when the task is cancelled:
-    /// the page started responding again or the browser closed.
-    public static func present(for browser: CefBrowser, in window: NSWindow?) async -> CefUnresponsivePageDecision {
+    /// the page started responding again or the page closed.
+    public static func present(for page: CefPage, in window: NSWindow?) async -> CefUnresponsivePageDecision {
         let alert = NSAlert()
         alert.messageText = String(localized: "Page Unresponsive", bundle: .cefKit, comment: "Title of the sheet shown when a page stops responding.")
-        if let site = browser.url?.host() ?? browser.url?.absoluteString {
+        if let site = page.url?.host() ?? page.url?.absoluteString {
             alert.informativeText = String(localized: "\(site) is not responding. You can wait for it or reload it.", bundle: .cefKit,
                                            comment: "Unresponsive page sheet: %@ is the website's host, such as example.com.")
         } else {
@@ -52,7 +52,7 @@ public enum CefUnresponsivePagePresenter {
     }
 }
 
-extension CefBrowser {
+extension CefPage {
     /// `on_render_process_unresponsive`. Returns whether CefSwift handles
     /// it; `false` lets Chromium show its dialog (Chrome style) or wait.
     ///
@@ -67,7 +67,7 @@ extension CefBrowser {
         reloadsWhenRendererEnds = false
         unresponsiveEpisode += 1
         let episode = unresponsiveEpisode
-        decide(.unresponsive) { await $0.browserPageIsUnresponsive(self) } then: { [weak self] decision in
+        decide(.unresponsive) { await $0.pageIsUnresponsive(self) } then: { [weak self] decision in
             // Only the current question's answer counts.
             guard let self, self.unresponsiveEpisode == episode, self.state != .closed else { return }
             switch decision {
@@ -114,22 +114,22 @@ extension CefBrowser {
 extension CefBrowserClient {
     /// Adds the responsiveness callbacks to the request handler.
     static func installResponsivenessCallbacks(on handler: UnsafeMutablePointer<cef_request_handler_t>) {
-        handler.pointee.on_render_process_unresponsive = { s, browser, callback in
+        handler.pointee.on_render_process_unresponsive = { s, page, callback in
             guard let callback = CefRef(adopting: callback) else {
-                cefRelease(browser)
+                cefRelease(page)
                 return 0
             }
-            return CefBrowserClient.run(s, browser, default: 0) { _, b in
+            return CefBrowserClient.run(s, page, default: 0) { _, b in
                 b.renderProcessBecameUnresponsive(callback) ? 1 : 0
             }
         }
-        handler.pointee.on_render_process_responsive = { s, browser in
-            CefBrowserClient.run(s, browser, default: ()) { _, b in b.renderProcessBecameResponsive() }
+        handler.pointee.on_render_process_responsive = { s, page in
+            CefBrowserClient.run(s, page, default: ()) { _, b in b.renderProcessBecameResponsive() }
         }
     }
 }
 
-extension CefBrowser {
+extension CefPage {
     /// Sends the page a click and a key press, as the user would, so that
     /// Chromium's hang monitor watches for its answer.
     @_spi(Testing) public func sendTestInput() {

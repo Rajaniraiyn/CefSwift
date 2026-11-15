@@ -4,18 +4,18 @@ import Foundation
 /// the ones your app adds.
 ///
 /// CefKit reads the menu Chromium builds for a click into this value,
-/// passes it through ``CefBrowser/Configuration/ContextMenu/customize(_:)``
+/// passes it through ``CefPage/Configuration/ContextMenu/customize(_:)``
 /// in order, and shows the result
-/// (``CefBrowserDelegate/browser(_:runContextMenu:for:)``). Chromium's items
+/// (``CefPageDelegate/page(_:runContextMenu:for:)``). Chromium's items
 /// keep their ``Item/command`` and run natively when chosen, unless you give
 /// one an ``Item/action``; your items run their action.
 ///
 /// ```swift
-/// browserConfiguration.contextMenu.customize { menu, target in
+/// pageConfiguration.contextMenu.customize { menu, target in
 ///     menu.remove(.viewSource)
 ///     if target.linkURL != nil {
-///         menu.insert(CefContextMenu.Item("Copy as Markdown") { browser, target in
-///             copyMarkdownLink(target.linkURL!, title: browser.title)
+///         menu.insert(CefContextMenu.Item("Copy as Markdown") { page, target in
+///             copyMarkdownLink(target.linkURL!, title: page.title)
 ///         }, after: .copyLinkAddress)
 ///     }
 /// }
@@ -30,9 +30,9 @@ public struct CefContextMenu: Sendable {
 }
 
 extension CefContextMenu {
-    /// What an item of yours does when chosen, given the browser and what
+    /// What an item of yours does when chosen, given the page and what
     /// the menu was opened on.
-    public typealias Action = @MainActor @Sendable (CefBrowser, CefContextMenuTarget) async -> Void
+    public typealias Action = @MainActor @Sendable (CefPage, CefContextMenuTarget) async -> Void
 
     /// One row of a ``CefContextMenu``: a command, a submenu or a separator.
     public struct Item: Sendable {

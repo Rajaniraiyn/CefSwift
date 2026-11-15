@@ -10,14 +10,14 @@ import CefBase
 @MainActor
 @Suite struct PageStateTests {
     @Test func theLastRegionContainingAPointDecides() {
-        let bar = CefBrowser.DraggableRegion(frame: CGRect(x: 0, y: 0, width: 300, height: 40), isDraggable: true)
-        let button = CefBrowser.DraggableRegion(frame: CGRect(x: 200, y: 5, width: 60, height: 30), isDraggable: false)
-        #expect(CefBrowser.isDraggable(at: CGPoint(x: 10, y: 10), in: [bar, button]))
-        #expect(!CefBrowser.isDraggable(at: CGPoint(x: 210, y: 10), in: [bar, button]))
-        #expect(!CefBrowser.isDraggable(at: CGPoint(x: 10, y: 100), in: [bar, button]))
+        let bar = CefPage.DraggableRegion(frame: CGRect(x: 0, y: 0, width: 300, height: 40), isDraggable: true)
+        let button = CefPage.DraggableRegion(frame: CGRect(x: 200, y: 5, width: 60, height: 30), isDraggable: false)
+        #expect(CefPage.isDraggable(at: CGPoint(x: 10, y: 10), in: [bar, button]))
+        #expect(!CefPage.isDraggable(at: CGPoint(x: 210, y: 10), in: [bar, button]))
+        #expect(!CefPage.isDraggable(at: CGPoint(x: 10, y: 100), in: [bar, button]))
         // A drag region after a no-drag one wins again.
-        #expect(CefBrowser.isDraggable(at: CGPoint(x: 210, y: 10), in: [bar, button, bar]))
-        #expect(!CefBrowser.isDraggable(at: .zero, in: []))
+        #expect(CefPage.isDraggable(at: CGPoint(x: 210, y: 10), in: [bar, button, bar]))
+        #expect(!CefPage.isDraggable(at: .zero, in: []))
     }
 
     @Test func transitionsReadChromiumsSourceAndQualifiers() {
@@ -32,7 +32,7 @@ import CefBase
     }
 
     @Test func contentSwitchesFillBrowserSettings() {
-        var content = CefBrowser.Configuration.Content()
+        var content = CefPage.Configuration.Content()
         var settings = cef_browser_settings_t()
         content.apply(to: &settings)
         #expect(settings.javascript == STATE_DEFAULT && settings.javascript_access_clipboard == STATE_DEFAULT)
@@ -45,7 +45,7 @@ import CefBase
         content.fonts.standardFamily = "Helvetica"
         content.defaultEncoding = "ISO-8859-1"
         content.apply(to: &settings)
-        defer { CefBrowser.Configuration.Content.clearStrings(of: &settings) }
+        defer { CefPage.Configuration.Content.clearStrings(of: &settings) }
         #expect(settings.javascript == STATE_DISABLED && settings.image_loading == STATE_DISABLED
                     && settings.webgl == STATE_DISABLED && settings.local_storage == STATE_DISABLED
                     && settings.remote_fonts == STATE_DISABLED)
@@ -61,19 +61,19 @@ import CefBase
         profile.userScripts = [CefUserScript(source: "profile")]
         let shared = CefBridge(name: "app"), other = CefBridge(name: "tools")
         profile.bridges = [shared, other]
-        final class Attachment: CefBrowserAttachment {
-            func browserDidCreate(_ browser: CefBrowser) async {}
-            func browserDidClose(_ browser: CefBrowser) {}
+        final class Attachment: CefPageAttachment {
+            func pageDidCreate(_ page: CefPage) async {}
+            func pageDidClose(_ page: CefPage) {}
         }
         let first = Attachment(), second = Attachment()
         profile.attachments = [first]
-        var configuration = CefBrowser.Configuration()
+        var configuration = CefPage.Configuration()
         configuration.profile = profile
         configuration.userScripts = [CefUserScript(source: "page")]
         let own = CefBridge(name: "app")
         configuration.bridges = [own]
         configuration.attachments = [second]
-        let page = CefBrowser(configuration: configuration)
+        let page = CefPage(configuration: configuration)
         #expect(page.userScripts.map(\.source) == ["profile", "page"])
         #expect(page.bridges.map(ObjectIdentifier.init) == [ObjectIdentifier(own), ObjectIdentifier(other)])
         #expect(page.attachments.map { ObjectIdentifier($0) } == [ObjectIdentifier(first), ObjectIdentifier(second)])

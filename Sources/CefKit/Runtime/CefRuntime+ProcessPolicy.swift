@@ -10,12 +10,12 @@ extension CefRuntime {
     public enum ProcessPolicy: Sendable, Equatable {
         /// Chromium's own behavior. Besides the renderer of each page, Chromium
         /// keeps a spare renderer process running, so that a page from a new
-        /// site, or a new browser, does not wait for one to start.
+        /// site, or a new page, does not wait for one to start.
         case automatic
 
         /// Renderer processes start only when a page needs one. Saves the
         /// spare renderer, one process and about 13 MB. A page from a site
-        /// that has no renderer yet, and each new browser, waits for its
+        /// that has no renderer yet, and each new page, waits for its
         /// renderer to start, about 40 ms on an M3. Suits apps that show their
         /// own content.
         case onDemand

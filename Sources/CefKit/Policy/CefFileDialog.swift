@@ -6,7 +6,7 @@ import UniformTypeIdentifiers
 /// A file chooser a page asked for: an `<input type="file">`, or
 /// `showOpenFilePicker()` and its relatives.
 ///
-/// ``CefBrowserDelegate/browser(_:runFileDialog:)`` answers it; by default
+/// ``CefPageDelegate/page(_:runFileDialog:)`` answers it; by default
 /// ``CefFileDialogPresenter`` shows an `NSOpenPanel` or `NSSavePanel`.
 public struct CefFileDialog: Sendable, Equatable {
     /// What the page asks the user to choose.
@@ -126,7 +126,7 @@ extension CefFileDialog {
     }
 }
 
-/// The native panels behind ``CefBrowserDelegate/browser(_:runFileDialog:)``:
+/// The native panels behind ``CefPageDelegate/page(_:runFileDialog:)``:
 /// `NSOpenPanel` for opening files and folders, `NSSavePanel` for saving.
 /// Call it from your own delegate to keep the stock panel for some pages.
 @MainActor
@@ -183,16 +183,16 @@ public enum CefFileDialogPresenter {
 extension CefBrowserClient {
     func makeDialogHandler() -> UnsafeMutablePointer<cef_dialog_handler_t> {
         let h = cefAllocate(cef_dialog_handler_t.self, owner: self)
-        h.pointee.on_file_dialog = { s, browser, mode, title, defaultPath, filters, extensions, descriptions, callback in
+        h.pointee.on_file_dialog = { s, page, mode, title, defaultPath, filters, extensions, descriptions, callback in
             let dialog = CefFileDialog(
                 mode: mode, title: title, defaultFilePath: defaultPath,
                 filters: filters, extensions: extensions, descriptions: descriptions)
             guard let callback = CefRef(adopting: callback) else {
-                cefRelease(browser)
+                cefRelease(page)
                 return 0
             }
-            return CefBrowserClient.run(s, browser, default: 0) { _, b in
-                b.decide(.page) { await $0.browser(b, runFileDialog: dialog) } then: { urls in
+            return CefBrowserClient.run(s, page, default: 0) { _, b in
+                b.decide(.page) { await $0.page(b, runFileDialog: dialog) } then: { urls in
                     guard let urls, !urls.isEmpty, let list = cef_string_list_alloc() else {
                         callback.pointer.pointee.cancel(callback.pointer)
                         return

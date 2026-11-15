@@ -5,21 +5,21 @@ import Testing
 /// The points optional modules and apps extend CefKit at.
 @MainActor
 struct ExtensionPointTests {
-    final class Attachment: CefBrowserAttachment {
+    final class Attachment: CefPageAttachment {
         let preparesBeforeFirstDocument: Bool
         init(preparesFirst: Bool) { preparesBeforeFirstDocument = preparesFirst }
     }
 
-    final class PlainAttachment: CefBrowserAttachment {}
+    final class PlainAttachment: CefPageAttachment {}
 
     @Test func anAttachmentThatPreparesFirstHoldsTheFirstDocument() {
         #expect(!PlainAttachment().preparesBeforeFirstDocument)
-        var configuration = CefBrowser.Configuration()
-        #expect(!CefBrowser(configuration: configuration).attachmentsPrepareBeforeFirstDocument)
+        var configuration = CefPage.Configuration()
+        #expect(!CefPage(configuration: configuration).attachmentsPrepareBeforeFirstDocument)
         configuration.attachments = [PlainAttachment()]
-        #expect(!CefBrowser(configuration: configuration).attachmentsPrepareBeforeFirstDocument)
+        #expect(!CefPage(configuration: configuration).attachmentsPrepareBeforeFirstDocument)
         configuration.attachments.append(Attachment(preparesFirst: true))
-        #expect(CefBrowser(configuration: configuration).attachmentsPrepareBeforeFirstDocument)
+        #expect(CefPage(configuration: configuration).attachmentsPrepareBeforeFirstDocument)
     }
 
     final class State {

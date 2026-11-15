@@ -58,7 +58,7 @@ public struct CefPasskey: Sendable, Hashable, Identifiable, Codable {
 
 /// A WebAuthn request a page made with `navigator.credentials.create()` or
 /// `navigator.credentials.get()`, delivered to
-/// ``CefPasskeyDelegate/browser(_:decidePasskeyFor:)``.
+/// ``CefPasskeyDelegate/page(_:decidePasskeyFor:)``.
 public struct CefPasskeyRequest: Sendable, Equatable {
     /// What the page asks for.
     public enum Kind: Sendable, Equatable {
@@ -117,7 +117,7 @@ public enum CefPasskeyDecision: Sendable, Equatable {
 
 /// A ``CefPasskeyStore`` call that failed while a ``CefPasskeyController``
 /// answered a WebAuthn request, delivered to
-/// ``CefPasskeyDelegate/browser(_:passkeyStoreDidFail:)``.
+/// ``CefPasskeyDelegate/page(_:passkeyStoreDidFail:)``.
 public struct CefPasskeyStoreError: Error, Sendable, CustomStringConvertible {
     /// What the controller asked the store to do.
     public enum Operation: Sendable, Equatable {

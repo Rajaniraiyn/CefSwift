@@ -37,29 +37,29 @@ private func fake<T>(_ type: T.Type, _ flag: FreedFlag) -> UnsafeMutablePointer<
     }
 
     @Test func processMessageWithoutMessageReleasesFrame() {
-        let client = CefBrowserClient(browser: nil, chromeToolbar: .init())
+        let client = CefBrowserClient(page: nil, chromeToolbar: .init())
         let raw = client.makeClient()
         defer { cefRelease(raw) }
-        let browser = FreedFlag(), frame = FreedFlag()
+        let page = FreedFlag(), frame = FreedFlag()
         _ = raw.pointee.on_process_message_received(
-            raw, fake(cef_browser_t.self, browser), fake(cef_frame_t.self, frame), PID_RENDERER, nil)
-        #expect(browser.isFreed && frame.isFreed)
+            raw, fake(cef_browser_t.self, page), fake(cef_frame_t.self, frame), PID_RENDERER, nil)
+        #expect(page.isFreed && frame.isFreed)
     }
 
     @Test func downloadWithoutItemReleasesCallback() {
-        let client = CefBrowserClient(browser: nil, chromeToolbar: .init())
+        let client = CefBrowserClient(page: nil, chromeToolbar: .init())
         let raw = client.makeClient()
         defer { cefRelease(raw) }
         let handler = client.handlers.retained(cef_download_handler_t.self)!
         defer { cefRelease(handler) }
-        let browser = FreedFlag(), callback = FreedFlag()
+        let page = FreedFlag(), callback = FreedFlag()
         _ = handler.pointee.on_before_download(
-            handler, fake(cef_browser_t.self, browser), nil, nil, fake(cef_before_download_callback_t.self, callback))
-        #expect(browser.isFreed && callback.isFreed)
+            handler, fake(cef_browser_t.self, page), nil, nil, fake(cef_before_download_callback_t.self, callback))
+        #expect(page.isFreed && callback.isFreed)
     }
 
-    @Test func credentialsWithoutBrowserReleaseCallback() {
-        let client = CefBrowserClient(browser: nil, chromeToolbar: .init())
+    @Test func credentialsWithoutPageReleaseCallback() {
+        let client = CefBrowserClient(page: nil, chromeToolbar: .init())
         let raw = client.makeClient()
         defer { cefRelease(raw) }
         let handler = client.handlers.retained(cef_request_handler_t.self)!
@@ -79,23 +79,23 @@ private func fake<T>(_ type: T.Type, _ flag: FreedFlag) -> UnsafeMutablePointer<
         #expect(callback.isFreed)
     }
 
-    /// The client retains its browser until creation, and its handler
+    /// The client retains its page until creation, and its handler
     /// structs retain the client; a failed creation must undo both.
-    @Test func failedCreationFreesClientAndBrowser() {
+    @Test func failedCreationFreesClientAndPage() {
         weak var weakClient: CefBrowserClient?
-        weak var weakBrowser: CefBrowser?
+        weak var weakPage: CefPage?
         do {
-            let browser = CefBrowser(url: URL(string: "about:blank"))
-            let client = CefBrowserClient(browser: browser, chromeToolbar: .init())
+            let page = CefPage(url: URL(string: "about:blank"))
+            let client = CefBrowserClient(page: page, chromeToolbar: .init())
             // A failed creation call releases the client it was given.
             cefRelease(client.makeClient())
-            browser.client = client
+            page.client = client
             weakClient = client
-            weakBrowser = browser
-            browser.creationFailed()
-            #expect(browser.state == .closed)
+            weakPage = page
+            page.creationFailed()
+            #expect(page.state == .closed)
         }
         #expect(weakClient == nil)
-        #expect(weakBrowser == nil)
+        #expect(weakPage == nil)
     }
 }

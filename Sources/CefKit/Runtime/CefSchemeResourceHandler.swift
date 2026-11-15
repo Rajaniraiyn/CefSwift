@@ -19,9 +19,9 @@ final class SchemeHandlerFactory: Sendable {
     /// the caller, which registration hands to CEF.
     func makeFactory() -> UnsafeMutablePointer<cef_scheme_handler_factory_t> {
         let factory = cefAllocate(cef_scheme_handler_factory_t.self, owner: self)
-        factory.pointee.create = { factorySelf, browser, frame, _, request in
+        factory.pointee.create = { factorySelf, page, frame, _, request in
             // The resource handler reads the request in `open`.
-            cefRelease(browser)
+            cefRelease(page)
             cefRelease(frame)
             cefRelease(request)
             guard let owner = cefOwner(SchemeHandlerFactory.self, factorySelf) else { return nil }

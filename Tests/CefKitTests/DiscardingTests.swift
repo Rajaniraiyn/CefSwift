@@ -49,17 +49,17 @@ import Testing
     }
 
     @Test func errorDescription() {
-        #expect(CefBrowser.DiscardError.blocked([.visible, .playingAudio]).description == "not discardable: playingAudio, visible")
-        #expect(CefBrowser.DiscardError.blocked([.unknown("why")]).description == "not discardable: unknown(why)")
+        #expect(CefPage.DiscardError.blocked([.visible, .playingAudio]).description == "not discardable: playingAudio, visible")
+        #expect(CefPage.DiscardError.blocked([.unknown("why")]).description == "not discardable: unknown(why)")
     }
 
-    private func isUnknown(_ blocker: CefBrowser.DiscardBlocker) -> Bool {
+    private func isUnknown(_ blocker: CefPage.DiscardBlocker) -> Bool {
         if case .unknown = blocker { return true }
         return false
     }
 }
 
-/// The JavaScript that picks a browser's tab from `chrome://discards`,
+/// The JavaScript that picks a page's tab from `chrome://discards`,
 /// run in JavaScriptCore on lists shaped like `getTabDiscardsInfo`'s.
 @Suite struct DiscardTabMatchingTests {
     private func tab(_ id: Int, _ url: String, _ title: String, visibility: Int = 0, state: Int = 0, reasons: [String] = []) -> [String: Any] {
@@ -215,7 +215,7 @@ import Testing
         #expect(context.evaluateScript("JSON.stringify([...frames.keys()])")?.toString() == "[1]")
     }
 
-    private func isUnknown(_ blocker: CefBrowser.DiscardBlocker) -> Bool {
+    private func isUnknown(_ blocker: CefPage.DiscardBlocker) -> Bool {
         if case .unknown = blocker { return true }
         return false
     }
@@ -275,19 +275,19 @@ import Testing
     /// taken before them, and their events never reach this session's
     /// listeners.
     @MainActor @Test func childSessionMessagesAreTakenApart() {
-        let browser = CefBrowser()
+        let page = CefPage()
         var heard = 0
-        _ = browser.devTools.addListener(for: "Runtime.consoleAPICalled") { _ in heard += 1 }
+        _ = page.devTools.addListener(for: "Runtime.consoleAPICalled") { _ in heard += 1 }
         let childEvent = Data(#"{"method":"Runtime.consoleAPICalled","params":{},"sessionId":"S"}"#.utf8)
         let childReply = Data(#"{"id":7,"result":{},"sessionId":"S"}"#.utf8)
         // This session's messages, one mentioning a session in its parameters.
         let attached = Data(#"{"method":"Target.attachedToTarget","params":{"sessionId":"S"}}"#.utf8)
         let reply = Data(#"{"id":8,"result":{"sessionId":"S"}}"#.utf8)
-        #expect(browser.devTools.receivedChildSessionMessage(childEvent))
-        #expect(browser.devTools.receivedChildSessionMessage(childReply))
-        #expect(!browser.devTools.receivedChildSessionMessage(attached))
-        #expect(!browser.devTools.receivedChildSessionMessage(reply))
-        #expect(!browser.devTools.receivedChildSessionMessage(Data(#"{"id":9,"result":{}}"#.utf8)))
+        #expect(page.devTools.receivedChildSessionMessage(childEvent))
+        #expect(page.devTools.receivedChildSessionMessage(childReply))
+        #expect(!page.devTools.receivedChildSessionMessage(attached))
+        #expect(!page.devTools.receivedChildSessionMessage(reply))
+        #expect(!page.devTools.receivedChildSessionMessage(Data(#"{"id":9,"result":{}}"#.utf8)))
         #expect(heard == 0)
     }
 }

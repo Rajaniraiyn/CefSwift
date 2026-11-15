@@ -25,8 +25,8 @@ public enum CefError: Error {
     /// An operation that requires an initialized runtime was attempted
     /// before `CefRuntime.initialize` succeeded.
     case notInitialized
-    /// The browser closed before the operation could complete.
-    case browserClosed
+    /// The page closed before the operation could complete.
+    case pageClosed
     /// The frame an operation targeted was gone: detached from its
     /// renderer, or navigated away.
     case frameDetached
@@ -41,7 +41,7 @@ public enum CefError: Error {
     /// The page's render process ended while its document was loading.
     case renderProcessTerminated(CefTerminationReason)
     /// Chromium could not load a persistent profile from its directory.
-    /// The associated value says why. Browsers on the profile close as
+    /// The associated value says why. Pages on the profile close as
     /// they are created; nothing falls back to an in-memory profile. See
     /// ``CefProfile/ready()``.
     case profileUnavailable(String)
@@ -83,7 +83,7 @@ extension CefError: CustomStringConvertible {
             return "CefRuntime has shut down. Chromium starts once per process; it cannot be initialized again."
         case .notInitialized:
             return "CefRuntime has not been initialized. Call CefRuntime.shared.initialize() first."
-        case .browserClosed:
+        case .pageClosed:
             return "The browser closed before the operation completed."
         case .frameDetached:
             return "The frame was detached before the operation completed."

@@ -15,7 +15,7 @@ private struct UncheckedSendable<Value>: @unchecked Sendable {
 /// One node of an offscreen page, as an AppKit accessibility element.
 ///
 /// Elements hold only the node's identifier and read the node from the
-/// browser's ``CefAccessibilityTree`` on every query, so they always report
+/// page's ``CefAccessibilityTree`` on every query, so they always report
 /// the page as it is. An element whose node has gone away reports itself
 /// as an empty group until assistive apps let go of it.
 ///

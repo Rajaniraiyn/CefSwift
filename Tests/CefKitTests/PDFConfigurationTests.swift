@@ -10,7 +10,7 @@ import Testing
 @MainActor
 struct PDFConfigurationTests {
     @Test func defaultsFollowPageSetup() {
-        let configuration = CefBrowser.PDFConfiguration()
+        let configuration = CefPage.PDFConfiguration()
         #expect(configuration.paperSize == NSPrintInfo.shared.paperSize)
         #expect(configuration.printsBackgrounds && configuration.isTagged && configuration.includesOutline)
         var settings = configuration.makeSettings()
@@ -21,7 +21,7 @@ struct PDFConfigurationTests {
     }
 
     @Test func pointsBecomeInches() {
-        var configuration = CefBrowser.PDFConfiguration(paperSize: CGSize(width: 595, height: 842))
+        var configuration = CefPage.PDFConfiguration(paperSize: CGSize(width: 595, height: 842))
         configuration.margins = .custom(top: 72, left: 36, bottom: 18, right: 0)
         configuration.scale = 5
         configuration.isTagged = false
@@ -36,7 +36,7 @@ struct PDFConfigurationTests {
     }
 
     @Test func landscapeTurnsThePaper() {
-        var configuration = CefBrowser.PDFConfiguration(paperSize: CGSize(width: 612, height: 792))
+        var configuration = CefPage.PDFConfiguration(paperSize: CGSize(width: 612, height: 792))
         configuration.isLandscape = true
         var settings = configuration.makeSettings()
         defer { ccef_string_clear(&settings.page_ranges) }
@@ -44,13 +44,13 @@ struct PDFConfigurationTests {
     }
 
     @Test func pageRangesAreSpelledAsChromiumReadsThem() {
-        var configuration = CefBrowser.PDFConfiguration(paperSize: CGSize(width: 612, height: 792))
+        var configuration = CefPage.PDFConfiguration(paperSize: CGSize(width: 612, height: 792))
         configuration.pageRanges = [1...3, 5...5, 8...9]
         #expect(configuration.pageRangeText == "1-3, 5, 8-9")
     }
 
     @Test func aFooterAloneStillGetsAnEmptyHeader() {
-        var configuration = CefBrowser.PDFConfiguration(paperSize: CGSize(width: 612, height: 792))
+        var configuration = CefPage.PDFConfiguration(paperSize: CGSize(width: 612, height: 792))
         configuration.footerTemplate = "<span class=pageNumber></span>"
         var settings = configuration.makeSettings()
         defer {

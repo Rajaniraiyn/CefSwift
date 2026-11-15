@@ -4,7 +4,7 @@ import Foundation
 /// A page's request to open a URL whose scheme Chromium does not load
 /// itself (`mailto:`, `zoommtg:`, `slack:`), which another app on the Mac
 /// may handle. Passed to
-/// ``CefBrowserDelegate/browser(_:decideExternalProtocolFor:)``.
+/// ``CefPageDelegate/page(_:decideExternalProtocolFor:)``.
 public struct CefExternalProtocolRequest: Sendable, Equatable {
     /// The URL to hand to another app.
     public var url: URL
@@ -37,7 +37,7 @@ public enum CefExternalProtocolDecision: Sendable, Equatable {
 }
 
 /// The sheet behind the default answer to
-/// ``CefBrowserDelegate/browser(_:decideExternalProtocolFor:)``: "Open
+/// ``CefPageDelegate/page(_:decideExternalProtocolFor:)``: "Open
 /// “Zoom”?", naming the app and the site that asks, as Safari and Chrome
 /// ask. Call it from your own delegate to keep it for some requests.
 @MainActor
@@ -71,7 +71,7 @@ public enum CefExternalProtocolPresenter {
     }
 }
 
-extension CefBrowser {
+extension CefPage {
     /// Opens a URL another app handles, once the delegate allowed it.
     /// SelfTest replaces it, so that no other app opens unattended.
     @_spi(Testing) public static var openExternalURL: @MainActor (URL) -> Void = { url in
@@ -83,9 +83,9 @@ extension CefBrowser {
     func handleExternalProtocol(_ request: CefExternalProtocolRequest) {
         decide(.page, { [weak self] delegate -> CefExternalProtocolDecision in
             guard let self else { return .deny }
-            return await delegate.browser(self, decideExternalProtocolFor: request)
+            return await delegate.page(self, decideExternalProtocolFor: request)
         }, then: { (decision: CefExternalProtocolDecision) in
-            if decision == .allow { CefBrowser.openExternalURL(request.url) }
+            if decision == .allow { CefPage.openExternalURL(request.url) }
         })
     }
 }

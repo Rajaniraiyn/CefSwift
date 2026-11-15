@@ -23,12 +23,12 @@ struct UnresponsivePageTests {
     }
 
     /// Answers each question when the test says so.
-    @MainActor final class Delegate: CefBrowserDelegate {
+    @MainActor final class Delegate: CefPageDelegate {
         var asked = 0
         var cancelled = 0
         private var answers: [Int: CheckedContinuation<CefUnresponsivePageDecision, Never>] = [:]
 
-        func browserPageIsUnresponsive(_ browser: CefBrowser) async -> CefUnresponsivePageDecision {
+        func pageIsUnresponsive(_ page: CefPage) async -> CefUnresponsivePageDecision {
             asked += 1
             let question = asked
             let answer = await withCheckedContinuation { answers[question] = $0 }
@@ -46,78 +46,78 @@ struct UnresponsivePageTests {
     }
 
     @Test func aSecondNotificationReplacesTheFirst() async {
-        let browser = CefBrowser()
+        let page = CefPage()
         let delegate = Delegate()
-        browser.delegate = delegate
+        page.delegate = delegate
         let first = FakeCallback(), second = FakeCallback()
-        #expect(browser.renderProcessBecameUnresponsive(makeCallback(first)))
+        #expect(page.renderProcessBecameUnresponsive(makeCallback(first)))
         await drain()
-        #expect(browser.renderProcessBecameUnresponsive(makeCallback(second)))
+        #expect(page.renderProcessBecameUnresponsive(makeCallback(second)))
         await drain()
         #expect(delegate.asked == 2)
-        #expect(browser.pendingDecisionCount == 1)
+        #expect(page.pendingDecisionCount == 1)
 
         // The replaced question's late reload does nothing at all.
         delegate.answer(1, .reload)
         await drain()
         #expect(first.calls.isEmpty)
-        #expect(!browser.reloadsWhenRendererEnds)
+        #expect(!page.reloadsWhenRendererEnds)
 
         delegate.answer(2, .wait)
         await drain()
         #expect(second.calls == ["wait"])
-        #expect(!browser.reloadsWhenRendererEnds)
-        #expect(browser.pendingDecisionCount == 0)
+        #expect(!page.reloadsWhenRendererEnds)
+        #expect(page.pendingDecisionCount == 0)
     }
 
     @Test func aReloadBelongsToItsRenderer() async {
-        let browser = CefBrowser()
+        let page = CefPage()
         let delegate = Delegate()
-        browser.delegate = delegate
+        page.delegate = delegate
         let callback = FakeCallback()
-        _ = browser.renderProcessBecameUnresponsive(makeCallback(callback))
+        _ = page.renderProcessBecameUnresponsive(makeCallback(callback))
         await drain()
         delegate.answer(1, .reload)
         await drain()
         #expect(callback.calls == ["terminate"])
-        #expect(browser.reloadsWhenRendererEnds)
+        #expect(page.reloadsWhenRendererEnds)
         // Its renderer ends: the reload is used up.
-        browser.renderProcessEnded()
-        #expect(!browser.reloadsWhenRendererEnds)
+        page.renderProcessEnded()
+        #expect(!page.reloadsWhenRendererEnds)
     }
 
     @Test func respondingNavigatingOrClosingClearsAReload() async {
         for end in ["responsive", "navigation", "close"] {
-            let browser = CefBrowser()
+            let page = CefPage()
             let delegate = Delegate()
-            browser.delegate = delegate
-            _ = browser.renderProcessBecameUnresponsive(makeCallback(FakeCallback()))
+            page.delegate = delegate
+            _ = page.renderProcessBecameUnresponsive(makeCallback(FakeCallback()))
             await drain()
             delegate.answer(1, .reload)
             await drain()
-            #expect(browser.reloadsWhenRendererEnds, "\(end)")
+            #expect(page.reloadsWhenRendererEnds, "\(end)")
             switch end {
-            case "responsive": browser.renderProcessBecameResponsive()
-            case "navigation": browser.mainFrameDidStartLoading(nil)
-            default: browser.handleClosed()
+            case "responsive": page.renderProcessBecameResponsive()
+            case "navigation": page.mainFrameDidStartLoading(nil)
+            default: page.handleClosed()
             }
-            #expect(!browser.reloadsWhenRendererEnds, "\(end)")
+            #expect(!page.reloadsWhenRendererEnds, "\(end)")
         }
     }
 
     @Test func respondingWithdrawsTheQuestion() async {
-        let browser = CefBrowser()
+        let page = CefPage()
         let delegate = Delegate()
-        browser.delegate = delegate
+        page.delegate = delegate
         let callback = FakeCallback()
-        _ = browser.renderProcessBecameUnresponsive(makeCallback(callback))
+        _ = page.renderProcessBecameUnresponsive(makeCallback(callback))
         await drain()
-        browser.renderProcessBecameResponsive()
+        page.renderProcessBecameResponsive()
         delegate.answer(1, .reload)
         await drain()
         #expect(callback.calls.isEmpty)
         #expect(delegate.cancelled == 1)
-        #expect(!browser.reloadsWhenRendererEnds)
-        #expect(browser.isResponsive)
+        #expect(!page.reloadsWhenRendererEnds)
+        #expect(page.isResponsive)
     }
 }

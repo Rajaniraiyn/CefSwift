@@ -4,7 +4,7 @@ import Foundation
 import IOSurface
 import CefBase
 
-/// A frame painted by an offscreen browser.
+/// A frame painted by an offscreen page.
 ///
 /// A frame is only valid during
 /// ``CefOffscreenHost/offscreenDidPaint(_:element:)``: Chromium paints
@@ -67,14 +67,14 @@ public enum CefOffscreenPaintElement: Sendable {
 ///
 /// Positions are in screen points with a top-left origin at the top-left
 /// corner of the primary display, the coordinates Chromium uses for
-/// windowed browsers too. Pages read them as `window.screenX` and
+/// windowed pages too. Pages read them as `window.screenX` and
 /// `screenY`, `outerWidth` and `outerHeight`, `screen.width` and
 /// `screen.availWidth` and the like, so report the real window and screen:
-/// a page sees an offscreen browser as the window it is shown in.
+/// a page sees an offscreen page as the window it is shown in.
 ///
-/// Call ``CefBrowser/hostViewDidResize()`` after the size changes,
-/// ``CefBrowser/hostViewDidMove()`` after the view's window moves, and
-/// ``CefBrowser/hostViewDidChangeBackingProperties()`` after the scale or
+/// Call ``CefPage/hostViewDidResize()`` after the size changes,
+/// ``CefPage/hostViewDidMove()`` after the view's window moves, and
+/// ``CefPage/hostViewDidChangeBackingProperties()`` after the scale or
 /// screen changes.
 public struct CefOffscreenViewInfo: Sendable {
     /// The view size in points.
@@ -117,10 +117,10 @@ public struct CefOffscreenViewInfo: Sendable {
     }
 }
 
-/// The view that displays an offscreen browser: it supplies geometry and
+/// The view that displays an offscreen page: it supplies geometry and
 /// receives frames, cursor changes, popups, IME ranges, menus and drags.
 ///
-/// ``CefOffscreenBrowserView`` implements this. Every method is
+/// ``CefOffscreenPageView`` implements this. Every method is
 /// called on the main thread.
 @MainActor
 public protocol CefOffscreenHost: AnyObject {
@@ -145,30 +145,30 @@ public protocol CefOffscreenHost: AnyObject {
     func offscreenDidChangeSelection(_ selectedText: String, selectedRange: NSRange)
     /// The page started dragging `data` from `point`, in view points. Begin
     /// a system drag session and, when it ends, call
-    /// ``CefBrowser/draggingSessionEnded(at:operation:)``. Return `false` to
+    /// ``CefPage/draggingSessionEnded(at:operation:)``. Return `false` to
     /// cancel the drag. The default returns `false`.
     func offscreenBeginDraggingSession(_ data: CefDragData, allowedOperations: CefDragOperation, at point: CGPoint) -> Bool
     /// The drag cursor should show `operation`. The default does nothing.
     func offscreenDragOperationDidChange(_ operation: CefDragOperation)
-    /// The browser's ``CefBrowser/accessibilityTree`` changed. Post the
+    /// The page's ``CefPage/accessibilityTree`` changed. Post the
     /// matching platform notifications. The default does nothing.
     func offscreenAccessibilityTreeDidChange(_ changes: CefAccessibilityChanges)
     /// The frame the host shows, with the popup widget (a `<select>` list,
     /// a date picker) drawn over it while one is open, at the view's pixel
-    /// size; `nil` before the first frame. ``CefBrowser/snapshot()`` returns
+    /// size; `nil` before the first frame. ``CefPage/snapshot()`` returns
     /// it. The default returns `nil`, and the snapshot comes from the
     /// DevTools Protocol instead.
     func offscreenSnapshot() -> CGImage?
-    /// `browser` no longer shows in this host: it moved to another one
-    /// (``CefBrowser/host(offscreenIn:size:)``) or was withdrawn
-    /// (``CefBrowser/stopHosting(in:)``). Stop forwarding input, geometry
+    /// `page` no longer shows in this host: it moved to another one
+    /// (``CefPage/host(offscreenIn:size:)``) or was withdrawn
+    /// (``CefPage/stopHosting(in:)``). Stop forwarding input, geometry
     /// and accessibility to it; nothing more reaches the host from it. The
-    /// default does nothing. ``CefOffscreenBrowserView`` sets its
-    /// ``CefOffscreenBrowserView/browser`` to nil.
-    func offscreenDidStopHosting(_ browser: CefBrowser)
+    /// default does nothing. ``CefOffscreenPageView`` sets its
+    /// ``CefOffscreenPageView/page`` to nil.
+    func offscreenDidStopHosting(_ page: CefPage)
     /// The page's tooltip changed (a `title` attribute under the mouse);
     /// nil when none shows. The default does nothing;
-    /// ``CefOffscreenBrowserView`` sets its `toolTip`.
+    /// ``CefOffscreenPageView`` sets its `toolTip`.
     func offscreenDidChangeToolTip(_ toolTip: String?)
 }
 
@@ -180,12 +180,12 @@ extension CefOffscreenHost {
     public func offscreenBeginDraggingSession(_ data: CefDragData, allowedOperations: CefDragOperation, at point: CGPoint) -> Bool { false }
     public func offscreenDragOperationDidChange(_ operation: CefDragOperation) {}
     public func offscreenAccessibilityTreeDidChange(_ changes: CefAccessibilityChanges) {}
-    public func offscreenDidStopHosting(_ browser: CefBrowser) {}
+    public func offscreenDidStopHosting(_ page: CefPage) {}
     public func offscreenDidChangeToolTip(_ toolTip: String?) {}
 }
 
 extension CefBrowserClient {
-    /// Builds the `cef_render_handler_t` installed for offscreen browsers.
+    /// Builds the `cef_render_handler_t` installed for offscreen pages.
     func makeRenderHandler() -> UnsafeMutablePointer<cef_render_handler_t> {
         let handler = cefAllocate(cef_render_handler_t.self, owner: self)
 
@@ -193,15 +193,15 @@ extension CefBrowserClient {
             cefOwner(CefBrowserClient.self, s)?.handlers.retained(cef_accessibility_handler_t.self)
         }
 
-        handler.pointee.get_view_rect = { s, browser, rect in
-            cefRelease(browser)
+        handler.pointee.get_view_rect = { s, page, rect in
+            cefRelease(page)
             guard let rect else { return }
             let info = CefBrowserClient.offscreenViewInfo(s)
             rect.pointee = cef_rect_t(CGRect(origin: .zero, size: info.size))
         }
 
-        handler.pointee.get_screen_info = { s, browser, screenInfo in
-            cefRelease(browser)
+        handler.pointee.get_screen_info = { s, page, screenInfo in
+            cefRelease(page)
             guard let screenInfo else { return 0 }
             let info = CefBrowserClient.offscreenViewInfo(s)
             let screen = cef_rect_t(info.screenFrame)
@@ -214,15 +214,15 @@ extension CefBrowserClient {
             return 1
         }
 
-        handler.pointee.get_root_screen_rect = { s, browser, rect in
-            cefRelease(browser)
+        handler.pointee.get_root_screen_rect = { s, page, rect in
+            cefRelease(page)
             guard let rect, let window = CefBrowserClient.offscreenViewInfo(s).windowFrame else { return 0 }
             rect.pointee = cef_rect_t(window)
             return 1
         }
 
-        handler.pointee.get_screen_point = { s, browser, viewX, viewY, screenX, screenY in
-            cefRelease(browser)
+        handler.pointee.get_screen_point = { s, page, viewX, viewY, screenX, screenY in
+            cefRelease(page)
             guard let screenX, let screenY else { return 0 }
             let origin = CefBrowserClient.offscreenViewInfo(s).screenOrigin
             screenX.pointee = Int32(saturating: origin.x + CGFloat(viewX))
@@ -230,8 +230,8 @@ extension CefBrowserClient {
             return 1
         }
 
-        handler.pointee.on_paint = { s, browser, type, dirtyCount, dirtyRects, buffer, width, height in
-            cefRelease(browser)
+        handler.pointee.on_paint = { s, page, type, dirtyCount, dirtyRects, buffer, width, height in
+            cefRelease(page)
             guard let buffer else { return }
             let element = CefOffscreenPaintElement(cefValue: type)
             let rects = CGRect.array(dirtyRects, count: dirtyCount)
@@ -239,8 +239,8 @@ extension CefBrowserClient {
             CefBrowserClient.withOffscreenHost(s) { $0.offscreenDidPaint(frame, element: element) }
         }
 
-        handler.pointee.on_accelerated_paint = { s, browser, type, dirtyCount, dirtyRects, info in
-            cefRelease(browser)
+        handler.pointee.on_accelerated_paint = { s, page, type, dirtyCount, dirtyRects, info in
+            cefRelease(page)
             guard let info, let opaque = info.pointee.shared_texture_io_surface else { return }
             let element = CefOffscreenPaintElement(cefValue: type)
             let surface = Unmanaged<IOSurfaceRef>.fromOpaque(opaque).takeUnretainedValue()
@@ -251,16 +251,16 @@ extension CefBrowserClient {
             }
         }
 
-        handler.pointee.on_scroll_offset_changed = { s, browser, x, y in
-            cefRelease(browser)
+        handler.pointee.on_scroll_offset_changed = { s, page, x, y in
+            cefRelease(page)
             guard let client = cefOwner(CefBrowserClient.self, s) else { return }
             MainActor.assumeIsolated {
                 client.primary?.accessibilityScrollOffsetDidChange(CGPoint(x: x, y: y))
             }
         }
 
-        handler.pointee.start_dragging = { s, browser, dragData, allowedOps, x, y in
-            cefRelease(browser)
+        handler.pointee.start_dragging = { s, page, dragData, allowedOps, x, y in
+            cefRelease(page)
             guard let dragData else { return 0 }
             let data = CefDragData(reading: dragData)
             cefRelease(dragData)
@@ -273,27 +273,27 @@ extension CefBrowserClient {
             }
         }
 
-        handler.pointee.update_drag_cursor = { s, browser, operation in
-            cefRelease(browser)
+        handler.pointee.update_drag_cursor = { s, page, operation in
+            cefRelease(page)
             let operation = CefDragOperation(rawValue: UInt32(operation.rawValue))
             CefBrowserClient.withOffscreenHost(s) { $0.offscreenDragOperationDidChange(operation) }
         }
 
-        handler.pointee.on_popup_show = { s, browser, show in
-            cefRelease(browser)
+        handler.pointee.on_popup_show = { s, page, show in
+            cefRelease(page)
             let visible = show != 0
             CefBrowserClient.withOffscreenHost(s) { $0.offscreenPopupDidChangeVisibility(visible) }
         }
 
-        handler.pointee.on_popup_size = { s, browser, rect in
-            cefRelease(browser)
+        handler.pointee.on_popup_size = { s, page, rect in
+            cefRelease(page)
             guard let rect else { return }
             let bounds = CGRect(rect.pointee)
             CefBrowserClient.withOffscreenHost(s) { $0.offscreenPopupDidResize(bounds) }
         }
 
-        handler.pointee.on_ime_composition_range_changed = { s, browser, selectedRange, boundsCount, characterBounds in
-            cefRelease(browser)
+        handler.pointee.on_ime_composition_range_changed = { s, page, selectedRange, boundsCount, characterBounds in
+            cefRelease(page)
             let range = selectedRange.map { NSRange($0.pointee) } ?? NSRange(location: 0, length: 0)
             let rects = CGRect.array(characterBounds, count: boundsCount)
             CefBrowserClient.withOffscreenHost(s) {
@@ -301,8 +301,8 @@ extension CefBrowserClient {
             }
         }
 
-        handler.pointee.on_text_selection_changed = { s, browser, selectedText, selectedRange in
-            cefRelease(browser)
+        handler.pointee.on_text_selection_changed = { s, page, selectedText, selectedRange in
+            cefRelease(page)
             let text = CefStringUtil.string(from: selectedText)
             let range = selectedRange.map { NSRange($0.pointee) } ?? NSRange(location: 0, length: 0)
             CefBrowserClient.withOffscreenHost(s) {
@@ -313,7 +313,7 @@ extension CefBrowserClient {
         return handler
     }
 
-    /// The host's geometry; while no host shows the browser, the last
+    /// The host's geometry; while no host shows the page, the last
     /// host's, or a 1×1 placeholder.
     private nonisolated static func offscreenViewInfo(
         _ handler: UnsafeMutablePointer<cef_render_handler_t>?

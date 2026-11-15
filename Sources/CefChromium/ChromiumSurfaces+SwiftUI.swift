@@ -28,7 +28,7 @@ extension CefWindow {
     }
 
     /// Replaces Chromium's find bar with a SwiftUI view, shown under the
-    /// toolbar while the browser's ``CefBrowser/findSession`` is active: from
+    /// toolbar while the page's ``CefPage/findSession`` is active: from
     /// ⌘F or ``CefChromeCommand/find`` until ``CefFindSession/end()``.
     ///
     /// ```swift
@@ -37,7 +37,7 @@ extension CefWindow {
     ///
     /// The bar's first text field takes keyboard focus as it appears.
     public func setFindBar(@ViewBuilder _ content: @escaping (CefFindSession) -> some View) {
-        let session = browser.findSession
+        let session = page.findSession
         let accessory = FindBarAccessory(session: session, content: AnyView(content(session)))
         withWindow { window in
             accessory.install(in: window)
@@ -51,7 +51,7 @@ extension CefWindow {
     /// Replaces Chromium's status bubble — the address of a hovered link —
     /// with a SwiftUI view laid over the page: it hides Chromium's
     /// (``CefChromiumSurface/Kind/statusBubble``) and sets the window's
-    /// `pageOverlay`. `content` receives ``CefBrowser/statusText`` as it
+    /// `pageOverlay`. `content` receives ``CefPage/statusText`` as it
     /// changes, and is shown only while it is not empty; align it within
     /// the page yourself.
     ///
@@ -67,10 +67,10 @@ extension CefWindow {
     ///
     /// The bubble takes the whole page overlay. To show it with other views
     /// over the page, hide Chromium's with `chromiumSurfacePolicy[.statusBubble] = .hidden`
-    /// and draw ``CefBrowser/statusText`` in an overlay of your own.
+    /// and draw ``CefPage/statusText`` in an overlay of your own.
     public func setStatusBubble(@ViewBuilder _ content: @escaping (String) -> some View) {
         chromiumSurfacePolicy[.statusBubble] = .hidden
-        let hosting = NSHostingView(rootView: StatusTextReader(browser: browser, content: { AnyView(content($0)) }))
+        let hosting = NSHostingView(rootView: StatusTextReader(page: page, content: { AnyView(content($0)) }))
         pageOverlay = PassthroughHostingContainer(hosting)
     }
 }
@@ -96,7 +96,7 @@ extension CefChromeWindow {
 
     /// Replaces Chromium's find bar with a SwiftUI view along the top of
     /// the page (``pageBar``), shown while the active tab's
-    /// ``CefBrowser/findSession`` is active: from ⌘F or
+    /// ``CefPage/findSession`` is active: from ⌘F or
     /// ``CefChromeCommand/find`` until ``CefFindSession/end()``. Each tab
     /// keeps its own search; the bar shows the active tab's, as Chrome's
     /// find bar does.
@@ -114,7 +114,7 @@ extension CefChromeWindow {
 
     /// Replaces Chromium's status bubble with a SwiftUI view over the
     /// page, as ``CefWindow/setStatusBubble(_:)``: `content` receives the
-    /// active tab's ``CefBrowser/statusText``, shown while it is not empty.
+    /// active tab's ``CefPage/statusText``, shown while it is not empty.
     public func setStatusBubble(@ViewBuilder _ content: @escaping (String) -> some View) {
         chromiumSurfacePolicy[.statusBubble] = .hidden
         let hosting = NSHostingView(rootView: ActiveStatusTextReader(window: self, content: { AnyView(content($0)) }))
@@ -128,7 +128,7 @@ private struct ActiveStatusTextReader: View {
     let content: (String) -> AnyView
 
     var body: some View {
-        let text = window.activeTab?.browser?.statusText ?? ""
+        let text = window.activeTab?.page?.statusText ?? ""
         ZStack {
             if !text.isEmpty { content(text) }
         }
@@ -162,7 +162,7 @@ private final class ChromeFindBar: NSView {
     /// Shows the active tab's session while it is active.
     private func follow() {
         withObservationTracking {
-            _ = chromeWindow?.activeTab?.browser?.findSession.isActive
+            _ = chromeWindow?.activeTab?.page?.findSession.isActive
         } onChange: { [weak self] in
             Task { @MainActor in
                 self?.update(focusing: false)
@@ -173,7 +173,7 @@ private final class ChromeFindBar: NSView {
     }
 
     func update(focusing: Bool) {
-        let active = chromeWindow?.activeTab?.browser?.findSession
+        let active = chromeWindow?.activeTab?.page?.findSession
         let isActive = active?.isActive == true
         if let active, active !== session {
             session = active
@@ -208,11 +208,11 @@ private final class ChromeFindBar: NSView {
 
 /// Reads the status text in `body`, so SwiftUI redraws as it changes.
 private struct StatusTextReader: View {
-    let browser: CefBrowser
+    let page: CefPage
     let content: (String) -> AnyView
 
     var body: some View {
-        let text = browser.statusText
+        let text = page.statusText
         ZStack {
             if !text.isEmpty { content(text) }
         }
@@ -252,9 +252,9 @@ extension View {
     /// window.
     ///
     /// ```swift
-    /// AddressField(browser: browser)
+    /// AddressField(page: page)
     ///     .chromiumSurfaceAnchor(alignment: .trailing)
-    /// Button("QR Code", systemImage: "qrcode") { browser.execute(.createQRCode) }
+    /// Button("QR Code", systemImage: "qrcode") { page.execute(.createQRCode) }
     ///     .chromiumSurfaceAnchor([.qrCode])
     /// ```
     public func chromiumSurfaceAnchor(

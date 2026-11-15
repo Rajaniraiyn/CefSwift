@@ -5,20 +5,20 @@ extension CefRuntime {
     /// (HTTP authentication: Basic, Digest, NTLM and the like).
     ///
     /// Set it with ``CefRuntime/Configuration/authenticationPrompt``. It applies to
-    /// every browser of the app, Chrome and Alloy style alike, for the life of
+    /// every page of the app, Chrome and Alloy style alike, for the life of
     /// the process.
     public enum AuthenticationPromptPolicy: Sendable, Equatable {
-        /// The browser's delegate:
-        /// ``CefBrowserDelegate/browser(_:credentialFor:)``, whose default
-        /// shows a native sheet. A browser without a delegate gets the sheet
+        /// The page's delegate:
+        /// ``CefPageDelegate/page(_:credentialFor:)``, whose default
+        /// shows a native sheet. A page without a delegate gets the sheet
         /// too. The default.
         ///
-        /// Requests that belong to no browser, such as a service worker's,
+        /// Requests that belong to no page, such as a service worker's,
         /// are refused.
         case delegate
 
         /// Chromium's own sign-in dialog, which its password manager can fill.
-        /// The delegate is not asked. In an Alloy-style browser the dialog is
+        /// The delegate is not asked. In an Alloy-style page the dialog is
         /// a window of its own, and the load first fails with
         /// `ERR_INVALID_AUTH_CREDENTIALS`.
         case chromium

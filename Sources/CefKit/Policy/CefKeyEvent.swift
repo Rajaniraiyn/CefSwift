@@ -40,8 +40,8 @@ public struct CefEventModifiers: OptionSet, Sendable, Hashable {
 }
 
 /// A key event: delivered to
-/// ``CefBrowserDelegate/browser(_:handleKeyEvent:isBeforePage:)``, or sent to
-/// an offscreen browser with ``CefBrowser/sendKeyEvent(_:)``.
+/// ``CefPageDelegate/page(_:handleKeyEvent:isBeforePage:)``, or sent to
+/// an offscreen page with ``CefPage/sendKeyEvent(_:)``.
 public struct CefKeyEvent: Sendable, Equatable {
     /// The kind of key event.
     public enum Phase: Sendable, Equatable {
