@@ -64,15 +64,20 @@ package final class CefResumeOnce<Value: Sendable>: Sendable {
         fallback: Value, _ start: (CefResumeOnce<Value>) -> Void
     ) async throws -> Value {
         let slot = Slot()
-        return try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Value, any Error>) in
-                let box = CefResumeOnce(continuation, fallback: fallback)
-                guard slot.install(box) else { return box.cancel() }
-                start(box)
-            }
-        } onCancel: {
-            slot.cancel()
-        }
+        // Isolation is passed explicitly: without it, Swift 6.1 runs
+        // `start` (which calls into CEF) on the generic executor.
+        return try await withTaskCancellationHandler(
+            operation: {
+                try await withCheckedThrowingContinuation(isolation: isolation) {
+                    (continuation: CheckedContinuation<Value, any Error>) in
+                    let box = CefResumeOnce(continuation, fallback: fallback)
+                    guard slot.install(box) else { return box.cancel() }
+                    start(box)
+                }
+            },
+            onCancel: { slot.cancel() },
+            isolation: isolation
+        )
     }
 
     /// Where the cancellation handler finds the box. It holds the box
