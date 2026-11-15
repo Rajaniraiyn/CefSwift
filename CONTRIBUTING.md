@@ -7,8 +7,9 @@ swift build
 swift test
 ```
 
-The examples' own logic (the Browser example's Memory Saver policy) has
-unit tests in the Examples package:
+The Browser example's own logic (typed addresses and launch options, the
+feature list, the swipe indicator, the Memory Saver policy and the tab
+rail's arithmetic) has unit tests in the Examples package:
 
 ```sh
 swift test --package-path Examples
@@ -192,7 +193,8 @@ loop.
 ## Check the documentation samples
 
 `Scripts/check-doc-samples.py` compiles every Swift block in `README.md`
-and `docs/` against this checkout, for macOS 14; CI runs it. Run it after
+and `docs/*.md` against this checkout, for macOS 14; CI runs it. It does
+not read `CONTRIBUTING.md` or `Examples/README.md`. Run it after
 changing public API or a sample. Names an app would define (`browser`,
 `openTab`, …) come from stubs in the script; add one there when a sample
 needs it, never a stub of CefSwift API. A sample that needs a later macOS

@@ -21,20 +21,25 @@ The runtime, browser, window and profile APIs are `@MainActor`.
   - [Prompts macOS shows](#prompts-macos-shows)
   - [Keychain access](#keychain-access)
   - [Enterprise policies](#enterprise-policies)
+  - [Signing and capabilities](#signing-and-capabilities)
   - [Preferences](#preferences)
   - [Relaunching](#relaunching)
 - [Browsers](#browsers)
+  - [Waiting for a load](#waiting-for-a-load)
   - [PDF](#pdf)
   - [Attachments](#attachments)
 - [Showing a browser](#showing-a-browser)
   - [Background](#background)
   - [In AppKit](#in-appkit)
   - [Offscreen rendering](#offscreen-rendering)
+  - [Animating a page](#animating-a-page)
+  - [Title bars in web content](#title-bars-in-web-content)
   - [Tooltips](#tooltips)
   - [Swipe navigation](#swipe-navigation)
   - [Offscreen accessibility](#offscreen-accessibility)
   - [Keyboard focus](#keyboard-focus)
 - [Discarding browsers](#discarding-browsers)
+- [Lifecycle and energy](#lifecycle-and-energy)
 - [Processes](#processes)
   - [Unresponsive pages](#unresponsive-pages)
 - [JavaScript](#javascript)
@@ -42,6 +47,7 @@ The runtime, browser, window and profile APIs are `@MainActor`.
   - [User scripts and style sheets](#user-scripts-and-style-sheets)
   - [Bridge](#bridge)
 - [Decisions](#decisions)
+  - [Permissions](#permissions)
   - [Built-in sheets](#built-in-sheets)
   - [HTTP authentication](#http-authentication)
   - [Navigation and new windows](#navigation-and-new-windows)
@@ -62,6 +68,9 @@ The runtime, browser, window and profile APIs are `@MainActor`.
   - [Tabs Chromium opens itself](#tabs-chromium-opens-itself)
 - [Customizing Chromium's own pages](#customizing-chromiums-own-pages)
 - [Profiles](#profiles)
+  - [What is configured where](#what-is-configured-where)
+  - [Request filter](#request-filter)
+  - [Profile settings](#profile-settings)
   - [Loading a persistent profile](#loading-a-persistent-profile)
   - [Network maintenance](#network-maintenance)
   - [Requests through Chromium's network stack](#requests-through-chromiums-network-stack)
@@ -76,12 +85,22 @@ The runtime, browser, window and profile APIs are `@MainActor`.
   - [Trust](#trust)
 - [DevTools](#devtools)
 - [Compatibility with bot protection](#compatibility-with-bot-protection)
+  - [What a page sees of CefSwift](#what-a-page-sees-of-cefswift)
+  - [Features that use the DevTools Protocol](#features-that-use-the-devtools-protocol)
+  - [How the app names itself](#how-the-app-names-itself)
+  - [Offscreen browsers](#offscreen-browsers)
+  - [Differences that stay](#differences-that-stay)
 - [Serving your own content](#serving-your-own-content)
+  - [Where a handler runs](#where-a-handler-runs)
+  - [Large and streamed bodies](#large-and-streamed-bodies)
 - [Playing streaming services](#playing-streaming-services)
   - [Widevine in Chromium](#widevine-in-chromium)
   - [WebKit and FairPlay](#webkit-and-fairplay)
   - [Services](#services)
 - [Footprint and launch time](#footprint-and-launch-time)
+  - [What every bundle does](#what-every-bundle-does)
+  - [What the presets turn off](#what-the-presets-turn-off)
+  - [Process policy](#process-policy)
 - [Known limits](#known-limits)
 
 ## Starting Chromium
@@ -4212,22 +4231,35 @@ the switches measured and not used.
   and bridges from its second document on; see
   [User scripts and style sheets](#user-scripts-and-style-sheets).
 - Chrome style (`chrome://` pages, extensions, history, the password manager)
-  exists only in `CefWindow` and Chrome UI windows, a Chromium
-  constraint on macOS. `CefWebView` uses the Alloy style.
-- Each Chrome-style window holds one browser; build tabs from native window
-  tabs.
+  exists only in `CefWindow`, `CefChromeWindow` and Chrome UI windows, a
+  Chromium constraint on macOS. `CefWebView` uses the Alloy style.
+- CEF 156 allows one Chrome-style browser view per window: a `CefWindow`
+  holds one browser, and Chromium counts it as a popup window of one tab,
+  so `chrome.tabs` cannot group or move it. Tabs that are Chromium's own
+  exist only in the windows Chromium draws itself (`CefChromeWindow`,
+  `openChromeWindow`); with `CefWindow`, build tabs from native window
+  tabs ([Tabs](#tabs)).
+- CEF restores no tabs or windows at startup, after a quit or a crash;
+  CefChromium's `previousSession` lets the app do it
+  ([Restoring tabs and sessions](#restoring-tabs-and-sessions)).
 - Only Chrome-style browsers record history. Pages shown in a `CefWebView`
   do not appear in `profile.history`.
 - `authenticationPrompt` applies to the whole app: Chromium's sign-in
   dialog and the delegate cannot be chosen per browser. HTTP authentication
   requests without a browser, such as a service worker's, are refused.
-- Chromium's own Memory Saver never discards a CefKit browser, since each
-  is the active tab of its own Chromium window; call `discard()` from your
-  own policy instead. A `CefWebView` browser loses its back/forward list
+- Chromium's own Memory Saver never discards a browser in a `CefWindow`,
+  since each is the active tab of its own Chromium window; call
+  `discard()` from your own policy instead. A `CefWebView` browser loses its back/forward list
   when discarded, never reports `.exempt`, `.pictureInPicture` or
   `.connectedToDevice`, and Chromium tells tabs apart only by
   address and title, so Chrome-style tabs showing the same page under the
   same title cannot be discarded (`.unknown`) until one of them moves on.
+- CefKit turns Chromium's `RemoteCoreAnimationAPI` feature off: with it
+  on, no page Chromium draws itself (windowed views, `CefWindow`,
+  `CefChromeWindow`) reaches the screen on macOS 27.2, though the page
+  renders. Offscreen pages draw either way. Listing the feature in
+  `enabledFeatures` turns it back on
+  ([architecture](architecture.md#presenting-pages)).
 - DevTools opens in a window of its own; there is no docked DevTools.
   Measured with CEF 156.0.28: `show_dev_tools` given a parent view (which
   makes the DevTools browser Alloy style) logs `Alloy style is not

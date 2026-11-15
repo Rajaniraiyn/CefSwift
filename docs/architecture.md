@@ -16,8 +16,9 @@ examples.
 |---|---|---|
 | `CefKit` (core) | What any app embedding CEF needs and could not write itself: the runtime, browsers, profiles, the AppKit host views, CEF Views windows (`CefWindow`), handlers and delegates, offscreen rendering and its accessibility, discarding | `CefRuntime`, `CefBrowser`, `CefProfile`, `CefOffscreenBrowserView`, `CefWindow` |
 | `CefSwiftUI` | SwiftUI on top of `CefKit`, nothing else | `CefSwiftApp`, `CefWebView`, `setToolbar`, `setPageOverlay` |
-| `CefPasskeys`, `CefChromium` (optional) | Capabilities on Chromium internals some apps want: passkeys the app answers; Chromium's bookmark, history and suggestion stores and its bubbles | `CefPasskeyController`, `CefBookmarks`, `CefChromiumSurface` |
-| `Examples` | Product decisions written against the public API: UI, defaults, heuristics for when to use a capability | the Browser's toolbar, swipe indicator, Memory Saver, permission names |
+| `CefPasskeys`, `CefChromium` (optional) | Capabilities on Chromium internals some apps want: passkeys the app answers; Chromium's bookmark, history and suggestion stores, its extensions, its tabbed windows and tab strip, and its bubbles | `CefPasskeyController`, `CefBookmarks`, `CefExtensions`, `CefChromeWindow`, `CefTabStrip`, `CefChromiumSurface` |
+| `CefBundling`, `cefswift`, `CefPlugin` | Build time: the app bundle, its helpers, signing and checks | `swift package cef bundle`, `Scripts/xcode-embed.sh` |
+| `Examples` | Product decisions written against the public API: UI, defaults, heuristics for when to use a capability | the Browser's tab rail, toolbar, swipe indicator, Memory Saver, permission names |
 
 The rule: the library holds what an app cannot write against its public
 API, because it calls the CEF C API, hooks Chromium or works around a CEF
@@ -33,8 +34,10 @@ CefSwiftUI   CefSwiftApp, CefWebView (over CefKit's host views), SwiftUI modifie
     │  CefPasskeys  optional: CefPasskeyController (a CefBrowserAttachment), passkey
     │     │         stores and the passkey sheet
     │     │  CefChromium  optional, bound to the pinned CEF: CefBookmarks, CefHistory,
-    │     │     │         CefAutocomplete (on CefKit's service hosts); CefChromiumSurface,
-    │     │     │         chromiumSurfacePolicy and their SwiftUI glue (on Chromium's AppKit classes)
+    │     │     │         CefAutocomplete, CefExtensions, CefTabStrip, CefChromeWindow,
+    │     │     │         CefTab and CefTabGroup (on CefKit's service hosts);
+    │     │     │         CefChromiumSurface, chromiumSurfacePolicy and their SwiftUI
+    │     │     │         glue (on Chromium's AppKit classes)
 CefKit       CefRuntime, CefBrowser, CefWindow, CefBrowserDelegate, CefBridge,
     │        CefDevTools, CefProfile, CefBrowserAttachment, configuration and policy types; the AppKit
     │        host views CefWindowedBrowserView and CefOffscreenBrowserView
@@ -44,11 +47,19 @@ CCef         vendored CEF C headers, the generated bridge, the runtime loader (C
 
 CefBase      reference counting, strings and process messages, shared by
              CefKit and the helper (no Foundation, no AppKit)
-CefRenderer  renderer-side features on the V8 API, run by the helper
-CefHelper    the helper-process executable (cefswift-helper)
+CefRenderer  renderer-side features (bridges, user scripts, evaluation) on
+             the V8 API, run by the helper
+CefHelper    the helper-process executable (product cefswift-helper)
+CefHelperStartup  the helper's startup library (product cefswift_helper_startup),
+             which seals the sandbox before the framework's code runs
 
-CefPlugin    swift package cef download | bundle | info | clean; builds the
-             helper products and assembles the app
+CefBundling  the bundle: framework, helpers, Info.plists, entitlements,
+             signing, cef doctor (Foundation only)
+cefswift     the command-line tool over CefBundling (Sources/CefSwiftTool),
+             run by the plugin and by the Xcode build phase
+CefPlugin    swift package cef download | bundle | info | clean | doctor |
+             package | notarize; builds the product, the helper and its
+             startup library with SwiftPM and runs cefswift
 ```
 
 ### Extension points
@@ -367,7 +378,7 @@ ahead on the in-memory fallback, so a browser on a profile still loading
 stays `.pending` and the creation runs again once the profile reports;
 the last host asked for wins. The deferred creation is a token,
 `creationAwaitingProfile`, checked when the profile reports: a host view
-given another browser or none (`hostDidRelease(_:)`) or leaving its
+given another browser or none (`stopHosting(in:)`) or leaving its
 window, a close, or a quit clears it, and nothing is created. Such
 browsers are in no browser list, so `CefRuntime` tracks them
 (`browsersAwaitingProfiles`) and quitting closes them first, which ends
@@ -1555,7 +1566,7 @@ replaces the `WebContents` with a new one, which CEF reports as the browser
 closing and another opening.
 
 Chromium's own policies (Memory Saver, urgent discarding under memory
-pressure) never pick a CefKit tab. Each Chrome-style browser is the only,
+pressure) never pick a `CefWindow`'s tab. Each such browser is the only,
 and so the active, tab of its own Chromium window, and the discard
 eligibility policy protects the active tab of every window, as it does a
 tab with DevTools attached, which CefKit's DevTools connection counts as.
@@ -1825,9 +1836,10 @@ library loaded with `dlopen` has the same segment fixed up in the process,
 which makes all of it private, dirty memory. The app executable gets the
 same benefit from the weak link `cef bundle` gives it; an Xcode target's
 executable does not link the framework, so its process loads it with
-`dlopen` ([bundling](bundling.md#xcode)). Across the six processes of the Minimal
-example this takes the idle footprint from 185 MB to 101 MB
-([guide](guide.md#footprint-and-launch-time)).
+`dlopen` ([bundling](bundling.md#xcode)). With this change and the
+presets' process settings, the Minimal example's idle footprint went from
+185 MB in six processes to 88 MB in five, most of it from linking at
+launch ([design notes](design-notes.md#loading-the-framework-at-launch)).
 
 Chrome 157 does the same with its "Aperitif" helpers: separate helper apps
 (`Google Chrome Helper (Aperitif).app` and so on) that link

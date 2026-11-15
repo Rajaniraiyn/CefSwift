@@ -1,8 +1,9 @@
 # Examples
 
-Five apps built on CefSwift, in a package of their own that depends on the
-checkout above it. They need macOS 15. Bundle and run one from the
-repository root:
+Five apps built on CefSwift (Browser, Gallery, Minimal, Compat, SelfTest),
+the Browser's WebKit library (`SystemEngine`) and an Xcode project, in a
+package of their own that depends on the checkout above it. They need
+macOS 15. Bundle and run one from the repository root:
 
 ```sh
 swift package --package-path Examples \
@@ -78,6 +79,7 @@ Chrome, under the browser's own tab rail and toolbar.
 | `SwipeIndicator` | The browser's own back and forward swipe indicator | `navigationGestureProgress`, `pageOverlay` |
 | `Appearance` | Settings › Appearance, for the windows and the pages | `CefProfile.setColorScheme` |
 | `Downloads` | A toolbar button listing downloads | `CefBrowser.downloads` |
+| `Extensions` | Pinned extension actions in the toolbar and a menu of the rest; each action's popup page under its button, in a small Chrome-style window of its own (Chromium opens action popups only from its own toolbar); a Manage Extensions window that lists, turns on and off, removes and loads extensions and opens the Chrome Web Store | `CefExtensions` |
 | `TabDiscarding` | Memory Saver: background tabs put to sleep after a while or under memory pressure; Settings › Put tabs to sleep; a button that wakes them. Background tabs are Chromium's real background tabs now, so Chromium's own discarding applies to them too | `discard()`, `lifecycle` |
 | `ChromiumPanels` | QR code and Share buttons and View › Cast: Chromium's bubbles under the buttons, or the browser's own QR code and Cast panels (Settings, `-customChromiumPanels YES`) | `chromiumSurfaceAnchor`, `CefChromeWindow.setCustomPresentation`, `CefMediaRouter` |
 | `ChromiumPages` | `chrome://settings` without what does nothing in an embedded Chromium, an About page of the browser's own, and a Browser menu of Chromium's pages | `CefUserScript.styleSheet`, navigation policy |
@@ -128,14 +130,16 @@ nowhere to appear; without `StartPage`, new tabs open `about:blank`.
 
 ## Gallery
 
-A library of small examples (`Sources/Gallery`), each showing one
+A library of 30 small examples (`Sources/Gallery`), each showing one
 capability in one file of SwiftUI and CefSwift code you can copy:
-`Demos/<Name>Demo.swift`. The sidebar groups them; the detail shows the
-running demo, what it shows, and its file.
+`Demos/<Name>Demo.swift`. The sidebar groups them and launches each; the
+detail shows the running demo, what it shows, and its file.
 
 - **Web Views**: observable state and awaited loads; offscreen rendering
-  under SwiftUI; swipe navigation with the app's own indicator;
-  `CefWindowedBrowserView` in an `NSViewRepresentable`, without CefSwiftUI.
+  under SwiftUI; windowed and offscreen pages under animations and
+  transforms (`AnimationDemo`); swipe navigation with the app's own
+  indicator; `CefWindowedBrowserView` in an `NSViewRepresentable`, without
+  CefSwiftUI.
 - **Page**: find in page (`CefFindSession`); the context menu; PDF and
   printing; DevTools and the DevTools Protocol.
 - **JavaScript**: `evaluateJavaScript`; a typed `CefBridge` both ways;
@@ -151,8 +155,8 @@ running demo, what it shows, and its file.
   (`AppShellDemo`).
 - **Runtime**: the task manager; discarding and restoring; the media
   router's devices.
-- **Chromium Data** (`CefChromium`): bookmarks, history and address
-  suggestions.
+- **Chromium Data** (`CefChromium`): bookmarks, history, address
+  suggestions, and the profile's extensions.
 - **Passkeys** (`CefPasskeys`): passkeys answered from an in-memory store.
 
 Every demo works offline. Pages come from a `gallery://` scheme handler,
@@ -232,6 +236,10 @@ Examples/dist/Gallery.app/Contents/MacOS/Gallery -demo BridgeDemo
 # Gallery: open every demo in turn; the exit status is the number of failures.
 Examples/dist/Gallery.app/Contents/MacOS/Gallery -smoke
 
+# Gallery: play the Animation demo's scenes, save pictures of the window
+# during them into the directory, then quit.
+Examples/dist/Gallery.app/Contents/MacOS/Gallery -animationShots /tmp/shots
+
 # Browser: open tabs, run JavaScript in the last one once it has loaded,
 # start editing the address, and force an appearance.
 Examples/dist/Browser.app/Contents/MacOS/Browser \
@@ -253,7 +261,7 @@ Examples/dist/Browser.app/Contents/MacOS/Browser -private YES -addressBarText sw
 | `-tabsAtTheSide YES` | Puts the tab rail down the side. |
 | `-customChromiumPanels YES` | The browser's own QR code and Cast panels in place of Chromium's bubbles. |
 | `-restoresWindowsOnLaunch YES` | Settings › On startup › Reopen windows from last time. |
-| `-railScreenshots <directory>` | Opens tabs, pins, groups and overflows them, saves a PNG of the browser's own views in each state (light, dark, side), then quits. Drawn from inside the app (`cacheDisplay(in:to:)`), so no screen recording is involved. |
+| `-railScreenshots <directory>` | Opens tabs, pins, groups and overflows them, saves a PNG of the browser's window, page included, in each state (light, dark, side), then quits. The pictures are of the app's own window (`CGWindowListCreateImage`), which needs no screen-recording permission. |
 | `-appearance light\|dark\|system` | Overrides the appearance setting. |
 | `-showTaskManager YES` | Opens the Task Manager window. |
 | `-showPageInfo YES` | Opens the page info of the first secure page shown. |
