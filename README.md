@@ -10,7 +10,7 @@ Chrome's own pages; Chromium's own tabbed windows under your own tab
 interface; profiles, requests, DevTools, custom schemes and a JavaScript
 bridge.
 
-![The Browser example](docs/images/browser.png)
+![The Browser example: a tab rail and toolbar over Chromium's tabs, showing swift.org](docs/images/browser.png)
 
 CefSwift uses the official prebuilt CEF distribution, downloaded at the
 version `CEF_VERSION.json` pins. It does not support custom CEF builds.

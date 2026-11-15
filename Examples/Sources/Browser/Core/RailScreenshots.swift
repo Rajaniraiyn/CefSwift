@@ -22,9 +22,7 @@ enum RailScreenshots {
         func settle() async { try? await Task.sleep(for: .milliseconds(900)) }
         func shoot(_ name: String) async {
             await settle()
-            guard let nsWindow = window.window, let image = windowImage(nsWindow) else { return }
-            try? NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])?
-                .write(to: directory.appendingPathComponent("\(name).png"))
+            guard save(window, to: directory.appendingPathComponent("\(name).png")) else { return }
             print("cefswift-rail-screenshot \(name)")
         }
 
@@ -84,6 +82,16 @@ enum RailScreenshots {
         window.window?.toggleFullScreen(nil)
         try? await Task.sleep(for: .seconds(2))
         NSApp.terminate(nil)
+    }
+
+    /// Saves a PNG of `window` as the window server composites it, page
+    /// included, to `file`. Returns whether it did.
+    @discardableResult
+    static func save(_ window: CefChromeWindow, to file: URL) -> Bool {
+        guard let nsWindow = window.window, let image = windowImage(nsWindow),
+              let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])
+        else { return false }
+        return (try? png.write(to: file)) != nil
     }
 
     private typealias CreateImage = @convention(c) (CGRect, UInt32, UInt32, UInt32) -> Unmanaged<CGImage>?

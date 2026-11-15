@@ -1,4 +1,5 @@
 import AppKit
+import CefChromium
 import CefSwiftUI
 
 /// Launch arguments, for opening the browser in a given state — handy for
@@ -14,6 +15,9 @@ import CefSwiftUI
 /// - `-tabsAtTheSide YES` puts the tab rail down the side.
 /// - `-railScreenshots <directory>` saves PNGs of the browser's window,
 ///   page included, in a few states, then quits (`RailScreenshots`).
+/// - `-screenshot <file.png>` saves a PNG of the browser's window, page
+///   included, once the tabs from `-urls` have loaded, then quits. The
+///   last tab is the one in front.
 /// - `-cacheDirectory <path>` keeps Chromium's data there
 ///   (`CefRuntime.Configuration.browser`).
 /// - `-benchmark YES` reports the first finished load and quits when
@@ -60,6 +64,10 @@ struct LaunchOptions {
                 await RailScreenshots.capture(window, controller: controller, into: URL(fileURLWithPath: directory))
                 return
             }
+            if let file = UserDefaults.standard.string(forKey: "screenshot") {
+                await screenshot(window, to: URL(fileURLWithPath: file))
+                return
+            }
             guard let page = last, script != nil || focusesAddressBar else { return }
             _ = try? await page.waitUntilLoaded(timeout: .seconds(10))
             if let script { _ = try? await page.evaluateJavaScript(script, userGesture: true) }
@@ -77,6 +85,23 @@ struct LaunchOptions {
                 }
             }
         }
+    }
+
+    /// `-screenshot <file.png>`: waits for every tab to load, gives images
+    /// and web fonts a moment to draw, saves a picture of `window` and quits.
+    private func screenshot(_ window: CefChromeWindow, to file: URL) async {
+        window.window?.setContentSize(NSSize(width: 1280, height: 800))
+        window.window?.center()
+        for page in window.tabs.compactMap(\.page) {
+            _ = try? await page.waitUntilLoaded(timeout: .seconds(30))
+        }
+        try? await Task.sleep(for: .seconds(2))
+        if RailScreenshots.save(window, to: file) {
+            print("cefswift-screenshot \(file.path)")
+        } else {
+            NSLog("Browser: could not save a screenshot to \(file.path)")
+        }
+        NSApp.terminate(nil)
     }
 }
 

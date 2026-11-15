@@ -262,6 +262,7 @@ Examples/dist/Browser.app/Contents/MacOS/Browser -private YES -addressBarText sw
 | `-customChromiumPanels YES` | The browser's own QR code and Cast panels in place of Chromium's bubbles. |
 | `-restoresWindowsOnLaunch YES` | Settings › On startup › Reopen windows from last time. |
 | `-railScreenshots <directory>` | Opens tabs, pins, groups and overflows them, saves a PNG of the browser's window, page included, in each state (light, dark, side), then quits. The pictures are of the app's own window (`CGWindowListCreateImage`), which needs no screen-recording permission. |
+| `-screenshot <file.png>` | Once the tabs from `-urls` have loaded, saves a PNG of the browser's window, page included, the same way, then quits. The last tab is the one in front. |
 | `-appearance light\|dark\|system` | Overrides the appearance setting. |
 | `-showTaskManager YES` | Opens the Task Manager window. |
 | `-showPageInfo YES` | Opens the page info of the first secure page shown. |
