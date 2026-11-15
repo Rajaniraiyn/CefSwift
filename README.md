@@ -14,7 +14,8 @@ bridge.
 
 CefSwift uses the official prebuilt CEF distribution at the version
 `CEF_VERSION.json` pins; custom CEF builds are not supported. It is
-pre-1.0, and its API can change between releases.
+pre-1.0, and its API can change between minor releases, so the sample
+depends on one minor version.
 
 ## Modules
 
@@ -52,7 +53,7 @@ covers each track.
        name: "MyApp",
        platforms: [.macOS(.v14)],
        dependencies: [
-           .package(url: "https://github.com/Rajaniraiyn/CefSwift", branch: "main"),
+           .package(url: "https://github.com/Rajaniraiyn/CefSwift", .upToNextMinor(from: "0.2.0")),
        ],
        targets: [
            .executableTarget(name: "MyApp", dependencies: [
