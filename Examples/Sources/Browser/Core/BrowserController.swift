@@ -349,10 +349,10 @@ final class BrowserController: CefPageDelegate {
                 var selected = window.selectedTabs
                 if let index = selected.firstIndex(where: { $0 === tab }) { selected.remove(at: index) } else { selected.append(tab) }
                 let active = selected.first { $0.isActive } ?? selected.first
-                if let active { try? await window.strip.select([active] + selected.filter { $0 !== active }) }
+                if let active { try? await window.profile.tabs.select([active] + selected.filter { $0 !== active }) }
             } else if modifiers.contains(.shift), let active = window.activeTab {
                 let range = min(active.index, tab.index)...max(active.index, tab.index)
-                try? await window.strip.select([active] + window.tabs.filter { range.contains($0.index) && $0 !== active })
+                try? await window.profile.tabs.select([active] + window.tabs.filter { range.contains($0.index) && $0 !== active })
             } else {
                 try? await tab.select()
             }
@@ -379,7 +379,7 @@ final class BrowserController: CefPageDelegate {
     /// window or from another of the profile's, or, from another profile,
     /// the page opened here and the tab closed there.
     func land(_ transfer: CefTab.Transfer, at target: TabRailLogic.DropTarget, in window: CefChromeWindow) async {
-        let strip = window.strip
+        let strip = window.profile.tabs
         if let tab = transfer.tab(in: strip) {
             let source = tab.window === window ? tab.index : nil
             let index = target.finalIndex(movingFrom: source)
@@ -394,7 +394,7 @@ final class BrowserController: CefPageDelegate {
             } catch {
                 NSLog("Browser: could not move the tab: \(error)")
             }
-        } else if let other = windows.lazy.compactMap({ $0.chrome.strip.tab(transfer.id) }).first, let url = other.url {
+        } else if let other = windows.lazy.compactMap({ $0.chrome.profile.tabs.tab(transfer.id) }).first, let url = other.url {
             await moveToProfile(other, url: url, window: window, index: target.insertionIndex)
         }
     }

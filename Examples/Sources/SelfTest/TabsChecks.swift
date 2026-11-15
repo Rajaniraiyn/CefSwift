@@ -271,12 +271,12 @@ extension SelfTest {
 
         // Tabs at the side: Chrome's vertical tab strip, covered by the sidebar.
         window.setSidebar { Text("Sidebar").accessibilityIdentifier("selftest-sidebar") }
-        window.strip.layout = .vertical(width: 220)
+        window.profile.tabs.layout = .vertical(width: 220)
         let vertical = await waitUntil(timeout: .seconds(5)) { window.sidebarWidth > 100 }
         check("chrome window: with tabs at the side, the sidebar covers Chrome's vertical tab strip",
               vertical && window.contentFrame.minX == window.sidebarWidth,
               detail: "sidebar \(window.sidebarWidth), content \(window.contentFrame), top \(window.topBarHeight)")
-        window.strip.layout = .horizontal
+        window.profile.tabs.layout = .horizontal
         _ = await waitUntil(timeout: .seconds(5)) { window.sidebarWidth == 0 }
     }
 }

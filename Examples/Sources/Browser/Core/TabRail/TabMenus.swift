@@ -16,11 +16,11 @@ struct TabMenu: View {
             if let window { controller.openTab(in: window, at: tab.index + 1, inGroup: tab.group) }
         }
         Button("Duplicate") { Task { for tab in tabs { _ = try? await tab.duplicate() } } }
-        Button(tab.isPinned ? "Unpin" : "Pin") { Task { try? await tab.window?.strip.pin(tabs, !tab.isPinned) } }
+        Button(tab.isPinned ? "Unpin" : "Pin") { Task { try? await tab.window?.profile.tabs.pin(tabs, !tab.isPinned) } }
         Button(tab.isMuted ? "Unmute" : "Mute") { tabs.forEach { $0.setMuted(!tab.isMuted) } }
         Divider()
         Menu("Add to Group") {
-            Button("New Group") { Task { try? await tab.window?.strip.group(tabs) } }
+            Button("New Group") { Task { try? await tab.window?.profile.tabs.group(tabs) } }
             if let window, !window.groups.isEmpty {
                 Divider()
                 ForEach(window.groups) { group in
@@ -29,16 +29,16 @@ struct TabMenu: View {
             }
         }
         if tab.group != nil {
-            Button("Remove from Group") { Task { try? await tab.window?.strip.ungroup(tabs) } }
+            Button("Remove from Group") { Task { try? await tab.window?.profile.tabs.ungroup(tabs) } }
         }
         Menu("Move to Window") {
-            Button("New Window") { Task { try? await tab.window?.strip.moveToNewWindow(tabs) } }
+            Button("New Window") { Task { try? await tab.window?.profile.tabs.moveToNewWindow(tabs) } }
             let others = controller.windows.map(\.chrome).filter { $0 !== window }
             if !others.isEmpty { Divider() }
             ForEach(others) { other in
                 if other.profile === window?.profile {
                     Button(other.activeTab?.displayTitle ?? "Window") {
-                        Task { try? await other.strip.move(tabs, to: -1, in: other) }
+                        Task { try? await other.profile.tabs.move(tabs, to: -1, in: other) }
                     }
                 } else if let url = tab.url {
                     // Chromium moves tabs only within a profile.
@@ -55,15 +55,15 @@ struct TabMenu: View {
             let pinned = Set(window.tabs.filter(\.isPinned).map(\.index))
             Button("Close Other Tabs") {
                 let indices = TabRailLogic.indicesToClose(others: tab.index, count: window.tabs.count, pinned: pinned)
-                window.strip.close(indices.map { window.tabs[$0] })
+                window.profile.tabs.close(indices.map { window.tabs[$0] })
             }
             Button("Close Tabs to the Right") {
                 let indices = TabRailLogic.indicesToClose(after: tab.index, count: window.tabs.count, pinned: pinned)
-                window.strip.close(indices.map { window.tabs[$0] })
+                window.profile.tabs.close(indices.map { window.tabs[$0] })
             }
             Divider()
             Button("Reopen Closed Tab") { window.reopenClosedTab() }
-                .disabled(window.strip.recentlyClosed.isEmpty)
+                .disabled(window.profile.tabs.recentlyClosed.isEmpty)
         }
     }
 }

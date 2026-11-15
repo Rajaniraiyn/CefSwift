@@ -23,10 +23,10 @@ enum RestorePrompt {
         let tabs = session.windows.reduce(0) { $0 + $1.count }
         let hosting = NSHostingView(rootView: Prompt(windows: session.windows.count, tabs: tabs) {
             close()
-            Task { try? await window.strip.restorePreviousSession(configuration: controller.tabConfiguration(for: window.profile), delegate: controller) }
+            Task { try? await window.profile.tabs.restorePreviousSession(configuration: controller.tabConfiguration(for: window.profile), delegate: controller) }
         } dismiss: {
             close()
-            window.strip.discardPreviousSession()
+            window.profile.tabs.discardPreviousSession()
         })
         hosting.sizingOptions = [.intrinsicContentSize]
         panel.contentView = hosting

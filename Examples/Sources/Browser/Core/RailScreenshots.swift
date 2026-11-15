@@ -37,12 +37,12 @@ enum RailScreenshots {
 
         let tabs = window.tabs
         if tabs.count >= 6 {
-            try? await window.strip.pin([tabs[0], tabs[1]])
+            try? await window.profile.tabs.pin([tabs[0], tabs[1]])
             await shoot("2-pinned")
-            let reading = try? await window.strip.group([tabs[2], tabs[3]])
+            let reading = try? await window.profile.tabs.group([tabs[2], tabs[3]])
             try? await reading?.setTitle("Reading")
             try? await reading?.setColor(.blue)
-            let videos = try? await window.strip.group([tabs[4], tabs[5]])
+            let videos = try? await window.profile.tabs.group([tabs[4], tabs[5]])
             try? await videos?.setTitle("Videos")
             try? await videos?.setColor(.orange)
             try? await window.tabs.first { $0.group === reading }?.select()

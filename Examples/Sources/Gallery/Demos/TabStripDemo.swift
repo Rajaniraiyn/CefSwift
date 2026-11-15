@@ -63,7 +63,7 @@ private struct TabRow: View {
             Button(tab.isPinned ? "Unpin" : "Pin") { Task { try? await tab.pin(!tab.isPinned) } }
             Button(tab.group == nil ? "Group" : "Ungroup") {
                 Task {
-                    if let group = tab.group { try? await group.ungroup() } else { _ = try? await tab.window?.strip.group([tab]) }
+                    if let group = tab.group { try? await group.ungroup() } else { _ = try? await tab.window?.profile.tabs.group([tab]) }
                 }
             }
             Button(tab.isMuted ? "Unmute" : "Mute") { tab.setMuted(!tab.isMuted) }

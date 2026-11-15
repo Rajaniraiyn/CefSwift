@@ -46,7 +46,7 @@ public final class CefChromeWindow: Identifiable {
 
     public nonisolated let id: ID
     /// The profile's ``CefTabs``, which lists the window.
-    public let strip: CefTabs
+    let strip: CefTabs
     /// The profile the window's tabs belong to.
     public var profile: CefProfile { strip.profile }
 

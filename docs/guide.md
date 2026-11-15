@@ -3353,7 +3353,7 @@ import CefChromium
 let window = try await CefChromeWindow.open(url: URL(string: "https://swift.org")!)
 let tab = try await window.openTab(URL(string: "https://developer.apple.com")!)
 try await tab.pin()
-let group = try await window.strip.group([tab])
+let group = try await window.profile.tabs.group([tab])
 try await group?.setTitle("Reading")
 try await tab.move(to: 0, in: window)
 for tab in window.tabs {

@@ -263,7 +263,7 @@ extension SelfTest {
                 o.connect(g).connect(ctx.destination); o.start(); 'ok'
                 """, userGesture: true)
             try? await Task.sleep(for: .seconds(3))
-            await window?.strip.refresh()
+            await window?.profile.tabs.refresh()
             note("title playing: '\(window?.window?.title ?? "-")' audible \(window?.activeTab?.isAudible ?? false) titles \(titles.value)")
             page?.isAudioMuted = true
             try? await Task.sleep(for: .seconds(1))
