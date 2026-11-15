@@ -9,34 +9,34 @@ import Security
 extension SelfTest {
     static func securityChecks() async {
         let recorder = SecurityRecorder()
-        var configuration = CefBrowser.Configuration()
+        var configuration = CefPage.Configuration()
         configuration.clientCertificates = .delegate
-        let browser = CefBrowser(url: URL(string: "selftest://app/second.html")!, configuration: configuration)
-        browser.delegate = recorder
-        let view = hostWindowed(browser)
+        let page = CefPage(url: URL(string: "selftest://app/second.html")!, configuration: configuration)
+        page.delegate = recorder
+        let view = hostWindowed(page)
 
         /// Loads `url` and waits until it finishes or `orUntil` holds.
         func load(_ url: URL, title: String? = nil, orUntil done: () -> Bool = { false }) async -> Bool {
-            browser.load(url)
+            page.load(url)
             return await waitUntil(timeout: .seconds(20)) {
-                done() || browser.url?.host() == url.host() && !browser.isLoading && (title == nil || browser.title == title)
+                done() || page.url?.host() == url.host() && !page.isLoading && (title == nil || page.title == title)
             }
         }
 
-        _ = await loaded(browser, title: "second")
-        check("security: the app's own scheme is local", browser.connectionSecurity?.level == .local,
-              detail: "\(String(describing: browser.connectionSecurity))")
+        _ = await loaded(page, title: "second")
+        check("security: the app's own scheme is local", page.connectionSecurity?.level == .local,
+              detail: "\(String(describing: page.connectionSecurity))")
         _ = await load(capabilityOrigin.appending(path: "plain.html"), title: "plain")
-        let handled = browser.connectionSecurity
+        let handled = page.connectionSecurity
         check("security: an https page served by the app has no TLS or certificate",
               handled?.isSecureConnection == false && handled?.certificate == nil && handled?.level == .notSecure,
               detail: "\(String(describing: handled))")
 
         // An error page also finishes loading, so the public site's own
         // title is what tells a working network from none.
-        let online = await load(URL(string: "https://example.com/")!) && browser.title.lowercased().contains("example")
+        let online = await load(URL(string: "https://example.com/")!) && page.title.lowercased().contains("example")
         if online {
-            let security = browser.connectionSecurity
+            let security = page.connectionSecurity
             let certificate = security?.certificate
             check("security: a public HTTPS site is secure over TLS 1.2 or later",
                   security?.level == .secure && [.tls1_2, .tls1_3, .quic].contains(security?.protocolVersion),
@@ -71,10 +71,10 @@ extension SelfTest {
             check("security: a site asking for a client certificate asks the delegate",
                   request.host == "client.badssl.com" && request.port == 443 && !request.isProxy,
                   detail: "\(request)")
-        } else if !online || browser.title.isEmpty {
+        } else if !online || page.title.isEmpty {
             skip("security: a client-certificate request", because: "client.badssl.com did not answer (offline?)", .environment)
         } else {
-            check("security: a site asking for a client certificate asks the delegate", false, detail: browser.title)
+            check("security: a site asking for a client certificate asks the delegate", false, detail: page.title)
         }
 
         // The profile's network maintenance.
@@ -99,21 +99,21 @@ extension SelfTest {
                 return false
             } catch { return true }
         }
-        await closeHosted(browser, view)
+        await closeHosted(page, view)
     }
 }
 
 @MainActor
-final class SecurityRecorder: CefBrowserDelegate {
+final class SecurityRecorder: CefPageDelegate {
     var certificateErrors: [CefCertificateError] = []
     var clientCertificateRequests: [CefClientCertificateRequest] = []
 
-    func browser(_ browser: CefBrowser, shouldProceedDespite error: CefCertificateError) async -> Bool {
+    func page(_ page: CefPage, shouldProceedDespite error: CefCertificateError) async -> Bool {
         certificateErrors.append(error)
         return false
     }
 
-    func browser(_ browser: CefBrowser, selectClientCertificateFor request: CefClientCertificateRequest) async -> CefCertificate? {
+    func page(_ page: CefPage, selectClientCertificateFor request: CefClientCertificateRequest) async -> CefCertificate? {
         clientCertificateRequests.append(request)
         return nil
     }

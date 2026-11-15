@@ -8,7 +8,7 @@ import Testing
 @MainActor @Suite struct FeatureCompositionTests {
     struct AddsScript: BrowserFeature {
         let name: String
-        func configure(_ configuration: inout CefBrowser.Configuration) {
+        func configure(_ configuration: inout CefPage.Configuration) {
             configuration.userScripts.append(CefUserScript(source: name))
         }
     }
@@ -22,14 +22,14 @@ import Testing
             AddsScript(name: "second")
             AddsScript(name: "third")
         }
-        var configuration = CefBrowser.Configuration()
+        var configuration = CefPage.Configuration()
         features.configure(&configuration)
         #expect(configuration.userScripts.map(\.source) == ["first", "second", "third"])
     }
 
     @Test func oneFeatureIsAList() {
         let features = BrowserFeatures { AddsScript(name: "only") }
-        var configuration = CefBrowser.Configuration()
+        var configuration = CefPage.Configuration()
         features.configure(&configuration)
         #expect(configuration.userScripts.map(\.source) == ["only"])
     }

@@ -16,11 +16,11 @@ import SwiftUI
 struct XcodeExampleApp: CefSwiftApp {
     static var runtimeConfiguration: CefRuntime.Configuration { .embedded }
 
-    @State private var browser = CefBrowser(url: Self.pageURL, delegate: SmokeTest.shared)
+    @State private var page = CefPage(url: Self.pageURL, delegate: SmokeTest.shared)
 
     var body: some Scene {
         WindowGroup {
-            ContentView(browser: browser)
+            ContentView(page: page)
                 .onAppear { SmokeTest.shared.start() }
         }
         .defaultSize(width: 900, height: 640)
@@ -33,22 +33,22 @@ struct XcodeExampleApp: CefSwiftApp {
 }
 
 struct ContentView: View {
-    let browser: CefBrowser
+    let page: CefPage
 
     var body: some View {
-        CefWebView(browser)
-            .navigationTitle(browser.title.isEmpty ? "Xcode example" : browser.title)
+        CefWebView(page)
+            .navigationTitle(page.title.isEmpty ? "Xcode example" : page.title)
     }
 }
 
 // Previews run without Chromium: the web view shows a placeholder.
 #Preview {
-    ContentView(browser: CefBrowser(url: URL(string: "https://example.com")!))
+    ContentView(page: CefPage(url: URL(string: "https://example.com")!))
 }
 
 /// The `-smoke YES` launch argument.
 @MainActor
-final class SmokeTest: CefBrowserDelegate {
+final class SmokeTest: CefPageDelegate {
     static let shared = SmokeTest()
 
     private let isEnabled = UserDefaults.standard.bool(forKey: "smoke")
@@ -63,10 +63,10 @@ final class SmokeTest: CefBrowserDelegate {
         }
     }
 
-    func browser(_ browser: CefBrowser, didFinishLoadWithStatus httpStatus: Int) {
+    func page(_ page: CefPage, didFinishLoadWithStatus httpStatus: Int) {
         guard isEnabled, !isDone else { return }
         isDone = true
-        print("PASS loaded \(browser.url?.absoluteString ?? "")")
+        print("PASS loaded \(page.url?.absoluteString ?? "")")
         fflush(stdout)
         NSApp.terminate(nil)
     }

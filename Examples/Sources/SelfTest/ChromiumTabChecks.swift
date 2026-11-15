@@ -1,34 +1,34 @@
 import AppKit
 import CefSwiftUI
 
-/// Browsers Chromium opens in tabbed windows of its own, through
+/// Pages Chromium opens in tabbed windows of its own, through
 /// `CefRuntime.onChromeTab`.
 extension SelfTest {
     static func chromiumTabChecks() async {
         var requests: [CefChromeTabRequest] = []
         var decision = CefChromeTabDecision.close
-        var announced: [CefBrowser] = []
+        var announced: [CefPage] = []
         var wasLive: [Bool] = []
         CefRuntime.shared.onChromeTab = { request in
-            wasLive.append(request.browser.state == .live && CefRuntime.shared.browsers.contains { $0 === request.browser })
+            wasLive.append(request.page.state == .live && CefRuntime.shared.pages.contains { $0 === request.page })
             requests.append(request)
             return decision
         }
-        CefRuntime.shared.onBrowserCreated = { announced.append($0) }
+        CefRuntime.shared.onPageCreated = { announced.append($0) }
         defer {
             CefRuntime.shared.onChromeTab = nil
-            CefRuntime.shared.onBrowserCreated = nil
+            CefRuntime.shared.onPageCreated = nil
         }
-        var configuration = CefBrowser.Configuration()
+        var configuration = CefPage.Configuration()
         configuration.profile = .persistent(id: "selftest-tabs", displayName: "SelfTest Tabs")
-        let page = "data:text/html,<title>links</title><a href='selftest://app/second.html' "
+        let html = "data:text/html,<title>links</title><a href='selftest://app/second.html' "
             + "style='display:block;width:300px;height:100px'>second</a>"
-        let browser = CefBrowser(url: URL(string: page)!, configuration: configuration)
-        let window = CefWindow(browser: browser)
+        let page = CefPage(url: URL(string: html)!, configuration: configuration)
+        let window = CefWindow(page: page)
         window.show()
         defer { window.close() }
-        guard await loaded(browser, title: "links", timeout: .seconds(20)) else {
-            check("Chromium's tabs: page loads", false, detail: browser.title)
+        guard await loaded(page, title: "links", timeout: .seconds(20)) else {
+            check("Chromium's tabs: page loads", false, detail: page.title)
             return
         }
 
@@ -36,7 +36,7 @@ extension SelfTest {
         // in a background tab of a window of its own.
         let present = Set(NSApp.windows.filter(\.isVisible).map(ObjectIdentifier.init))
         for type in ["mousePressed", "mouseReleased"] {
-            _ = try? await browser.devTools.send("Input.dispatchMouseEvent", [
+            _ = try? await page.devTools.send("Input.dispatchMouseEvent", [
                 "type": .string(type), "x": 40, "y": 40, "button": "left", "clickCount": 1, "modifiers": 4,
             ])
         }
@@ -60,12 +60,12 @@ extension SelfTest {
         }
         let request = requests.first
         check("Chromium's tabs: a ⌘-clicked link's tab arrives with its opener, disposition and profile",
-              arrived && request?.url.absoluteString == "selftest://app/second.html" && request?.opener === browser
+              arrived && request?.url.absoluteString == "selftest://app/second.html" && request?.opener === page
                   && request?.disposition == .newBackgroundTab && request?.profile === configuration.profile,
               detail: "\(String(describing: request.map { ($0.url, $0.opener?.identifier, $0.disposition, $0.profile === configuration.profile) }))")
         check("Chromium's tabs: the request carries Chromium's live browser",
-              request?.browser.opener == nil && wasLive.first == true)
-        let closed = await waitUntil { request?.browser.state == .closed }
+              request?.page.opener == nil && wasLive.first == true)
+        let closed = await waitUntil { request?.page.state == .closed }
         check("Chromium's tabs: answering close closes Chromium's browser, whose window is never seen",
               closed && sawChromiumWindow == nil, detail: "window: \(sawChromiumWindow ?? "none")")
         check("Chromium's tabs: the app's own windows stay on screen", unrelated.isVisible && unrelated.alphaValue == 1)
@@ -77,11 +77,11 @@ extension SelfTest {
         // stays in Chromium's window.
         decision = .showInChromeWindow
         requests = []
-        browser.execute(.newTab)
+        page.execute(.newTab)
         _ = await waitUntil { !requests.isEmpty }
         let shown = requests.first
         let visible = await waitUntil {
-            guard let window = shown?.browser.nativeView?.window else { return false }
+            guard let window = shown?.page.nativeView?.window else { return false }
             return window.isVisible && window.alphaValue == 1
         }
         check("Chromium's tabs: a new-tab command's tab has no opener",
@@ -89,8 +89,8 @@ extension SelfTest {
                   && shown?.profile === configuration.profile,
               detail: "\(String(describing: shown.map { ($0.url, $0.opener?.identifier, $0.disposition) }))")
         check("Chromium's tabs: answering showInChromeWindow shows Chromium's window and announces the browser",
-              visible && announced.contains { $0 === shown?.browser })
-        shown?.browser.close(force: true)
-        _ = await waitUntil { shown?.browser.state == .closed }
+              visible && announced.contains { $0 === shown?.page })
+        shown?.page.close(force: true)
+        _ = await waitUntil { shown?.page.state == .closed }
     }
 }

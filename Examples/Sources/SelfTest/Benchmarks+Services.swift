@@ -32,7 +32,7 @@ extension Benchmarks {
 final class ServiceBench {
     let profile: CefProfile
     let faviconPage = URL(string: "selftest://edge/favicon.html")!
-    private var hostBrowsers: [CefWindow] = []
+    private var hostPages: [CefWindow] = []
 
     init(profile: CefProfile) {
         self.profile = profile
@@ -42,8 +42,8 @@ final class ServiceBench {
 
     func prepare() async {
         // A visited page with an icon, for history, top sites and favicons.
-        let visited = CefWindow(browser: CefBrowser(url: faviconPage))
-        _ = await SelfTest.waitUntil { visited.browser.favicon != nil }
+        let visited = CefWindow(page: CefPage(url: faviconPage))
+        _ = await SelfTest.waitUntil { visited.page.favicon != nil }
         visited.close()
         _ = await SelfTest.waitUntil { visited.isClosed }
         CefProfile.serviceIdleTimeout = .seconds(600)
@@ -67,7 +67,7 @@ final class ServiceBench {
             ("bookmarks", "fetch('chrome://favicon2/?pageUrl=https%3A%2F%2Fexample.com&size=16').then(r => ({ ok: r.ok, type: r.type, ct: r.headers.get('content-type') }), e => String(e))"),
         ]
         for (host, script) in probes {
-            let result = try? await profile.serviceHostBrowser(named: host)?.evaluateJavaScript(script)
+            let result = try? await profile.serviceHostPage(named: host)?.evaluateJavaScript(script)
             print("bench probe \(host): \(result.map { $0.text } ?? "failed")")
         }
     }
@@ -82,7 +82,7 @@ final class ServiceBench {
 
     func perCallType() async {
         // The floor: a trivial evaluation in a host, no engine.
-        if let host = profile.serviceHostBrowser(named: "history") {
+        if let host = profile.serviceHostPage(named: "history") {
             await measure("floor (evaluate `1` in a host)", host: nil, count: 300) {
                 _ = try await host.evaluateJavaScript("1")
             }
@@ -444,8 +444,8 @@ final class ServiceBench {
     // MARK: Another page busy
 
     func whileAnotherPageIsBusy() async {
-        let busy = CefBrowser(url: URL(string: "selftest://bench/bridge.html")!)
-        let view = CefWindowedBrowserView(browser: busy)
+        let busy = CefPage(url: URL(string: "selftest://bench/bridge.html")!)
+        let view = CefWindowedPageView(page: busy)
         view.frame = SelfTest.window.contentView!.bounds
         SelfTest.window.contentView!.addSubview(view)
         defer {

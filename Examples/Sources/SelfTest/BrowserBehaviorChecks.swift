@@ -1,7 +1,7 @@
 import AppKit
 import CefSwiftUI
 
-/// Checks of what a browser built on `CefWindow` relies on: popups,
+/// Checks of what a page built on `CefWindow` relies on: popups,
 /// closing in awkward moments, downloads, `beforeunload`, load errors,
 /// renderer crashes and Chromium's own pages.
 extension SelfTest {
@@ -29,15 +29,15 @@ extension SelfTest {
             total += amount
             return total
         }
-        var configuration = CefBrowser.Configuration()
+        var configuration = CefPage.Configuration()
         configuration.bridges = [counter]
-        let browser = CefBrowser(url: URL(string: "selftest://edge/tab.html")!, configuration: configuration)
-        let window = CefWindow(browser: browser)
+        let page = CefPage(url: URL(string: "selftest://edge/tab.html")!, configuration: configuration)
+        let window = CefWindow(page: page)
         window.show()
-        _ = await loaded(browser, title: "tab")
+        _ = await loaded(page, title: "tab")
         await expect("bridge: typed round trip in a Chrome-style window") {
-            let first = try await browser.evaluateJavaScript("counter.increment(1)").intValue
-            let second = try await browser.evaluateJavaScript("counter.increment(10)").intValue
+            let first = try await page.evaluateJavaScript("counter.increment(1)").intValue
+            let second = try await page.evaluateJavaScript("counter.increment(10)").intValue
             return first == 1 && second == 11 && total == 11
         }
         window.close()
@@ -47,8 +47,8 @@ extension SelfTest {
     // MARK: Popups
 
     static func popupChecks() async {
-        let browser = CefBrowser(url: URL(string: "selftest://edge/opener.html")!)
-        let opener = CefWindow(browser: browser)
+        let page = CefPage(url: URL(string: "selftest://edge/opener.html")!)
+        let opener = CefWindow(page: page)
         var popups: [CefWindow] = []
         opener.onPopup = { popup in
             popups.append(popup)
@@ -61,31 +61,31 @@ extension SelfTest {
             popup.show()
         }
         opener.show()
-        _ = await loaded(browser, title: "opener")
+        _ = await loaded(page, title: "opener")
 
         await expect("popup: requested size is reported") {
-            try await browser.evaluateJavaScript("window.__popup = window.open('popup.html', 'p', 'width=420,height=360'); 0", userGesture: true)
+            try await page.evaluateJavaScript("window.__popup = window.open('popup.html', 'p', 'width=420,height=360'); 0", userGesture: true)
             guard await waitUntil(timeout: .seconds(5), { popups.count == 1 }) else { return false }
-            return popups[0].browser.popupFeatures?.size == CGSize(width: 420, height: 360)
+            return popups[0].page.popupFeatures?.size == CGSize(width: 420, height: 360)
         }
         check("popup: is a child window of its opener",
               popups.first?.window.map { opener.window?.childWindows?.contains($0) == true } == true)
         await expect("popup: page calling window.close() closes it") {
             guard let popup = popups.first else { return false }
-            _ = await waitUntil { popup.browser.title == "popup" }
+            _ = await waitUntil { popup.page.title == "popup" }
             // Run without awaiting a result: the close may come before an
-            // evaluation's reply, which the closing browser then fails.
-            popup.browser.executeJavaScript("window.close()")
+            // evaluation's reply, which the closing page then fails.
+            popup.page.executeJavaScript("window.close()")
             return await waitUntil { popup.isClosed }
         }
         check("popup: leaves its opener's child windows", opener.window?.childWindows?.isEmpty != false)
 
         await expect("popup: closing the opener with a popup open is clean") {
-            try await browser.evaluateJavaScript("window.open('popup.html', 'q', 'width=300,height=200'); 0", userGesture: true)
+            try await page.evaluateJavaScript("window.open('popup.html', 'q', 'width=300,height=200'); 0", userGesture: true)
             guard await waitUntil(timeout: .seconds(5), { popups.count == 2 }) else { return false }
             let popup = popups[1]
             opener.close()
-            guard await waitUntil({ opener.isClosed && browser.state == .closed }) else { return false }
+            guard await waitUntil({ opener.isClosed && page.state == .closed }) else { return false }
             // Chromium keeps a popup when its opener goes; the app decides.
             popup.close()
             return await waitUntil { popup.isClosed }
@@ -95,19 +95,19 @@ extension SelfTest {
     // MARK: Closing
 
     static func closingChecks() async {
-        let slow = CefBrowser(url: URL(string: "selftest://edge/slow.html")!)
-        let loading = CefWindow(browser: slow)
+        let slow = CefPage(url: URL(string: "selftest://edge/slow.html")!)
+        let loading = CefWindow(page: slow)
         loading.show()
         _ = await waitUntil(timeout: .seconds(3)) { slow.isLoading }
         loading.close()
         check("closing: a window still loading closes", await waitUntil { loading.isClosed && slow.state == .closed })
 
         let windows = (0..<8).map { index in
-            CefWindow(browser: CefBrowser(url: URL(string: "selftest://edge/tab.html?\(index)")!))
+            CefWindow(page: CefPage(url: URL(string: "selftest://edge/tab.html?\(index)")!))
         }
         windows.forEach { $0.show() }
         check("closing: many tabs opened at once all load",
-              await waitUntil { windows.allSatisfy { $0.browser.title == "tab" } })
+              await waitUntil { windows.allSatisfy { $0.page.title == "tab" } })
         windows.forEach { $0.close() }
         check("closing: many tabs closed at once", await waitUntil { windows.allSatisfy(\.isClosed) })
     }
@@ -132,37 +132,37 @@ extension SelfTest {
         let profile = CefProfile.incognito()
         // Downloads are the profile's: its delegate decides where they go.
         profile.delegate = recorder
-        var configuration = CefBrowser.Configuration()
+        var configuration = CefPage.Configuration()
         configuration.profile = profile
-        let browser = CefBrowser(url: URL(string: "selftest://edge/tab.html")!, configuration: configuration, delegate: recorder)
-        let window = CefWindow(browser: browser)
+        let page = CefPage(url: URL(string: "selftest://edge/tab.html")!, configuration: configuration, delegate: recorder)
+        let window = CefWindow(page: page)
         window.show()
-        _ = await loaded(browser, title: "tab")
-        func download(named name: String) -> CefDownload? { browser.downloads.last { $0.url?.lastPathComponent == name } }
+        _ = await loaded(page, title: "tab")
+        func download(named name: String) -> CefDownload? { page.downloads.last { $0.url?.lastPathComponent == name } }
         func describe() -> String {
-            browser.downloads.map { "\($0.suggestedFilename) \($0.state) \($0.fileURL?.path ?? "-")" }.joined(separator: "; ")
+            page.downloads.map { "\($0.suggestedFilename) \($0.state) \($0.fileURL?.path ?? "-")" }.joined(separator: "; ")
         }
 
         check("download: the profile's policy starts as the Downloads folder", profile.downloadPolicy == .downloadsFolder)
         // The profile delegate's decision wins over the policy.
         profile.downloadPolicy = .disabled
-        browser.load(URL(string: "\(base)/report.txt")!)
+        page.load(URL(string: "\(base)/report.txt")!)
         check("download: attachment is saved where the delegate says", await waitUntil {
             download(named: "report.txt")?.state == .completed
                 && download(named: "report.txt")?.fileURL?.deletingLastPathComponent().lastPathComponent == directory.lastPathComponent
         }, detail: describe())
-        check("download: page stays put", browser.title == "tab")
+        check("download: page stays put", page.title == "tab")
         if let report = download(named: "report.txt") {
             check("download: the item has its name, type, size and progress",
                   report.suggestedFilename == "report.txt" && report.mimeType == "text/plain"
                       && report.receivedBytes == 2048 * 9 && report.fractionCompleted == 1 && !report.canResume,
                   detail: "\(report.suggestedFilename) \(report.mimeType) \(report.receivedBytes) \(String(describing: report.fractionCompleted))")
             check("download: the profile lists it, and its browser",
-                  profile.downloads.contains { $0 === report } && report.browser === browser)
+                  profile.downloads.contains { $0 === report } && report.page === page)
         }
 
         recorder.downloadDestination = nil
-        browser.load(URL(string: "\(base)/denied.txt")!)
+        page.load(URL(string: "\(base)/denied.txt")!)
         check("download: denied download is cancelled", await waitUntil {
             download(named: "denied.txt")?.state == .cancelled
         }, detail: describe())
@@ -174,21 +174,21 @@ extension SelfTest {
         try? FileManager.default.createDirectory(at: policyFolder, withIntermediateDirectories: true)
         try? Data("taken".utf8).write(to: policyFolder.appendingPathComponent("policy.txt"))
         profile.downloadPolicy = .folder(policyFolder)
-        browser.load(URL(string: "\(base)/policy.txt")!)
+        page.load(URL(string: "\(base)/policy.txt")!)
         check("download: the policy's folder is used, and a taken name is numbered", await waitUntil {
             download(named: "policy.txt")?.state == .completed
                 && download(named: "policy.txt")?.fileURL?.lastPathComponent == "policy (1).txt"
         }, detail: describe())
         profile.downloadPolicy = .disabled
-        browser.load(URL(string: "\(base)/disabled.txt")!)
+        page.load(URL(string: "\(base)/disabled.txt")!)
         check("download: a disabled policy cancels", await waitUntil {
             download(named: "disabled.txt")?.state == .cancelled
         }, detail: describe())
 
         // Asking shows the save panel as a sheet; cancelling it cancels the download.
         profile.downloadPolicy = .ask
-        browser.load(URL(string: "\(base)/asked.txt")!)
-        let hostWindow = browser.hostWindow
+        page.load(URL(string: "\(base)/asked.txt")!)
+        let hostWindow = page.hostWindow
         _ = await waitUntil(timeout: .seconds(10)) { hostWindow?.attachedSheet is NSSavePanel }
         let panel = hostWindow?.attachedSheet as? NSSavePanel
         check("download: asking shows a save panel named for the file", panel?.nameFieldStringValue == "asked.txt",
@@ -206,18 +206,18 @@ extension SelfTest {
 
     static func leavingChecks() async {
         let recorder = Recorder()
-        let browser = CefBrowser(url: URL(string: "selftest://edge/leave.html")!, delegate: recorder)
-        let window = CefWindow(browser: browser)
+        let page = CefPage(url: URL(string: "selftest://edge/leave.html")!, delegate: recorder)
+        let window = CefWindow(page: page)
         window.show()
-        _ = await loaded(browser, title: "leave")
+        _ = await loaded(page, title: "leave")
         // beforeunload needs the page to have seen a user gesture.
-        _ = try? await browser.evaluateJavaScript("document.body.click(); 0", userGesture: true)
+        _ = try? await page.evaluateJavaScript("document.body.click(); 0", userGesture: true)
 
         recorder.leavesPage = false
         window.close()
         check("beforeunload: the delegate is asked on close", await waitUntil { recorder.leaveRequests == 1 })
         try? await Task.sleep(for: .milliseconds(500))
-        check("beforeunload: staying keeps the window open", !window.isClosed && browser.state == .live)
+        check("beforeunload: staying keeps the window open", !window.isClosed && page.state == .live)
 
         recorder.leavesPage = true
         window.close()
@@ -228,8 +228,8 @@ extension SelfTest {
 
     static func loadFailureChecks() async {
         let recorder = Recorder()
-        let browser = CefBrowser(url: URL(string: "https://nonexistent.invalid/")!, delegate: recorder)
-        let window = CefWindow(browser: browser)
+        let page = CefPage(url: URL(string: "https://nonexistent.invalid/")!, delegate: recorder)
+        let window = CefWindow(page: page)
         window.show()
         check("load error: reported through didFailLoad",
               await waitUntil { recorder.loadErrors.contains { !$0.isCancellation } },
@@ -242,16 +242,16 @@ extension SelfTest {
 
     static func rendererCrashChecks() async {
         let recorder = Recorder()
-        let browser = CefBrowser(url: URL(string: "selftest://edge/tab.html")!, delegate: recorder)
-        let window = CefWindow(browser: browser)
+        let page = CefPage(url: URL(string: "selftest://edge/tab.html")!, delegate: recorder)
+        let window = CefWindow(page: page)
         window.show()
-        _ = await loaded(browser, title: "tab")
-        browser.load(URL(string: "chrome://crash")!)
+        _ = await loaded(page, title: "tab")
+        page.load(URL(string: "chrome://crash")!)
         check("renderer crash: delegate is told", await waitUntil { !recorder.terminations.isEmpty })
-        browser.load(URL(string: "selftest://edge/tab.html?again")!)
+        page.load(URL(string: "selftest://edge/tab.html?again")!)
         check("renderer crash: loading again recovers", await waitUntil {
-            browser.title == "tab" && browser.url?.query() == "again"
-        }, detail: browser.title)
+            page.title == "tab" && page.url?.query() == "again"
+        }, detail: page.title)
         window.close()
         _ = await waitUntil { window.isClosed }
     }
@@ -270,12 +270,12 @@ extension SelfTest {
         """
 
     static func settingsPageChecks() async {
-        var configuration = CefBrowser.Configuration()
+        var configuration = CefPage.Configuration()
         configuration.userScripts = [.styleSheet(settingsStyles, matching: ["chrome://settings/*"])]
-        let browser = CefBrowser(url: URL(string: "chrome://settings/")!, configuration: configuration)
-        let window = CefWindow(browser: browser)
+        let page = CefPage(url: URL(string: "chrome://settings/")!, configuration: configuration)
+        let window = CefWindow(page: page)
         window.show()
-        _ = await waitUntil { browser.title == "Settings" && !browser.isLoading }
+        _ = await waitUntil { page.title == "Settings" && !page.isLoading }
         let visibility = """
             (() => {
               const deepAll = (sel, root = document) => [...root.querySelectorAll(sel)].concat(
@@ -286,14 +286,14 @@ extension SelfTest {
             })()
             """
         _ = await waitUntilAsync {
-            (try? await browser.evaluateJavaScript(visibility).stringValue)?.contains("true") == true
+            (try? await page.evaluateJavaScript(visibility).stringValue)?.contains("true") == true
         }
-        let shown = (try? await browser.evaluateJavaScript(visibility).stringValue) ?? ""
+        let shown = (try? await page.evaluateJavaScript(visibility).stringValue) ?? ""
         check("settings: About, You and Google and Default browser are hidden; the rest shows",
               shown == "false,false,false,true,false", detail: shown)
 
         // Components that assign their own adoptedStyleSheets keep the sheet.
-        browser.load(URL(string: "chrome://settings/appearance")!)
+        page.load(URL(string: "chrome://settings/appearance")!)
         let appearance = """
             (() => {
               const deepAll = (sel, root = document) => [...root.querySelectorAll(sel)].concat(
@@ -304,9 +304,9 @@ extension SelfTest {
             })()
             """
         _ = await waitUntilAsync {
-            (try? await browser.evaluateJavaScript(appearance).stringValue)?.hasSuffix("true") == true
+            (try? await page.evaluateJavaScript(appearance).stringValue)?.hasSuffix("true") == true
         }
-        let appearanceShown = (try? await browser.evaluateJavaScript(appearance).stringValue) ?? ""
+        let appearanceShown = (try? await page.evaluateJavaScript(appearance).stringValue) ?? ""
         check("settings: styles reach components that set their own adoptedStyleSheets",
               appearanceShown == "false,false,false,true", detail: appearanceShown)
 
@@ -315,10 +315,10 @@ extension SelfTest {
         var sawChromiumWindow = false
         CefRuntime.shared.onChromeTab = { opened.append($0.url); return .close }
         defer { CefRuntime.shared.onChromeTab = nil }
-        browser.load(URL(string: "chrome://settings/autofill")!)
-        _ = await waitUntil { browser.title.contains("Autofill") && !browser.isLoading }
+        page.load(URL(string: "chrome://settings/autofill")!)
+        _ = await waitUntil { page.title.contains("Autofill") && !page.isLoading }
         _ = await waitUntilAsync {
-            (try? await browser.evaluateJavaScript("""
+            (try? await page.evaluateJavaScript("""
                 (() => {
                   const deepAll = (sel, root = document) => [...root.querySelectorAll(sel)].concat(
                     ...[...root.querySelectorAll('*')].filter(e => e.shadowRoot).map(e => deepAll(sel, e.shadowRoot)));
@@ -345,10 +345,10 @@ extension SelfTest {
     }
 }
 
-/// Records what a browser reports and answers its questions, and, as a
+/// Records what a page reports and answers its questions, and, as a
 /// profile's delegate, where its downloads go.
 @MainActor
-final class Recorder: CefBrowserDelegate, CefProfileDelegate {
+final class Recorder: CefPageDelegate, CefProfileDelegate {
     var downloadDestination: URL?
     /// Leaves downloads to the profile's policy instead of ``downloadDestination``.
     var followsDownloadPolicy = false
@@ -366,21 +366,21 @@ final class Recorder: CefBrowserDelegate, CefProfileDelegate {
         return downloadDestination.map { .save(to: $0.appendingPathComponent(download.suggestedFilename)) } ?? .cancel
     }
 
-    func browser(_ browser: CefBrowser, confirmLeavingPage isReload: Bool) async -> Bool {
+    func page(_ page: CefPage, confirmLeavingPage isReload: Bool) async -> Bool {
         leaveRequests += 1
         return leavesPage
     }
 
-    func browser(_ browser: CefBrowser, didFailLoad error: CefLoadError) {
+    func page(_ page: CefPage, didFailLoad error: CefLoadError) {
         loadErrors.append(error)
     }
 
-    func browser(_ browser: CefBrowser, credentialFor challenge: CefAuthenticationChallenge) async -> CefCredential? {
+    func page(_ page: CefPage, credentialFor challenge: CefAuthenticationChallenge) async -> CefCredential? {
         challenges.append(challenge)
         return credentialQueue.isEmpty ? credential : credentialQueue.removeFirst()
     }
 
-    func browser(_ browser: CefBrowser, renderProcessDidTerminate reason: CefTerminationReason) {
+    func page(_ page: CefPage, renderProcessDidTerminate reason: CefTerminationReason) {
         terminations.append(reason)
     }
 }

@@ -54,12 +54,12 @@ extension SelfTest {
     /// and checks that nothing asked macOS for notification authorization;
     /// then that a page's own notifications still show.
     static func launchPromptChecks(label: String) async {
-        let browser = CefBrowser(url: URL(string: "https://cefswift.test/prompts.html")!)
-        let window = CefWindow(browser: browser)
+        let page = CefPage(url: URL(string: "https://cefswift.test/prompts.html")!)
+        let window = CefWindow(page: page)
         window.show()
         defer { window.close() }
-        guard await loaded(browser, title: "prompts") else {
-            check("\(label): page loads", false, detail: browser.title)
+        guard await loaded(page, title: "prompts") else {
+            check("\(label): page loads", false, detail: page.title)
             return
         }
         // Chromium sets up notifications for a profile shortly after it
@@ -82,7 +82,7 @@ extension SelfTest {
         CefProfile.default.siteSettings.set(.allow, for: .notifications, origin: origin)
         defer { CefProfile.default.siteSettings.set(.default, for: .notifications, origin: origin) }
         await expect("\(label): a page's notification still shows") {
-            let result = try await browser.evaluateJavaScript("""
+            let result = try await page.evaluateJavaScript("""
                 new Promise(resolve => {
                   const n = new Notification('CefSwift', { body: 'SelfTest' });
                   n.onshow = () => { n.close(); resolve('shown ' + Notification.permission); };

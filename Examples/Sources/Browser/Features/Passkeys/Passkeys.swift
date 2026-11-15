@@ -7,7 +7,7 @@ import SwiftUI
 /// Settings › Passkeys chooses; Settings also lists and removes the
 /// browser's saved passkeys. The choice applies to tabs opened after it.
 struct Passkeys: BrowserFeature {
-    func configure(_ configuration: inout CefBrowser.Configuration) {
+    func configure(_ configuration: inout CefPage.Configuration) {
         guard BrowserPasskeys.isEnabled else { return }
         let passkeys = BrowserPasskeys.shared
         let isPrivate = configuration.profile.map { $0 !== CefProfile.default } ?? false

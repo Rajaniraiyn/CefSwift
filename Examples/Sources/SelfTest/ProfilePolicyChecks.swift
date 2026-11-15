@@ -33,36 +33,36 @@ extension SelfTest {
             }
         }
 
-        var configuration = CefBrowser.Configuration()
+        var configuration = CefPage.Configuration()
         configuration.profile = profile
         configuration.userScripts = [CefUserScript(source: "window.__order = (window.__order || '') + 'G';")]
-        let browser = CefBrowser(url: URL(string: "\(base)/page")!, configuration: configuration)
-        let view = hostWindowed(browser)
-        guard await loaded(browser, title: "policy") else {
-            check("profile policy: page loads", false, detail: browser.title)
-            await closeHosted(browser, view)
+        let page = CefPage(url: URL(string: "\(base)/page")!, configuration: configuration)
+        let view = hostWindowed(page)
+        guard await loaded(page, title: "policy") else {
+            check("profile policy: page loads", false, detail: page.title)
+            await closeHosted(page, view)
             return
         }
 
         // Scripts and bridges: the profile's first, then the page's.
         await expect("profile policy: profile scripts run before the page's own") {
-            let order = try await browser.evaluateJavaScript("window.__order").stringValue
+            let order = try await page.evaluateJavaScript("window.__order").stringValue
             return (order == "PG", order ?? "nil")
         }
         await expect("profile policy: a profile bridge reaches the page") {
-            try await browser.evaluateJavaScript("profileBridge.ping()").stringValue == "pong"
+            try await page.evaluateJavaScript("profileBridge.ping()").stringValue == "pong"
         }
         check("profile policy: profile attachments set the page up",
-              await waitUntil { attachment.created.contains(ObjectIdentifier(browser)) })
+              await waitUntil { attachment.created.contains(ObjectIdentifier(page)) })
 
         // The request filter: the profile's applies to a page without one.
-        func fetch(_ path: String, in page: CefBrowser) async -> String {
+        func fetch(_ path: String, in page: CefPage) async -> String {
             (try? await page.evaluateJavaScript(
                 "fetch('\(path)').then(r => r.status + '', e => 'blocked')").stringValue) ?? "no answer"
         }
-        let blocked = await fetch("/policy/blocked", in: browser)
-        let allowed = await fetch("/policy/allowed", in: browser)
-        let other = await fetch("/other", in: browser)
+        let blocked = await fetch("/policy/blocked", in: page)
+        let allowed = await fetch("/policy/allowed", in: page)
+        let other = await fetch("/other", in: page)
         let seen = await PolicyFilterLog.snapshot()
         check("profile policy: the profile's filter blocks and allows a page's requests",
               blocked == "blocked" && allowed == "200", detail: "\(blocked) \(allowed)")
@@ -71,14 +71,14 @@ extension SelfTest {
         let fetched = seen.first { $0.url?.path == "/policy/allowed" }
         check("profile policy: a request carries its type, frame, page, initiator and first party",
               fetched?.resourceType == .fetch && fetched?.frame?.isMain == true
-                  && fetched?.pageIdentifier == browser.identifier
+                  && fetched?.pageIdentifier == page.identifier
                   && fetched?.initiator?.absoluteString == "http://127.0.0.1:\(server.port)"
                   && fetched?.firstPartyURL?.host() == "127.0.0.1" && fetched?.isThirdParty == false
                   && seen.first { $0.url?.path == "/policy/page" }?.resourceType == .mainFrame,
               detail: "\(String(describing: fetched))")
 
         // Cookies the filter keeps out are neither sent nor saved.
-        _ = await fetch("/policy/set-cookie", in: browser)
+        _ = await fetch("/policy/set-cookie", in: page)
         let cookies = (try? await profile.cookies(for: URL(string: base)!)) ?? []
         check("profile policy: restrictCookies keeps a response's cookies out",
               !cookies.contains { $0.name == "policyCookie" }, detail: "\(cookies.map(\.name))")
@@ -95,7 +95,7 @@ extension SelfTest {
         // A service worker's requests have no page: only the profile's
         // request context handler sees them.
         await PolicyFilterLog.reset()
-        let worker = CefBrowser(url: URL(string: "\(base)/sw-page")!, configuration: configuration)
+        let worker = CefPage(url: URL(string: "\(base)/sw-page")!, configuration: configuration)
         let workerView = hostWindowed(worker)
         let registered = await waitUntilAsync(timeout: .seconds(15)) {
             (try? await worker.evaluateJavaScript("window.__worker || ''").stringValue) == "blocked"
@@ -111,7 +111,7 @@ extension SelfTest {
         // A page's own filter takes the profile's place for its requests.
         var own = configuration
         own.requestFilter = CefRequestFilter { _ in .allow }
-        let overriding = CefBrowser(url: URL(string: "\(base)/page")!, configuration: own)
+        let overriding = CefPage(url: URL(string: "\(base)/page")!, configuration: own)
         let overridingView = hostWindowed(overriding)
         _ = await loaded(overriding, title: "policy")
         await PolicyFilterLog.reset()
@@ -123,7 +123,7 @@ extension SelfTest {
 
         await permissionPrecedenceChecks(profile: profile, policy: policy)
         await chromiumCreatedPageChecks(profile: profile, policy: policy, base: base, attachment: attachment)
-        await closeHosted(browser, view)
+        await closeHosted(page, view)
         await schemeHandlerPrecedenceChecks()
         profileFactChecks(profile: profile)
     }
@@ -134,18 +134,18 @@ extension SelfTest {
         let origin = capabilityOrigin
         let settings = profile.siteSettings
         settings.reset(origin: origin)
-        var configuration = CefBrowser.Configuration()
+        var configuration = CefPage.Configuration()
         configuration.profile = profile
-        let browser = CefBrowser(url: origin.appending(path: "permissions.html"), configuration: configuration)
-        let view = hostWindowed(browser)
+        let page = CefPage(url: origin.appending(path: "permissions.html"), configuration: configuration)
+        let view = hostWindowed(page)
         defer { settings.reset(origin: origin) }
-        guard await loaded(browser, title: "permissions") else {
-            check("profile permissions: page loads", false, detail: browser.title)
-            await closeHosted(browser, view)
+        guard await loaded(page, title: "permissions") else {
+            check("profile permissions: page loads", false, detail: page.title)
+            await closeHosted(page, view)
             return
         }
         func request() async -> String {
-            (try? await browser.evaluateJavaScript(
+            (try? await page.evaluateJavaScript(
                 "navigator.requestMIDIAccess({sysex: true}).then(() => 'granted', e => e.name)").stringValue) ?? "no answer"
         }
         policy.permissionRequests = []
@@ -153,30 +153,30 @@ extension SelfTest {
         let denied = await request()
         let asked = policy.permissionRequests.first
         check("profile permissions: a page without a delegate leaves the request to its profile",
-              denied != "granted" && asked?.request.kinds == .midi && asked?.page === browser
+              denied != "granted" && asked?.request.kinds == .midi && asked?.page === page
                   && asked?.request.origin.absoluteString == "https://cefswift.test"
                   && asked?.request.topLevelOrigin?.absoluteString == "https://cefswift.test"
                   && asked?.request.isMainFrame == true,
               detail: "\(denied) \(String(describing: asked?.request))")
 
-        let page = PermissionRecorder()
-        page.answer = .allow
-        browser.delegate = page
+        let pageRecorder = PermissionRecorder()
+        pageRecorder.answer = .allow
+        page.delegate = pageRecorder
         policy.permissionRequests = []
         // Chromium keeps a prompt's deny for the site.
         settings.reset(origin: origin)
         let granted = await request()
         check("profile permissions: the page's delegate wins over the profile's",
-              granted == "granted" && page.requests.count == 1 && policy.permissionRequests.isEmpty,
-              detail: "\(granted), page \(page.requests.count), profile \(policy.permissionRequests.count)")
+              granted == "granted" && pageRecorder.requests.count == 1 && policy.permissionRequests.isEmpty,
+              detail: "\(granted), page \(pageRecorder.requests.count), profile \(policy.permissionRequests.count)")
 
-        browser.delegate = nil
+        page.delegate = nil
         settings.reset(origin: origin)
         policy.answer = .alwaysAllow
         _ = await request()
         check("profile permissions: alwaysAllow from the profile is stored in its site settings",
               settings.setting(for: .midiSystemExclusive, origin: origin) == .allow)
-        await closeHosted(browser, view)
+        await closeHosted(page, view)
     }
 
     /// A native popup and a tab Chromium opens in a window of its own get
@@ -184,23 +184,23 @@ extension SelfTest {
     private static func chromiumCreatedPageChecks(
         profile: CefProfile, policy: ProfilePolicyRecorder, base: String, attachment: CountingAttachment
     ) async {
-        var configuration = CefBrowser.Configuration()
+        var configuration = CefPage.Configuration()
         configuration.profile = profile
         let opener = PopupAllower()
-        let page = "<title>links</title><a href='\(base)/page' style='display:block;width:300px;height:100px'>page</a>"
-        let browser = CefBrowser(
-            url: URL(string: "data:text/html," + page.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)!)!,
+        let html = "<title>links</title><a href='\(base)/page' style='display:block;width:300px;height:100px'>page</a>"
+        let page = CefPage(
+            url: URL(string: "data:text/html," + html.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)!)!,
             configuration: configuration, delegate: opener)
-        let window = CefWindow(browser: browser)
+        let window = CefWindow(page: page)
         window.show()
         defer { window.close() }
-        guard await loaded(browser, title: "links", timeout: .seconds(20)) else {
-            check("Chromium-created pages: opener loads", false, detail: browser.title)
+        guard await loaded(page, title: "links", timeout: .seconds(20)) else {
+            check("Chromium-created pages: opener loads", false, detail: page.title)
             return
         }
 
         // A native popup, which Chromium creates and loads at once.
-        _ = try? await browser.evaluateJavaScript("window.open('\(base)/page', 'popup', 'width=400,height=300'); 0",
+        _ = try? await page.evaluateJavaScript("window.open('\(base)/page', 'popup', 'width=400,height=300'); 0",
                                                   userGesture: true)
         _ = await waitUntil { opener.popups.first?.title == "policy" }
         if let popup = opener.popups.first {
@@ -232,12 +232,12 @@ extension SelfTest {
         }
         defer { CefRuntime.shared.onChromeTab = nil }
         for type in ["mousePressed", "mouseReleased"] {
-            _ = try? await browser.devTools.send("Input.dispatchMouseEvent", [
+            _ = try? await page.devTools.send("Input.dispatchMouseEvent", [
                 "type": .string(type), "x": 40, "y": 40, "button": "left", "clickCount": 1, "modifiers": 4,
             ])
         }
-        _ = await waitUntil { tabs.first?.browser.title == "policy" }
-        guard let tab = tabs.first?.browser else {
+        _ = await waitUntil { tabs.first?.page.title == "policy" }
+        guard let tab = tabs.first?.page else {
             check("Chromium-created pages: a ⌘-clicked link opens a Chromium tab", false)
             return
         }
@@ -293,13 +293,13 @@ extension SelfTest {
         own.registerSchemeHandler(scheme: "selftest", domain: "precedence", handler: TitledPage(title: "profile"))
         let url = URL(string: "selftest://precedence/")!
         func title(in profile: CefProfile) async -> String {
-            var configuration = CefBrowser.Configuration()
+            var configuration = CefPage.Configuration()
             configuration.profile = profile
-            let browser = CefBrowser(url: url, configuration: configuration)
-            let view = hostWindowed(browser)
-            _ = await loaded(browser)
-            let title = browser.title
-            await closeHosted(browser, view)
+            let page = CefPage(url: url, configuration: configuration)
+            let view = hostWindowed(page)
+            _ = await loaded(page)
+            let title = page.title
+            await closeHosted(page, view)
             return title
         }
         let inOwn = await title(in: own)
@@ -360,9 +360,9 @@ enum PolicyFilterLog {
 @MainActor
 final class ProfilePolicyRecorder: CefProfileDelegate {
     var answer = CefPermissionDecision.deny
-    var permissionRequests: [(request: CefPermissionRequest, page: CefBrowser)] = []
+    var permissionRequests: [(request: CefPermissionRequest, page: CefPage)] = []
 
-    func profile(_ profile: CefProfile, decidePermissionFor request: CefPermissionRequest, in page: CefBrowser) async
+    func profile(_ profile: CefProfile, decidePermissionFor request: CefPermissionRequest, in page: CefPage) async
         -> CefPermissionDecision
     {
         permissionRequests.append((request, page))
@@ -372,25 +372,25 @@ final class ProfilePolicyRecorder: CefProfileDelegate {
 
 /// Lets every popup open natively and keeps the popups.
 @MainActor
-final class PopupAllower: CefBrowserDelegate {
-    var popups: [CefBrowser] = []
+final class PopupAllower: CefPageDelegate {
+    var popups: [CefPage] = []
 
-    func browser(_ browser: CefBrowser, decideWindowOpenFor request: CefWindowOpenRequest) -> CefWindowOpenDecision {
+    func page(_ page: CefPage, decideWindowOpenFor request: CefWindowOpenRequest) -> CefWindowOpenDecision {
         .allowNativePopup
     }
 
-    func browser(_ browser: CefBrowser, didOpen popup: CefBrowser) {
+    func page(_ page: CefPage, didOpen popup: CefPage) {
         popups.append(popup)
     }
 }
 
-/// Counts the browsers it sets up.
+/// Counts the pages it sets up.
 @MainActor
-final class CountingAttachment: CefBrowserAttachment {
+final class CountingAttachment: CefPageAttachment {
     var created: Set<ObjectIdentifier> = []
 
-    func browserDidCreate(_ browser: CefBrowser) async { created.insert(ObjectIdentifier(browser)) }
-    func browserDidClose(_ browser: CefBrowser) {}
+    func pageDidCreate(_ page: CefPage) async { created.insert(ObjectIdentifier(page)) }
+    func pageDidClose(_ page: CefPage) {}
 }
 
 /// A page titled `title`.

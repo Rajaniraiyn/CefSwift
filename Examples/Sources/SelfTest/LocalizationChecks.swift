@@ -96,23 +96,23 @@ extension SelfTest {
             profile.acceptLanguages = ["de-CH", "it"]
             return profile
         }())] {
-            var configuration = CefBrowser.Configuration()
+            var configuration = CefPage.Configuration()
             configuration.profile = profile
-            let browser = CefBrowser(url: url, configuration: configuration)
-            let view = hostWindowed(browser)
+            let page = CefPage(url: url, configuration: configuration)
+            let view = hostWindowed(page)
             defer {
-                browser.close(force: true)
+                page.close(force: true)
                 view.removeFromSuperview()
             }
-            guard await waitUntil({ browser.title.hasPrefix("accept-language") }) else {
-                check("localization (\(label)): page loads", false, detail: browser.title)
+            guard await waitUntil({ page.title.hasPrefix("accept-language") }) else {
+                check("localization (\(label)): page loads", false, detail: page.title)
                 continue
             }
-            let languages = (try? await browser.evaluateJavaScript("navigator.languages", as: [String].self)) ?? []
+            let languages = (try? await page.evaluateJavaScript("navigator.languages", as: [String].self)) ?? []
             let expected = profile === CefProfile.default ? preferred : ["de-CH", "it"]
             check("localization (\(label)): navigator.languages", languages.first == expected.first,
                   detail: "\(languages), expected \(expected)")
-            let header = String(browser.title.dropFirst("accept-language ".count))
+            let header = String(page.title.dropFirst("accept-language ".count))
             check("localization (\(label)): Accept-Language", header.hasPrefix(expected[0]),
                   detail: "'\(header)', expected \(expected)")
         }
@@ -151,17 +151,17 @@ extension SelfTest {
         check("Chromium's own strings are in that language", newTab == expected.newTab,
               detail: "'\(newTab ?? "nil")'")
 
-        let browser = CefBrowser(url: URL(string: "selftest://edge/tab.html")!)
-        let view = hostWindowed(browser)
+        let page = CefPage(url: URL(string: "selftest://edge/tab.html")!)
+        let view = hostWindowed(page)
         defer {
-            browser.close(force: true)
+            page.close(force: true)
             view.removeFromSuperview()
         }
-        guard await loaded(browser, title: "tab") else {
-            check("page loads", false, detail: browser.title)
+        guard await loaded(page, title: "tab") else {
+            check("page loads", false, detail: page.title)
             return
         }
-        let language = (try? await browser.evaluateJavaScript("navigator.language").stringValue) ?? nil
+        let language = (try? await page.evaluateJavaScript("navigator.language").stringValue) ?? nil
         check("navigator.language follows the user's languages",
               language?.lowercased().hasPrefix(expected.navigatorLanguage.lowercased()) == true,
               detail: "'\(language ?? "nil")', expected \(expected.navigatorLanguage)")

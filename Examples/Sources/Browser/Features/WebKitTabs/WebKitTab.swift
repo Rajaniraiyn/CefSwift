@@ -9,12 +9,12 @@ import SwiftUI
 /// streaming service hands the page back to Chromium.
 @MainActor
 final class WebKitTab {
-    let browser: SystemBrowser
+    let page: SystemPage
     let window: NSWindow
     let isPrivate: Bool
 
     init(profile: CefProfile, tabs: WebKitTabs) {
-        browser = SystemBrowser(configuration: .init(profile: profile))
+        page = SystemPage(configuration: .init(profile: profile))
         let isPrivate = profile !== CefProfile.default
         self.isPrivate = isPrivate
         window = NSWindow(
@@ -25,17 +25,17 @@ final class WebKitTab {
         window.isReleasedWhenClosed = false
         window.contentMinSize = NSSize(width: 560, height: 320)
         window.contentView = NSHostingView(rootView: WebKitTabView(tab: self, tabs: tabs))
-        browser.decidePolicy = { [weak tabs] browser, navigation in
+        page.decidePolicy = { [weak tabs] page, navigation in
             // A link the user follows out of the streaming site goes back
             // to Chromium; the site's own redirects (sign-in) stay here.
             guard let url = navigation.url, navigation.hasUserGesture, WebKitTabs.opensStreamingSitesAutomatically,
-                  url.scheme == "https" || url.scheme == "http", !SystemBrowser.prefersSystemEngine(for: url),
+                  url.scheme == "https" || url.scheme == "http", !SystemPage.prefersSystemEngine(for: url),
                   let tabs
             else { return .allow }
             tabs.openInChromium(followedLinkTo: url, isPrivate: isPrivate)
             return .cancel
         }
-        browser.onOpenWindow = { [weak tabs] _, url in
+        page.onOpenWindow = { [weak tabs] _, url in
             tabs?.open(url, profile: profile)
         }
         mirrorTitle()
@@ -43,7 +43,7 @@ final class WebKitTab {
 
     private func mirrorTitle() {
         window.title = withObservationTracking {
-            browser.title.isEmpty ? (browser.url?.host() ?? "New Tab") : browser.title
+            page.title.isEmpty ? (page.url?.host() ?? "New Tab") : page.title
         } onChange: { [weak self] in
             Task { @MainActor in self?.mirrorTitle() }
         }
@@ -55,16 +55,16 @@ private struct WebKitTabView: View {
     let tabs: WebKitTabs
 
     var body: some View {
-        SystemWebView(tab.browser)
+        SystemWebView(tab.page)
             .clipShape(.rect(cornerRadius: 10))
             .padding([.horizontal, .bottom], 6)
             .toolbar {
                 ToolbarItem(placement: .navigation) {
                     HStack(spacing: 2) {
-                        Button("Back", systemImage: "chevron.backward", action: tab.browser.goBack)
-                            .disabled(!tab.browser.canGoBack)
-                        Button("Forward", systemImage: "chevron.forward", action: tab.browser.goForward)
-                            .disabled(!tab.browser.canGoForward)
+                        Button("Back", systemImage: "chevron.backward", action: tab.page.goBack)
+                            .disabled(!tab.page.canGoBack)
+                        Button("Forward", systemImage: "chevron.forward", action: tab.page.goForward)
+                            .disabled(!tab.page.canGoForward)
                     }
                     .buttonStyle(ToolbarIconButtonStyle())
                 }
@@ -73,7 +73,7 @@ private struct WebKitTabView: View {
                 }
                 ToolbarItem(placement: .primaryAction) {
                     Button("Open in Chromium", systemImage: "arrow.uturn.backward.circle") {
-                        if let url = tab.browser.url {
+                        if let url = tab.page.url {
                             tabs.openInChromium(url, isPrivate: tab.isPrivate)
                             tab.window.close()
                         }
@@ -101,7 +101,7 @@ private struct WebKitAddressBar: View {
                 .padding(.vertical, 2)
                 .background(.blue.opacity(0.18), in: .capsule)
                 .help("Shown by the system's WebKit, which plays FairPlay-protected video")
-            if tab.browser.hasOnlySecureContent {
+            if tab.page.hasOnlySecureContent {
                 Image(systemName: "lock.fill").font(.caption).foregroundStyle(.secondary)
             }
             TextField("Address", text: $text)
@@ -109,13 +109,13 @@ private struct WebKitAddressBar: View {
                 .focused($isFocused)
                 .onSubmit {
                     let typed = text.contains("://") ? text : "https://\(text)"
-                    if let url = URL(string: typed) { tab.browser.load(url) }
+                    if let url = URL(string: typed) { tab.page.load(url) }
                     isFocused = false
                 }
-            if tab.browser.isLoading {
+            if tab.page.isLoading {
                 ProgressView().controlSize(.small)
             }
-            Button("Reload", systemImage: "arrow.clockwise") { tab.browser.reload() }
+            Button("Reload", systemImage: "arrow.clockwise") { tab.page.reload() }
                 .labelStyle(.iconOnly)
                 .buttonStyle(.plain)
         }
@@ -123,8 +123,8 @@ private struct WebKitAddressBar: View {
         .padding(.vertical, 4)
         .frame(minWidth: 320, idealWidth: 520, maxWidth: 640)
         .background(.quaternary.opacity(0.6), in: .rect(cornerRadius: 8))
-        .onChange(of: tab.browser.url, initial: true) {
-            if !isFocused { text = tab.browser.url?.absoluteString ?? "" }
+        .onChange(of: tab.page.url, initial: true) {
+            if !isFocused { text = tab.page.url?.absoluteString ?? "" }
         }
     }
 }

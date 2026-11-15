@@ -37,7 +37,7 @@ struct MinimalApp: CefSwiftApp {
         return configuration
     }
 
-    @State private var browser = CefBrowser(url: Self.pageURL, delegate: BenchmarkReporter.shared)
+    @State private var page = CefPage(url: Self.pageURL, delegate: BenchmarkReporter.shared)
 
     init() {
         BenchmarkReporter.shared.start()
@@ -45,7 +45,7 @@ struct MinimalApp: CefSwiftApp {
 
     var body: some Scene {
         WindowGroup {
-            CefWebView(browser)
+            CefWebView(page)
         }
         .defaultSize(width: 900, height: 640)
     }
@@ -59,7 +59,7 @@ struct MinimalApp: CefSwiftApp {
 /// The `-benchmark YES` launch argument: reports each finished load on
 /// standard output and quits when standard input closes.
 @MainActor
-final class BenchmarkReporter: CefBrowserDelegate {
+final class BenchmarkReporter: CefPageDelegate {
     static let shared = BenchmarkReporter()
 
     private let isEnabled = UserDefaults.standard.bool(forKey: "benchmark")
@@ -72,9 +72,9 @@ final class BenchmarkReporter: CefBrowserDelegate {
         }
     }
 
-    func browser(_ browser: CefBrowser, didFinishLoadWithStatus httpStatus: Int) {
+    func page(_ page: CefPage, didFinishLoadWithStatus httpStatus: Int) {
         guard isEnabled else { return }
-        print("cefswift-benchmark loaded \(Date().timeIntervalSince1970) \(browser.url?.absoluteString ?? "")")
+        print("cefswift-benchmark loaded \(Date().timeIntervalSince1970) \(page.url?.absoluteString ?? "")")
         fflush(stdout)
     }
 }

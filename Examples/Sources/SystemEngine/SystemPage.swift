@@ -15,26 +15,26 @@ import WebKit
 /// host signing, and Chromium has no FairPlay. WebKit on macOS has
 /// FairPlay Streaming through Encrypted Media Extensions, needs no
 /// entitlement or licence, and identifies as Safari, so services that
-/// look for Safari serve it their Safari player. Use a system browser for
-/// such sites and Chromium (`CefBrowser`) for everything else:
+/// look for Safari serve it their Safari player. Use a system page for
+/// such sites and Chromium (`CefPage`) for everything else:
 ///
 /// ```swift
-/// func browser(_ browser: CefBrowser, decidePolicyFor navigation: CefNavigationAction) -> CefNavigationDecision {
-///     guard navigation.isMainFrame, let url = navigation.url, SystemBrowser.prefersSystemEngine(for: url)
+/// func page(_ page: CefPage, decidePolicyFor navigation: CefNavigationAction) -> CefNavigationDecision {
+///     guard navigation.isMainFrame, let url = navigation.url, SystemPage.prefersSystemEngine(for: url)
 ///     else { return .allow }
-///     openSystemTab(SystemBrowser(url: url, configuration: .init(profile: browser.configuration.profile)))
+///     openSystemTab(SystemPage(url: url, configuration: .init(profile: page.configuration.profile)))
 ///     return .cancel
 /// }
 /// ```
 ///
-/// It has the parts of `CefBrowser`'s surface WebKit offers: navigation
+/// It has the parts of `CefPage`'s surface WebKit offers: navigation
 /// and its observable state, JavaScript, user scripts, find, zoom and
 /// snapshots. Show it with ``SystemWebView`` or by adding ``nativeView``
 /// to a view hierarchy.
 @MainActor
 @Observable
-public final class SystemBrowser {
-    /// How a system browser is set up. Fixed when it is created.
+public final class SystemPage {
+    /// How a system page is set up. Fixed when it is created.
     public struct Configuration {
         /// Whose website data (cookies, storage, cache) the page uses. Each
         /// `CefProfile` has a WebKit data store of its own, separate from
@@ -46,7 +46,7 @@ public final class SystemBrowser {
         /// Whether the User-Agent ends `Version/<Safari's version>
         /// Safari/605.1.15`, as Safari's does, so sites serve their Safari
         /// pages and players. The engine is the one Safari uses. Off leaves
-        /// WebKit's default, which names no browser.
+        /// WebKit's default, which names no page.
         public var identifiesAsSafari = true
         /// Scripts added to every page, with their URL pattern, injection
         /// time and frames honored.
@@ -70,7 +70,7 @@ public final class SystemBrowser {
     /// Whether every resource on the page arrived over a secure connection.
     public private(set) var hasOnlySecureContent = false
 
-    /// The settings the browser was made with.
+    /// The settings the page was made with.
     @ObservationIgnored public let configuration: Configuration
 
     /// A main-frame navigation awaiting ``decidePolicy``.
@@ -82,12 +82,12 @@ public final class SystemBrowser {
 
     /// Decides each main-frame navigation; `nil` allows all. Return
     /// `.cancel` to send a URL elsewhere, such as back to a Chromium
-    /// browser when the user leaves a streaming site.
-    @ObservationIgnored public var decidePolicy: ((SystemBrowser, Navigation) -> CefNavigationDecision)?
+    /// page when the user leaves a streaming site.
+    @ObservationIgnored public var decidePolicy: ((SystemPage, Navigation) -> CefNavigationDecision)?
 
     /// Called when the page opens a new window (`target="_blank"`,
-    /// `window.open`). `nil` loads the URL in this browser.
-    @ObservationIgnored public var onOpenWindow: ((SystemBrowser, URL) -> Void)?
+    /// `window.open`). `nil` loads the URL in this page.
+    @ObservationIgnored public var onOpenWindow: ((SystemPage, URL) -> Void)?
 
     /// The `WKWebView` showing the page.
     @ObservationIgnored public let nativeView: WKWebView
@@ -111,7 +111,7 @@ public final class SystemBrowser {
         nativeView = WKWebView(frame: .zero, configuration: webViewConfiguration)
         nativeView.allowsBackForwardNavigationGestures = configuration.allowsBackForwardNavigationGestures
         nativeView.allowsMagnification = true
-        coordinator.browser = self
+        coordinator.page = self
         nativeView.navigationDelegate = coordinator
         nativeView.uiDelegate = coordinator
         observe()
@@ -143,7 +143,7 @@ public final class SystemBrowser {
     /// awaiting it if it is a promise. Throws ``JavaScriptError`` when
     /// the script throws.
     ///
-    /// As `CefBrowser.evaluateJavaScript` does, this runs
+    /// As `CefPage.evaluateJavaScript` does, this runs
     /// `script` as a classic script: statements, declarations and `throw`
     /// work, and the value is that of the last statement. Its top-level
     /// `let`, `const` and `class` declarations stay local to the call. On a
@@ -246,7 +246,7 @@ public final class SystemBrowser {
     // MARK: Cookies
 
     /// Copies the cookies `profile`'s Chromium store has for `url` into this
-    /// browser's WebKit store, so a sign-in made in Chromium carries over;
+    /// page's WebKit store, so a sign-in made in Chromium carries over;
     /// returns how many were copied. Nothing is copied unless you call it:
     /// the two engines otherwise keep separate cookies.
     @discardableResult
@@ -362,25 +362,25 @@ public final class SystemBrowser {
     }
 
     private final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
-        weak var browser: SystemBrowser?
+        weak var page: SystemPage?
 
         func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction) async -> WKNavigationActionPolicy {
-            guard action.targetFrame?.isMainFrame ?? true, let browser, let decide = browser.decidePolicy else {
+            guard action.targetFrame?.isMainFrame ?? true, let page, let decide = page.decidePolicy else {
                 return .allow
             }
             let navigation = Navigation(
                 url: action.request.url,
                 hasUserGesture: action.navigationType == .linkActivated || action.navigationType == .formSubmitted)
-            return decide(browser, navigation) == .allow ? .allow : .cancel
+            return decide(page, navigation) == .allow ? .allow : .cancel
         }
 
         func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
                      for action: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
-            guard let url = action.request.url, let browser else { return nil }
-            if let onOpenWindow = browser.onOpenWindow {
-                onOpenWindow(browser, url)
+            guard let url = action.request.url, let page else { return nil }
+            if let onOpenWindow = page.onOpenWindow {
+                onOpenWindow(page, url)
             } else {
-                browser.load(url)
+                page.load(url)
             }
             return nil
         }
@@ -389,7 +389,7 @@ public final class SystemBrowser {
 
 // MARK: Website data stores
 
-extension SystemBrowser {
+extension SystemPage {
     /// The stores made so far, one per profile, kept while the profile is.
     private static let dataStores = NSMapTable<CefProfile, WKWebsiteDataStore>.weakToStrongObjects()
 

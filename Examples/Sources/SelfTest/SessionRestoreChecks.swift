@@ -2,14 +2,14 @@ import AppKit
 import CefChromium
 import CefKit
 
-/// Reopening what closed (`CefTabStrip.reopen`), and the previous session
+/// Reopening what closed (`CefTabs.reopen`), and the previous session
 /// after a clean quit and after a crash (`previousSession`,
 /// `restorePreviousSession`), the last two in two launches of a probe.
 extension SelfTest {
     static let sessionProbePhaseKey = "CEFSWIFT_SELFTEST_SESSION_PHASE"
 
     static func sessionRestoreChecks() async {
-        let strip = CefProfile.default.tabStrip
+        let strip = CefProfile.default.tabs
         func url(_ name: String) -> URL { URL(string: "chrome://version/?\(name)")! }
         func names(_ window: CefChromeWindow?) -> [String] { window?.tabs.map { $0.url?.query ?? "-" } ?? [] }
         check("session: no previous session on a first launch", strip.previousSession == nil,
@@ -18,21 +18,21 @@ extension SelfTest {
         do {
             one = try await CefChromeWindow.open(url: url("a"))
             let b = try await one.openTab(url("b"))
-            _ = try? await b.browser?.waitUntilLoaded(timeout: .seconds(10))
-            b.browser?.load(url("b2"))
-            _ = await waitUntil(timeout: .seconds(5)) { b.browser?.canGoBack == true && b.url == url("b2") }
+            _ = try? await b.page?.waitUntilLoaded(timeout: .seconds(10))
+            b.page?.load(url("b2"))
+            _ = await waitUntil(timeout: .seconds(5)) { b.page?.canGoBack == true && b.url == url("b2") }
             try await one.openTab(url("c"))
             two = try await CefChromeWindow.open(url: url("w2a"))
             try await two.openTab(url("w2b"))
         } catch {
             check("session: opens windows", false, detail: "\(error)")
-            return closeAllBrowsers()
+            return closeAllPages()
         }
         // Close a tab, then a whole window: the tab is no longer the newest.
-        let bBrowser = one.tabs.first { $0.url == url("b2") }?.browser
+        let bPage = one.tabs.first { $0.url == url("b2") }?.page
         one.tabs.first { $0.url == url("b2") }?.close()
         _ = await waitUntil(timeout: .seconds(5)) { !names(one).contains("b2") }
-        two.activeTab?.browser?.execute(.closeWindow)
+        two.activeTab?.page?.execute(.closeWindow)
         _ = await waitUntil(timeout: .seconds(5)) { two.isClosed }
         let closed = await strip.refreshRecentlyClosed()
         check("session: a window closed as a window is one entry with its tabs; a tab, an entry with its place",
@@ -43,11 +43,11 @@ extension SelfTest {
         if let tabItem = closed.first(where: { $0.kind == .tab }) {
             await expect("session: reopens a given tab, not the newest entry, in its window at its place, with its history") {
                 let window = try await strip.reopen(tabItem)
-                let reopened = await waitUntil(timeout: .seconds(5)) { one.tabs.contains { $0.url == url("b2") && $0.browser != nil } }
+                let reopened = await waitUntil(timeout: .seconds(5)) { one.tabs.contains { $0.url == url("b2") && $0.page != nil } }
                 let tab = one.tabs.first { $0.url == url("b2") }
-                _ = await waitUntil(timeout: .seconds(5)) { tab?.browser?.canGoBack == true }
-                return (reopened && window === one && tab?.index == 1 && tab?.browser?.canGoBack == true && tab?.browser !== bBrowser,
-                        "\(names(one)) in \(window?.id.description ?? "-") index \(tab?.index ?? -1) back \(tab?.browser?.canGoBack ?? false)")
+                _ = await waitUntil(timeout: .seconds(5)) { tab?.page?.canGoBack == true }
+                return (reopened && window === one && tab?.index == 1 && tab?.page?.canGoBack == true && tab?.page !== bPage,
+                        "\(names(one)) in \(window?.id.description ?? "-") index \(tab?.index ?? -1) back \(tab?.page?.canGoBack ?? false)")
             }
         }
         if let windowItem = closed.first(where: { $0.kind == .window }) {
@@ -61,7 +61,7 @@ extension SelfTest {
               await waitUntil(timeout: .seconds(5)) { strip.windows.count == 2 && strip.windows.allSatisfy { !$0.tabs.isEmpty } },
               detail: "\(strip.windows.map(names))")
         for window in strip.windows { window.close() }
-        _ = await waitUntil(timeout: .seconds(10)) { CefRuntime.shared.browsers.isEmpty }
+        _ = await waitUntil(timeout: .seconds(10)) { CefRuntime.shared.pages.isEmpty }
 
         // The previous session, in two launches sharing a profile.
         for mode in ["clean", "crash"] {
@@ -72,20 +72,20 @@ extension SelfTest {
             await runProbe("sessionRestore", label: "session (\(mode), relaunch)", root: root,
                            environment: [sessionProbePhaseKey: "\(mode)-second"], timeout: .seconds(60))
         }
-        closeAllBrowsers()
+        closeAllPages()
     }
 
     /// One launch of the previous-session probe.
     static func sessionRestoreProbe() async {
         let phase = ProcessInfo.processInfo.environment[sessionProbePhaseKey] ?? ""
-        let strip = CefProfile.default.tabStrip
+        let strip = CefProfile.default.tabs
         func url(_ name: String) -> URL { URL(string: "chrome://version/?\(name)")! }
         if phase.hasSuffix("first") {
             do {
                 let one = try await CefChromeWindow.open(url: url("s1a"))
                 let b = try await one.openTab(url("s1b"))
-                _ = try? await b.browser?.waitUntilLoaded(timeout: .seconds(10))
-                b.browser?.load(url("s1b2"))
+                _ = try? await b.page?.waitUntilLoaded(timeout: .seconds(10))
+                b.page?.load(url("s1b2"))
                 _ = await waitUntil(timeout: .seconds(5)) { b.url == url("s1b2") }
                 try await b.pin()
                 let two = try await CefChromeWindow.open(url: url("s2a"))
@@ -107,7 +107,7 @@ extension SelfTest {
         guard let session = strip.previousSession else {
             return check("previous session: is reported after a relaunch", false)
         }
-        let expectedExit: CefTabStrip.PreviousSession.Exit = phase.hasPrefix("clean") ? .clean : .crashed
+        let expectedExit: CefTabs.PreviousSession.Exit = phase.hasPrefix("clean") ? .clean : .crashed
         check("previous session: reports how the last run ended (\(expectedExit)) and its windows",
               session.exit == expectedExit && session.windows.count == 2
                 && session.windows.map { $0.map { $0.url.query ?? "-" } }.sorted { $0.first ?? "" < $1.first ?? "" }
@@ -120,8 +120,8 @@ extension SelfTest {
             _ = await waitUntil(timeout: .seconds(10)) { strip.windows.count == 2 && strip.windows.allSatisfy { $0.window != nil } }
             let layout = strip.windows.map { $0.tabs.map { "\($0.url?.query ?? "-")\($0.isPinned ? "(pinned)" : "")" } }
             let b = strip.windows.flatMap(\.tabs).first { $0.url == url("s1b2") }
-            _ = await waitUntil(timeout: .seconds(5)) { b?.browser?.canGoBack == true }
-            let history = b?.browser?.canGoBack == true
+            _ = await waitUntil(timeout: .seconds(5)) { b?.page?.canGoBack == true }
+            let history = b?.page?.canGoBack == true
             check("previous session: restores its windows, announced, with \(session.keepsHistory ? "history and pinned tabs" : "addresses and pinned tabs")",
                   windows.count == 2 && strip.windows.count == 2 && announced >= 2 && b?.isPinned == true
                     && history == session.keepsHistory && strip.previousSession == nil,
@@ -130,10 +130,10 @@ extension SelfTest {
             check("previous session: restores its windows", false, detail: "\(error)")
         }
         for window in strip.windows { window.close() }
-        _ = await waitUntil(timeout: .seconds(10)) { CefRuntime.shared.browsers.isEmpty }
+        _ = await waitUntil(timeout: .seconds(10)) { CefRuntime.shared.pages.isEmpty }
     }
 
-    private static func closeAllBrowsers() {
-        for browser in CefRuntime.shared.browsers { browser.close(force: true) }
+    private static func closeAllPages() {
+        for page in CefRuntime.shared.pages { page.close(force: true) }
     }
 }

@@ -158,13 +158,13 @@ private struct TabLayoutSetting: View {
 
 /// File › Recently Closed: what Chromium can reopen, newest first — tabs,
 /// and windows and groups with their tab counts. Each reopens as Chromium
-/// closed it (`CefTabStrip.reopen`): a tab in its window at its place, a
+/// closed it (`CefTabs.reopen`): a tab in its window at its place, a
 /// window with all its tabs, each with its history.
 private struct RecentlyClosedMenu: View {
     let controller: BrowserController
 
     var body: some View {
-        let strip = CefProfile.default.tabStrip
+        let strip = CefProfile.default.tabs
         Menu("Recently Closed") {
             ForEach(strip.recentlyClosed.prefix(15)) { item in
                 Button(Self.title(of: item)) {
@@ -175,7 +175,7 @@ private struct RecentlyClosedMenu: View {
         .disabled(strip.recentlyClosed.isEmpty)
     }
 
-    static func title(of item: CefTabStrip.ClosedItem) -> String {
+    static func title(of item: CefTabs.ClosedItem) -> String {
         let title = String(menuTitle: item.title, url: item.url)
         switch item.kind {
         case .window: return "Window: \(item.tabCount) \(item.tabCount == 1 ? "Tab" : "Tabs") — \(title)"

@@ -4,7 +4,7 @@ import SwiftUI
 import SystemEngine
 
 /// Tabs shown by the system's WebKit instead of Chromium (`SystemEngine`'s
-/// `SystemBrowser`), which plays the FairPlay-protected video Chromium in
+/// `SystemPage`), which plays the FairPlay-protected video Chromium in
 /// CefSwift cannot: streaming services open there by themselves (Settings ›
 /// "Play streaming services with WebKit"), and View › Open in WebKit moves
 /// any page there. WebKit pages are not Chromium tabs, so each is a window
@@ -30,11 +30,11 @@ final class WebKitTabs: BrowserFeature {
         self.controller = controller
     }
 
-    func decidePolicy(for navigation: CefNavigationAction, in browser: CefBrowser) -> CefNavigationDecision? {
+    func decidePolicy(for navigation: CefNavigationAction, in page: CefPage) -> CefNavigationDecision? {
         guard navigation.isMainFrame, let url = navigation.url, Self.opensStreamingSitesAutomatically,
-              !keptInChromium.contains(ObjectIdentifier(browser)), SystemBrowser.prefersSystemEngine(for: url)
+              !keptInChromium.contains(ObjectIdentifier(page)), SystemPage.prefersSystemEngine(for: url)
         else { return nil }
-        open(url, profile: browser.configuration.profile ?? .default, replacing: browser)
+        open(url, profile: page.configuration.profile ?? .default, replacing: page)
         return .cancel
     }
 
@@ -42,7 +42,7 @@ final class WebKitTabs: BrowserFeature {
     /// Chromium profile's cookies for the site over. With `replacing`, a
     /// Chromium tab that has shown nothing else yet closes, so the WebKit
     /// tab takes its place.
-    func open(_ url: URL, profile: CefProfile, replacing source: CefBrowser? = nil) {
+    func open(_ url: URL, profile: CefProfile, replacing source: CefPage? = nil) {
         guard let controller else { return }
         let tab = WebKitTab(profile: profile, tabs: self)
         tabs.append(tab)
@@ -50,15 +50,15 @@ final class WebKitTabs: BrowserFeature {
             forName: NSWindow.willCloseNotification, object: tab.window, queue: .main
         ) { [weak self, weak tab] _ in
             MainActor.assumeIsolated {
-                tab?.browser.close()
+                tab?.page.close()
                 self?.tabs.removeAll { $0 === tab }
             }
         }
-        controller.showTab(tab.window, page: tab.browser)
+        controller.showTab(tab.window, page: tab.page)
         if let source, !source.canGoBack { controller.tab(of: source)?.close() }
         Task {
-            _ = try? await tab.browser.importCookies(from: profile, for: url)
-            tab.browser.load(url)
+            _ = try? await tab.page.importCookies(from: profile, for: url)
+            tab.page.load(url)
         }
     }
 
@@ -69,8 +69,8 @@ final class WebKitTabs: BrowserFeature {
         // exists, after this returns.
         guard let controller else { return }
         Task {
-            if let browser = await controller.openTabNow(url: url, isPrivate: isPrivate)?.browser {
-                keptInChromium.insert(ObjectIdentifier(browser))
+            if let page = await controller.openTabNow(url: url, isPrivate: isPrivate)?.page {
+                keptInChromium.insert(ObjectIdentifier(page))
             }
         }
     }
@@ -83,10 +83,10 @@ final class WebKitTabs: BrowserFeature {
     /// View › Open in WebKit: shows the frontmost Chromium tab's page in a
     /// WebKit tab instead.
     private func openCurrentTab() {
-        guard let controller, let browser = controller.current, let url = browser.url,
-              url.scheme == "https" || url.scheme == "http", let tab = controller.tab(of: browser)
+        guard let controller, let page = controller.current, let url = page.url,
+              url.scheme == "https" || url.scheme == "http", let tab = controller.tab(of: page)
         else { return }
-        open(url, profile: browser.configuration.profile ?? .default)
+        open(url, profile: page.configuration.profile ?? .default)
         tab.close()
     }
 
@@ -114,4 +114,4 @@ final class WebKitTabs: BrowserFeature {
     }
 }
 
-extension SystemBrowser: TabPage {}
+extension SystemPage: TabPage {}

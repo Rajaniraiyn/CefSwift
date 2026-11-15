@@ -4,7 +4,7 @@ import SwiftUI
 /// How a demo tells the gallery it is up, for `Gallery -smoke`. Outside
 /// smoke mode nothing waits on it.
 ///
-/// Demos report through a modifier: `.readyWhenLoaded(browser)` for a page,
+/// Demos report through a modifier: `.readyWhenLoaded(page)` for a page,
 /// or `.reportReady { … }` for work of their own.
 @MainActor
 final class DemoReadiness {
@@ -49,11 +49,11 @@ extension View {
         modifier(ReportReady(work: work))
     }
 
-    /// Reports the demo ready once each browser has loaded its page.
-    func readyWhenLoaded(_ browsers: CefBrowser...) -> some View {
+    /// Reports the demo ready once each page has loaded its page.
+    func readyWhenLoaded(_ pages: CefPage...) -> some View {
         reportReady {
-            for browser in browsers {
-                try await browser.waitUntilLoaded(timeout: .seconds(30))
+            for page in pages {
+                try await page.waitUntilLoaded(timeout: .seconds(30))
             }
         }
     }

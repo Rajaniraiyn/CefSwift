@@ -27,16 +27,16 @@ extension SelfTest {
     /// A Chrome-style window on `/page`, every surface native.
     static func surfaceWindow(
         _ base: URL, path: String = "page", configure: (inout CefWindow.Configuration) -> Void = { _ in },
-        browserConfiguration: CefBrowser.Configuration = .init()
+        pageConfiguration: CefPage.Configuration = .init()
     ) async -> CefWindow? {
-        let browser = CefBrowser(url: base.appendingPathComponent(path), configuration: browserConfiguration)
+        let page = CefPage(url: base.appendingPathComponent(path), configuration: pageConfiguration)
         var configuration = CefWindow.Configuration()
         configuration.frame = CGRect(x: 160, y: 160, width: 900, height: 640)
         configure(&configuration)
-        let window = CefWindow(browser: browser, configuration: configuration)
+        let window = CefWindow(page: page, configuration: configuration)
         window.chromiumSurfacePolicy = window.chromiumSurfacePolicy
         window.show()
-        guard await loaded(browser), window.window != nil else {
+        guard await loaded(page), window.window != nil else {
             window.close()
             return nil
         }
@@ -46,7 +46,7 @@ extension SelfTest {
 
     static func closeSurfaceWindow(_ window: CefWindow) async {
         window.close()
-        _ = await waitUntil { window.isClosed && window.browser.state == .closed }
+        _ = await waitUntil { window.isClosed && window.page.state == .closed }
     }
 
     static func nativeSurface(_ kind: CefChromiumSurface.Kind, in window: CefWindow, timeout: Duration = .seconds(5)) async
@@ -68,10 +68,10 @@ extension SelfTest {
         guard let window = await surfaceWindow(base) else {
             return check("surface states: window loads", false)
         }
-        let browser = window.browser
+        let page = window.page
 
         // presented → dismissed(.app)
-        browser.execute(.createQRCode)
+        page.execute(.createQRCode)
         if let qr = await nativeSurface(.qrCode, in: window) {
             check("surface states: a native surface's window is followed as shown",
                   CefChromiumTesting.widgetPhases(of: window).contains("shown qrCode"),
@@ -85,7 +85,7 @@ extension SelfTest {
         }
 
         // presented → dismissed(.chromium): Esc in Chromium's own bubble.
-        browser.execute(.createQRCode)
+        page.execute(.createQRCode)
         if let qr = await nativeSurface(.qrCode, in: window), let child = qr.window {
             SurfaceInventory.sendEscape(to: child)
             check("surface states: Esc in Chromium's bubble ends it as .chromium",
@@ -99,9 +99,9 @@ extension SelfTest {
         // A second bubble of another kind while one is open: whatever
         // Chromium does with the first, its state says so.
         try? await Task.sleep(for: .milliseconds(500))
-        browser.execute(.createQRCode)
+        page.execute(.createQRCode)
         let qr = await nativeSurface(.qrCode, in: window)
-        browser.execute(.zoomIn)
+        page.execute(.zoomIn)
         let zoom = await nativeSurface(.zoom, in: window)
         try? await Task.sleep(for: .milliseconds(300))
         print("NOTE surface states: QR code then zoom: \(window.chromiumSurfaces.map { "\($0.kind)" }), QR \(qr.map { "\($0.state)" } ?? "-")")
@@ -114,12 +114,12 @@ extension SelfTest {
         } ?? false)
         check("surface states: a second bubble while one is open is followed, and the first's state matches its window",
               zoom != nil && consistent, detail: "\(window.chromiumSurfaces.map { "\($0.kind)" }) QR \(qr.map { "\($0.state)" } ?? "-")")
-        browser.execute(.resetZoom)
+        page.execute(.resetZoom)
         window.chromiumSurfaces.forEach { $0.dismiss() }
         _ = await waitUntil(timeout: .seconds(3)) { window.chromiumSurfaces.isEmpty }
 
         // Native → hidden while open.
-        browser.execute(.createQRCode)
+        page.execute(.createQRCode)
         if let qr = await nativeSurface(.qrCode, in: window) {
             window.chromiumSurfacePolicy[.qrCode] = .hidden
             check("surface states: native → hidden while open ends it as .presentation and hides Chromium's",
@@ -131,20 +131,20 @@ extension SelfTest {
         var announced: [CefChromiumSurface] = []
         window.onChromiumSurface = { announced.append($0) }
         window.chromiumSurfacePolicy[.zoom] = .hidden
-        browser.execute(.zoomIn)
+        page.execute(.zoomIn)
         check("surface states: a hidden kind is still announced, already dismissed",
               await waitUntil { announced.contains { $0.kind == .zoom && $0.state == .dismissed(.presentation) } }
                   && visibleWidgets(of: window).isEmpty,
               detail: "\(announced.map { "\($0.kind) \($0.state)" })")
         window.onChromiumSurface = nil
-        browser.execute(.resetZoom)
-        _ = await waitUntil(timeout: .seconds(3)) { browser.zoomLevel == 0 }
+        page.execute(.resetZoom)
+        _ = await waitUntil(timeout: .seconds(3)) { page.zoomLevel == 0 }
         try? await Task.sleep(for: .seconds(2))
         window.chromiumSurfacePolicy[.zoom] = .native
 
         // Native → custom while open: the app's interface takes over.
         window.chromiumSurfacePolicy[.qrCode] = .native
-        browser.execute(.createQRCode)
+        page.execute(.createQRCode)
         if let qr = await nativeSurface(.qrCode, in: window) {
             var presented: [CefChromiumSurface] = []
             window.setCustomPresentation(for: .qrCode) { presented.append($0) }
@@ -163,7 +163,7 @@ extension SelfTest {
             let anchorView = NSView(frame: CGRect(x: 100, y: content.bounds.maxY - 80, width: 300, height: 20))
             content.addSubview(anchorView)
             window.chromiumSurfacePolicy.anchors[.qrCode] = .view(anchorView, alignment: .leading)
-            browser.execute(.createQRCode)
+            page.execute(.createQRCode)
             if let qr = await nativeSurface(.qrCode, in: window), let nsWindow = window.window {
                 func isUnder(_ view: NSView) -> Bool {
                     guard let frame = qr.window?.frame else { return false }
@@ -193,9 +193,9 @@ extension SelfTest {
         }
 
         // A native bubble and a navigation.
-        browser.execute(.createQRCode)
+        page.execute(.createQRCode)
         if let qr = await nativeSurface(.qrCode, in: window) {
-            _ = await load(base.appendingPathComponent("ping-page"), in: browser)
+            _ = await load(base.appendingPathComponent("ping-page"), in: page)
             try? await Task.sleep(for: .milliseconds(500))
             print("NOTE surface states: Chromium's QR code bubble after a navigation: \(qr.state)")
             qr.dismiss()
@@ -209,19 +209,19 @@ extension SelfTest {
         guard let window = await surfaceWindow(base) else {
             return check("surface states: custom window loads", false)
         }
-        let browser = window.browser
+        let page = window.page
         var presented: [CefChromiumSurface] = []
         window.setCustomPresentation(for: .qrCode) { presented.append($0) }
 
         // A second command replaces the first.
-        browser.execute(.createQRCode)
-        browser.execute(.createQRCode)
+        page.execute(.createQRCode)
+        page.execute(.createQRCode)
         check("surface states: a second custom surface replaces the first (.replaced)",
               presented.count == 2 && presented[0].state == .dismissed(.replaced) && presented[1].state == .presented
                   && window.chromiumSurfaces.count == 1)
 
         // A navigation ends it, as Chromium's bubbles end.
-        _ = await load(base.appendingPathComponent("ping-page"), in: browser)
+        _ = await load(base.appendingPathComponent("ping-page"), in: page)
         check("surface states: a navigation ends a custom bubble as .chromium",
               await waitUntil(timeout: .seconds(3)) { presented.last?.state == .dismissed(.chromium) && window.chromiumSurfaces.isEmpty },
               detail: "\(presented.last.map { "\($0.state)" } ?? "-")")
@@ -237,10 +237,10 @@ extension SelfTest {
         // ends it.
         var finds: [CefChromiumSurface] = []
         window.setCustomPresentation(for: .findBar) { finds.append($0) }
-        let session = browser.findSession
-        browser.execute(.find)
+        let session = page.findSession
+        page.execute(.find)
         session.text = "page"
-        browser.execute(.find)
+        page.execute(.find)
         check("surface states: ⌘F with the custom find bar open keeps it and its search",
               finds.count == 1 && finds[0].state == .presented && session.isActive && session.text == "page")
         session.end()
@@ -248,8 +248,8 @@ extension SelfTest {
               await waitUntil(timeout: .seconds(3)) { finds.first?.state == .dismissed(.app) && window.chromiumSurfaces.isEmpty })
         // Rapid toggling.
         for _ in 0..<10 {
-            browser.execute(.find)
-            browser.execute(CefChromeCommand(rawValue: Int(IDC_CLOSE_FIND_OR_STOP)))
+            page.execute(.find)
+            page.execute(CefChromeCommand(rawValue: Int(IDC_CLOSE_FIND_OR_STOP)))
             finds.last?.dismiss()
         }
         try? await Task.sleep(for: .milliseconds(300))
@@ -262,7 +262,7 @@ extension SelfTest {
         // SwiftUI panel: keyboard focus returns to the window afterwards.
         window.setCustomPresentation(for: .qrCode) { _ in Text("QR").padding() }
         window.window?.makeKeyAndOrderFront(nil)
-        browser.execute(.createQRCode)
+        page.execute(.createQRCode)
         let panel = await waitUntil(timeout: .seconds(3)) { NSApp.keyWindow?.parent === window.window }
         let panelSurface = window.chromiumSurfaces.first { $0.kind == .qrCode }
         panelSurface?.dismiss()
@@ -280,27 +280,27 @@ extension SelfTest {
         guard let window = await surfaceWindow(base) else {
             return check("surface states: zoom window loads", false)
         }
-        let browser = window.browser
+        let page = window.page
         var zooms: [CefChromiumSurface] = []
         window.setCustomPresentation(for: .zoom) { zooms.append($0) }
-        let before = browser.zoomLevel
+        let before = page.zoomLevel
         // As key repeat sends them, a few milliseconds apart.
         for _ in 0..<5 {
-            browser.execute(.zoomIn)
+            page.execute(.zoomIn)
             try? await Task.sleep(for: .milliseconds(30))
         }
         check("surface states: a custom zoom bubble follows the zoom commands, which still zoom",
-              await waitUntil(timeout: .seconds(3)) { browser.zoomLevel > before }
+              await waitUntil(timeout: .seconds(3)) { page.zoomLevel > before }
                   && zooms.count == 5 && zooms.filter { $0.state == .presented }.count == 1,
-              detail: "level \(browser.zoomLevel), \(zooms.count) surfaces")
+              detail: "level \(page.zoomLevel), \(zooms.count) surfaces")
         try? await Task.sleep(for: .milliseconds(400))
         check("surface states: Chromium's zoom bubble stays hidden under a custom one", visibleWidgets(of: window).isEmpty,
               detail: "\(visibleWidgets(of: window).map { NSStringFromRect($0.frame) })")
         window.setCustomPresentation(for: .zoom, nil)
         window.chromiumSurfacePolicy[.zoom] = .hidden
-        browser.execute(.resetZoom)
+        page.execute(.resetZoom)
         check("surface states: a hidden zoom bubble still lets the command zoom",
-              await waitUntil(timeout: .seconds(3)) { browser.zoomLevel == 0 })
+              await waitUntil(timeout: .seconds(3)) { page.zoomLevel == 0 })
         window.chromiumSurfacePolicy[.zoom] = .native
 
         // The custom status bubble follows statusText.
@@ -309,10 +309,10 @@ extension SelfTest {
         window.chromiumSurfacePolicy[.statusBubble] = .custom
         var shown = false
         for _ in 0..<5 where !shown {
-            _ = try? await browser.devTools.send("Input.dispatchMouseEvent", ["type": "mouseMoved", "x": 1, "y": 1])
-            let point = try? await browser.evaluateJavaScript(
+            _ = try? await page.devTools.send("Input.dispatchMouseEvent", ["type": "mouseMoved", "x": 1, "y": 1])
+            let point = try? await page.evaluateJavaScript(
                 "(() => { const r = document.getElementById('link').getBoundingClientRect(); return [r.x + 4, r.y + 4]; })()")
-            _ = try? await browser.devTools.send("Input.dispatchMouseEvent", [
+            _ = try? await page.devTools.send("Input.dispatchMouseEvent", [
                 "type": "mouseMoved", "x": .number(point?[0].doubleValue ?? 0), "y": .number(point?[1].doubleValue ?? 0),
             ])
             shown = await waitUntil(timeout: .seconds(2)) { statuses.contains { $0.state == .presented } }
@@ -322,11 +322,11 @@ extension SelfTest {
                  because: "the test window is covered, so Chromium does not hover the page", .environment)
         } else {
             check("surface states: a custom status bubble appears with the status text",
-                  shown && statuses.last?.title == browser.statusText, detail: "'\(browser.statusText)'")
-            _ = try? await browser.devTools.send("Input.dispatchMouseEvent", ["type": "mouseMoved", "x": 1, "y": 1])
+                  shown && statuses.last?.title == page.statusText, detail: "'\(page.statusText)'")
+            _ = try? await page.devTools.send("Input.dispatchMouseEvent", ["type": "mouseMoved", "x": 1, "y": 1])
             check("surface states: and ends as .chromium when the text goes",
                   await waitUntil(timeout: .seconds(3)) { statuses.last?.state == .dismissed(.chromium) },
-                  detail: "'\(browser.statusText)' \(statuses.last.map { "\($0.state)" } ?? "-")")
+                  detail: "'\(page.statusText)' \(statuses.last.map { "\($0.state)" } ?? "-")")
         }
         window.chromiumSurfacePolicy[.statusBubble] = .native
         window.onChromiumSurface = nil
@@ -339,9 +339,9 @@ extension SelfTest {
         guard let window = await surfaceWindow(base, path: "surfaces") else {
             return check("surface states: surfaces page loads", false)
         }
-        let browser = window.browser
+        let page = window.page
         func gesture(_ script: String) async {
-            _ = try? await browser.devTools.send(
+            _ = try? await page.devTools.send(
                 "Runtime.evaluate", ["expression": .string(script), "userGesture": true, "awaitPromise": false])
         }
         // A request made before the page counts the gesture shows nothing:
@@ -356,7 +356,7 @@ extension SelfTest {
                   chooser.kind.hangsFromToolbar && chooser.kind.capabilities.contains(.dismiss))
             chooser.dismiss()
             let closed = await waitUntil { chooser.window?.isVisible != true }
-            let usable = await pageTakesInput(browser)
+            let usable = await pageTakesInput(page)
             check("surface kinds: dismissing the device chooser cancels it", closed && usable)
         } else {
             check("surface kinds: the USB chooser is recognized", false,
@@ -372,12 +372,12 @@ extension SelfTest {
         } else {
             print("NOTE surface kinds: no payment sheet: \(window.chromiumSurfaces.map { "\($0.kind)" })")
         }
-        browser.execute(.print)
+        page.execute(.print)
         if let preview = await nativeSurface(.printPreview, in: window, timeout: .seconds(8)) {
             try? await Task.sleep(for: .seconds(1))
             preview.dismiss()
             let closed = await waitUntil { preview.window?.isVisible != true }
-            let usable = await pageTakesInput(browser)
+            let usable = await pageTakesInput(page)
             check("surface kinds: print preview is recognized and dismisses, leaving the page usable", closed && usable,
                   detail: "closed \(closed), page takes input \(usable)")
         } else {
@@ -386,9 +386,9 @@ extension SelfTest {
         }
         // Hiding a tab-modal dialog leaves the page usable.
         window.chromiumSurfacePolicy[.printPreview] = .hidden
-        browser.execute(.print)
+        page.execute(.print)
         try? await Task.sleep(for: .seconds(2))
-        let usable = await pageTakesInput(browser)
+        let usable = await pageTakesInput(page)
         check("surface kinds: a hidden print preview is cancelled and the page takes input",
               visibleWidgets(of: window).isEmpty && usable,
               detail: "\(visibleWidgets(of: window).map(\.title))")
@@ -397,14 +397,14 @@ extension SelfTest {
 
     /// Whether the page answers a click: a tab-modal dialog left open
     /// would leave it inert.
-    static func pageTakesInput(_ browser: CefBrowser) async -> Bool {
-        _ = try? await browser.evaluateJavaScript("window.__clicked = false; document.addEventListener('click', () => window.__clicked = true, {once: true}); 0")
+    static func pageTakesInput(_ page: CefPage) async -> Bool {
+        _ = try? await page.evaluateJavaScript("window.__clicked = false; document.addEventListener('click', () => window.__clicked = true, {once: true}); 0")
         for type in ["mousePressed", "mouseReleased"] {
-            _ = try? await browser.devTools.send(
+            _ = try? await page.devTools.send(
                 "Input.dispatchMouseEvent", ["type": .string(type), "x": 850, "y": 600, "button": "left", "clickCount": 1])
         }
         return await waitUntilAsync(timeout: .seconds(3)) {
-            (try? await browser.evaluateJavaScript("window.__clicked"))?.boolValue == true
+            (try? await page.evaluateJavaScript("window.__clicked"))?.boolValue == true
         }
     }
 
@@ -413,8 +413,8 @@ extension SelfTest {
     static func windowLifecycleChecks(base: URL) async {
         // Two windows keep their own presentations; an incognito one too.
         guard let first = await surfaceWindow(base),
-              let second = await surfaceWindow(base, browserConfiguration: {
-                  var configuration = CefBrowser.Configuration()
+              let second = await surfaceWindow(base, pageConfiguration: {
+                  var configuration = CefPage.Configuration()
                   configuration.profile = .incognito()
                   return configuration
               }())
@@ -423,20 +423,20 @@ extension SelfTest {
         }
         var presented: [CefChromiumSurface] = []
         first.setCustomPresentation(for: .qrCode) { presented.append($0) }
-        second.browser.execute(.createQRCode)
+        second.page.execute(.createQRCode)
         let native = await nativeSurface(.qrCode, in: second)
         check("surface states: a second (incognito) window keeps Chromium's QR code while the first replaces it",
               native != nil && presented.isEmpty && second.chromiumSurfacePolicy[.qrCode] == .native)
 
         // Closing the window ends its surfaces, and nothing is called after.
-        first.browser.execute(.createQRCode)
-        first.browser.execute(.find)
+        first.page.execute(.createQRCode)
+        first.page.execute(.find)
         _ = await waitUntil(timeout: .seconds(5)) { first.chromiumSurfaces.count == 2 }
         let open = first.chromiumSurfaces
         var calledAfterClose = false
         await closeSurfaceWindow(first)
         first.onChromiumSurface = { _ in calledAfterClose = true }
-        first.browser.execute(.createQRCode)
+        first.page.execute(.createQRCode)
         check("surface states: closing the window ends its surfaces as .window",
               open.count == 2 && open.allSatisfy { $0.state == .dismissed(.window) } && first.chromiumSurfaces.isEmpty,
               detail: "\(open.map { "\($0.kind) \($0.state)" })")
@@ -446,13 +446,13 @@ extension SelfTest {
               native.map { $0.state != .presented } ?? false, detail: "\(native.map { "\($0.state)" } ?? "-")")
 
         // A surface asked for right as the window shows.
-        let browser = CefBrowser(url: base.appendingPathComponent("page"))
-        let early = CefWindow(browser: browser)
+        let page = CefPage(url: base.appendingPathComponent("page"))
+        let early = CefWindow(page: page)
         early.chromiumSurfacePolicy = CefChromiumSurface.Policy()
         early.show()
-        browser.execute(.createQRCode)
-        _ = await loaded(browser)
-        browser.execute(.createQRCode)
+        page.execute(.createQRCode)
+        _ = await loaded(page)
+        page.execute(.createQRCode)
         check("surface states: a QR code asked for as the window first shows is followed",
               await nativeSurface(.qrCode, in: early) != nil)
         await closeSurfaceWindow(early)

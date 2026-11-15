@@ -143,14 +143,14 @@ extension SelfTest {
     // MARK: Favicons
 
     private static func faviconChecks(_ profile: CefProfile) async {
-        let page = URL(string: "selftest://edge/favicon.html")!
+        let faviconPage = URL(string: "selftest://edge/favicon.html")!
         // The page shows a solid red 32-pixel icon (`EdgePages.iconPNG`).
-        let visited = CefWindow(browser: CefBrowser(url: page))
-        _ = await waitUntil { visited.browser.favicon != nil }
+        let visited = CefWindow(page: CefPage(url: faviconPage))
+        _ = await waitUntil { visited.page.favicon != nil }
         visited.close()
         _ = await waitUntil { visited.isClosed }
         await expect("favicons: the icon's pixels arrive intact") {
-            let icon = try await profile.history.favicon(for: page, size: 16)
+            let icon = try await profile.history.favicon(for: faviconPage, size: 16)
             guard let image = icon?.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
                 return (false, "no icon")
             }
@@ -172,8 +172,8 @@ extension SelfTest {
         }
         await expect("favicons: one call answers for a list, leaving out pages without an icon") {
             let unknown = URL(string: "https://never-visited.invalid/icon-check")!
-            let icons = try await profile.history.favicons(for: [page, unknown], size: 16)
-            return (icons[page] != nil && icons[unknown] == nil, "\(icons.keys.map(\.absoluteString))")
+            let icons = try await profile.history.favicons(for: [faviconPage, unknown], size: 16)
+            return (icons[faviconPage] != nil && icons[unknown] == nil, "\(icons.keys.map(\.absoluteString))")
         }
     }
 

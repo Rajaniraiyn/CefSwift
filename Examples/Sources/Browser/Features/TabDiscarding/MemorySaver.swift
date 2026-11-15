@@ -10,7 +10,7 @@ extension TabDiscarding {
         MemorySaverSetting()
     }
 
-    @ViewBuilder func toolbarItems(_ placement: ToolbarPlacement, for browser: CefBrowser) -> some View {
+    @ViewBuilder func toolbarItems(_ placement: ToolbarPlacement, for page: CefPage) -> some View {
         if placement == .trailing { SleepingTabsButton() }
     }
 }
@@ -67,7 +67,7 @@ private struct SleepingTabsButton: View {
     @Environment(BrowserController.self) private var controller
 
     var body: some View {
-        let sleeping = controller.allTabs.compactMap(\.browser).filter(\.isDiscarded)
+        let sleeping = controller.allTabs.compactMap(\.page).filter(\.isDiscarded)
         if !sleeping.isEmpty {
             Menu {
                 Text("^[\(sleeping.count) tab](inflect: true) asleep to save memory")

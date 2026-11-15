@@ -15,13 +15,13 @@ struct AddressBar: BrowserFeature {
         }
     }
 
-    @ViewBuilder func toolbarItems(_ placement: ToolbarPlacement, for browser: CefBrowser) -> some View {
-        if placement == .principal { AddressField(browser: browser) }
+    @ViewBuilder func toolbarItems(_ placement: ToolbarPlacement, for page: CefPage) -> some View {
+        if placement == .principal { AddressField(page: page) }
     }
 }
 
 private struct AddressField: View {
-    let browser: CefBrowser
+    let page: CefPage
     @Environment(BrowserController.self) private var controller
 
     @State private var text = ""
@@ -30,7 +30,7 @@ private struct AddressField: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            controller.toolbarItems(.addressFieldLeading, for: browser)
+            controller.toolbarItems(.addressFieldLeading, for: page)
             ZStack {
                 TextField("Search or enter website name", text: $text)
                     .textFieldStyle(.plain)
@@ -50,10 +50,10 @@ private struct AddressField: View {
                         .allowsHitTesting(false)
                 }
             }
-            controller.toolbarItems(.addressFieldTrailing, for: browser)
-            if !isFocused, browser.url != nil {
-                Button(browser.isLoading ? "Stop" : "Reload", systemImage: browser.isLoading ? "xmark" : "arrow.clockwise") {
-                    if browser.isLoading { browser.stopLoading() } else { browser.reload() }
+            controller.toolbarItems(.addressFieldTrailing, for: page)
+            if !isFocused, page.url != nil {
+                Button(page.isLoading ? "Stop" : "Reload", systemImage: page.isLoading ? "xmark" : "arrow.clockwise") {
+                    if page.isLoading { page.stopLoading() } else { page.reload() }
                 }
                 .labelStyle(.iconOnly)
                 .buttonStyle(.borderless)
@@ -81,18 +81,18 @@ private struct AddressField: View {
         .onAppear {
             suggestions.setFieldText = { [$text] in $text.wrappedValue = $0 }
             suggestions.favicon = { [controller] url in controller.tab(showing: url)?.favicon }
-            suggestions.choose = { [browser, controller, $isFocused] suggestion in
+            suggestions.choose = { [page, controller, $isFocused] suggestion in
                 $isFocused.wrappedValue = false
-                Self.open(suggestion, in: browser, controller: controller)
+                Self.open(suggestion, in: page, controller: controller)
             }
         }
-        .onChange(of: browser.url, initial: true) {
+        .onChange(of: page.url, initial: true) {
             if !isFocused { text = editableText }
         }
         .onChange(of: text) {
             guard isFocused else { return }
             suggestions.fieldTextChanged(
-                to: text, profile: browser.configuration.profile ?? .default, currentURL: browser.url)
+                to: text, profile: page.configuration.profile ?? .default, currentURL: page.url)
         }
         .onChange(of: isFocused) { _, focused in
             guard focused else {
@@ -100,7 +100,7 @@ private struct AddressField: View {
                 text = editableText
                 return
             }
-            suggestions.beginEditing(profile: browser.configuration.profile ?? .default)
+            suggestions.beginEditing(profile: page.configuration.profile ?? .default)
             // Select the whole address so typing replaces it, as Safari does.
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                 NSApp.sendAction(#selector(NSText.selectAll(_:)), to: nil, from: nil)
@@ -110,14 +110,14 @@ private struct AddressField: View {
 
     /// What the field shows when not editing.
     private var summary: String {
-        controller.isStartPage(browser.url) ? "" : AddressBar.summary(
-            of: browser.url, title: browser.title,
-            securityDisplay: browser.url.flatMap(CefRuntime.shared.securityDisplayString(for:)))
+        controller.isStartPage(page.url) ? "" : AddressBar.summary(
+            of: page.url, title: page.title,
+            securityDisplay: page.url.flatMap(CefRuntime.shared.securityDisplayString(for:)))
     }
 
     /// What the field shows while editing: the full address.
     private var editableText: String {
-        controller.isStartPage(browser.url) ? "" : AddressBar.editableText(for: browser.url)
+        controller.isStartPage(page.url) ? "" : AddressBar.editableText(for: page.url)
     }
 
     /// Load progress, a hairline along the field's lower edge.
@@ -125,29 +125,29 @@ private struct AddressField: View {
         GeometryReader { field in
             Rectangle()
                 .fill(.tint)
-                .frame(width: field.size.width * browser.estimatedProgress, height: 2)
+                .frame(width: field.size.width * page.estimatedProgress, height: 2)
                 .frame(maxHeight: .infinity, alignment: .bottom)
         }
         .clipShape(.rect(cornerRadius: 9))
-        .opacity(browser.isLoading ? 1 : 0)
-        .animation(.easeOut(duration: 0.25), value: browser.estimatedProgress)
-        .animation(.easeOut(duration: 0.4), value: browser.isLoading)
+        .opacity(page.isLoading ? 1 : 0)
+        .animation(.easeOut(duration: 0.25), value: page.estimatedProgress)
+        .animation(.easeOut(duration: 0.4), value: page.isLoading)
         .allowsHitTesting(false)
     }
 
     private func navigate() {
         guard let destination = TypedAddress.destination(for: text) else { return }
         isFocused = false
-        browser.load(destination)
+        page.load(destination)
     }
 
     /// Goes where a suggestion leads: an open tab is brought forward, a
     /// search runs on the browser's search engine, a page opens.
-    private static func open(_ suggestion: CefAutocomplete.Suggestion, in browser: CefBrowser, controller: BrowserController) {
+    private static func open(_ suggestion: CefAutocomplete.Suggestion, in page: CefPage, controller: BrowserController) {
         if suggestion.kind == .openTab, let url = suggestion.url, controller.switchToTab(showing: url) { return }
         let destination = suggestion.isSearch ? TypedAddress.searchURL(for: suggestion.text) : suggestion.url
         if let destination = destination ?? TypedAddress.destination(for: suggestion.replacementText) {
-            browser.load(destination)
+            page.load(destination)
         }
     }
 }

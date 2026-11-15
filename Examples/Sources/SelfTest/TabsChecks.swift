@@ -3,11 +3,11 @@ import CefChromium
 import CefKit
 import SwiftUI
 
-/// `CefTabStrip`, `CefTab`, `CefChromeWindow`: Chromium's own tabbed
+/// `CefTabs`, `CefTab`, `CefChromeWindow`: Chromium's own tabbed
 /// windows, mirrored and driven, with the app's views over Chrome's.
 extension SelfTest {
-    static func tabStripChecks() async {
-        let strip = CefProfile.default.tabStrip
+    static func tabsChecks() async {
+        let strip = CefProfile.default.tabs
         func url(_ name: String) -> URL { URL(string: "chrome://version/?\(name)")! }
         func tabs(_ window: CefChromeWindow) -> [String] { window.tabs.map { $0.url?.query ?? "-" } }
         func tab(_ name: String, in window: CefChromeWindow? = nil) -> CefTab? {
@@ -24,31 +24,31 @@ extension SelfTest {
             check("tab strip: opens a window Chrome draws", false, detail: "\(error), \(strip.lastError ?? "")")
             return closeAll()
         }
-        _ = await waitUntil(timeout: .seconds(10)) { window.window != nil && window.activeTab?.browser != nil }
+        _ = await waitUntil(timeout: .seconds(10)) { window.window != nil && window.activeTab?.page != nil }
         check("tab strip: opens a window, listed with its tab and browser",
-              strip.windows.contains { $0 === window } && tabs(window) == ["a"] && window.activeTab?.browser?.url == url("a")
+              strip.windows.contains { $0 === window } && tabs(window) == ["a"] && window.activeTab?.page?.url == url("a")
                 && window.window != nil && announced.contains { $0 === window },
               detail: "\(tabs(window)) window \(window.window != nil) announced \(announced.count) \(strip.lastError ?? "")")
 
         // Tabs the app makes (configured) and tabs Chromium makes.
-        var configuration = CefBrowser.Configuration()
+        var configuration = CefPage.Configuration()
         configuration.userScripts = [CefUserScript(source: "window.selfTestConfigured = '1'")]
         await expect("tab strip: opens an app-configured tab in the window, keeping its browser") {
             let probe = try await window.openTab(URL(string: "data:text/html,<title>configured</title>")!, configuration: configuration)
-            _ = try? await probe.browser?.waitUntilLoaded(timeout: .seconds(10))
-            let scripted = try await probe.browser?.evaluateJavaScript("String(window.selfTestConfigured || '')").stringValue
+            _ = try? await probe.page?.waitUntilLoaded(timeout: .seconds(10))
+            let scripted = try await probe.page?.evaluateJavaScript("String(window.selfTestConfigured || '')").stringValue
             probe.close()
             _ = await waitUntil { probe.window == nil }
             let b = try await window.openTab(url("b"), configuration: configuration)
-            _ = try? await b.browser?.waitUntilLoaded(timeout: .seconds(10))
+            _ = try? await b.page?.waitUntilLoaded(timeout: .seconds(10))
             let configured = scripted
-            return (tabs(window) == ["a", "b"] && b.isActive && b.browser?.url == url("b") && configured == "1"
-                    && strip.windows.count == 1, "\(tabs(window)) configured \(configured ?? "-") windows \(strip.windows.count) browser \(b.browser?.identifier ?? -1) scripts \(b.browser?.configuration.userScripts.count ?? -1) url \(b.browser?.url?.absoluteString ?? "-")")
+            return (tabs(window) == ["a", "b"] && b.isActive && b.page?.url == url("b") && configured == "1"
+                    && strip.windows.count == 1, "\(tabs(window)) configured \(configured ?? "-") windows \(strip.windows.count) browser \(b.page?.identifier ?? -1) scripts \(b.page?.configuration.userScripts.count ?? -1) url \(b.page?.url?.absoluteString ?? "-")")
         }
         await expect("tab strip: opens Chromium's own tab, at an index, in the background") {
             let c = try await window.openChromiumTab(url("c"), at: 1, isActive: false)
-            _ = await waitUntil { c.browser != nil }
-            return (tabs(window) == ["a", "c", "b"] && !c.isActive && c.browser?.url == url("c"), "\(tabs(window))")
+            _ = await waitUntil { c.page != nil }
+            return (tabs(window) == ["a", "c", "b"] && !c.isActive && c.page?.url == url("c"), "\(tabs(window))")
         }
 
         // Exact matching: tabs of the same address, in the background.
@@ -56,19 +56,19 @@ extension SelfTest {
             _ = try await window.openChromiumTab(url("a"), isActive: false)
             _ = try await window.openChromiumTab(url("a"), isActive: false)
         } catch { check("tab strip: opens tabs of the same address", false, detail: "\(error)") }
-        _ = await waitUntil(timeout: .seconds(10)) { window.tabs.count == 5 && window.tabs.allSatisfy { $0.browser != nil } }
-        let browsers = window.tabs.compactMap(\.browser)
+        _ = await waitUntil(timeout: .seconds(10)) { window.tabs.count == 5 && window.tabs.allSatisfy { $0.page != nil } }
+        let pages = window.tabs.compactMap(\.page)
         check("tab strip: matches each tab with its own browser, same addresses included",
-              browsers.count == 5 && Set(browsers.map(ObjectIdentifier.init)).count == 5
-                && window.tabs.allSatisfy { $0.browser?.url == $0.url },
-              detail: "\(window.tabs.map { "\($0.url?.query ?? "-"):\($0.browser?.identifier ?? -1)" })")
-        // Each match is the browser Chromium shows when the tab is selected.
+              pages.count == 5 && Set(pages.map(ObjectIdentifier.init)).count == 5
+                && window.tabs.allSatisfy { $0.page?.url == $0.url },
+              detail: "\(window.tabs.map { "\($0.url?.query ?? "-"):\($0.page?.identifier ?? -1)" })")
+        // Each match is the page Chromium shows when the tab is selected.
         await expect("tab strip: the matched browser is the one shown when its tab is selected") {
             var wrong: [String] = []
             for candidate in window.tabs where candidate.url == url("a") {
                 try await candidate.select()
-                _ = await waitUntil(timeout: .seconds(3)) { candidate.browser?.nativeView?.window === window.window }
-                if candidate.browser?.nativeView?.window !== window.window { wrong.append("\(candidate.id)") }
+                _ = await waitUntil(timeout: .seconds(3)) { candidate.page?.nativeView?.window === window.window }
+                if candidate.page?.nativeView?.window !== window.window { wrong.append("\(candidate.id)") }
             }
             return (wrong.isEmpty, "not shown: \(wrong)")
         }
@@ -90,7 +90,7 @@ extension SelfTest {
             do {
                 try await group.setCollapsed(true)
                 check("tab strip: collapses a group", await waitUntil(timeout: .seconds(3)) { group.isCollapsed })
-            } catch CefTabStrip.Error.unsupported(let reason) {
+            } catch CefTabs.Error.unsupported(let reason) {
                 skip("tab strip: collapses a group", because: reason, .limitation)
             } catch {
                 check("tab strip: collapses a group", false, detail: "\(error)")
@@ -122,13 +122,13 @@ extension SelfTest {
         }
         // A change made by Chromium itself shows up.
         let count = window.tabs.count
-        window.activeTab?.browser?.execute(.newTab)
+        window.activeTab?.page?.execute(.newTab)
         check("tab strip: follows a change Chromium makes (Chrome's New Tab command)",
               await waitUntil(timeout: .seconds(5)) { window.tabs.count == count + 1 },
               detail: "\(tabs(window)) \(strip.lastError ?? "")")
 
         await expect("tab strip: captures a background tab's preview") {
-            guard let background = window.tabs.first(where: { !$0.isActive && $0.browser != nil }) else {
+            guard let background = window.tabs.first(where: { !$0.isActive && $0.page != nil }) else {
                 return (false, "no background tab")
             }
             let start = ContinuousClock.now
@@ -140,7 +140,7 @@ extension SelfTest {
 
         await hostChecks(window)
 
-        // Moves between windows keep the browser.
+        // Moves between windows keep the page.
         let other: CefChromeWindow
         do { other = try await CefChromeWindow.open(url: url("z")) } catch {
             check("tab strip: opens a second window", false, detail: "\(error)")
@@ -148,18 +148,18 @@ extension SelfTest {
         }
         await expect("tab strip: moves a tab to another window, keeping its browser") {
             guard let b = tab("b") else { return (false, "no tab") }
-            let before = b.browser
+            let before = b.page
             try await b.move(to: 1, in: other)
             let moved = await waitUntil(timeout: .seconds(5)) { b.window === other && b.index == 1 }
-            return (moved && before != nil && b.browser === before && before?.state == .live && tab("b") === b,
-                    "in \(b.window?.id.description ?? "-") at \(b.index), browser \(before?.identifier ?? -1) -> \(b.browser?.identifier ?? -1)")
+            return (moved && before != nil && b.page === before && before?.state == .live && tab("b") === b,
+                    "in \(b.window?.id.description ?? "-") at \(b.index), browser \(before?.identifier ?? -1) -> \(b.page?.identifier ?? -1)")
         }
         await expect("tab strip: moves a tab to a new window, announced") {
             guard let b = tab("b") else { return (false, "no tab") }
-            let before = b.browser
+            let before = b.page
             let made = try await b.moveToNewWindow()
             let shown = await waitUntil(timeout: .seconds(5)) { made.window != nil && announced.contains { $0 === made } }
-            return (shown && made.tabs.first === b && b.browser === before, "window \(made.window != nil) announced \(announced.count)")
+            return (shown && made.tabs.first === b && b.page === before, "window \(made.window != nil) announced \(announced.count)")
         }
         await expect("tab strip: closes a tab, and reopens it") {
             guard let b = tab("b") else { return (false, "no tab") }
@@ -167,21 +167,21 @@ extension SelfTest {
             guard await waitUntil(timeout: .seconds(5), { tab("b") == nil }) else { return (false, "not closed") }
             let listed = await waitUntil(timeout: .seconds(5)) { strip.recentlyClosed.contains { $0.url == url("b") } }
             other.reopenClosedTab()
-            let reopened = await waitUntil(timeout: .seconds(5)) { tab("b")?.browser != nil }
+            let reopened = await waitUntil(timeout: .seconds(5)) { tab("b")?.page != nil }
             return (reopened, "recently closed listed \(listed): \(strip.recentlyClosed.prefix(3))")
         }
 
         // Closing every window with background tabs leaves nothing behind.
         for open in strip.windows { open.close() }
         check("tab strip: closing windows with background tabs closes every browser",
-              await waitUntil(timeout: .seconds(10)) { strip.windows.isEmpty && CefRuntime.shared.browsers.isEmpty },
-              detail: "windows \(strip.windows.count), browsers \(CefRuntime.shared.browsers.map { $0.url?.absoluteString ?? "-" })")
+              await waitUntil(timeout: .seconds(10)) { strip.windows.isEmpty && CefRuntime.shared.pages.isEmpty },
+              detail: "windows \(strip.windows.count), browsers \(CefRuntime.shared.pages.map { $0.url?.absoluteString ?? "-" })")
         closeAll()
 
         func closeAll() {
-            for browser in CefRuntime.shared.browsers { browser.close(force: true) }
+            for page in CefRuntime.shared.pages { page.close(force: true) }
         }
-        _ = await waitUntil { CefRuntime.shared.browsers.isEmpty }
+        _ = await waitUntil { CefRuntime.shared.pages.isEmpty }
     }
 
     /// The app's views over Chrome's tab strip and toolbar.
@@ -253,7 +253,7 @@ extension SelfTest {
         // Keyboard focus sent to Chrome's covered omnibox moves to the app's views.
         NSApp.activate()
         nsWindow.makeKeyAndOrderFront(nil)
-        window.activeTab?.browser?.execute(.focusLocation)
+        window.activeTab?.page?.execute(.focusLocation)
         let moved = await waitUntil(timeout: .seconds(3)) {
             (nsWindow.firstResponder as? NSView).map { $0.isDescendant(of: window.topBar ?? NSView()) } == true
         }

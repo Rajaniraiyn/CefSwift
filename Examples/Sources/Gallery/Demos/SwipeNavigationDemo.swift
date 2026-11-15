@@ -15,22 +15,22 @@ struct SwipeNavigationDemo: Demo {
 }
 
 private struct SwipeNavigationView: View {
-    @State private var browser: CefBrowser = {
-        var configuration = CefBrowser.Configuration()
+    @State private var page: CefPage = {
+        var configuration = CefPage.Configuration()
         configuration.rendering = .offscreen
         configuration.allowsBackForwardNavigationGestures = true
-        return CefBrowser(url: SamplePage.tour[0].url, configuration: configuration)
+        return CefPage(url: SamplePage.tour[0].url, configuration: configuration)
     }()
 
     var body: some View {
-        CefWebView(browser)
-            .overlay { SwipeIndicator(progress: browser.navigationGestureProgress) }
+        CefWebView(page)
+            .overlay { SwipeIndicator(progress: page.navigationGestureProgress) }
             // Two pages of history, so that there is somewhere to swipe back to.
             .reportReady {
-                try await browser.waitUntilLoaded(timeout: .seconds(30))
-                try await browser.load(SamplePage.tour[1].url).waitUntilLoaded(timeout: .seconds(30))
+                try await page.waitUntilLoaded(timeout: .seconds(30))
+                try await page.load(SamplePage.tour[1].url).waitUntilLoaded(timeout: .seconds(30))
             }
-            .onDisappear { browser.close(force: true) }
+            .onDisappear { page.close(force: true) }
     }
 }
 

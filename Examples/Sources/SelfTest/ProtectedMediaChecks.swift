@@ -9,10 +9,10 @@ extension SelfTest {
     /// before it skips.
     static let widevineDownloadLimit: Duration = .seconds(20)
 
-    /// Asks the page in `browser` for a key system and returns "OK" or the
+    /// Asks the page in `page` for a key system and returns "OK" or the
     /// error's name.
-    static func requestKeySystem(_ keySystem: String, in browser: CefBrowser) async throws -> String {
-        try await browser.evaluateJavaScript("""
+    static func requestKeySystem(_ keySystem: String, in page: CefPage) async throws -> String {
+        try await page.evaluateJavaScript("""
             navigator.requestMediaKeySystemAccess('\(keySystem)', [{
               initDataTypes: ['webm'],
               videoCapabilities: [{ contentType: 'video/webm; codecs="vp9"' }],
@@ -21,18 +21,18 @@ extension SelfTest {
     }
 
     static func protectedMediaChecks() async {
-        let browser = CefBrowser(url: URL(string: "selftest://app/eme.html")!)
-        let view = hostWindowed(browser)
+        let page = CefPage(url: URL(string: "selftest://app/eme.html")!)
+        let view = hostWindowed(page)
         defer {
-            browser.close(force: true)
+            page.close(force: true)
             view.removeFromSuperview()
         }
-        guard await loaded(browser) else {
+        guard await loaded(page) else {
             check("protected media: page loads", false)
             return
         }
         await expect("protected media: Clear Key plays without a download") {
-            try await requestKeySystem("org.w3.clearkey", in: browser) == "OK"
+            try await requestKeySystem("org.w3.clearkey", in: page) == "OK"
         }
         // SelfTest runs on CefRuntime.Configuration.embedded, whose protectedMedia
         // is .disabled.
@@ -41,7 +41,7 @@ extension SelfTest {
               CefRuntime.shared.widevine == .unavailable && installResult == .unavailable,
               detail: "\(CefRuntime.shared.widevine), \(String(describing: installResult))")
         await expect("protected media: .disabled refuses Widevine") {
-            try await requestKeySystem("com.widevine.alpha", in: browser) == "NotSupportedError"
+            try await requestKeySystem("com.widevine.alpha", in: page) == "NotSupportedError"
         }
         let capabilities = CefRuntime.shared.capabilities
         check("protected media: the base helper can load Widevine (\(capabilities.signature.rawValue))",
@@ -51,9 +51,9 @@ extension SelfTest {
     }
 
     /// The probe: with `.automatic`, fetch Widevine and ask for it in
-    /// an Alloy-style (embedded) and a Chrome-style browser.
+    /// an Alloy-style (embedded) and a Chrome-style page.
     static func widevineProbeChecks() async {
-        let embedded = CefBrowser(url: URL(string: "selftest://app/eme.html")!)
+        let embedded = CefPage(url: URL(string: "selftest://app/eme.html")!)
         let view = hostWindowed(embedded)
         defer {
             embedded.close(force: true)
@@ -74,7 +74,7 @@ extension SelfTest {
 
         let started = ContinuousClock.now
         var result: CefRuntime.WidevineState?
-        // Chromium's update service fetches nothing until the first browser
+        // Chromium's update service fetches nothing until the first page
         // exists, so ask only now.
         Task { result = try? await CefRuntime.shared.installWidevine() }
         _ = await waitUntil(timeout: widevineDownloadLimit) { result != nil }
@@ -90,8 +90,8 @@ extension SelfTest {
             try await requestKeySystem("com.widevine.alpha", in: embedded) == "OK"
         }
 
-        let chrome = CefBrowser(url: URL(string: "selftest://app/eme.html")!)
-        let chromeWindow = CefWindow(browser: chrome)
+        let chrome = CefPage(url: URL(string: "selftest://app/eme.html")!)
+        let chromeWindow = CefWindow(page: chrome)
         chromeWindow.show()
         if await loaded(chrome) {
             await expect("a Chrome-style browser gets com.widevine.alpha") {
@@ -101,6 +101,6 @@ extension SelfTest {
             check("Chrome-style page loads", false)
         }
         chromeWindow.close()
-        _ = await waitUntil(timeout: .seconds(5)) { CefRuntime.shared.browsers.count <= 1 }
+        _ = await waitUntil(timeout: .seconds(5)) { CefRuntime.shared.pages.count <= 1 }
     }
 }

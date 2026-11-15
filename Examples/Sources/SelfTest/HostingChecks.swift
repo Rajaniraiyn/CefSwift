@@ -1,7 +1,7 @@
 import AppKit
 import CefKit
 
-// A live browser moved from one host view to another, and withdrawn from
+// A live page moved from one host view to another, and withdrawn from
 // its host with `stopHosting(in:)`: the host it left lets go completely.
 extension SelfTest {
     static func hostingChecks() async {
@@ -10,57 +10,57 @@ extension SelfTest {
         await settersBeforeCreationChecks()
     }
 
-    /// Zoom and mute set before Chromium creates the browser apply once it
+    /// Zoom and mute set before Chromium creates the page apply once it
     /// has.
     private static func settersBeforeCreationChecks() async {
-        let browser = CefBrowser(url: URL(string: "selftest://app/second.html")!)
-        browser.zoomLevel = 1
-        browser.isAudioMuted = true
-        let view = hostWindowed(browser)
-        guard await loaded(browser, title: "second") else {
-            check("hosting: page loads for pre-creation setters", false, detail: browser.title)
-            await closeHosted(browser, view)
+        let page = CefPage(url: URL(string: "selftest://app/second.html")!)
+        page.zoomLevel = 1
+        page.isAudioMuted = true
+        let view = hostWindowed(page)
+        guard await loaded(page, title: "second") else {
+            check("hosting: page loads for pre-creation setters", false, detail: page.title)
+            await closeHosted(page, view)
             return
         }
         // At zoom level 1 (120%), CSS pixels are 1.2 times larger.
-        let ratio = (try? await browser.evaluateJavaScript("devicePixelRatio").doubleValue) ?? 0
+        let ratio = (try? await page.evaluateJavaScript("devicePixelRatio").doubleValue) ?? 0
         let expected = window.backingScaleFactor * 1.2
         check("hosting: a zoom level set before creation applies to the first page",
-              abs(ratio - expected) < 0.01 && abs(browser.zoomLevel - 1) < 0.001,
-              detail: "devicePixelRatio \(ratio), expected \(expected), zoomLevel \(browser.zoomLevel)")
-        check("hosting: muting before creation applies once created", browser.isAudioMuted)
+              abs(ratio - expected) < 0.01 && abs(page.zoomLevel - 1) < 0.001,
+              detail: "devicePixelRatio \(ratio), expected \(expected), zoomLevel \(page.zoomLevel)")
+        check("hosting: muting before creation applies once created", page.isAudioMuted)
         // Chromium keeps the level for the site, which later checks load.
-        browser.zoomLevel = 0
-        _ = await waitUntil { abs(browser.zoomLevel) < 0.001 }
-        await closeHosted(browser, view)
+        page.zoomLevel = 0
+        _ = await waitUntil { abs(page.zoomLevel) < 0.001 }
+        await closeHosted(page, view)
     }
 
     static let transferPage = URL(string: "selftest://app/transfer.html")!
 
     private static func offscreenTransferChecks() async {
-        var configuration = CefBrowser.Configuration()
+        var configuration = CefPage.Configuration()
         configuration.rendering = .offscreen
-        let browser = CefBrowser(url: transferPage, configuration: configuration)
+        let page = CefPage(url: transferPage, configuration: configuration)
         let bounds = window.contentView!.bounds
-        let first = CefOffscreenBrowserView(browser: browser)
+        let first = CefOffscreenPageView(page: page)
         first.frame = CGRect(x: 0, y: 0, width: bounds.width / 2, height: bounds.height)
         window.contentView!.addSubview(first)
         defer { first.removeFromSuperview() }
-        guard await loaded(browser, title: "transfer") else {
-            check("hosting: offscreen page loads", false, detail: browser.title)
-            await closeHosted(browser, first)
+        guard await loaded(page, title: "transfer") else {
+            check("hosting: offscreen page loads", false, detail: page.title)
+            await closeHosted(page, first)
             return
         }
 
-        let second = CefOffscreenBrowserView(browser: browser)
+        let second = CefOffscreenPageView(page: page)
         second.frame = CGRect(x: bounds.width / 2, y: 0, width: bounds.width / 2 - 40, height: bounds.height - 60)
         window.contentView!.addSubview(second)
         defer { second.removeFromSuperview() }
         check("hosting: offscreen transfer — the first view lets go",
-              first.browser == nil && second.browser === browser && browser.hostView === second)
+              first.page == nil && second.page === page && page.hostView === second)
 
         func innerSize() async -> String {
-            (try? await browser.evaluateJavaScript("innerWidth + 'x' + innerHeight").stringValue) ?? "?"
+            (try? await page.evaluateJavaScript("innerWidth + 'x' + innerHeight").stringValue) ?? "?"
         }
         let secondSize = "\(Int(second.bounds.width))x\(Int(second.bounds.height))"
         check("hosting: offscreen transfer — the page takes the new view's size",
@@ -73,7 +73,7 @@ extension SelfTest {
         window.contentView!.addSubview(first)
         try? await Task.sleep(for: .milliseconds(300))
         check("hosting: offscreen transfer — the old view does not take it back",
-              browser.hostView === second && first.browser == nil && second.browser === browser)
+              page.hostView === second && first.page == nil && second.page === page)
         check("hosting: offscreen transfer — the old view does not resize it",
               await innerSize() == secondSize, detail: await innerSize())
 
@@ -84,7 +84,7 @@ extension SelfTest {
             let scale = window.backingScaleFactor
             var image: NSBitmapImageRep?
             _ = await waitUntilAsync(timeout: .seconds(5)) {
-                image = (try? await browser.snapshot()).flatMap { NSBitmapImageRep(data: $0) }
+                image = (try? await page.snapshot()).flatMap { NSBitmapImageRep(data: $0) }
                 return image?.pixelsWide == Int(second.bounds.width * scale)
                     && image?.pixelsHigh == Int(second.bounds.height * scale)
             }
@@ -113,7 +113,7 @@ extension SelfTest {
         click(first, at: CGPoint(x: 5, y: 5))
         click(second, at: CGPoint(x: 30, y: 40))
         check("hosting: offscreen transfer — input comes from the new view only",
-              await waitUntil { browser.title == "down 30,40" }, detail: browser.title)
+              await waitUntil { page.title == "down 30,40" }, detail: page.title)
 
         // Accessibility: the tree belongs to the new view.
         _ = second.accessibilityChildren()
@@ -122,52 +122,52 @@ extension SelfTest {
         }
         check("hosting: offscreen transfer — accessibility follows the new view",
               treeArrived && (first.accessibilityChildren() ?? []).isEmpty,
-              detail: "\(browser.accessibilityTree.nodeCount) nodes")
+              detail: "\(page.accessibilityTree.nodeCount) nodes")
 
-        // Withdrawn: the view lets go and the browser stops painting, but
+        // Withdrawn: the view lets go and the page stops painting, but
         // stays live; a stale host withdraws nothing.
-        browser.stopHosting(in: first)
-        check("hosting: stopHosting from a stale host does nothing", browser.hostView === second && second.browser === browser)
-        browser.stopHosting(in: second)
+        page.stopHosting(in: first)
+        check("hosting: stopHosting from a stale host does nothing", page.hostView === second && second.page === page)
+        page.stopHosting(in: second)
         check("hosting: stopHosting withdraws without closing",
-              second.browser == nil && browser.hostView == nil && browser.state == .live)
-        second.browser = browser
+              second.page == nil && page.hostView == nil && page.state == .live)
+        second.page = page
         let resized = await waitUntilAsync { await innerSize() == secondSize }
-        check("hosting: a withdrawn browser can be hosted again", browser.hostView === second && resized)
-        await closeHosted(browser, second)
+        check("hosting: a withdrawn browser can be hosted again", page.hostView === second && resized)
+        await closeHosted(page, second)
     }
 
     private static func windowedTransferChecks() async {
-        let browser = CefBrowser(url: transferPage)
+        let page = CefPage(url: transferPage)
         let bounds = window.contentView!.bounds
-        let first = CefWindowedBrowserView(browser: browser)
+        let first = CefWindowedPageView(page: page)
         first.frame = CGRect(x: 0, y: 0, width: bounds.width / 2, height: bounds.height)
         window.contentView!.addSubview(first)
         defer { first.removeFromSuperview() }
-        guard await loaded(browser, title: "transfer") else {
-            check("hosting: windowed page loads", false, detail: browser.title)
-            await closeHosted(browser, first)
+        guard await loaded(page, title: "transfer") else {
+            check("hosting: windowed page loads", false, detail: page.title)
+            await closeHosted(page, first)
             return
         }
-        let second = CefWindowedBrowserView(browser: browser)
+        let second = CefWindowedPageView(page: page)
         second.frame = CGRect(x: bounds.width / 2, y: 0, width: bounds.width / 2 - 40, height: bounds.height - 60)
         window.contentView!.addSubview(second)
         defer { second.removeFromSuperview() }
         first.removeFromSuperview()
         window.contentView!.addSubview(first)
         check("hosting: windowed transfer — the old view lets go and does not take it back",
-              first.browser == nil && browser.hostView === second && browser.nativeView?.superview === second
+              first.page == nil && page.hostView === second && page.nativeView?.superview === second
                   && !first.acceptsFirstResponder)
         let secondSize = "\(Int(second.bounds.width))x\(Int(second.bounds.height))"
         check("hosting: windowed transfer — the page takes the new view's size", await waitUntilAsync {
-            (try? await browser.evaluateJavaScript("innerWidth + 'x' + innerHeight").stringValue) == secondSize
+            (try? await page.evaluateJavaScript("innerWidth + 'x' + innerHeight").stringValue) == secondSize
         })
-        browser.stopHosting(in: second)
-        // CEF closes a browser whose view goes away, a moment later.
+        page.stopHosting(in: second)
+        // CEF closes a page whose view goes away, a moment later.
         try? await Task.sleep(for: .milliseconds(500))
         check("hosting: windowed stopHosting removes the native view without closing",
-              second.browser == nil && browser.nativeView?.superview == nil && browser.state == .live,
-              detail: "\(browser.state)")
-        await closeHosted(browser, second)
+              second.page == nil && page.nativeView?.superview == nil && page.state == .live,
+              detail: "\(page.state)")
+        await closeHosted(page, second)
     }
 }

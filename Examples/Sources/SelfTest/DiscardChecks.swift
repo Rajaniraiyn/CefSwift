@@ -5,7 +5,7 @@ import Darwin
 
 /// Tab discarding: Chromium's own discard for Chrome-style windows, closing
 /// and re-creating for views, blockers, and quitting with discarded
-/// browsers. When to discard is the app's policy (the Browser example's
+/// pages. When to discard is the app's policy (the Browser example's
 /// Memory Saver, tested in Examples/Tests/BrowserTests).
 extension SelfTest {
     static func discardChecks() async {
@@ -16,19 +16,19 @@ extension SelfTest {
         await viewDiscardChecks()
     }
 
-    /// Records the discard events a browser's delegate receives.
-    final class DiscardRecorder: CefBrowserDelegate {
+    /// Records the discard events a page's delegate receives.
+    final class DiscardRecorder: CefPageDelegate {
         var events: [String] = []
-        func browserWillDiscard(_ browser: CefBrowser) { events.append("will") }
-        func browserDidDiscard(_ browser: CefBrowser) { events.append("did") }
-        func browserDidRestore(_ browser: CefBrowser) { events.append("restore") }
-        func browser(_ browser: CefBrowser, renderProcessDidTerminate reason: CefTerminationReason) {
+        func pageWillDiscard(_ page: CefPage) { events.append("will") }
+        func pageDidDiscard(_ page: CefPage) { events.append("did") }
+        func pageDidRestore(_ page: CefPage) { events.append("restore") }
+        func page(_ page: CefPage, renderProcessDidTerminate reason: CefTerminationReason) {
             events.append("terminated")
         }
     }
 
-    static func discardConfiguration() -> CefBrowser.Configuration {
-        var configuration = CefBrowser.Configuration()
+    static func discardConfiguration() -> CefPage.Configuration {
+        var configuration = CefPage.Configuration()
         configuration.bridges = [bridge]
         configuration.userScripts = [CefUserScript(source: "window.__injected = 42;")]
         return configuration
@@ -38,40 +38,40 @@ extension SelfTest {
 
     static func windowDiscardChecks() async {
         let recorder = DiscardRecorder()
-        let browser = CefBrowser(url: URL(string: "selftest://edge/heavy.html?1")!, configuration: discardConfiguration(), delegate: recorder)
-        let browserWindow = CefWindow(browser: browser)
-        browserWindow.show()
-        _ = await loaded(browser, title: "heavy")
-        browser.load(URL(string: "selftest://edge/heavy.html?2")!)
-        _ = await waitUntil { browser.url?.query == "2" && !browser.isLoading && browser.favicon != nil }
-        let renderer = await allocateInRenderer(browser)
-        _ = try? await browser.evaluateJavaScript("scrollTo(0, 1500)")
+        let page = CefPage(url: URL(string: "selftest://edge/heavy.html?1")!, configuration: discardConfiguration(), delegate: recorder)
+        let pageWindow = CefWindow(page: page)
+        pageWindow.show()
+        _ = await loaded(page, title: "heavy")
+        page.load(URL(string: "selftest://edge/heavy.html?2")!)
+        _ = await waitUntil { page.url?.query == "2" && !page.isLoading && page.favicon != nil }
+        let renderer = await allocateInRenderer(page)
+        _ = try? await page.evaluateJavaScript("scrollTo(0, 1500)")
         // Chromium saves a page's scroll position within a second of it
         // changing.
         try? await Task.sleep(for: .milliseconds(1500))
 
         do {
-            try await browser.discard()
+            try await page.discard()
             check("discard: the frontmost tab is refused", false, detail: "discarded")
         } catch {
             check("discard: the frontmost tab is refused", error == .blocked([.visible]), detail: "\(error)")
         }
 
         // A DevTools consumer subscribed before the discard.
-        _ = try? await browser.devTools.send("Runtime.enable")
+        _ = try? await page.devTools.send("Runtime.enable")
         var consoleMessages: [String] = []
         let consoleWatcher = Task {
-            for await event in browser.devTools.events("Runtime.consoleAPICalled") {
+            for await event in page.devTools.events("Runtime.consoleAPICalled") {
                 consoleMessages.append(event["args"][0]["value"].stringValue ?? "")
             }
         }
         defer { consoleWatcher.cancel() }
 
-        browserWindow.hide()
-        let title = browser.title, url = browser.url
+        pageWindow.hide()
+        let title = page.title, url = page.url
         await expect("discard: a hidden tab is discarded") {
-            try await browser.discard()
-            return browser.isDiscarded && browser.state == .live
+            try await page.discard()
+            return page.isDiscarded && page.state == .live
         }
         check("discard: delegate hears will and did", recorder.events == ["will", "did"], detail: "\(recorder.events)")
         if let renderer {
@@ -81,64 +81,64 @@ extension SelfTest {
         } else {
             check("discard: the tab's renderer process exits", false, detail: "renderer not found")
         }
-        check("discard: URL, title and favicon stay", browser.url == url && browser.title == title && browser.favicon != nil)
-        check("discard: snapshot of the page kept", browser.discardSnapshot != nil)
+        check("discard: URL, title and favicon stay", page.url == url && page.title == title && page.favicon != nil)
+        check("discard: snapshot of the page kept", page.discardSnapshot != nil)
         check("discard: no renderer crash reported", !recorder.events.contains("terminated"))
 
-        browserWindow.show()
-        check("discard: showing the tab restores it", await waitUntil { !browser.isDiscarded && !browser.isLoading },
+        pageWindow.show()
+        check("discard: showing the tab restores it", await waitUntil { !page.isDiscarded && !page.isLoading },
               detail: "\(recorder.events)")
-        check("discard: restored on the same URL", browser.url == url && recorder.events.last == "restore")
+        check("discard: restored on the same URL", page.url == url && recorder.events.last == "restore")
         var scrollY: Int?
         check("discard: scroll position restored", await waitUntilAsync(timeout: .seconds(3)) {
-            scrollY = try? await browser.evaluateJavaScript("scrollY").intValue
+            scrollY = try? await page.evaluateJavaScript("scrollY").intValue
             return scrollY == 1500
         }, detail: "scrollY \(String(describing: scrollY))")
         await expect("discard: user script and bridge work after restore") {
-            let injected = try await browser.evaluateJavaScript("window.__injected").intValue
-            let greeting = try await browser.evaluateJavaScript("app.greet({name: 'Ada'})").stringValue
+            let injected = try await page.evaluateJavaScript("window.__injected").intValue
+            let greeting = try await page.evaluateJavaScript("app.greet({name: 'Ada'})").stringValue
             return injected == 42 && greeting == "Hello, Ada from main!"
         }
         await expect("discard: DevTools event stream keeps delivering") {
-            try await browser.evaluateJavaScript("console.log('after restore')")
+            try await page.evaluateJavaScript("console.log('after restore')")
             return await waitUntil(timeout: .seconds(5)) { consoleMessages.contains("after restore") }
         }
         await expect("discard: executeJavaScript reaches the restored page") {
-            browser.executeJavaScript("window.__executed = 7")
+            page.executeJavaScript("window.__executed = 7")
             return await waitUntilAsync(timeout: .seconds(5)) {
-                (try? await browser.evaluateJavaScript("window.__executed").intValue) == 7
+                (try? await page.evaluateJavaScript("window.__executed").intValue) == 7
             }
         }
-        check("discard: back/forward list survives", browser.canGoBack)
-        browser.goBack()
-        check("discard: going back reaches the first page", await waitUntil { browser.url?.query == "1" && !browser.isLoading })
+        check("discard: back/forward list survives", page.canGoBack)
+        page.goBack()
+        check("discard: going back reaches the first page", await waitUntil { page.url?.query == "1" && !page.isLoading })
 
         // A command restores a hidden discarded tab.
-        browserWindow.hide()
+        pageWindow.hide()
         await expect("discard: evaluateJavaScript restores a hidden discarded tab") {
-            try await browser.discard()
-            let href = try await browser.evaluateJavaScript("location.href").stringValue
-            return href == "selftest://edge/heavy.html?1" && !browser.isDiscarded
+            try await page.discard()
+            let href = try await page.evaluateJavaScript("location.href").stringValue
+            return href == "selftest://edge/heavy.html?1" && !page.isDiscarded
         }
 
-        await waitUntilDiscardable(browser)
-        check("discard: a restored tab is discarded again", (try? await browser.discard()) != nil && browser.isDiscarded)
-        browserWindow.close()
+        await waitUntilDiscardable(page)
+        check("discard: a restored tab is discarded again", (try? await page.discard()) != nil && page.isDiscarded)
+        pageWindow.close()
         check("discard: a discarded tab's window closes",
-              await waitUntil { browserWindow.isClosed && browser.state == .closed })
+              await waitUntil { pageWindow.isClosed && page.state == .closed })
     }
 
     // MARK: Blockers
 
     static func discardBlockerChecks() async {
-        let audible = CefWindow(browser: CefBrowser(url: URL(string: "selftest://edge/tab.html?audio")!))
-        let leaving = CefWindow(browser: CefBrowser(url: URL(string: "selftest://edge/leave.html")!))
+        let audible = CefWindow(page: CefPage(url: URL(string: "selftest://edge/tab.html?audio")!))
+        let leaving = CefWindow(page: CefPage(url: URL(string: "selftest://edge/leave.html")!))
         let windows = [audible, leaving]
         windows.forEach { $0.show() }
-        _ = await allLoaded(windows.map(\.browser))
+        _ = await allLoaded(windows.map(\.page))
 
-        audible.browser.isAudioMuted = true
-        _ = try? await audible.browser.evaluateJavaScript("""
+        audible.page.isAudioMuted = true
+        _ = try? await audible.page.evaluateJavaScript("""
             const context = new AudioContext(), tone = context.createOscillator(), gain = context.createGain();
             gain.gain.value = 0.05;
             tone.connect(gain).connect(context.destination);
@@ -148,46 +148,46 @@ extension SelfTest {
         try? await Task.sleep(for: .seconds(1))
         windows.forEach { $0.hide() }
 
-        let audio = await audible.browser.discardBlockers()
+        let audio = await audible.page.discardBlockers()
         check("discard blockers: a page playing audio is kept", audio.contains(.playingAudio), detail: "\(audio)")
         await expect("discard blockers: a page with a beforeunload handler is kept") {
             do {
-                try await leaving.browser.discard()
+                try await leaving.page.discard()
                 return false
-            } catch let error as CefBrowser.DiscardError {
+            } catch let error as CefPage.DiscardError {
                 guard case .blocked(let blockers) = error else { return false }
-                return blockers.contains(.beforeUnloadHandler) && !leaving.browser.isDiscarded
+                return blockers.contains(.beforeUnloadHandler) && !leaving.page.isDiscarded
             }
         }
 
         for window in windows { window.close() }
         // The beforeunload page asks before it closes; answer for it.
-        leaving.browser.close(force: true)
+        leaving.page.close(force: true)
         _ = await waitUntil { windows.allSatisfy(\.isClosed) }
         await discardIdentityChecks()
     }
 
-    /// Runs `body` when a browser is about to be discarded.
-    final class WillDiscardHook: CefBrowserDelegate {
-        var body: (CefBrowser) -> Void = { _ in }
-        func browserWillDiscard(_ browser: CefBrowser) { body(browser) }
+    /// Runs `body` when a page is about to be discarded.
+    final class WillDiscardHook: CefPageDelegate {
+        var body: (CefPage) -> Void = { _ in }
+        func pageWillDiscard(_ page: CefPage) { body(page) }
     }
 
     /// Chromium names tabs only by address and title, so tabs it cannot
-    /// tell apart are kept; and a browser that is shown or navigates while
+    /// tell apart are kept; and a page that is shown or navigates while
     /// it is being discarded stays loaded.
     static func discardIdentityChecks() async {
         let twinURL = URL(string: "selftest://edge/tab.html?twin")!
-        let twins = [CefWindow(browser: CefBrowser(url: twinURL)), CefWindow(browser: CefBrowser(url: twinURL))]
+        let twins = [CefWindow(page: CefPage(url: twinURL)), CefWindow(page: CefPage(url: twinURL))]
         twins.forEach { $0.show() }
-        _ = await allLoaded(twins.map(\.browser), title: "tab")
+        _ = await allLoaded(twins.map(\.page), title: "tab")
         twins.forEach { $0.hide() }
         // Kept only for being ambiguous, once both are hidden.
         for twin in twins {
-            await waitUntilDiscardable(twin.browser) { if case .unknown = $0 { true } else { false } }
+            await waitUntilDiscardable(twin.page) { if case .unknown = $0 { true } else { false } }
         }
-        var twinError: CefBrowser.DiscardError?
-        do { try await twins[0].browser.discard() } catch { twinError = error }
+        var twinError: CefPage.DiscardError?
+        do { try await twins[0].page.discard() } catch { twinError = error }
         let ambiguous: Bool
         if case .blocked(let blockers) = twinError {
             ambiguous = blockers.contains { if case .unknown = $0 { true } else { false } }
@@ -195,71 +195,71 @@ extension SelfTest {
             ambiguous = false
         }
         check("discard identity: tabs with the same address and title are kept",
-              ambiguous && twins.allSatisfy { !$0.browser.isDiscarded }, detail: "\(String(describing: twinError))")
+              ambiguous && twins.allSatisfy { !$0.page.isDiscarded }, detail: "\(String(describing: twinError))")
         // One of them navigating apart makes each tab identifiable again.
-        _ = await load(URL(string: "selftest://edge/tab.html?other")!, in: twins[1].browser)
-        await waitUntilDiscardable(twins[0].browser)
+        _ = await load(URL(string: "selftest://edge/tab.html?other")!, in: twins[1].page)
+        await waitUntilDiscardable(twins[0].page)
         await expect("discard identity: a tab told apart by its address is discarded, and only it") {
-            try await twins[0].browser.discard()
-            return twins[0].browser.isDiscarded && !twins[1].browser.isDiscarded
+            try await twins[0].page.discard()
+            return twins[0].page.isDiscarded && !twins[1].page.isDiscarded
         }
         for window in twins { window.close() }
         _ = await waitUntil { twins.allSatisfy(\.isClosed) }
 
         let hook = WillDiscardHook()
-        let browser = CefBrowser(url: URL(string: "selftest://edge/tab.html?revalidate")!, delegate: hook)
-        let window = CefWindow(browser: browser)
+        let page = CefPage(url: URL(string: "selftest://edge/tab.html?revalidate")!, delegate: hook)
+        let window = CefWindow(page: page)
         window.show()
-        _ = await loaded(browser, title: "tab")
+        _ = await loaded(page, title: "tab")
         window.hide()
-        await waitUntilDiscardable(browser)
+        await waitUntilDiscardable(page)
         hook.body = { _ in window.show() }
-        var shownError: CefBrowser.DiscardError?
-        do { try await browser.discard() } catch { shownError = error }
+        var shownError: CefPage.DiscardError?
+        do { try await page.discard() } catch { shownError = error }
         check("discard identity: a tab shown while it is being discarded stays loaded",
-              shownError == .blocked([.visible]) && !browser.isDiscarded, detail: "\(String(describing: shownError))")
+              shownError == .blocked([.visible]) && !page.isDiscarded, detail: "\(String(describing: shownError))")
 
-        _ = await waitUntil { !browser.isLoading }
+        _ = await waitUntil { !page.isLoading }
         window.hide()
-        await waitUntilDiscardable(browser)
-        hook.body = { browser in browser.load(URL(string: "selftest://edge/tab.html?moved")!) }
-        var movedError: CefBrowser.DiscardError?
-        do { try await browser.discard() } catch { movedError = error }
+        await waitUntilDiscardable(page)
+        hook.body = { page in page.load(URL(string: "selftest://edge/tab.html?moved")!) }
+        var movedError: CefPage.DiscardError?
+        do { try await page.discard() } catch { movedError = error }
         hook.body = { _ in }
         check("discard identity: a tab that navigates while it is being discarded stays loaded",
-              movedError != nil && !browser.isDiscarded, detail: "\(String(describing: movedError))")
+              movedError != nil && !page.isDiscarded, detail: "\(String(describing: movedError))")
         window.close()
         _ = await waitUntil { window.isClosed }
     }
 
     // MARK: View blockers
 
-    /// Audio and form input for browsers in views, which Chromium's tab
+    /// Audio and form input for pages in views, which Chromium's tab
     /// rules do not cover, read from its performance-manager graph on
     /// `chrome://discards`. The graph is Chromium-private: when a CEF
     /// update changes it, these fail (a quiet page reports `.unknown`).
     static func viewDiscardBlockerChecks() async {
-        func page(_ name: String, _ script: String? = nil, hidden: Bool = true) async -> (CefBrowser, NSView) {
-            let browser = CefBrowser(url: URL(string: "selftest://edge/tab.html?\(name)")!)
-            let view = hostWindowed(browser)
-            _ = await loaded(browser, title: "tab")
+        func makePage(_ name: String, _ script: String? = nil, hidden: Bool = true) async -> (CefPage, NSView) {
+            let page = CefPage(url: URL(string: "selftest://edge/tab.html?\(name)")!)
+            let view = hostWindowed(page)
+            _ = await loaded(page, title: "tab")
             if let script {
                 // Playback starts only after a user gesture.
-                let reply = try? await browser.evaluateJavaScript(script, userGesture: true)
+                let reply = try? await page.evaluateJavaScript(script, userGesture: true)
                 if reply?.stringValue != "ok" { print("     \(name): \(reply?.text ?? "script failed")") }
             }
             view.isHidden = hidden
-            return (browser, view)
+            return (page, view)
         }
         let play = "window.player = %@; player.loop = true; player.play().then(() => 'ok', e => String(e))"
         // The first look-up starts the discards host; pages opened after it
         // reach its graph subscription as they are created.
-        let (silent, silentView) = await page("view-silent")
-        var silentBlockers: Set<CefBrowser.DiscardBlocker> = []
+        let (silent, silentView) = await makePage("view-silent")
+        var silentBlockers: Set<CefPage.DiscardBlocker> = []
         let coldCall = await ContinuousClock().measure { silentBlockers = await silent.discardBlockers() }
 
-        let (element, elementView) = await page("view-audio", play.replacingOccurrences(of: "%@", with: "new Audio('tone.wav')"))
-        let (webAudio, webAudioView) = await page("view-webaudio", """
+        let (element, elementView) = await makePage("view-audio", play.replacingOccurrences(of: "%@", with: "new Audio('tone.wav')"))
+        let (webAudio, webAudioView) = await makePage("view-webaudio", """
             const context = new AudioContext(), tone = context.createOscillator(), gain = context.createGain();
             gain.gain.value = 0.05;
             tone.connect(gain).connect(context.destination);
@@ -267,18 +267,18 @@ extension SelfTest {
             context.state === 'running' ? 'ok' : context.state
             """)
         // Kept on screen: Chromium pauses a muted video in a hidden page.
-        let (muted, mutedView) = await page("view-muted", """
+        let (muted, mutedView) = await makePage("view-muted", """
             document.body.innerHTML = '<video muted src=tone.wav></video>';
             \(play.replacingOccurrences(of: "%@", with: "document.querySelector('video')"))
             """, hidden: false)
-        let (typed, typedView) = await page("view-typed", "document.body.innerHTML = '<input>'; document.querySelector('input').focus(); 'ok'")
+        let (typed, typedView) = await makePage("view-typed", "document.body.innerHTML = '<input>'; document.querySelector('input').focus(); 'ok'")
         typedView.isHidden = false
         _ = try? await typed.devTools.send("Input.insertText", ["text": "unsent"])
         typedView.isHidden = true
 
         check("discard blockers (view): Chromium's page graph describes a quiet page, and it is not blocked",
               silentBlockers.isEmpty, detail: "\(silentBlockers)")
-        var blockers: Set<CefBrowser.DiscardBlocker> = []
+        var blockers: Set<CefPage.DiscardBlocker> = []
         check("discard blockers (view): a page playing an audio element is kept",
               await waitUntilAsync(timeout: .seconds(5)) {
                   blockers = await element.discardBlockers()
@@ -305,7 +305,7 @@ extension SelfTest {
         // so a policy polling visible pages never attaches them. (The
         // audible pages above were set up with a user gesture, which is
         // itself sent through DevTools.)
-        let (shown, shownView) = await page("view-shown", hidden: false)
+        let (shown, shownView) = await makePage("view-shown", hidden: false)
         let shownBlockers = await shown.discardBlockers()
         check("discard blockers (view): a visible page is not asked of DevTools",
               shownBlockers == [.visible] && !shown.devTools.isAttached,
@@ -319,7 +319,7 @@ extension SelfTest {
         let recent = await element.discardBlockers()
         check("discard blockers (view): a page that fell silent is kept for a minute", recent == [.playingAudio],
               detail: "\(recent)")
-        var refusal: CefBrowser.DiscardError?
+        var refusal: CefPage.DiscardError?
         do { try await webAudio.discard() } catch { refusal = error }
         check("discard blockers (view): discard() refuses a page playing audio",
               refusal == .blocked([.playingAudio]) && !webAudio.isDiscarded, detail: "\(String(describing: refusal))")
@@ -329,9 +329,9 @@ extension SelfTest {
         check("discard blockers (view): a look-up with the host running is quick", warmCall < .milliseconds(500),
               detail: "\(warmCall)")
 
-        for (browser, view) in [(silent, silentView), (element, elementView), (webAudio, webAudioView),
+        for (page, view) in [(silent, silentView), (element, elementView), (webAudio, webAudioView),
                                 (muted, mutedView), (typed, typedView)] {
-            await closeHosted(browser, view)
+            await closeHosted(page, view)
         }
     }
 
@@ -343,72 +343,72 @@ extension SelfTest {
     /// (out-of-process) `iframe` keeps the page too.
     static func beforeUnloadBlockerChecks() async {
         for style in ["view", "window"] {
-            func open(_ path: String) async -> (browser: CefBrowser, close: () async -> Void) {
-                let browser = CefBrowser(url: URL(string: "selftest://edge/\(path)")!)
+            func open(_ path: String) async -> (page: CefPage, close: () async -> Void) {
+                let page = CefPage(url: URL(string: "selftest://edge/\(path)")!)
                 if style == "view" {
-                    let view = hostWindowed(browser)
-                    _ = await loaded(browser)
+                    let view = hostWindowed(page)
+                    _ = await loaded(page)
                     view.isHidden = true
-                    return (browser, { await closeHosted(browser, view) })
+                    return (page, { await closeHosted(page, view) })
                 }
-                let window = CefWindow(browser: browser)
+                let window = CefWindow(page: page)
                 window.show()
-                _ = await loaded(browser)
+                _ = await loaded(page)
                 window.hide()
-                return (browser, {
-                    browser.close(force: true)
-                    _ = await waitUntil { window.isClosed && browser.state == .closed }
+                return (page, {
+                    page.close(force: true)
+                    _ = await waitUntil { window.isClosed && page.state == .closed }
                 })
             }
             /// Runs `script` (in the page's first subframe if `inFrame`),
             /// then checks whether the page is kept for its listeners.
             func expectKept(
-                _ name: String, _ browser: CefBrowser, _ script: String?, inFrame: Bool = false, kept: Bool
+                _ name: String, _ page: CefPage, _ script: String?, inFrame: Bool = false, kept: Bool
             ) async {
                 if let script {
-                    if inFrame, let frame = browser.frames.first(where: { !$0.isMain }) {
-                        _ = try? await browser.evaluateJavaScript(script, in: frame)
+                    if inFrame, let frame = page.frames.first(where: { !$0.isMain }) {
+                        _ = try? await page.evaluateJavaScript(script, in: frame)
                     } else {
-                        _ = try? await browser.evaluateJavaScript(script)
+                        _ = try? await page.evaluateJavaScript(script)
                     }
                 }
                 // Hidden windows take a moment to reach Chromium's tab state.
-                var blockers: Set<CefBrowser.DiscardBlocker> = []
+                var blockers: Set<CefPage.DiscardBlocker> = []
                 let agreed = await waitUntilAsync(timeout: .seconds(5)) {
-                    blockers = await browser.discardBlockers()
+                    blockers = await page.discardBlockers()
                     return blockers == (kept ? [.beforeUnloadHandler] : [])
                 }
                 check("discard blockers (\(style)): \(name)", agreed, detail: "\(blockers)")
             }
 
-            let page = await open("tab.html?beforeunload")
-            await expectKept("a page without beforeunload listeners is not kept", page.browser, nil, kept: false)
-            await expectKept("a beforeunload listener added after load keeps the page", page.browser,
+            let opened = await open("tab.html?beforeunload")
+            await expectKept("a page without beforeunload listeners is not kept", opened.page, nil, kept: false)
+            await expectKept("a beforeunload listener added after load keeps the page", opened.page,
                              "window.__leave = event => event.preventDefault(); addEventListener('beforeunload', __leave)",
                              kept: true)
-            await expectKept("removing the listener again releases it", page.browser,
+            await expectKept("removing the listener again releases it", opened.page,
                              "removeEventListener('beforeunload', __leave)", kept: false)
-            await expectKept("window.onbeforeunload keeps the page", page.browser,
+            await expectKept("window.onbeforeunload keeps the page", opened.page,
                              "onbeforeunload = () => 'stay'", kept: true)
-            await expectKept("window.onbeforeunload = null releases it", page.browser,
+            await expectKept("window.onbeforeunload = null releases it", opened.page,
                              "onbeforeunload = null", kept: false)
-            await page.close()
+            await opened.close()
 
             let sameSite = await open("leave-frame.html")
-            await expectKept("a listener in a same-site iframe keeps the page", sameSite.browser, nil, kept: true)
+            await expectKept("a listener in a same-site iframe keeps the page", sameSite.page, nil, kept: true)
             await sameSite.close()
 
             let crossSite = await open("plain-xframe.html")
-            let separate = crossSite.browser.frames.count == 2
-                && Set(crossSite.browser.frames.map { $0.id.split(separator: "-").first }).count == 2
+            let separate = crossSite.page.frames.count == 2
+                && Set(crossSite.page.frames.map { $0.id.split(separator: "-").first }).count == 2
             check("discard blockers (\(style)): the cross-site iframe is in a renderer of its own", separate,
-                  detail: "\(crossSite.browser.frames.map(\.id))")
-            await expectKept("a cross-site iframe without listeners does not keep the page", crossSite.browser,
+                  detail: "\(crossSite.page.frames.map(\.id))")
+            await expectKept("a cross-site iframe without listeners does not keep the page", crossSite.page,
                              nil, kept: false)
-            await expectKept("a listener a cross-site iframe adds after load keeps the page", crossSite.browser,
+            await expectKept("a listener a cross-site iframe adds after load keeps the page", crossSite.page,
                              "window.__leave = () => {}; addEventListener('beforeunload', __leave)",
                              inFrame: true, kept: true)
-            await expectKept("the cross-site iframe removing it releases the page", crossSite.browser,
+            await expectKept("the cross-site iframe removing it releases the page", crossSite.page,
                              "removeEventListener('beforeunload', __leave)", inFrame: true, kept: false)
             await crossSite.close()
         }
@@ -421,24 +421,24 @@ extension SelfTest {
         let attachment = RecordingAttachment()
         var configuration = discardConfiguration()
         configuration.attachments = [attachment]
-        let browser = CefBrowser(url: URL(string: "selftest://edge/heavy.html?view")!, configuration: configuration, delegate: recorder)
-        let view = hostWindowed(browser)
-        _ = await loaded(browser, title: "heavy")
-        let renderer = await allocateInRenderer(browser)
-        _ = try? await browser.devTools.send("Runtime.enable")
+        let page = CefPage(url: URL(string: "selftest://edge/heavy.html?view")!, configuration: configuration, delegate: recorder)
+        let view = hostWindowed(page)
+        _ = await loaded(page, title: "heavy")
+        let renderer = await allocateInRenderer(page)
+        _ = try? await page.devTools.send("Runtime.enable")
         var consoleMessages: [String] = []
         let consoleWatcher = Task {
-            for await event in browser.devTools.events("Runtime.consoleAPICalled") {
+            for await event in page.devTools.events("Runtime.consoleAPICalled") {
                 consoleMessages.append(event["args"][0]["value"].stringValue ?? "")
             }
         }
         defer { consoleWatcher.cancel() }
 
-        let url = browser.url
+        let url = page.url
         view.isHidden = true
         await expect("discard (view): a hidden view's browser is discarded") {
-            try await browser.discard()
-            return browser.isDiscarded && browser.state == .live && browser.url == url && browser.title == "heavy"
+            try await page.discard()
+            return page.isDiscarded && page.state == .live && page.url == url && page.title == "heavy"
         }
         if let renderer {
             let exited = await waitUntil(timeout: .seconds(10)) { footprint(of: renderer.pid) == nil }
@@ -447,19 +447,19 @@ extension SelfTest {
         } else {
             check("discard (view): the renderer process exits", false, detail: "renderer not found")
         }
-        check("discard (view): stays in CefRuntime.browsers", CefRuntime.shared.browsers.contains { $0 === browser })
+        check("discard (view): stays in CefRuntime.pages", CefRuntime.shared.pages.contains { $0 === page })
 
         view.isHidden = false
         check("discard (view): showing the view restores the page",
-              await waitUntil { !browser.isDiscarded && !browser.isLoading && browser.url == url },
+              await waitUntil { !page.isDiscarded && !page.isLoading && page.url == url },
               detail: "\(recorder.events)")
         await expect("discard (view): user script and bridge work after restore") {
-            let injected = try await browser.evaluateJavaScript("window.__injected").intValue
-            let greeting = try await browser.evaluateJavaScript("app.greet({name: 'Ada'})").stringValue
+            let injected = try await page.evaluateJavaScript("window.__injected").intValue
+            let greeting = try await page.evaluateJavaScript("app.greet({name: 'Ada'})").stringValue
             return injected == 42 && greeting == "Hello, Ada from main!"
         }
         await expect("discard (view): DevTools event stream keeps delivering") {
-            try await browser.evaluateJavaScript("console.log('view restored')")
+            try await page.evaluateJavaScript("console.log('view restored')")
             return await waitUntil(timeout: .seconds(5)) { consoleMessages.contains("view restored") }
         }
         check("discard (view): delegate hears will, did and restore",
@@ -469,28 +469,28 @@ extension SelfTest {
               detail: "\(attachment.events), \(attachment.pageDuringRestore ?? "nil")")
 
         view.isHidden = true
-        check("discard (view): a restored browser is discarded again", (try? await browser.discard()) != nil && browser.isDiscarded)
-        browser.close()
+        check("discard (view): a restored browser is discarded again", (try? await page.discard()) != nil && page.isDiscarded)
+        page.close()
         view.removeFromSuperview()
-        check("discard (view): a discarded browser closes", await waitUntil { browser.state == .closed })
+        check("discard (view): a discarded browser closes", await waitUntil { page.state == .closed })
         check("discard (view): … and its attachment hears the close once, after the creation",
               attachment.events == ["create", "created", "restore", "close"], detail: "\(attachment.events)")
     }
 
     // MARK: Quitting
 
-    /// Browsers left discarded for the quit, opened after the census check
+    /// Pages left discarded for the quit, opened after the census check
     /// so that it sees only what CefKit leaked.
-    static var browsersDiscardedForQuitting: [AnyObject] = []
+    static var pagesDiscardedForQuitting: [AnyObject] = []
 
     /// Leaves a discarded Chrome-style window and a discarded view-hosted
-    /// browser open, so that quitting runs with both.
-    static func discardBrowsersForQuitting() async {
+    /// page open, so that quitting runs with both.
+    static func discardPagesForQuitting() async {
         SelfTestResults.shared.group = "quit"
-        let tab = CefBrowser(url: URL(string: "selftest://edge/tab.html?quit")!)
-        let tabWindow = CefWindow(browser: tab)
+        let tab = CefPage(url: URL(string: "selftest://edge/tab.html?quit")!)
+        let tabWindow = CefWindow(page: tab)
         tabWindow.show()
-        let viewed = CefBrowser(url: URL(string: "selftest://edge/tab.html?quit-view")!)
+        let viewed = CefPage(url: URL(string: "selftest://edge/tab.html?quit-view")!)
         let view = hostWindowed(viewed)
         _ = await allLoaded([tab, viewed], title: "tab")
         tabWindow.hide()
@@ -500,25 +500,25 @@ extension SelfTest {
         let viewDiscarded = (try? await viewed.discard()) != nil && viewed.isDiscarded
         check("quit: a Chrome-style tab and a view's browser are discarded for quitting", discarded && viewDiscarded,
               detail: "tab \(discarded), view \(viewDiscarded)")
-        browsersDiscardedForQuitting = [tabWindow, view]
+        pagesDiscardedForQuitting = [tabWindow, view]
     }
 
-    /// Waits until nothing keeps `browser` loaded but what `allowed`
+    /// Waits until nothing keeps `page` loaded but what `allowed`
     /// accepts: a hidden window takes a moment to reach Chromium's tab
     /// state, and a page that just loaded to settle.
     static func waitUntilDiscardable(
-        _ browser: CefBrowser, allowing allowed: (CefBrowser.DiscardBlocker) -> Bool = { _ in false }
+        _ page: CefPage, allowing allowed: (CefPage.DiscardBlocker) -> Bool = { _ in false }
     ) async {
-        _ = await waitUntilAsync(timeout: .seconds(5)) { await browser.discardBlockers().allSatisfy(allowed) }
+        _ = await waitUntilAsync(timeout: .seconds(5)) { await page.discardBlockers().allSatisfy(allowed) }
     }
 
     // MARK: Processes
 
     /// Fills 200 MB in the page's renderer and returns that renderer: the
     /// one renderer process whose footprint grew by more than 150 MB.
-    static func allocateInRenderer(_ browser: CefBrowser) async -> (pid: Int32, megabytes: Int)? {
+    static func allocateInRenderer(_ page: CefPage) async -> (pid: Int32, megabytes: Int)? {
         let before = Dictionary(uniqueKeysWithValues: rendererProcesses().map { ($0, footprint(of: $0) ?? 0) })
-        _ = try? await browser.evaluateJavaScript("__allocate()")
+        _ = try? await page.evaluateJavaScript("__allocate()")
         try? await Task.sleep(for: .milliseconds(300))
         for pid in rendererProcesses() {
             let now = footprint(of: pid) ?? 0

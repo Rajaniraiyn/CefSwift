@@ -30,8 +30,8 @@ struct Extensions: BrowserFeature {
         }
     }
 
-    @ViewBuilder func toolbarItems(_ placement: ToolbarPlacement, for browser: CefBrowser) -> some View {
-        if placement == .trailing { ExtensionsToolbar(browser: browser) }
+    @ViewBuilder func toolbarItems(_ placement: ToolbarPlacement, for page: CefPage) -> some View {
+        if placement == .trailing { ExtensionsToolbar(page: page) }
     }
 }
 
@@ -60,11 +60,11 @@ final class PinnedExtensions {
 // MARK: - Toolbar
 
 private struct ExtensionsToolbar: View {
-    let browser: CefBrowser
+    let page: CefPage
     @Environment(BrowserController.self) private var controller
     private let pinned = PinnedExtensions.shared
 
-    private var extensions: CefExtensions { (browser.configuration.profile ?? .default).extensions }
+    private var extensions: CefExtensions { (page.configuration.profile ?? .default).extensions }
 
     private var actions: [CefExtension] {
         extensions.installed.filter { $0.isEnabled && $0.action != nil }
@@ -73,9 +73,9 @@ private struct ExtensionsToolbar: View {
     var body: some View {
         HStack(spacing: 2) {
             ForEach(actions.filter(pinned.isPinned)) { item in
-                ExtensionActionButton(item: item, browser: browser)
+                ExtensionActionButton(item: item, page: page)
             }
-            ExtensionsMenu(browser: browser, extensions: extensions)
+            ExtensionsMenu(page: page, extensions: extensions)
         }
         .task {
             // The first read; CefExtensions keeps the list current after it.
@@ -87,13 +87,13 @@ private struct ExtensionsToolbar: View {
 /// One extension's action: its icon, and its popup under it.
 private struct ExtensionActionButton: View {
     let item: CefExtension
-    let browser: CefBrowser
+    let page: CefPage
 
     var body: some View {
         AnchoredButton(title: item.action?.title ?? item.name) {
             ExtensionIcon(image: item.action?.icon ?? item.icon, size: 16)
         } action: { anchor in
-            ExtensionPopup.toggle(for: item, from: anchor, in: browser)
+            ExtensionPopup.toggle(for: item, from: anchor, in: page)
         }
         .help(item.action?.title ?? item.name)
     }
@@ -101,7 +101,7 @@ private struct ExtensionActionButton: View {
 
 /// The puzzle piece: every extension, with its menu.
 private struct ExtensionsMenu: View {
-    let browser: CefBrowser
+    let page: CefPage
     let extensions: CefExtensions
     @Environment(BrowserController.self) private var controller
     private let pinned = PinnedExtensions.shared
@@ -113,7 +113,7 @@ private struct ExtensionsMenu: View {
             }
             ForEach(extensions.installed) { item in
                 Menu {
-                    ExtensionActions(item: item, extensions: extensions, browser: browser)
+                    ExtensionActions(item: item, extensions: extensions, page: page)
                 } label: {
                     Label {
                         Text(item.name)
@@ -124,7 +124,7 @@ private struct ExtensionsMenu: View {
             }
             Divider()
             Button("Manage Extensions…") { ManageExtensionsWindow.show(controller: controller) }
-            Button("Chrome Web Store") { controller.openTab(url: ExtensionLinks.webStore, sharingProfileOf: browser) }
+            Button("Chrome Web Store") { controller.openTab(url: ExtensionLinks.webStore, sharingProfileOf: page) }
         } label: {
             Label("Extensions", systemImage: "puzzlepiece.extension")
         }
@@ -139,7 +139,7 @@ private struct ExtensionsMenu: View {
 private struct ExtensionActions: View {
     let item: CefExtension
     let extensions: CefExtensions
-    let browser: CefBrowser
+    let page: CefPage
     @Environment(BrowserController.self) private var controller
     private let pinned = PinnedExtensions.shared
 
@@ -148,10 +148,10 @@ private struct ExtensionActions: View {
             Button(pinned.isPinned(item) ? "Unpin from Toolbar" : "Pin to Toolbar") { pinned.toggle(item) }
         }
         if let options = item.optionsURL {
-            Button("Options") { controller.openTab(url: options, sharingProfileOf: browser) }
+            Button("Options") { controller.openTab(url: options, sharingProfileOf: page) }
         }
         if let store = item.webStoreURL {
-            Button("View in Chrome Web Store") { controller.openTab(url: store, sharingProfileOf: browser) }
+            Button("View in Chrome Web Store") { controller.openTab(url: store, sharingProfileOf: page) }
         }
         Divider()
         if item.isUserModifiable {

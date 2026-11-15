@@ -16,30 +16,30 @@ struct PDFDemo: Demo {
 }
 
 private struct PDFDemoView: View {
-    @State private var browser = CefBrowser(url: SamplePage.article.url)
+    @State private var page = CefPage(url: SamplePage.article.url)
     @State private var isLandscape = false
     @State private var document: PDFDocument?
 
     var body: some View {
         HSplitView {
-            CefWebView(browser).frame(minWidth: 320)
+            CefWebView(page).frame(minWidth: 320)
             PDFPreview(document: document).frame(minWidth: 280)
         }
         .toolbar {
             Toggle("Landscape", systemImage: "rectangle.landscape.rotate", isOn: $isLandscape)
             Button("Save as PDF…", systemImage: "square.and.arrow.down", action: save)
-            Button("Print…", systemImage: "printer") { browser.print() }
+            Button("Print…", systemImage: "printer") { page.print() }
         }
         .reportReady {
-            try await browser.waitUntilLoaded(timeout: .seconds(30))
+            try await page.waitUntilLoaded(timeout: .seconds(30))
             try await render()
         }
         .onChange(of: isLandscape) { Task { try? await render() } }
-        .onDisappear { browser.close(force: true) }
+        .onDisappear { page.close(force: true) }
     }
 
-    private var configuration: CefBrowser.PDFConfiguration {
-        var configuration = CefBrowser.PDFConfiguration()
+    private var configuration: CefPage.PDFConfiguration {
+        var configuration = CefPage.PDFConfiguration()
         configuration.isLandscape = isLandscape
         configuration.margins = .uniform(36)
         configuration.footerTemplate = """
@@ -49,15 +49,15 @@ private struct PDFDemoView: View {
     }
 
     private func render() async throws {
-        document = PDFDocument(data: try await browser.pdf(configuration: configuration))
+        document = PDFDocument(data: try await page.pdf(configuration: configuration))
     }
 
     private func save() {
         let panel = NSSavePanel()
-        panel.nameFieldStringValue = "\(browser.title).pdf"
+        panel.nameFieldStringValue = "\(page.title).pdf"
         panel.allowedContentTypes = [.pdf]
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        Task { try? await browser.printToPDF(at: url, configuration: configuration) }
+        Task { try? await page.printToPDF(at: url, configuration: configuration) }
     }
 }
 

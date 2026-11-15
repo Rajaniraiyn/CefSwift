@@ -1,7 +1,7 @@
 import CefSwiftUI
 import SwiftUI
 
-/// `browser.devTools` speaks the Chrome DevTools Protocol in-process,
+/// `page.devTools` speaks the Chrome DevTools Protocol in-process,
 /// without a debugging port: `send(_:_:)` calls a method and
 /// `events(_:)` streams an event. `showDevTools()` opens the DevTools
 /// window.
@@ -15,13 +15,13 @@ struct DevToolsDemo: Demo {
 }
 
 private struct DevToolsView: View {
-    @State private var browser = CefBrowser(url: Self.page.url)
+    @State private var page = CefPage(url: Self.page.url)
     @State private var messages: [String] = []
     @State private var emulatesPhone = false
 
     var body: some View {
         VSplitView {
-            CefWebView(browser).frame(minHeight: 200)
+            CefWebView(page).frame(minHeight: 200)
             List(messages.indices.reversed(), id: \.self) { index in
                 Text(messages[index]).font(.callout.monospaced())
             }
@@ -30,22 +30,22 @@ private struct DevToolsView: View {
         }
         .toolbar {
             Toggle("Phone Viewport", systemImage: "iphone", isOn: $emulatesPhone)
-            Button("Show DevTools", systemImage: "wrench.and.screwdriver") { browser.showDevTools() }
+            Button("Show DevTools", systemImage: "wrench.and.screwdriver") { page.showDevTools() }
         }
         .onChange(of: emulatesPhone) {
             Task {
                 if emulatesPhone {
-                    _ = try? await browser.devTools.send("Emulation.setDeviceMetricsOverride",
+                    _ = try? await page.devTools.send("Emulation.setDeviceMetricsOverride",
                                                     ["width": 390, "height": 844, "deviceScaleFactor": 2, "mobile": true])
                 } else {
-                    _ = try? await browser.devTools.send("Emulation.clearDeviceMetricsOverride")
+                    _ = try? await page.devTools.send("Emulation.clearDeviceMetricsOverride")
                 }
             }
         }
         .reportReady {
             // Subscribe before enabling the domain, so no event is missed.
-            let events = browser.devTools.events("Runtime.consoleAPICalled")
-            try await browser.devTools.send("Runtime.enable")
+            let events = page.devTools.events("Runtime.consoleAPICalled")
+            try await page.devTools.send("Runtime.enable")
             Task {
                 for await event in events {
                     let text = event["args"].arrayValue?.compactMap { $0["value"].stringValue ?? $0["description"].stringValue }
@@ -54,8 +54,8 @@ private struct DevToolsView: View {
             }
         }
         .onDisappear {
-            browser.closeDevTools()
-            browser.close(force: true)
+            page.closeDevTools()
+            page.close(force: true)
         }
     }
 

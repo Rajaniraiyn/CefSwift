@@ -1,7 +1,7 @@
 import CefSwiftUI
 import SwiftUI
 
-/// Every browser has a `findSession`, an observable model for a find bar
+/// Every page has a `findSession`, an observable model for a find bar
 /// of the app's own: setting `text` searches as the user types,
 /// `matchCount` and `activeMatch` follow Chromium's results, and `next()`,
 /// `previous()` and `end()` move between matches and clear them.
@@ -15,14 +15,14 @@ struct FindInPageDemo: Demo {
 }
 
 private struct FindInPageView: View {
-    @State private var browser = CefBrowser(url: SamplePage.article.url)
+    @State private var page = CefPage(url: SamplePage.article.url)
 
     var body: some View {
-        FindBar(session: browser.findSession) {
-            CefWebView(browser)
+        FindBar(session: page.findSession) {
+            CefWebView(page)
         }
-        .readyWhenLoaded(browser)
-        .onDisappear { browser.close(force: true) }
+        .readyWhenLoaded(page)
+        .onDisappear { page.close(force: true) }
     }
 }
 

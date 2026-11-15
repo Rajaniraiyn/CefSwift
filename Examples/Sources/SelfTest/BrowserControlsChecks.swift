@@ -1,7 +1,7 @@
 import AppKit
 import CefKit
 
-// Small browser controls over CEF calls: zoom steps, spelling, leaving
+// Small page controls over CEF calls: zoom steps, spelling, leaving
 // fullscreen, the find selection, and URLs for security display.
 extension SelfTest {
     static func browserControlsChecks() async {
@@ -18,65 +18,65 @@ extension SelfTest {
               spoof == "https://xn--80ak6aa92e.com" && safe == "https://bücher.de",
               detail: "\(spoof ?? "nil"), \(safe ?? "nil")")
 
-        let browser = CefBrowser(url: URL(string: "selftest://app/second.html?controls")!)
-        let view = hostWindowed(browser)
-        guard await loaded(browser, title: "second") else {
-            check("controls: page loads", false, detail: browser.title)
-            await closeHosted(browser, view)
+        let page = CefPage(url: URL(string: "selftest://app/second.html?controls")!)
+        let view = hostWindowed(page)
+        guard await loaded(page, title: "second") else {
+            check("controls: page loads", false, detail: page.title)
+            await closeHosted(page, view)
             return
         }
 
         // Chrome's presets: 100% then 110%.
-        check("controls: at the default level, reset has nothing to do", !browser.canZoom(.reset) && browser.canZoom(.zoomIn))
-        browser.zoom(.zoomIn)
+        check("controls: at the default level, reset has nothing to do", !page.canZoom(.reset) && page.canZoom(.zoomIn))
+        page.zoom(.zoomIn)
         let expected = log(1.1) / log(1.2)
         check("controls: zoom(.zoomIn) steps to Chrome's next preset",
-              await waitUntil { abs(browser.zoomLevel - expected) < 0.01 }, detail: "\(browser.zoomLevel)")
-        browser.zoom(.reset)
+              await waitUntil { abs(page.zoomLevel - expected) < 0.01 }, detail: "\(page.zoomLevel)")
+        page.zoom(.reset)
         check("controls: zoom(.reset) goes back to the default",
-              await waitUntil { abs(browser.zoomLevel - browser.defaultZoomLevel) < 0.001 } && browser.defaultZoomLevel == 0,
-              detail: "\(browser.zoomLevel)")
+              await waitUntil { abs(page.zoomLevel - page.defaultZoomLevel) < 0.001 } && page.defaultZoomLevel == 0,
+              detail: "\(page.zoomLevel)")
 
         // The find selection.
-        _ = try? await browser.evaluateJavaScript("document.body.innerHTML = '<h1>needle</h1><p>needle</p>'; 0")
-        browser.find("needle")
-        _ = await waitUntil { browser.findResult?.isFinal == true }
-        browser.find("needle")
+        _ = try? await page.evaluateJavaScript("document.body.innerHTML = '<h1>needle</h1><p>needle</p>'; 0")
+        page.find("needle")
+        _ = await waitUntil { page.findResult?.isFinal == true }
+        page.find("needle")
         check("controls: a find result has the match's rectangle", await waitUntil {
-            browser.findResult?.isFinal == true && (browser.findResult?.selectionRect.map { !$0.isEmpty } ?? false)
-        }, detail: "\(String(describing: browser.findResult))")
-        browser.stopFinding()
+            page.findResult?.isFinal == true && (page.findResult?.selectionRect.map { !$0.isEmpty } ?? false)
+        }, detail: "\(String(describing: page.findResult))")
+        page.stopFinding()
 
-        // Leaving fullscreen, which an Alloy-style browser needs the app for.
-        _ = try? await browser.evaluateJavaScript("document.body.requestFullscreen().then(() => 0)", userGesture: true)
-        if await waitUntil(timeout: .seconds(5), { browser.isFullscreen }) {
-            browser.exitFullscreen()
-            check("controls: exitFullscreen leaves fullscreen", await waitUntil(timeout: .seconds(5)) { !browser.isFullscreen })
+        // Leaving fullscreen, which an Alloy-style page needs the app for.
+        _ = try? await page.evaluateJavaScript("document.body.requestFullscreen().then(() => 0)", userGesture: true)
+        if await waitUntil(timeout: .seconds(5), { page.isFullscreen }) {
+            page.exitFullscreen()
+            check("controls: exitFullscreen leaves fullscreen", await waitUntil(timeout: .seconds(5)) { !page.isFullscreen })
         } else {
             check("controls: the page enters fullscreen", false)
         }
         _ = await waitUntil(timeout: .seconds(3)) { view.window?.styleMask.contains(.fullScreen) != true }
 
         // Spelling: a misspelled word, selected, replaced by a suggestion.
-        _ = try? await browser.evaluateJavaScript("""
+        _ = try? await page.evaluateJavaScript("""
             document.body.innerHTML = '<div id=e contenteditable spellcheck=true></div>';
             document.getElementById('e').focus(); 0
             """, userGesture: true)
         // Typed, so that Chromium's spell checker marks it.
-        _ = try? await browser.devTools.send("Input.insertText", ["text": "teh "])
+        _ = try? await page.devTools.send("Input.insertText", ["text": "teh "])
         try? await Task.sleep(for: .milliseconds(1500))
-        _ = try? await browser.evaluateJavaScript("""
+        _ = try? await page.evaluateJavaScript("""
             const t = document.getElementById('e').firstChild; const r = document.createRange();
             r.setStart(t, 0); r.setEnd(t, 3); getSelection().removeAllRanges(); getSelection().addRange(r); 0
             """)
-        browser.replaceMisspelling(with: "the")
+        page.replaceMisspelling(with: "the")
         let replaced = await waitUntilAsync(timeout: .seconds(3)) {
-            (try? await browser.evaluateJavaScript("document.getElementById('e').textContent").stringValue)?.hasPrefix("the") == true
+            (try? await page.evaluateJavaScript("document.getElementById('e').textContent").stringValue)?.hasPrefix("the") == true
         }
         // Not a check: Chromium acts only on a word its spell checker has
         // marked, which typing through DevTools did not get marked here.
         print("NOTE controls: replaceMisspelling on a typed, selected misspelling \(replaced ? "replaced it" : "changed nothing")")
-        browser.learnSpelling("cefswiftword")
-        await closeHosted(browser, view)
+        page.learnSpelling("cefswiftword")
+        await closeHosted(page, view)
     }
 }

@@ -10,7 +10,7 @@ import CefPasskeys
 /// - `-url <address>`: the page.
 /// - `-host window|windowed|offscreen`: a Chrome-style `CefWindow`,
 ///   or a `CefWebView`-style view (Alloy), windowed or offscreen.
-/// - `-preset default|browser|embedded`: the `CefRuntime.Configuration` preset.
+/// - `-preset default|page|embedded`: the `CefRuntime.Configuration` preset.
 /// - `-features <name>,<name>`: `devtools` (a DevTools session with no
 ///   domain enabled), `runtime` (`Runtime.enable`), `page` (`Page.enable`),
 ///   `bridge`, `userscript`, `evaluate` (one `evaluateJavaScript` as the
@@ -28,8 +28,8 @@ import CefPasskeys
 enum CompatApp {
     static let defaults = UserDefaults.standard
     static var window: NSWindow?
-    static var browserWindow: CefWindow?
-    static var browser: CefBrowser!
+    static var pageWindow: CefWindow?
+    static var page: CefPage!
     static let bridge = CefBridge(name: "compatBridge")
 
     static var features: Set<String> {
@@ -58,37 +58,37 @@ enum CompatApp {
         }
 
         let url = URL(string: defaults.string(forKey: "url") ?? "about:blank")!
-        var browserConfiguration = CefBrowser.Configuration()
+        var pageConfiguration = CefPage.Configuration()
         if features.contains("bridge") {
             bridge.handle("ping") { (_: CefJSON) in "pong" }
-            browserConfiguration.bridges = [bridge]
+            pageConfiguration.bridges = [bridge]
         }
         if features.contains("userscript") {
-            browserConfiguration.userScripts = [CefUserScript(source: "addEventListener('DOMContentLoaded', () => { document.documentElement.dataset.compat = '1'; });")]
+            pageConfiguration.userScripts = [CefUserScript(source: "addEventListener('DOMContentLoaded', () => { document.documentElement.dataset.compat = '1'; });")]
         }
         if features.contains("passkeys") {
-            browserConfiguration.attachments = [CefPasskeyController(policy: .app(CefInMemoryPasskeyStore()))]
+            pageConfiguration.attachments = [CefPasskeyController(policy: .app(CefInMemoryPasskeyStore()))]
         }
         if features.contains("accessibility") {
-            browserConfiguration.offscreenAccessibility = .enabled
+            pageConfiguration.offscreenAccessibility = .enabled
         }
 
         let frame = NSRect(x: 60, y: 60, width: 1280, height: 900)
         switch defaults.string(forKey: "host") ?? "window" {
         case "windowed", "offscreen":
             let offscreen = defaults.string(forKey: "host") == "offscreen"
-            if offscreen { browserConfiguration.rendering = .offscreen }
-            browser = CefBrowser(url: url, configuration: browserConfiguration, delegate: CompatDelegate.shared)
+            if offscreen { pageConfiguration.rendering = .offscreen }
+            page = CefPage(url: url, configuration: pageConfiguration, delegate: CompatDelegate.shared)
             let window = NSWindow(
                 contentRect: frame, styleMask: [.titled, .resizable, .closable, .miniaturizable],
                 backing: .buffered, defer: false)
             window.title = "Compat"
             let view: NSView
             if offscreen {
-                let offscreenView = CefOffscreenBrowserView(browser: browser)
+                let offscreenView = CefOffscreenPageView(page: page)
                 view = offscreenView
             } else {
-                let windowedView = CefWindowedBrowserView(browser: browser)
+                let windowedView = CefWindowedPageView(page: page)
                 view = windowedView
             }
             view.frame = window.contentView!.bounds
@@ -98,12 +98,12 @@ enum CompatApp {
             window.makeKeyAndOrderFront(nil)
             self.window = window
         default:
-            browser = CefBrowser(url: url, configuration: browserConfiguration, delegate: CompatDelegate.shared)
+            page = CefPage(url: url, configuration: pageConfiguration, delegate: CompatDelegate.shared)
             var windowConfiguration = CefWindow.Configuration()
             windowConfiguration.frame = frame
-            let browserWindow = CefWindow(browser: browser, configuration: windowConfiguration)
-            browserWindow.show()
-            self.browserWindow = browserWindow
+            let pageWindow = CefWindow(page: page, configuration: windowConfiguration)
+            pageWindow.show()
+            self.pageWindow = pageWindow
         }
         NSApp.activate()
 
@@ -113,23 +113,23 @@ enum CompatApp {
 
     static func run() async {
         let features = features
-        try? await browser.ready()
+        try? await page.ready()
         if features.contains("devtools") {
-            _ = try? await browser.devTools.send("Browser.getVersion")
+            _ = try? await page.devTools.send("Browser.getVersion")
         }
         if features.contains("runtime") {
-            _ = try? await browser.devTools.send("Runtime.enable")
+            _ = try? await page.devTools.send("Runtime.enable")
         }
         if features.contains("page") {
-            _ = try? await browser.devTools.send("Page.enable")
+            _ = try? await page.devTools.send("Page.enable")
         }
         if features.contains("evaluate") {
             // A page that keeps its renderer busy must not hold up the reading.
-            _ = try? await browser.evaluateJavaScript("1 + 1", timeout: .seconds(10))
+            _ = try? await page.evaluateJavaScript("1 + 1", timeout: .seconds(10))
         }
         // The window number, for a screenshot from outside the app.
         for _ in 0..<100 {
-            if let number = (window ?? browserWindow?.window)?.windowNumber, number > 0 {
+            if let number = (window ?? pageWindow?.window)?.windowNumber, number > 0 {
                 print("compat window \(number)")
                 break
             }
@@ -138,7 +138,7 @@ enum CompatApp {
         let wait = defaults.double(forKey: "wait")
         try? await Task.sleep(for: .seconds(wait > 0 ? wait : 12))
         if let path = defaults.string(forKey: "capture"),
-           let number = (window ?? browserWindow?.window)?.windowNumber {
+           let number = (window ?? pageWindow?.window)?.windowNumber {
             let capture = Process()
             capture.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
             capture.arguments = ["-x", "-o", "-l", String(number), path]
@@ -146,8 +146,8 @@ enum CompatApp {
             capture.waitUntilExit()
         }
         print("compat done")
-        browser.close(force: true)
-        browserWindow?.close()
+        page.close(force: true)
+        pageWindow?.close()
         window?.close()
         NSApp.terminate(nil)
         // Chromium may wait on pages; never linger.
@@ -158,10 +158,10 @@ enum CompatApp {
 
 /// Reports renderer crashes, which would spoil a reading.
 @MainActor
-final class CompatDelegate: CefBrowserDelegate {
+final class CompatDelegate: CefPageDelegate {
     static let shared = CompatDelegate()
 
-    func browser(_ browser: CefBrowser, renderProcessDidTerminate reason: CefTerminationReason) {
+    func page(_ page: CefPage, renderProcessDidTerminate reason: CefTerminationReason) {
         print("compat renderer terminated: \(reason)")
     }
 }

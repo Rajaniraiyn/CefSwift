@@ -13,7 +13,7 @@ import Darwin
 ///   request matches, alternating.
 /// - `lifecycle`: CPU use of an animated page in each host and state.
 /// - `frames`: offscreen animation frames, pacing, input latency and CPU.
-/// - `compositor`: what `CefOffscreenBrowserView` presents, at three sizes.
+/// - `compositor`: what `CefOffscreenPageView` presents, at three sizes.
 /// - `animation`: pages under SwiftUI and AppKit animations, per host.
 /// - `services`: latency, cost and load behaviour of the service-host calls.
 @MainActor
@@ -51,27 +51,27 @@ enum Benchmarks {
             case "miss": profile.requestFilter = CefRequestFilter(hosts: ["nothing.example"]) { _ in .block }
             default: break
             }
-            var configuration = CefBrowser.Configuration()
+            var configuration = CefPage.Configuration()
             configuration.profile = profile
-            let browser = CefBrowser(url: URL(string: "selftest://bench/page.html?big=/small/end")!, configuration: configuration)
-            let view = CefWindowedBrowserView(browser: browser)
+            let page = CefPage(url: URL(string: "selftest://bench/page.html?big=/small/end")!, configuration: configuration)
+            let view = CefWindowedPageView(page: page)
             view.frame = SelfTest.window.contentView!.bounds
             let meter = MainThreadMeter()
             CefDiagnostics.isEnabled = true
             CefDiagnostics.reset()
             meter.start()
             SelfTest.window.contentView!.addSubview(view)
-            _ = await SelfTest.waitUntil(timeout: .seconds(60)) { browser.title.hasPrefix("done") }
+            _ = await SelfTest.waitUntil(timeout: .seconds(60)) { page.title.hasPrefix("done") }
             meter.stop()
             let match = CefDiagnostics.counter(.requestFilterMatch)
             let overhead = CefDiagnostics.counter(.requestFilterOverhead)
             let filter = CefDiagnostics.counter(.requestFilter)
             print(String(
                 format: "bench filters run %d (%@): %@; main thread %.0f ms; match %.2f µs each (%d); around the filter %.2f µs each (%d); filter %.2f µs each (%d)",
-                run, kind, browser.title, meter.busy.benchMilliseconds, match.microsecondsEach, match.count,
+                run, kind, page.title, meter.busy.benchMilliseconds, match.microsecondsEach, match.count,
                 overhead.microsecondsEach, overhead.count, filter.microsecondsEach, filter.count))
-            browser.close(force: true)
-            _ = await SelfTest.waitUntil { browser.state == .closed }
+            page.close(force: true)
+            _ = await SelfTest.waitUntil { page.state == .closed }
             view.removeFromSuperview()
             try? await Task.sleep(for: .seconds(1))
         }
@@ -89,13 +89,13 @@ enum Benchmarks {
         let kinds = ["data", "stream", "file"]
         for run in 1...(3 * kinds.count) {
             let kind = kinds[(run - 1) % kinds.count]
-            var configuration = CefBrowser.Configuration()
+            var configuration = CefPage.Configuration()
             configuration.requestFilter = CefRequestFilter { request in
                 if request.url?.path == "/blocked" { return .block }
                 return .setHeaders(["X-Bench": "1"])
             }
-            let browser = CefBrowser(url: URL(string: "selftest://bench/page.html?big=/big-\(kind)")!, configuration: configuration)
-            let view = CefWindowedBrowserView(browser: browser)
+            let page = CefPage(url: URL(string: "selftest://bench/page.html?big=/big-\(kind)")!, configuration: configuration)
+            let view = CefWindowedPageView(page: page)
             view.frame = SelfTest.window.contentView!.bounds
             let meter = MainThreadMeter()
             let memory = MemorySampler()
@@ -106,18 +106,18 @@ enum Benchmarks {
             meter.start()
             memory.start()
             SelfTest.window.contentView!.addSubview(view)
-            _ = await SelfTest.waitUntil(timeout: .seconds(120)) { browser.title.hasPrefix("done") }
+            _ = await SelfTest.waitUntil(timeout: .seconds(120)) { page.title.hasPrefix("done") }
             let elapsed = ContinuousClock.now - start
             meter.stop()
             memory.stop()
             let overhead = CefDiagnostics.counter(.requestFilterOverhead)
             print(String(
                 format: "bench requests run %d (%@): %@; total %.0f ms; main thread busy %.1f%% (%.0f ms); peak footprint %.0f MB (+%.0f MB); app CPU %.0f ms; request filter overhead %.2f µs each (%d)",
-                run, kind, browser.title, elapsed.benchMilliseconds, meter.busyFraction * 100, meter.busy.benchMilliseconds,
+                run, kind, page.title, elapsed.benchMilliseconds, meter.busyFraction * 100, meter.busy.benchMilliseconds,
                 memory.peakMB, memory.peakMB - memory.startMB, ProcessCPU.used(from: cpu, to: ProcessCPU.sample()).app * 1000,
                 overhead.microsecondsEach, overhead.count))
-            browser.close(force: true)
-            _ = await SelfTest.waitUntil { browser.state == .closed }
+            page.close(force: true)
+            _ = await SelfTest.waitUntil { page.state == .closed }
             view.removeFromSuperview()
             try? await Task.sleep(for: .seconds(1))
         }

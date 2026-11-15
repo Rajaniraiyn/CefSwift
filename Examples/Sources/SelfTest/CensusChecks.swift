@@ -2,17 +2,17 @@
 import Foundation
 
 /// The live-object census (`CefDiagnostics.census()`) after each group:
-/// what CefKit still holds once the group's browsers have closed.
+/// what CefKit still holds once the group's pages have closed.
 extension SelfTest {
     /// Prints what stayed after `group` compared with `baseline`.
     ///
     /// Leftovers of the kinds that are expected to stay a while (the
     /// process-lifetime objects, and the objects of service hosts while one
     /// is open) are reported at once. Anything else may still be on its way
-    /// out (a browser finishing its close), so it waits up to five seconds
+    /// out (a page finishing its close), so it waits up to five seconds
     /// for that first.
     static func reportCensus(after group: String, baseline: [String: Int]) async {
-        _ = await waitUntil(timeout: .seconds(10)) { CefRuntime.shared.browsers.isEmpty }
+        _ = await waitUntil(timeout: .seconds(10)) { CefRuntime.shared.pages.isEmpty }
         var extra: [String: Int] = [:]
         _ = await waitUntil(timeout: .seconds(5)) {
             extra = censusDifference(from: baseline)
@@ -33,7 +33,7 @@ extension SelfTest {
         "implemented NavigationHandlerOwner",
     ]
 
-    /// What an open service host holds: a hidden Chrome-style browser in a
+    /// What an open service host holds: a hidden Chrome-style page in a
     /// CEF window. Hosts close 30 s after their last call, so they outlive
     /// the group that called them.
     static let serviceHostCensus: Set<String> = [
@@ -55,7 +55,7 @@ extension SelfTest {
     static func censusChecks(baseline: [String: Int]) async {
         let isolatedChild = ProcessInfo.processInfo.environment["SELFTEST_ISOLATED_CHILD"] == "1"
         // Closed as idling closes them, without waiting the 30 s. Hosts of
-        // named profiles closed with the profile's last browser.
+        // named profiles closed with the profile's last page.
         CefProfile.default.stopServiceHosts()
         var extra: [String: Int] = [:]
         _ = await waitUntil(timeout: .seconds(isolatedChild ? 3 : 15)) {

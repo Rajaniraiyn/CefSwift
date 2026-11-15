@@ -10,13 +10,13 @@ extension SelfTest {
     static func tabResearchProbe() async {
         let experiment = ProcessInfo.processInfo.environment["CEFSWIFT_RESEARCH"] ?? "ids"
         func note(_ text: String) { print("NOTE \(text)"); fflush(stdout) }
-        func bookmarksHost() async -> (CefBrowser, CefWindow) {
-            let host = CefBrowser(url: URL(string: "chrome://bookmarks/")!)
-            let window = CefWindow(browser: host)
+        func bookmarksHost() async -> (CefPage, CefWindow) {
+            let host = CefPage(url: URL(string: "chrome://bookmarks/")!)
+            let window = CefWindow(page: host)
             _ = await loaded(host)
             return (host, window)
         }
-        func run(_ host: CefBrowser, _ label: String, _ script: String) async -> String {
+        func run(_ host: CefPage, _ label: String, _ script: String) async -> String {
             do {
                 let value = try await host.evaluateJavaScript("(async () => { try { \(script) } catch (e) { return 'error ' + e.message } })()")
                 note("\(label): \(value)")
@@ -28,26 +28,26 @@ extension SelfTest {
         }
         switch experiment {
         case "ids":
-            let strip = CefProfile.default.tabStrip
-            let window = try? await CefChromeWindow.open(url: page("a"))
-            _ = try? await window?.openChromiumTab(page("b"))
-            _ = await waitUntil { window?.tabs.count == 2 && window?.tabs.allSatisfy { $0.browser != nil } == true }
+            let strip = CefProfile.default.tabs
+            let window = try? await CefChromeWindow.open(url: pageURL("a"))
+            _ = try? await window?.openChromiumTab(pageURL("b"))
+            _ = await waitUntil { window?.tabs.count == 2 && window?.tabs.allSatisfy { $0.page != nil } == true }
             for tab in window?.tabs ?? [] {
-                guard let browser = tab.browser else { continue }
-                let w = try? await browser.devTools.send("Browser.getWindowForTarget")
-                let t = try? await browser.devTools.send("Target.getTargetInfo")
-                note("tab \(tab.id) window \(window?.id.rawValue ?? -1) cef \(browser.identifier): getWindowForTarget \(w.map { "\($0)" } ?? "-") targetInfo \(t.map { "\($0)" } ?? "-")")
+                guard let page = tab.page else { continue }
+                let w = try? await page.devTools.send("Browser.getWindowForTarget")
+                let t = try? await page.devTools.send("Target.getTargetInfo")
+                note("tab \(tab.id) window \(window?.id.rawValue ?? -1) cef \(page.identifier): getWindowForTarget \(w.map { "\($0)" } ?? "-") targetInfo \(t.map { "\($0)" } ?? "-")")
             }
             let (host, hostWindow) = await bookmarksHost()
             _ = await run(host, "apis", "return JSON.stringify({sessions: typeof chrome.sessions, tabGroups: typeof chrome.tabGroups, tabs: typeof chrome.tabs, windows: typeof chrome.windows, send: typeof chrome.send})")
             // tab-strip-internals: its interface, and recently closed entries.
-            let internals = CefBrowser(url: URL(string: "chrome://tab-strip-internals/")!)
-            let internalsWindow = CefWindow(browser: internals)
+            let internals = CefPage(url: URL(string: "chrome://tab-strip-internals/")!)
+            let internalsWindow = CefWindow(page: internals)
             _ = await loaded(internals, timeout: .seconds(5))
             window?.tabs.last?.close()
             try? await Task.sleep(for: .seconds(1))
-            let second = try? await CefChromeWindow.open(url: page("w2"))
-            _ = try? await second?.openChromiumTab(page("w2b"))
+            let second = try? await CefChromeWindow.open(url: pageURL("w2"))
+            _ = try? await second?.openChromiumTab(pageURL("w2b"))
             try? await Task.sleep(for: .seconds(1))
             second?.close()
             try? await Task.sleep(for: .seconds(1))
@@ -63,8 +63,8 @@ extension SelfTest {
                 """)
             _ = await run(internals, "internals module exports", "const m = await import('chrome://tab-strip-internals/tab_strip_internals.mojom-webui.js'); return Object.keys(m).join(',')")
             // tab search: what the page serves.
-            let search = CefBrowser(url: URL(string: "chrome://tab-search.top-chrome/")!)
-            let searchWindow = CefWindow(browser: search)
+            let search = CefPage(url: URL(string: "chrome://tab-search.top-chrome/")!)
+            let searchWindow = CefWindow(page: search)
             _ = await loaded(search, timeout: .seconds(5))
             _ = await run(search, "tab search", "return JSON.stringify({url: location.href, scripts: [...document.scripts].map(s => s.src), send: typeof chrome.send, tabs: typeof chrome.tabs})")
             for path in ["tab_search.mojom-webui.js", "tab_search_api_proxy.js", "tab_search.js"] {
@@ -87,16 +87,16 @@ extension SelfTest {
             // Which chrome.tabs or chrome.windows listener on the WebUI host
             // takes Chromium down, and when.
             let name = String(listener.dropFirst("listener=".count))
-            let window = try? await CefChromeWindow.open(url: page("a"))
+            let window = try? await CefChromeWindow.open(url: pageURL("a"))
             let (host, hostWindow) = await bookmarksHost()
             _ = await run(host, "listen \(name)", "\(name).addListener((...a) => { window.__events = (window.__events || 0) + 1; }); return 'ok'")
-            _ = try? await window?.openChromiumTab(page("b"))
+            _ = try? await window?.openChromiumTab(pageURL("b"))
             try? await Task.sleep(for: .seconds(1))
             if let first = window?.tabs.first { try? await first.move(to: -1) }
             try? await Task.sleep(for: .milliseconds(500))
             note("step: incognito window")
             let incognito = CefProfile.incognito()
-            let privateWindow = try? await CefChromeWindow.open(url: page("p"), profile: incognito)
+            let privateWindow = try? await CefChromeWindow.open(url: pageURL("p"), profile: incognito)
             try? await Task.sleep(for: .seconds(2))
             _ = await run(host, "events after incognito", "return String(window.__events || 0)")
             note("step: disable and enable the extension")
@@ -123,13 +123,13 @@ extension SelfTest {
             if let mode {
                 try? CefProfile.default.preferences.setValue(.number(Double(mode)), named: "session.restore_on_startup")
             }
-            let one = try? await CefChromeWindow.open(url: page("s1a"))
-            _ = try? await one?.openChromiumTab(page("s1b"))
-            if let b = one?.tabs.last { _ = await waitUntil { b.browser != nil }; b.browser?.load(page("s1b2")) }
-            let two = try? await CefChromeWindow.open(url: page("s2a"))
-            _ = try? await two?.openChromiumTab(page("s2b"))
+            let one = try? await CefChromeWindow.open(url: pageURL("s1a"))
+            _ = try? await one?.openChromiumTab(pageURL("s1b"))
+            if let b = one?.tabs.last { _ = await waitUntil { b.page != nil }; b.page?.load(pageURL("s1b2")) }
+            let two = try? await CefChromeWindow.open(url: pageURL("s2a"))
+            _ = try? await two?.openChromiumTab(pageURL("s2b"))
             try? await Task.sleep(for: .seconds(3))
-            note("first launch: windows \(CefProfile.default.tabStrip.windows.map { $0.tabs.map { $0.url?.absoluteString ?? "-" } })")
+            note("first launch: windows \(CefProfile.default.tabs.windows.map { $0.tabs.map { $0.url?.absoluteString ?? "-" } })")
             note("pref restore_on_startup \(CefProfile.default.preferences.value(named: "session.restore_on_startup").map { "\($0)" } ?? "-")")
             if experiment == "crash1" {
                 note("killing")
@@ -137,9 +137,9 @@ extension SelfTest {
             }
             if ProcessInfo.processInfo.environment["CEFSWIFT_CLOSE_WINDOWS"] != nil {
                 // Each window closed as a window, as Chrome's quit would record them.
-                for window in CefProfile.default.tabStrip.windows { window.tabs.first?.browser?.execute(.closeWindow) }
-                _ = await waitUntil(timeout: .seconds(5)) { CefRuntime.shared.browsers.isEmpty }
-                let closed = await CefProfile.default.tabStrip.refreshRecentlyClosed()
+                for window in CefProfile.default.tabs.windows { window.tabs.first?.page?.execute(.closeWindow) }
+                _ = await waitUntil(timeout: .seconds(5)) { CefRuntime.shared.pages.isEmpty }
+                let closed = await CefProfile.default.tabs.refreshRecentlyClosed()
                 note("closed at quit: \(closed.map { "\($0.id) \($0.kind) tabs \($0.tabCount) at \($0.closedAt.map { "\($0.timeIntervalSince1970)" } ?? "-")" })")
                 return
             }
@@ -150,13 +150,13 @@ extension SelfTest {
             }
         case "session2", "crash2":
             // Second launch: what Chromium opened by itself.
-            note("at start: browsers \(CefRuntime.shared.browsers.map { $0.url?.absoluteString ?? "-" })")
+            note("at start: browsers \(CefRuntime.shared.pages.map { $0.url?.absoluteString ?? "-" })")
             var created: [String] = []
-            CefRuntime.shared.onBrowserCreated = { created.append($0.url?.absoluteString ?? "-") }
+            CefRuntime.shared.onPageCreated = { created.append($0.url?.absoluteString ?? "-") }
             try? await Task.sleep(for: .seconds(6))
-            let strip = CefProfile.default.tabStrip
+            let strip = CefProfile.default.tabs
             await strip.refresh()
-            note("after 6 s: created \(created.count), browsers \(CefRuntime.shared.browsers.map { "\($0.url?.absoluteString ?? "-")" })")
+            note("after 6 s: created \(created.count), browsers \(CefRuntime.shared.pages.map { "\($0.url?.absoluteString ?? "-")" })")
             note("strip windows \(strip.windows.map { $0.tabs.map { $0.url?.absoluteString ?? "-" } }) closed \(strip.recentlyClosed.map { "\($0.kind) \($0.title)" })")
             note("pref restore_on_startup \(CefProfile.default.preferences.value(named: "session.restore_on_startup").map { "\($0)" } ?? "-") exit_type \(CefProfile.default.preferences.value(named: "profile.exit_type").map { "\($0)" } ?? "-") exited_cleanly \(CefProfile.default.preferences.value(named: "profile.exited_cleanly").map { "\($0)" } ?? "-")")
             for window in NSApp.windows where window.isVisible {
@@ -167,12 +167,12 @@ extension SelfTest {
             note("closed at start: \(closedAtStart.map { "\($0.id) \($0.kind) tabs \($0.tabCount) at \($0.closedAt.map { "\($0.timeIntervalSince1970)" } ?? "-")" })")
             if experiment == "crash2" {
                 // Chromium's own restore, if offered: IDC_RESTORE_TAB on a new window.
-                let window = try? await CefChromeWindow.open(url: page("after"))
+                let window = try? await CefChromeWindow.open(url: pageURL("after"))
                 try? await Task.sleep(for: .seconds(2))
                 let closedAfterOpen = await strip.refreshRecentlyClosed()
                 note("closed after a window opened: \(closedAfterOpen.map { "\($0.id) \($0.kind) tabs \($0.tabCount)" })")
-                let search = CefBrowser(url: URL(string: "chrome://tab-search.top-chrome/")!)
-                let searchWindow = CefWindow(browser: search)
+                let search = CefPage(url: URL(string: "chrome://tab-search.top-chrome/")!)
+                let searchWindow = CefWindow(page: search)
                 _ = await loaded(search, timeout: .seconds(5))
                 _ = await run(search, "tab search closed", """
                     const m = await import('chrome://tab-search.top-chrome/tab_search.js');
@@ -186,7 +186,7 @@ extension SelfTest {
                     let children = (nsWindow.childWindows ?? []).map { CefChromiumTesting.describe($0) }
                     note("after open: window '\(nsWindow.title)' children \(children.map { "\($0.kind ?? "-") '\($0.title)' \($0.classes.prefix(16))" })")
                 }
-                window?.tabs.first?.browser?.execute(.restoreTab)
+                window?.tabs.first?.page?.execute(.restoreTab)
                 try? await Task.sleep(for: .seconds(3))
                 await strip.refresh()
                 note("after IDC_RESTORE_TAB: \(strip.windows.map { $0.tabs.map { $0.url?.absoluteString ?? "-" } })")
@@ -194,26 +194,26 @@ extension SelfTest {
         case "restore":
             // Reopening a given entry: tab search's openRecentlyClosedEntry,
             // and closing a whole window (IDC_CLOSE_WINDOW).
-            let strip = CefProfile.default.tabStrip
+            let strip = CefProfile.default.tabs
             func layout() -> String { "\(strip.windows.map { "\($0.id): " + $0.tabs.map { "\($0.url?.query ?? $0.title)" }.joined(separator: ",") })" }
             let one = try? await CefChromeWindow.open(url: URL(string: "chrome://version/?a")!)
             _ = try? await one?.openChromiumTab(URL(string: "chrome://version/?b")!)
-            if let b = one?.tabs.last { _ = await waitUntil { b.browser != nil }; b.browser?.load(URL(string: "chrome://version/?b2")!) }
+            if let b = one?.tabs.last { _ = await waitUntil { b.page != nil }; b.page?.load(URL(string: "chrome://version/?b2")!) }
             try? await Task.sleep(for: .seconds(1))
             _ = try? await one?.openChromiumTab(URL(string: "chrome://version/?c")!)
             let two = try? await CefChromeWindow.open(url: URL(string: "chrome://version/?w2a")!)
             _ = try? await two?.openChromiumTab(URL(string: "chrome://version/?w2b")!)
             try? await Task.sleep(for: .seconds(1))
-            let bBrowser = one?.tabs.first { $0.url?.query == "b2" }?.browser
+            let bPage = one?.tabs.first { $0.url?.query == "b2" }?.page
             note("before: \(layout())")
             one?.tabs.first { $0.url?.query == "b2" }?.close()
             try? await Task.sleep(for: .seconds(1))
-            two?.tabs.first?.browser?.execute(.closeWindow)
+            two?.tabs.first?.page?.execute(.closeWindow)
             try? await Task.sleep(for: .seconds(2))
             let closed = await strip.refreshRecentlyClosed()
             note("closed: \(closed.map { "\($0.id) \($0.kind) '\($0.title)' tabs \($0.tabCount)" }) layout \(layout())")
-            let search = CefBrowser(url: URL(string: "chrome://tab-search.top-chrome/")!)
-            let searchWindow = CefWindow(browser: search)
+            let search = CefPage(url: URL(string: "chrome://tab-search.top-chrome/")!)
+            let searchWindow = CefWindow(page: search)
             _ = await loaded(search, timeout: .seconds(5))
             for item in closed where item.kind == .tab || item.kind == .window {
                 _ = await run(search, "reopen \(item.kind) \(item.id)", """
@@ -223,10 +223,10 @@ extension SelfTest {
                     """)
                 try? await Task.sleep(for: .seconds(2))
                 await strip.refresh()
-                note("after reopening \(item.kind): \(layout()) browsers \(CefRuntime.shared.browsers.map { $0.url?.query ?? "-" }) visible windows \(NSApp.windows.filter(\.isVisible).map { "\(type(of: $0)) '\($0.title)'" })")
+                note("after reopening \(item.kind): \(layout()) browsers \(CefRuntime.shared.pages.map { $0.url?.query ?? "-" }) visible windows \(NSApp.windows.filter(\.isVisible).map { "\(type(of: $0)) '\($0.title)'" })")
             }
             if let restored = strip.windows.flatMap(\.tabs).first(where: { $0.url?.query == "b2" }) {
-                note("restored b: same browser \(restored.browser === bBrowser) canGoBack \(restored.browser?.canGoBack ?? false) index \(restored.index) in \(restored.window?.id.rawValue ?? -1)")
+                note("restored b: same browser \(restored.page === bPage) canGoBack \(restored.page?.canGoBack ?? false) index \(restored.index) in \(restored.window?.id.rawValue ?? -1)")
             }
             searchWindow.close()
         case "preview":
@@ -234,14 +234,14 @@ extension SelfTest {
             // active tab (small JPEG) and for a background tab, and how long.
             let window = try? await CefChromeWindow.open(url: URL(string: "chrome://version/?front")!)
             let back = try? await window?.openTab(URL(string: "chrome://version/?back")!, isActive: false)
-            _ = await waitUntil { back?.browser != nil && window?.activeTab?.browser != nil }
+            _ = await waitUntil { back?.page != nil && window?.activeTab?.page != nil }
             try? await Task.sleep(for: .seconds(1))
             for (label, tab) in [("active", window?.activeTab), ("background", back)] {
-                guard let browser = tab?.browser else { continue }
+                guard let page = tab?.page else { continue }
                 for params: CefJSON in [["format": "png"],
                                         ["format": "jpeg", "quality": 60, "clip": ["x": 0, "y": 0, "width": 1200, "height": 800, "scale": 0.25]]] {
                     let start = ContinuousClock.now
-                    let reply = try? await browser.devTools.send("Page.captureScreenshot", params)
+                    let reply = try? await page.devTools.send("Page.captureScreenshot", params)
                     let bytes = reply?["data"].stringValue.flatMap { Data(base64Encoded: $0) }
                     let image = bytes.flatMap(NSImage.init(data:))
                     note("preview \(label) \(params["format"].stringValue ?? ""): \(bytes?.count ?? -1) bytes, \(image.map { "\(Int($0.size.width))x\(Int($0.size.height))" } ?? "no image") in \(ContinuousClock.now - start)")
@@ -250,31 +250,31 @@ extension SelfTest {
         case "audio":
             // What the NSWindow title says while the active tab plays sound,
             // and what tab search's page router offers.
-            let window = try? await CefChromeWindow.open(url: page("sound"))
-            _ = await waitUntil { window?.activeTab?.browser != nil && window?.window != nil }
-            let browser = window?.activeTab?.browser
+            let window = try? await CefChromeWindow.open(url: pageURL("sound"))
+            _ = await waitUntil { window?.activeTab?.page != nil && window?.window != nil }
+            let page = window?.activeTab?.page
             let titles = Box<[String]>([])
             let observation = window?.window?.observe(\.title, options: [.new]) { nsWindow, _ in
                 MainActor.assumeIsolated { titles.value.append(nsWindow.title) }
             }
             note("title before: '\(window?.window?.title ?? "-")'")
-            _ = try? await browser?.evaluateJavaScript("""
+            _ = try? await page?.evaluateJavaScript("""
                 window.ctx = new AudioContext(); const o = ctx.createOscillator(); const g = ctx.createGain(); g.gain.value = 0.001;
                 o.connect(g).connect(ctx.destination); o.start(); 'ok'
                 """, userGesture: true)
             try? await Task.sleep(for: .seconds(3))
             await window?.strip.refresh()
             note("title playing: '\(window?.window?.title ?? "-")' audible \(window?.activeTab?.isAudible ?? false) titles \(titles.value)")
-            browser?.isAudioMuted = true
+            page?.isAudioMuted = true
             try? await Task.sleep(for: .seconds(1))
             note("title muted: '\(window?.window?.title ?? "-")' titles \(titles.value)")
-            browser?.isAudioMuted = false
-            _ = try? await browser?.evaluateJavaScript("ctx.close(); 'ok'")
+            page?.isAudioMuted = false
+            _ = try? await page?.evaluateJavaScript("ctx.close(); 'ok'")
             try? await Task.sleep(for: .seconds(3))
             note("title stopped: '\(window?.window?.title ?? "-")' titles \(titles.value)")
             observation?.invalidate()
-            let search = CefBrowser(url: URL(string: "chrome://tab-search.top-chrome/")!)
-            let searchWindow = CefWindow(browser: search)
+            let search = CefPage(url: URL(string: "chrome://tab-search.top-chrome/")!)
+            let searchWindow = CefWindow(page: search)
             _ = await loaded(search, timeout: .seconds(5))
             _ = await run(search, "tab search router", """
                 const m = await import('chrome://tab-search.top-chrome/tab_search.js');
@@ -301,19 +301,19 @@ extension SelfTest {
             await gpu("nothing")
             var configuration = CefWindow.Configuration()
             configuration.frame = frame
-            let viewsBrowser = CefBrowser(url: page("v"))
-            let views = CefWindow(browser: viewsBrowser, configuration: configuration)
-            _ = await loaded(viewsBrowser)
+            let viewsPage = CefPage(url: pageURL("v"))
+            let views = CefWindow(page: viewsPage, configuration: configuration)
+            _ = await loaded(viewsPage)
             await gpu("CefWindow")
             views.close()
-            _ = await waitUntil { viewsBrowser.state == .closed }
+            _ = await waitUntil { viewsPage.state == .closed }
             await gpu("closed")
-            let chrome = CefRuntime.shared.openChromeWindow(url: page("c"), frame: frame)
+            let chrome = CefRuntime.shared.openChromeWindow(url: pageURL("c"), frame: frame)
             _ = await loaded(chrome)
             await gpu("Chrome window")
             await gpu("Chrome window, 6 s later")
             await gpu("Chrome window, 12 s later")
-            let strip = CefProfile.default.tabStrip
+            let strip = CefProfile.default.tabs
             strip.layout = .vertical(width: 200)
             await gpu("Chrome window, vertical tabs")
             strip.layout = .horizontal
@@ -327,8 +327,8 @@ extension SelfTest {
         default:
             note("unknown experiment \(experiment)")
         }
-        for open in CefRuntime.shared.browsers { open.close(force: true) }
-        _ = await waitUntil { CefRuntime.shared.browsers.isEmpty }
+        for open in CefRuntime.shared.pages { open.close(force: true) }
+        _ = await waitUntil { CefRuntime.shared.pages.isEmpty }
     }
 }
 

@@ -18,15 +18,15 @@ struct CustomSchemeDemo: Demo {
 
 private struct CustomSchemeView: View {
     @State private var site = SiteHandler()
-    @State private var browser: CefBrowser?
+    @State private var page: CefPage?
 
     var body: some View {
         HSplitView {
-            if let browser {
-                CefWebView(browser)
+            if let page {
+                CefWebView(page)
                     .frame(minWidth: 360)
-                    .readyWhenLoaded(browser)
-                    .onDisappear { browser.close(force: true) }
+                    .readyWhenLoaded(page)
+                    .onDisappear { page.close(force: true) }
             }
             List(site.requests.reversed(), id: \.self) { line in
                 Text(line).font(.callout.monospaced())
@@ -36,7 +36,7 @@ private struct CustomSchemeView: View {
         .onAppear {
             // Register the handler first, then load from the scheme.
             CefRuntime.shared.registerSchemeHandler(scheme: "gallery", domain: "site", handler: site)
-            browser = CefBrowser(url: URL(string: "gallery://site/index.html")!)
+            page = CefPage(url: URL(string: "gallery://site/index.html")!)
         }
     }
 }

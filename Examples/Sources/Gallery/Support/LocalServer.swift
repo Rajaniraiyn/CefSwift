@@ -10,7 +10,7 @@ import os
 /// - `/echo.json`: the request's method and headers, as JSON.
 /// - `/stream?bytes=<count>[&name=<file>]`: that many bytes, sent in parts
 ///   over about two seconds so that progress shows; with `name`, as an
-///   attachment, which a browser downloads.
+///   attachment, which a page downloads.
 final class LocalServer: Sendable {
     /// Started on first use.
     static let shared = try! LocalServer()

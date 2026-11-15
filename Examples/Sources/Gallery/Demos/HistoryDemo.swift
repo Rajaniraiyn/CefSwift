@@ -4,7 +4,7 @@ import SwiftUI
 
 /// With CefChromium, `profile.history` is Chromium's browsing history:
 /// `search(_:limit:)` finds visits as `chrome://history` does, and
-/// `remove(_:)` deletes them. Only Chrome-style browsers record visits, so
+/// `remove(_:)` deletes them. Only Chrome-style pages record visits, so
 /// pages opened in the Chrome-Style Window demo appear here; those in web
 /// views do not.
 struct HistoryDemo: Demo {

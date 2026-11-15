@@ -45,7 +45,7 @@ struct GalleryView: View {
             if let demo = model.selectedDemo {
                 DemoDetail(demo: demo)
                     .environment(\.demoReadiness, model.readiness)
-                    // A fresh view, and fresh browsers, for each demo.
+                    // A fresh view, and fresh pages, for each demo.
                     .id(demo.id)
             } else {
                 ContentUnavailableView("Choose a Demo", systemImage: "square.grid.2x2")

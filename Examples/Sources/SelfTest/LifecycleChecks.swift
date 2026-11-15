@@ -2,7 +2,7 @@ import AppKit
 @_spi(Testing) import CefKit
 import CefSwiftUI
 
-/// Checks that `CefBrowser.lifecycle` and the page's own
+/// Checks that `CefPage.lifecycle` and the page's own
 /// `document.visibilityState` agree as windows are covered, minimized,
 /// ordered out and tabbed, the app is hidden and views are hidden, in each
 /// kind of host; and the energy saver's offscreen frame rate.
@@ -18,33 +18,33 @@ extension SelfTest {
         await energyPolicyChecks()
     }
 
-    /// Whether the browser and its page agree that it is visible (or
+    /// Whether the page and its document agree that it is visible (or
     /// hidden), within a few seconds: Chromium notices covered windows
     /// with a delay.
-    static func agree(_ browser: CefBrowser, visible: Bool) async -> (Bool, String) {
-        var page = "?"
+    static func agree(_ page: CefPage, visible: Bool) async -> (Bool, String) {
+        var visibility = "?"
         let agreed = await waitUntilAsync(timeout: .seconds(6)) {
-            page = (try? await browser.evaluateJavaScript("document.visibilityState").stringValue) ?? "?"
-            return browser.lifecycle.isVisible == visible && page == (visible ? "visible" : "hidden")
+            visibility = (try? await page.evaluateJavaScript("document.visibilityState").stringValue) ?? "?"
+            return page.lifecycle.isVisible == visible && visibility == (visible ? "visible" : "hidden")
         }
-        return (agreed, "lifecycle \(browser.lifecycle), page \(page)")
+        return (agreed, "lifecycle \(page.lifecycle), page \(visibility)")
     }
 
     static func lifecycleChecks(in host: BenchmarkHost) async {
-        guard let hosted = await HostedBenchmarkBrowser(host, url: URL(string: "selftest://bench/animated.html")!) else {
+        guard let hosted = await HostedBenchmarkPage(host, url: URL(string: "selftest://bench/animated.html")!) else {
             check("lifecycle \(host): opens", false)
             return
         }
-        let browser = hosted.browser
-        _ = await waitUntil { browser.title == "animated" }
+        let page = hosted.page
+        _ = await waitUntil { page.title == "animated" }
         let name = "lifecycle \(host.rawValue)"
         func expectAgreement(_ step: String, visible: Bool) async {
-            var (agreed, detail) = await agree(browser, visible: visible)
+            var (agreed, detail) = await agree(page, visible: visible)
             // Another app's window over the test window (a screen-sharing
             // overlay, say) hides it for real; then both must say hidden.
             if !agreed, visible, !hosted.window.occlusionState.contains(.visible) {
                 print("NOTE \(name): \(step): another window covers the test window")
-                (agreed, detail) = await agree(browser, visible: false)
+                (agreed, detail) = await agree(page, visible: false)
             }
             check("\(name): \(step) — \(visible ? "visible" : "hidden") to both", agreed, detail: detail)
         }
@@ -86,45 +86,45 @@ extension SelfTest {
         if host != .offscreen {
             // Focus: active exactly when the page has focus.
             hosted.window.makeKeyAndOrderFront(nil)
-            if host == .windowed, let native = browser.nativeView { hosted.window.makeFirstResponder(native) }
+            if host == .windowed, let native = page.nativeView { hosted.window.makeFirstResponder(native) }
             var detail = ""
             let consistent = await waitUntilAsync(timeout: .seconds(3)) {
-                let focus = (try? await browser.evaluateJavaScript("document.hasFocus()").boolValue) ?? nil
-                detail = "lifecycle \(browser.lifecycle), hasFocus \(focus.map(String.init) ?? "?"), app active \(NSApp.isActive)"
-                return focus == (browser.lifecycle == .active)
+                let focus = (try? await page.evaluateJavaScript("document.hasFocus()").boolValue) ?? nil
+                detail = "lifecycle \(page.lifecycle), hasFocus \(focus.map(String.init) ?? "?"), app active \(NSApp.isActive)"
+                return focus == (page.lifecycle == .active)
             }
             check("\(name): active exactly when the page has focus", consistent, detail: detail)
         }
         await hosted.close()
-        check("\(name): a closed browser is hidden", browser.lifecycle == .hidden, detail: "\(browser.lifecycle)")
+        check("\(name): a closed browser is hidden", page.lifecycle == .hidden, detail: "\(page.lifecycle)")
     }
 
-    /// Two browsers as tabs of one native tab group: only the selected
+    /// Two pages as tabs of one native tab group: only the selected
     /// tab is visible.
     static func tabGroupChecks(_ host: BenchmarkHost) async {
-        guard let first = await HostedBenchmarkBrowser(host, url: URL(string: "selftest://bench/animated.html")!),
-              let second = await HostedBenchmarkBrowser(host, url: URL(string: "selftest://bench/animated.html")!)
+        guard let first = await HostedBenchmarkPage(host, url: URL(string: "selftest://bench/animated.html")!),
+              let second = await HostedBenchmarkPage(host, url: URL(string: "selftest://bench/animated.html")!)
         else {
             check("lifecycle \(host.rawValue) tabs: open", false)
             return
         }
-        _ = await waitUntil { first.browser.title == "animated" && second.browser.title == "animated" }
+        _ = await waitUntil { first.page.title == "animated" && second.page.title == "animated" }
         first.window.addTabbedWindow(second.window, ordered: .above)
         second.window.makeKeyAndOrderFront(nil)
         // The selected tab is visible unless another app's window covers it.
-        func selected(_ hosted: HostedBenchmarkBrowser) async -> (Bool, String) {
-            let result = await agree(hosted.browser, visible: true)
+        func selected(_ hosted: HostedBenchmarkPage) async -> (Bool, String) {
+            let result = await agree(hosted.page, visible: true)
             guard !result.0, !hosted.window.occlusionState.contains(.visible) else { return result }
             print("NOTE lifecycle \(host.rawValue) tabs: another window covers the test window")
-            return await agree(hosted.browser, visible: false)
+            return await agree(hosted.page, visible: false)
         }
-        let (firstHidden, detail1) = await agree(first.browser, visible: false)
+        let (firstHidden, detail1) = await agree(first.page, visible: false)
         let (secondVisible, detail2) = await selected(second)
         check("lifecycle \(host.rawValue) tabs: the tab not selected is hidden to both, the selected one visible",
               firstHidden && secondVisible, detail: "\(detail1); \(detail2)")
         first.window.tabGroup?.selectedWindow = first.window
         let (firstVisible, detail3) = await selected(first)
-        let (secondHidden, detail4) = await agree(second.browser, visible: false)
+        let (secondHidden, detail4) = await agree(second.page, visible: false)
         check("lifecycle \(host.rawValue) tabs: switching tabs swaps them", firstVisible && secondHidden,
               detail: "\(detail3); \(detail4)")
         await second.close()
@@ -132,8 +132,8 @@ extension SelfTest {
     }
 
     /// Animation frames a second in an offscreen page.
-    static func animationFrameRate(_ browser: CefBrowser) async -> Int {
-        (try? await browser.evaluateJavaScript("""
+    static func animationFrameRate(_ page: CefPage) async -> Int {
+        (try? await page.evaluateJavaScript("""
             new Promise(resolve => {
               let frames = 0; const start = performance.now();
               const tick = () => { frames++; performance.now() - start < 1000 ? requestAnimationFrame(tick) : resolve(frames); };
@@ -143,17 +143,17 @@ extension SelfTest {
     }
 
     static func energyPolicyChecks() async {
-        guard let hosted = await HostedBenchmarkBrowser(.offscreen, url: URL(string: "selftest://bench/animated.html")!) else { return }
-        _ = await waitUntil { hosted.browser.title == "animated" }
+        guard let hosted = await HostedBenchmarkPage(.offscreen, url: URL(string: "selftest://bench/animated.html")!) else { return }
+        _ = await waitUntil { hosted.page.title == "animated" }
         try? await Task.sleep(for: .milliseconds(500))
-        let browser = hosted.browser
+        let page = hosted.page
         /// The rate Chromium was told and, where the check reads them, the
         /// page's animation frames in each of three seconds.
         func sample(frames: Bool) async -> String {
             try? await Task.sleep(for: .milliseconds(300))
             var rates: [Int] = []
-            if frames { for _ in 0..<3 { rates.append(await animationFrameRate(browser)) } }
-            return "\(browser.currentOffscreenFrameRate ?? -1) \(rates)"
+            if frames { for _ in 0..<3 { rates.append(await animationFrameRate(page)) } }
+            return "\(page.currentOffscreenFrameRate ?? -1) \(rates)"
         }
         let normal = await sample(frames: false)
         CefRuntime.shared.simulateEnergyConditions(lowPowerMode: true, thermalState: .nominal)

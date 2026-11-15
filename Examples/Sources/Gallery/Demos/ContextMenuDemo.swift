@@ -1,7 +1,7 @@
 import CefSwiftUI
 import SwiftUI
 
-/// `CefBrowser.Configuration.contextMenu` shapes the menu without a
+/// `CefPage.Configuration.contextMenu` shapes the menu without a
 /// delegate: `customize` receives the menu Chromium built, as a value, and
 /// what was clicked; it removes commands by name and adds items of the
 /// app's own.
@@ -19,14 +19,14 @@ private struct ContextMenuView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            CefWebView(model.browser)
+            CefWebView(model.page)
             Divider()
             Label(model.lastAction, systemImage: "contextualmenu.and.cursorarrow")
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(8)
         }
-        .readyWhenLoaded(model.browser)
-        .onDisappear { model.browser.close(force: true) }
+        .readyWhenLoaded(model.page)
+        .onDisappear { model.page.close(force: true) }
     }
 }
 
@@ -34,10 +34,10 @@ private struct ContextMenuView: View {
 @Observable
 private final class ContextMenuModel {
     var lastAction = "Right-click the page, a link or some selected text."
-    @ObservationIgnored lazy var browser = makeBrowser()
+    @ObservationIgnored lazy var page = makePage()
 
-    private func makeBrowser() -> CefBrowser {
-        var configuration = CefBrowser.Configuration()
+    private func makePage() -> CefPage {
+        var configuration = CefPage.Configuration()
         configuration.contextMenu.showsInspectElement = true
         configuration.contextMenu.customize { [weak self] menu, target in
             menu.remove(.viewSource, .print)
@@ -48,8 +48,8 @@ private final class ContextMenuModel {
                 })
             }
             if let link = target.linkURL {
-                items.append(CefContextMenu.Item("Copy Link as Markdown") { browser, _ in
-                    let markdown = "[\(browser.title)](\(link.absoluteString))"
+                items.append(CefContextMenu.Item("Copy Link as Markdown") { page, _ in
+                    let markdown = "[\(page.title)](\(link.absoluteString))"
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(markdown, forType: .string)
                     self?.lastAction = "Copied \(markdown)"
@@ -57,7 +57,7 @@ private final class ContextMenuModel {
             }
             menu.appendSection(items)
         }
-        return CefBrowser(url: Self.page.url, configuration: configuration)
+        return CefPage(url: Self.page.url, configuration: configuration)
     }
 
     static let page = SamplePage("context-menu.html", title: "Context Menu", body: """

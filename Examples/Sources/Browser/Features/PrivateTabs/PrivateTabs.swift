@@ -14,8 +14,8 @@ struct PrivateTabs: BrowserFeature {
         }
     }
 
-    @ViewBuilder func toolbarItems(_ placement: ToolbarPlacement, for browser: CefBrowser) -> some View {
-        if placement == .addressFieldLeading, browser.isPrivate {
+    @ViewBuilder func toolbarItems(_ placement: ToolbarPlacement, for page: CefPage) -> some View {
+        if placement == .addressFieldLeading, page.isPrivate {
             Label("Private", systemImage: "hand.raised.fill")
                 .labelStyle(.titleAndIcon)
                 .fixedSize()

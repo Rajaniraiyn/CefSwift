@@ -39,7 +39,7 @@ private struct PasskeysView: View {
                     .padding(10)
                     .background(.tint.opacity(0.15))
                 }
-                CefWebView(model.browser)
+                CefWebView(model.page)
             }
             .frame(minWidth: 380)
             List(model.saved) { passkey in
@@ -51,10 +51,10 @@ private struct PasskeysView: View {
             .overlay { if model.saved.isEmpty { Text("No passkeys").foregroundStyle(.secondary) } }
             .frame(minWidth: 200, maxWidth: 280)
         }
-        .readyWhenLoaded(model.browser)
+        .readyWhenLoaded(model.page)
         .onDisappear {
             model.answer(.deny)
-            model.browser.close(force: true)
+            model.page.close(force: true)
         }
     }
 }
@@ -67,14 +67,14 @@ private final class PasskeyModel: CefPasskeyDelegate {
     @ObservationIgnored private var reply: CheckedContinuation<CefPasskeyDecision, Never>?
     @ObservationIgnored private let store = CefInMemoryPasskeyStore()
     @ObservationIgnored private lazy var controller = CefPasskeyController(policy: .app(store), delegate: self)
-    @ObservationIgnored lazy var browser: CefBrowser = {
-        var configuration = CefBrowser.Configuration()
+    @ObservationIgnored lazy var page: CefPage = {
+        var configuration = CefPage.Configuration()
         configuration.attachments = [controller]
         // WebAuthn needs a secure origin with a domain: http://localhost.
-        return CefBrowser(url: Self.page.localURL, configuration: configuration)
+        return CefPage(url: Self.page.localURL, configuration: configuration)
     }()
 
-    func browser(_ browser: CefBrowser, decidePasskeyFor request: CefPasskeyRequest) async -> CefPasskeyDecision {
+    func page(_ page: CefPage, decidePasskeyFor request: CefPasskeyRequest) async -> CefPasskeyDecision {
         // Conditional requests, made without a click, wait.
         guard request.hasUserGesture else { return .ignore }
         answer(.deny)

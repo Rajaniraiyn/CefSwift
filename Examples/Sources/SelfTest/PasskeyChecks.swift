@@ -3,7 +3,7 @@ import AppKit
 import CefPasskeys
 import CefSwiftUI
 
-/// Passkeys answered by the app (`CefPasskeyController.Policy.app`), in both browser
+/// Passkeys answered by the app (`CefPasskeyController.Policy.app`), in both page
 /// styles, on a page served from `http://localhost`, which WebAuthn treats
 /// as a secure context. The store is in memory: nothing touches the
 /// keychain.
@@ -17,9 +17,9 @@ extension SelfTest {
         let url = URL(string: "http://localhost:\(server.port)/passkeys.html")!
         let watcher = ChromiumDialogWatcher()
         await passkeyRoundTrip(style: "Alloy", url: url, watcher: watcher)
-        _ = await waitUntil { CefRuntime.shared.browsers.isEmpty }
+        _ = await waitUntil { CefRuntime.shared.pages.isEmpty }
         await passkeyRoundTrip(style: "Chrome style", url: url, watcher: watcher)
-        _ = await waitUntil { CefRuntime.shared.browsers.isEmpty }
+        _ = await waitUntil { CefRuntime.shared.pages.isEmpty }
         await disabledPasskeyChecks(url: url)
         await passkeyStoreFailureChecks(url: url)
         await passkeyDecisionCancellationChecks(url: url)
@@ -32,33 +32,33 @@ extension SelfTest {
     private static func passkeyRoundTrip(style: String, url: URL, watcher: ChromiumDialogWatcher) async {
         let store = CefInMemoryPasskeyStore()
         let policy = PasskeyPolicy()
-        var configuration = CefBrowser.Configuration()
+        var configuration = CefPage.Configuration()
         configuration.attachments = [CefPasskeyController(policy: .app(store), delegate: policy)]
-        let browser = CefBrowser(url: url, configuration: configuration)
+        let page = CefPage(url: url, configuration: configuration)
         var window: CefWindow?
-        var view: CefWindowedBrowserView?
+        var view: CefWindowedPageView?
         if style == "Alloy" {
-            let hosted = CefWindowedBrowserView(browser: browser)
+            let hosted = CefWindowedPageView(page: page)
             hosted.frame = SelfTest.window.contentView!.bounds
             SelfTest.window.contentView!.addSubview(hosted)
             view = hosted
         } else {
-            window = CefWindow(browser: browser)
+            window = CefWindow(page: page)
             window?.show()
         }
         defer {
-            browser.close(force: true)
+            page.close(force: true)
             window?.close()
             view?.removeFromSuperview()
         }
-        guard await loaded(browser, title: "passkeys", timeout: .seconds(20)) else {
-            check("passkeys (\(style)): page loads", false, detail: browser.title)
+        guard await loaded(page, title: "passkeys", timeout: .seconds(20)) else {
+            check("passkeys (\(style)): page loads", false, detail: page.title)
             return
         }
         let name = "passkeys (\(style))"
 
         policy.answer = { _ in .createPasskey }
-        let created = await PasskeyCall.run(browser, "register()")
+        let created = await PasskeyCall.run(page, "register()")
         // The store hears of the passkey as the page does.
         _ = await waitUntilAsync(timeout: .seconds(3)) { (try? await store.passkeys())?.isEmpty == false }
         let saved = (try? await store.passkeys()) ?? []
@@ -75,7 +75,7 @@ extension SelfTest {
               detail: "\(String(describing: registration))")
 
         policy.answer = { request in request.passkeys.first.map { .signIn(with: $0) } ?? .deny }
-        let signedIn = await PasskeyCall.run(browser, "signIn()")
+        let signedIn = await PasskeyCall.run(page, "signIn()")
         check("\(name): sign-in uses the saved passkey",
               signedIn.ok && signedIn.id == created.id && signedIn.user == Data([1, 2, 3, 4]).base64URLString,
               detail: "\(signedIn)")
@@ -89,7 +89,7 @@ extension SelfTest {
 
         policy.answer = { _ in .deny }
         let start = ContinuousClock.now
-        let denied = await PasskeyCall.run(browser, "signIn()")
+        let denied = await PasskeyCall.run(page, "signIn()")
         check("\(name): a refusal rejects at once",
               !denied.ok && denied.error == "NotAllowedError" && ContinuousClock.now - start < .seconds(5),
               detail: "\(denied)")
@@ -100,29 +100,29 @@ extension SelfTest {
             policy.answer = { request in request.hasUserGesture ? (request.passkeys.first.map { .signIn(with: $0) } ?? .deny) : .ignore }
             // Chromium allows one pending request per frame, so the ignored
             // one times out (Chromium waits at least 10 seconds) before the click.
-            browser.executeJavaScript("window.__waiting = signIn({ timeout: 1000 })")
+            page.executeJavaScript("window.__waiting = signIn({ timeout: 1000 })")
             _ = await waitUntil(timeout: .seconds(5)) { policy.requests.last?.hasUserGesture == false && policy.requests.count == 4 }
             _ = await waitUntilAsync(timeout: .seconds(15)) {
-                (try? await browser.evaluateJavaScript("window.__waiting.then(() => true, () => true)").boolValue) == true
+                (try? await page.evaluateJavaScript("window.__waiting.then(() => true, () => true)").boolValue) == true
             }
-            let clicked = await PasskeyCall.click(browser)
+            let clicked = await PasskeyCall.click(page)
             check("\(name): a click's request carries its user gesture",
                   policy.requests.last?.hasUserGesture == true && clicked.ok, detail: "\(clicked)")
 
-            browser.reload()
-            _ = await waitUntil { browser.isLoading }
-            _ = await waitUntil { !browser.isLoading }
+            page.reload()
+            _ = await waitUntil { page.isLoading }
+            _ = await waitUntil { !page.isLoading }
             policy.answer = { request in request.passkeys.first.map { .signIn(with: $0) } ?? .deny }
-            let afterReload = await PasskeyCall.run(browser, "signIn()")
+            let afterReload = await PasskeyCall.run(page, "signIn()")
             check("\(name): a new document is watched too", afterReload.ok, detail: "\(afterReload)")
 
-            // Discarding closes an Alloy browser's Chromium browser; the
+            // Discarding closes an Alloy page's Chromium page; the
             // new one must be set up again.
             view?.isHidden = true
-            let discarded = (try? await browser.discard()) != nil && browser.isDiscarded
+            let discarded = (try? await page.discard()) != nil && page.isDiscarded
             view?.isHidden = false
-            _ = await waitUntil { !browser.isDiscarded && !browser.isLoading && browser.title == "passkeys" }
-            let afterRestore = await PasskeyCall.run(browser, "signIn()")
+            _ = await waitUntil { !page.isDiscarded && !page.isLoading && page.title == "passkeys" }
+            let afterRestore = await PasskeyCall.run(page, "signIn()")
             check("\(name): the app still answers after a discard and restore",
                   discarded && afterRestore.ok, detail: "discarded: \(discarded), \(afterRestore)")
 
@@ -130,18 +130,18 @@ extension SelfTest {
             // delegate too.
             policy.answer = { _ in .deny }
             let asked = policy.requests.count
-            browser.load(url.appending(queryItems: [URLQueryItem(name: "early", value: "1")]))
+            page.load(url.appending(queryItems: [URLQueryItem(name: "early", value: "1")]))
             let heard = await waitUntil(timeout: .seconds(10)) {
                 policy.requests.count > asked && policy.requests.last?.kind == .assertion
             }
-            let early = (try? await browser.evaluateJavaScript("window.__early"))?.stringValue
+            let early = (try? await page.evaluateJavaScript("window.__early"))?.stringValue
             check("\(name): a document's first script reaches the delegate",
                   heard && early == "NotAllowedError", detail: "\(policy.requests.count - asked) asked, \(early ?? "nil")")
         } else {
             if let passkey = saved.first { try? await store.remove(passkey) }
             check("\(name): removing from the store", (try? await store.passkeys())?.isEmpty == true)
             policy.answer = { request in request.passkeys.isEmpty ? .deny : .signIn(with: request.passkeys[0]) }
-            let removed = await PasskeyCall.run(browser, "signIn()")
+            let removed = await PasskeyCall.run(page, "signIn()")
             check("\(name): a removed passkey is no longer offered",
                   !removed.ok && policy.requests.last?.passkeys.isEmpty == true, detail: "\(removed)")
         }
@@ -154,11 +154,11 @@ extension SelfTest {
     private static func popupPasskeyChecks(url: URL) async {
         for mode in ["disabled", "app"] {
             let policy = PasskeyPolicy()
-            var configuration = CefBrowser.Configuration()
+            var configuration = CefPage.Configuration()
             configuration.attachments = [CefPasskeyController(
                 policy: mode == "disabled" ? .disabled : .app(CefInMemoryPasskeyStore()), delegate: policy)]
-            let opener = CefBrowser(url: url, configuration: configuration)
-            let window = CefWindow(browser: opener)
+            let opener = CefPage(url: url, configuration: configuration)
+            let window = CefWindow(page: opener)
             var popups: [CefWindow] = []
             window.onPopup = { popup in
                 popups.append(popup)
@@ -178,8 +178,8 @@ extension SelfTest {
             let start = ContinuousClock.now
             let opened = try? await opener.evaluateJavaScript(
                 "window.open('\(target.absoluteString)', 'p', 'width=400,height=300') === null", userGesture: true)
-            guard await waitUntil(timeout: .seconds(10), { popups.first?.browser.title == "passkeys" }),
-                  let popup = popups.first?.browser
+            guard await waitUntil(timeout: .seconds(10), { popups.first?.page.title == "passkeys" }),
+                  let popup = popups.first?.page
             else {
                 check("\(name): the popup opens", false, detail: "\(popups.count) popups")
                 continue
@@ -212,14 +212,14 @@ extension SelfTest {
 
     private static func disabledPasskeyChecks(url: URL) async {
         let policy = PasskeyPolicy()
-        var configuration = CefBrowser.Configuration()
+        var configuration = CefPage.Configuration()
         configuration.attachments = [CefPasskeyController(policy: .disabled, delegate: policy)]
-        let browser = CefBrowser(url: url, configuration: configuration)
-        let window = CefWindow(browser: browser)
+        let page = CefPage(url: url, configuration: configuration)
+        let window = CefWindow(page: page)
         window.show()
-        _ = await loaded(browser, title: "passkeys", timeout: .seconds(20))
+        _ = await loaded(page, title: "passkeys", timeout: .seconds(20))
         let start = ContinuousClock.now
-        let result = await PasskeyCall.run(browser, "register()")
+        let result = await PasskeyCall.run(page, "register()")
         check("passkeys (disabled): requests are refused without asking",
               !result.ok && result.error == "NotAllowedError" && policy.requests.isEmpty
                   && ContinuousClock.now - start < .seconds(5),
@@ -229,38 +229,38 @@ extension SelfTest {
     }
 
     /// A passkey decision is a tracked one: leaving the page or closing the
-    /// browser ends it, and the default sheet goes with it.
+    /// page ends it, and the default sheet goes with it.
     private static func passkeyDecisionCancellationChecks(url: URL) async {
         let delegate = StallingDelegate()
         let controller = CefPasskeyController(policy: .app(CefInMemoryPasskeyStore()), delegate: delegate)
-        var configuration = CefBrowser.Configuration()
+        var configuration = CefPage.Configuration()
         configuration.attachments = [controller]
-        let browser = CefBrowser(url: url, configuration: configuration)
-        let view = hostWindowed(browser)
+        let page = CefPage(url: url, configuration: configuration)
+        let view = hostWindowed(page)
         defer { view.removeFromSuperview() }
-        if await loaded(browser, title: "passkeys", timeout: .seconds(20)) {
-            browser.executeJavaScript("register()")
-            let asked = await waitUntil(timeout: .seconds(5)) { delegate.started == 1 && browser.pendingDecisionCount == 1 }
-            browser.load(URL(string: "selftest://app/second.html")!)
+        if await loaded(page, title: "passkeys", timeout: .seconds(20)) {
+            page.executeJavaScript("register()")
+            let asked = await waitUntil(timeout: .seconds(5)) { delegate.started == 1 && page.pendingDecisionCount == 1 }
+            page.load(URL(string: "selftest://app/second.html")!)
             let ended = await waitUntil(timeout: .seconds(10)) {
-                delegate.cancelled == 1 && browser.pendingDecisionCount == 0 && browser.title == "second"
+                delegate.cancelled == 1 && page.pendingDecisionCount == 0 && page.title == "second"
             }
             check("passkeys: leaving the page cancels a pending passkey decision", asked && ended,
-                  detail: "asked \(asked), cancelled \(delegate.cancelled), pending \(browser.pendingDecisionCount), "
-                      + "title \(browser.title)")
+                  detail: "asked \(asked), cancelled \(delegate.cancelled), pending \(page.pendingDecisionCount), "
+                      + "title \(page.title)")
         } else {
-            check("passkeys (cancellation): page loads", false, detail: browser.title)
+            check("passkeys (cancellation): page loads", false, detail: page.title)
         }
-        browser.close(force: true)
-        _ = await waitUntil { browser.state == .closed }
+        page.close(force: true)
+        _ = await waitUntil { page.state == .closed }
 
         // The default delegate's sheet, for a click's sign-in with no
-        // saved passkey, goes when the browser closes.
+        // saved passkey, goes when the page closes.
         configuration.attachments = [CefPasskeyController(policy: .app(CefInMemoryPasskeyStore()))]
-        let sheetBrowser = CefBrowser(url: url, configuration: configuration)
-        view.browser = sheetBrowser
-        guard await loaded(sheetBrowser, title: "passkeys", timeout: .seconds(20)) else {
-            check("passkeys (sheet): page loads", false, detail: sheetBrowser.title)
+        let sheetPage = CefPage(url: url, configuration: configuration)
+        view.page = sheetPage
+        guard await loaded(sheetPage, title: "passkeys", timeout: .seconds(20)) else {
+            check("passkeys (sheet): page loads", false, detail: sheetPage.title)
             return
         }
         // Not awaited: the release's reply waits for the page, which stays
@@ -271,19 +271,19 @@ extension SelfTest {
         for _ in 0 ..< 5 where !shown {
             Task {
                 for type in ["mousePressed", "mouseReleased"] {
-                    _ = try? await sheetBrowser.devTools.send("Input.dispatchMouseEvent", [
+                    _ = try? await sheetPage.devTools.send("Input.dispatchMouseEvent", [
                         "type": .string(type), "x": 40, "y": 40, "button": "left", "clickCount": 1,
                     ])
                 }
             }
             shown = await waitUntil(timeout: .seconds(3)) { window.attachedSheet != nil }
         }
-        sheetBrowser.close(force: true)
+        sheetPage.close(force: true)
         let gone = await waitUntil(timeout: .seconds(5)) {
-            window.attachedSheet == nil && sheetBrowser.state == .closed && sheetBrowser.pendingDecisionCount == 0
+            window.attachedSheet == nil && sheetPage.state == .closed && sheetPage.pendingDecisionCount == 0
         }
         check("passkeys: closing dismisses the default passkey sheet", shown && gone,
-              detail: "shown \(shown), sheet \(String(describing: window.attachedSheet)), state \(sheetBrowser.state)")
+              detail: "shown \(shown), sheet \(String(describing: window.attachedSheet)), state \(sheetPage.state)")
         if let sheet = window.attachedSheet { window.endSheet(sheet) }
     }
 
@@ -294,23 +294,23 @@ extension SelfTest {
         let store = UnreliablePasskeyStore()
         let policy = PasskeyPolicy()
         policy.answer = { request in request.passkeys.first.map { .signIn(with: $0) } ?? .createPasskey }
-        var configuration = CefBrowser.Configuration()
+        var configuration = CefPage.Configuration()
         configuration.attachments = [CefPasskeyController(policy: .app(store), delegate: policy)]
-        let browser = CefBrowser(url: url, configuration: configuration)
-        let window = CefWindow(browser: browser)
+        let page = CefPage(url: url, configuration: configuration)
+        let window = CefWindow(page: page)
         window.show()
         defer { window.close() }
-        guard await loaded(browser, title: "passkeys", timeout: .seconds(20)) else {
-            check("passkeys (failing store): page loads", false, detail: browser.title)
+        guard await loaded(page, title: "passkeys", timeout: .seconds(20)) else {
+            check("passkeys (failing store): page loads", false, detail: page.title)
             return
         }
         store.failsReads = true
-        let unavailable = await PasskeyCall.run(browser, "register()")
+        let unavailable = await PasskeyCall.run(page, "register()")
         check("passkeys (failing store): an unavailable store refuses a registration unasked",
               !unavailable.ok && unavailable.error == "NotAllowedError" && policy.requests.isEmpty
                   && policy.storeFailures.map(\.operation) == [.checkAvailability],
               detail: "\(unavailable), \(policy.requests.count) asked, \(policy.storeFailures)")
-        let unreadable = await PasskeyCall.run(browser, "signIn()")
+        let unreadable = await PasskeyCall.run(page, "signIn()")
         check("passkeys (failing store): an unreadable store refuses a sign-in unasked",
               !unreadable.ok && unreadable.error == "NotAllowedError" && policy.requests.isEmpty
                   && policy.storeFailures.last?.operation == .read,
@@ -318,7 +318,7 @@ extension SelfTest {
 
         store.failsReads = false
         store.failsSaves = true
-        let created = await PasskeyCall.run(browser, "register()")
+        let created = await PasskeyCall.run(page, "register()")
         _ = await waitUntil(timeout: .seconds(3)) { policy.storeFailures.last?.operation == .save }
         let failure = policy.storeFailures.last
         check("passkeys (failing store): a failed save reaches the delegate with the passkey",
@@ -332,12 +332,12 @@ extension SelfTest {
         var opened: [URL] = []
         CefRuntime.shared.onChromeTab = { opened.append($0.url); return .close }
         defer { CefRuntime.shared.onChromeTab = nil }
-        let browser = CefBrowser(url: URL(string: "chrome://settings/autofill")!)
-        let window = CefWindow(browser: browser)
+        let page = CefPage(url: URL(string: "chrome://settings/autofill")!)
+        let window = CefWindow(page: page)
         window.show()
-        _ = await waitUntil { browser.title.contains("Autofill") && !browser.isLoading }
+        _ = await waitUntil { page.title.contains("Autofill") && !page.isLoading }
         let clicked = await waitUntilAsync {
-            (try? await browser.evaluateJavaScript("""
+            (try? await page.evaluateJavaScript("""
                 (() => {
                   const deepAll = (sel, root = document) => [...root.querySelectorAll(sel)].concat(
                     ...[...root.querySelectorAll('*')].filter(e => e.shadowRoot).map(e => deepAll(sel, e.shadowRoot)));
@@ -413,12 +413,12 @@ final class PasskeyPolicy: CefPasskeyDelegate {
     private(set) var requests: [CefPasskeyRequest] = []
     private(set) var storeFailures: [CefPasskeyStoreError] = []
 
-    func browser(_ browser: CefBrowser, decidePasskeyFor request: CefPasskeyRequest) async -> CefPasskeyDecision {
+    func page(_ page: CefPage, decidePasskeyFor request: CefPasskeyRequest) async -> CefPasskeyDecision {
         requests.append(request)
         return answer(request)
     }
 
-    func browser(_ browser: CefBrowser, passkeyStoreDidFail error: CefPasskeyStoreError) {
+    func page(_ page: CefPage, passkeyStoreDidFail error: CefPasskeyStoreError) {
         storeFailures.append(error)
     }
 }
@@ -454,9 +454,9 @@ struct PasskeyCall: Decodable, CustomStringConvertible {
 
     var description: String { ok ? "ok \(id ?? "")" : "\(error ?? "?"): \(message ?? "")" }
 
-    @MainActor static func run(_ browser: CefBrowser, _ script: String) async -> PasskeyCall {
+    @MainActor static func run(_ page: CefPage, _ script: String) async -> PasskeyCall {
         do {
-            return try await browser.evaluateJavaScript(script, as: PasskeyCall.self)
+            return try await page.evaluateJavaScript(script, as: PasskeyCall.self)
         } catch {
             return PasskeyCall(error: "evaluate", message: "\(error)")
         }
@@ -464,13 +464,13 @@ struct PasskeyCall: Decodable, CustomStringConvertible {
 
     /// Clicks the page's Sign In button, as the user would, and returns
     /// what the click's call gave.
-    @MainActor static func click(_ browser: CefBrowser) async -> PasskeyCall {
+    @MainActor static func click(_ page: CefPage) async -> PasskeyCall {
         for type in ["mousePressed", "mouseReleased"] {
-            _ = try? await browser.devTools.send("Input.dispatchMouseEvent", [
+            _ = try? await page.devTools.send("Input.dispatchMouseEvent", [
                 "type": .string(type), "x": 40, "y": 40, "button": "left", "clickCount": 1,
             ])
         }
-        return await run(browser, "window.__clicked ?? Promise.resolve({ ok: false, error: 'not clicked' })")
+        return await run(page, "window.__clicked ?? Promise.resolve({ ok: false, error: 'not clicked' })")
     }
 }
 

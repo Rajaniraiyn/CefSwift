@@ -6,7 +6,7 @@ import CefKit
 /// then a `SUMMARY` line, and quits with the number of failures as its exit
 /// status.
 ///
-/// A demo also fails when its browsers and windows are still open after
+/// A demo also fails when its pages and windows are still open after
 /// it is closed. `GALLERY_SMOKE_ONLY=BridgeDemo,RequestsDemo` runs only
 /// those. Chromium's data goes in a temporary directory, removed at exit,
 /// and keychain access is mocked (see `GalleryApp`), so a run needs nobody
@@ -53,20 +53,20 @@ enum Smoke {
         let clock = ContinuousClock()
         // Start from no demo, so that each one opens afresh.
         model.selection = nil
-        _ = await waitUntil { CefRuntime.shared.browsers.isEmpty }
+        _ = await waitUntil { CefRuntime.shared.pages.isEmpty }
         for demo in demos {
             let start = clock.now
             model.selection = demo.id
             let result = await model.readiness.wait(timeout: timeout)
             // Close the demo, and check it leaves nothing open behind it.
             model.selection = nil
-            let closed = await waitUntil { CefRuntime.shared.browsers.isEmpty && CefWindow.all.isEmpty }
+            let closed = await waitUntil { CefRuntime.shared.pages.isEmpty && CefWindow.all.isEmpty }
             let seconds = (clock.now - start).formatted(.units(allowed: [.seconds], fractionalPart: .show(length: 1)))
             switch result {
             case .failure(let failure):
                 report(false, demo, failure.reason)
             case .success where !closed:
-                report(false, demo, "left \(CefRuntime.shared.browsers.count) browsers and \(CefWindow.all.count) windows open")
+                report(false, demo, "left \(CefRuntime.shared.pages.count) browsers and \(CefWindow.all.count) windows open")
             case .success:
                 report(true, demo, seconds)
             }

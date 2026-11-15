@@ -1,7 +1,7 @@
 import CefSwiftUI
 import Dispatch
 
-/// Memory Saver: puts tabs to sleep with `CefBrowser.discard()` once they
+/// Memory Saver: puts tabs to sleep with `CefPage.discard()` once they
 /// have been hidden for a while, and every hidden tab when macOS reports
 /// memory pressure. Settings › Put tabs to sleep chooses when
 /// (`MemorySaver.swift`), and a toolbar button counts the sleeping tabs and
@@ -32,7 +32,7 @@ struct TabDiscarding: BrowserFeature {
     struct Tab<ID: Hashable> {
         var id: ID
         var isLive: Bool
-        var lifecycle: CefBrowser.Lifecycle
+        var lifecycle: CefPage.Lifecycle
         var lifecycleChangedAt: ContinuousClock.Instant
     }
 
@@ -60,7 +60,7 @@ struct TabDiscarding: BrowserFeature {
             didSet { if policy != oldValue { schedule() } }
         }
 
-        private var lastAttempts: [CefBrowser.ID: ContinuousClock.Instant] = [:]
+        private var lastAttempts: [CefPage.ID: ContinuousClock.Instant] = [:]
         private var timer: Task<Void, Never>?
         private var pressureSource: DispatchSourceMemoryPressure?
         private var isDiscarding = false
@@ -97,16 +97,16 @@ struct TabDiscarding: BrowserFeature {
             guard !isDiscarding else { return }
             isDiscarding = true
             defer { isDiscarding = false }
-            let browsers = CefRuntime.shared.browsers
-            let tabs = browsers.map {
+            let pages = CefRuntime.shared.pages
+            let tabs = pages.map {
                 Tab(id: $0.id, isLive: $0.state == .live, lifecycle: $0.lifecycle, lifecycleChangedAt: $0.lifecycleChangedAt)
             }
             let live = Set(tabs.map(\.id))
             lastAttempts = lastAttempts.filter { live.contains($0.key) }
             for id in TabDiscarding.tabsToDiscard(tabs, hiddenFor: duration, now: .now, lastAttempts: lastAttempts) {
-                guard let browser = browsers.first(where: { $0.id == id }), browser.lifecycle == .hidden else { continue }
+                guard let page = pages.first(where: { $0.id == id }), page.lifecycle == .hidden else { continue }
                 do {
-                    try await browser.discard()
+                    try await page.discard()
                     lastAttempts[id] = nil
                 } catch {
                     lastAttempts[id] = .now

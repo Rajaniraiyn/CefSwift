@@ -3,7 +3,7 @@ import AppKit
 import CefSwiftUI
 
 /// Checks of offscreen frame timing: Chromium's timer paints at the frame
-/// rate, a hidden browser paints nothing, and a frame rate change applies
+/// rate, a hidden page paints nothing, and a frame rate change applies
 /// at once.
 extension SelfTest {
     static func frameChecks() async {
@@ -18,12 +18,12 @@ extension SelfTest {
         frameWindow.contentView!.addSubview(probe)
         frameWindow.orderFrontRegardless()
 
-        var configuration = CefBrowser.Configuration()
+        var configuration = CefPage.Configuration()
         configuration.rendering = .offscreen(frameRate: 60)
-        let browser = CefBrowser(url: URL(string: "selftest://bench/animated.html")!, configuration: configuration)
-        browser.host(offscreenIn: probe, size: probe.bounds.size)
-        browser.hostViewDidUnhide()
-        _ = await waitUntil { browser.title == "animated" }
+        let page = CefPage(url: URL(string: "selftest://bench/animated.html")!, configuration: configuration)
+        page.host(offscreenIn: probe, size: probe.bounds.size)
+        page.hostViewDidUnhide()
+        _ = await waitUntil { page.title == "animated" }
         try? await Task.sleep(for: .milliseconds(500))
 
         func paintsPerSecond() async -> Int {
@@ -43,16 +43,16 @@ extension SelfTest {
         }
         let visible = await paintsPerSecond()
         rateCheck("frames: an animated offscreen page paints at its frame rate", visible >= 40, visible)
-        browser.setOffscreenFrameRate(20)
+        page.setOffscreenFrameRate(20)
         try? await Task.sleep(for: .milliseconds(200))
         let slow = await paintsPerSecond()
         rateCheck("frames: a lower frame rate applies at once", (15...25).contains(slow), slow)
-        browser.hostViewDidHide()
+        page.hostViewDidHide()
         try? await Task.sleep(for: .milliseconds(300))
         let hidden = await paintsPerSecond()
         check("frames: a hidden offscreen browser paints nothing", hidden == 0, detail: "\(hidden) a second")
-        browser.close(force: true)
-        _ = await waitUntil { browser.state == .closed }
+        page.close(force: true)
+        _ = await waitUntil { page.state == .closed }
         frameWindow.close()
     }
 }

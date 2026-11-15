@@ -123,14 +123,14 @@ extension SelfTest {
               detail: "\(String(describing: fixture?.siteAccess)) \(String(describing: fixture?.hosts))")
         check("incognito is off by default", fixture?.isAllowedInIncognito == false)
 
-        // Running in browsers.
-        let (window, browser) = await extensionWindow(base.appendingPathComponent("page"), toolbar: .chrome)
+        // Running in pages.
+        let (window, page) = await extensionWindow(base.appendingPathComponent("page"), toolbar: .chrome)
         defer { window.close() }
         await expect("its content script runs in a Chrome-style browser") {
-            let value = try await browser.evaluateJavaScript("document.documentElement.dataset.cefswiftFixture ?? 'absent'")
+            let value = try await page.evaluateJavaScript("document.documentElement.dataset.cefswiftFixture ?? 'absent'")
             return (value == "ran", value.text)
         }
-        let alloy = CefBrowser(url: base.appendingPathComponent("page"))
+        let alloy = CefPage(url: base.appendingPathComponent("page"))
         let alloyView = hostWindowed(alloy)
         _ = await loaded(alloy)
         await expect("its content script runs in an Alloy-style view too") {
@@ -139,11 +139,11 @@ extension SelfTest {
         }
         await closeHosted(alloy, alloyView)
         await expect("its declarativeNetRequest rule blocks a request") {
-            let value = try await browser.evaluateJavaScript(
+            let value = try await page.evaluateJavaScript(
                 "fetch('/dnr-blocked').then(r => 'fetched ' + r.status, e => 'blocked')")
             return (value == "blocked", value.text)
         }
-        await extensionMenuChecks(browser: browser, window: window)
+        await extensionMenuChecks(page: page, window: window)
         await extensionToolbarChecks(window: window)
         await extensionTabChecks(base: base)
         await extensionTabStripChecks(base: base)
@@ -152,8 +152,8 @@ extension SelfTest {
         await expect("setEnabled(false) disables it and its content script stops") {
             try await extensions.setEnabled(false, for: fixtureID)
             let disabled = extensions.installed.first { $0.id == fixtureID }?.state == .disabled
-            _ = await load(base.appendingPathComponent("page"), in: browser)
-            let value = try await browser.evaluateJavaScript("document.documentElement.dataset.cefswiftFixture ?? 'absent'")
+            _ = await load(base.appendingPathComponent("page"), in: page)
+            let value = try await page.evaluateJavaScript("document.documentElement.dataset.cefswiftFixture ?? 'absent'")
             return (disabled && value == "absent", "disabled \(disabled), content script \(value.text)")
         }
         await expect("setEnabled(true) enables it again") {
@@ -200,7 +200,7 @@ extension SelfTest {
         // Kept for the relaunch: a second unpacked load and a disabled state.
         _ = try? await extensions.loadUnpacked(at: copy)
         if isOnline {
-            await webStorePageInstallChecks(window: window, browser: browser, extensions: extensions)
+            await webStorePageInstallChecks(window: window, page: page, extensions: extensions)
         } else {
             skip("installing from the Chrome Web Store's page", because: "no network", .environment)
         }
@@ -213,35 +213,35 @@ extension SelfTest {
         try? JSONSerialization.data(withJSONObject: manifest).write(to: file)
     }
 
-    static func extensionWindow(_ url: URL, toolbar: CefWindow.Toolbar, profile: CefProfile? = nil) async -> (CefWindow, CefBrowser) {
-        var browserConfiguration = CefBrowser.Configuration()
-        browserConfiguration.profile = profile
-        let browser = CefBrowser(url: url, configuration: browserConfiguration)
+    static func extensionWindow(_ url: URL, toolbar: CefWindow.Toolbar, profile: CefProfile? = nil) async -> (CefWindow, CefPage) {
+        var pageConfiguration = CefPage.Configuration()
+        pageConfiguration.profile = profile
+        let page = CefPage(url: url, configuration: pageConfiguration)
         var configuration = CefWindow.Configuration()
         configuration.toolbar = toolbar
         configuration.frame = CGRect(x: 120, y: 100, width: 1100, height: 760)
-        let window = CefWindow(browser: browser, configuration: configuration)
+        let window = CefWindow(page: page, configuration: configuration)
         window.chromiumSurfacePolicy = CefChromiumSurface.Policy()
         window.show()
-        _ = await loaded(browser)
-        return (window, browser)
+        _ = await loaded(page)
+        return (window, page)
     }
 
     /// The extension page in a window of its own, for its view of storage.
     static func fixtureStorage(_ key: String) async -> CefJSON? {
-        let (window, browser) = await extensionWindow(
+        let (window, page) = await extensionWindow(
             URL(string: "chrome-extension://\(ExtensionFixture.id)/options.html")!, toolbar: .none)
         defer { window.close() }
-        return try? await browser.evaluateJavaScript("chrome.storage.local.get('\(key)').then(v => v['\(key)'] ?? null)")
+        return try? await page.evaluateJavaScript("chrome.storage.local.get('\(key)').then(v => v['\(key)'] ?? null)")
     }
 
     // MARK: Context menu
 
-    final class ExtensionMenuDelegate: CefBrowserDelegate {
+    final class ExtensionMenuDelegate: CefPageDelegate {
         var menu: CefContextMenu?
         var choose: (CefContextMenu) -> CefContextMenu.Item? = { _ in nil }
 
-        func browser(_ browser: CefBrowser, runContextMenu menu: CefContextMenu, for target: CefContextMenuTarget) async -> CefContextMenu.Item? {
+        func page(_ page: CefPage, runContextMenu menu: CefContextMenu, for target: CefContextMenuTarget) async -> CefContextMenu.Item? {
             self.menu = menu
             return choose(menu)
         }
@@ -255,13 +255,13 @@ extension SelfTest {
         return nil
     }
 
-    static func extensionMenuChecks(browser: CefBrowser, window: CefWindow) async {
+    static func extensionMenuChecks(page: CefPage, window: CefWindow) async {
         let delegate = ExtensionMenuDelegate()
-        browser.delegate = delegate
-        defer { browser.delegate = nil }
+        page.delegate = delegate
+        defer { page.delegate = nil }
         delegate.choose = { findItem("CefSwift Test Item", in: $0) }
         for type in ["mousePressed", "mouseReleased"] {
-            _ = try? await browser.devTools.send("Input.dispatchMouseEvent", [
+            _ = try? await page.devTools.send("Input.dispatchMouseEvent", [
                 "type": .string(type), "x": 500, "y": 400, "button": "right", "buttons": 2, "clickCount": 1,
             ])
         }
@@ -303,11 +303,11 @@ extension SelfTest {
         let first = CefRuntime.shared.openChromeWindow(url: base.appendingPathComponent("page"))
         _ = await loaded(first)
         first.execute(CefChromeCommand(rawValue: Int(IDC_NEW_TAB)))
-        func isNewTab(_ browser: CefBrowser) -> Bool {
-            browser !== first && !CefWindow.all.contains { $0.browser === browser }
+        func isNewTab(_ page: CefPage) -> Bool {
+            page !== first && !CefWindow.all.contains { $0.page === page }
         }
-        _ = await waitUntil { CefRuntime.shared.browsers.contains(where: isNewTab) }
-        let tab = CefRuntime.shared.browsers.last(where: isNewTab)
+        _ = await waitUntil { CefRuntime.shared.pages.contains(where: isNewTab) }
+        let tab = CefRuntime.shared.pages.last(where: isNewTab)
         guard let tab else {
             check("a new tab in Chrome's window reaches the app", false)
             first.close(force: true)
@@ -353,12 +353,12 @@ extension SelfTest {
             let opened = await waitUntilAsync(timeout: .seconds(5)) { await fixtureStorage("popupOpened") != nil }
             return (title == "popup opened" && opened, "\(started.text) \(title) storage \(opened)")
         }
-        for browser in CefRuntime.shared.browsers where !CefWindow.all.contains(where: { $0.browser === browser }) {
-            browser.close(force: true)
+        for page in CefRuntime.shared.pages where !CefWindow.all.contains(where: { $0.page === page }) {
+            page.close(force: true)
         }
-        _ = await waitUntil { CefRuntime.shared.browsers.allSatisfy { b in CefWindow.all.contains { $0.browser === b } } }
+        _ = await waitUntil { CefRuntime.shared.pages.allSatisfy { b in CefWindow.all.contains { $0.page === b } } }
 
-        // A CefWindow's browser: one tab in a popup-type window.
+        // A CefWindow's page: one tab in a popup-type window.
         var requests: [URL] = []
         CefRuntime.shared.onChromeTab = { requests.append($0.url); return .close }
         defer { CefRuntime.shared.onChromeTab = nil }
@@ -382,9 +382,9 @@ extension SelfTest {
         let incognito = CefProfile.incognito()
         check("an incognito profile's extensions are the default profile's",
               incognito.extensions === CefProfile.default.extensions)
-        let (window, browser) = await extensionWindow(base.appendingPathComponent("page"), toolbar: .none, profile: incognito)
+        let (window, page) = await extensionWindow(base.appendingPathComponent("page"), toolbar: .none, profile: incognito)
         await expect("an extension does not run in incognito by default") {
-            let value = try await browser.evaluateJavaScript("document.documentElement.dataset.cefswiftFixture ?? 'absent'")
+            let value = try await page.evaluateJavaScript("document.documentElement.dataset.cefswiftFixture ?? 'absent'")
             return (value == "absent", value.text)
         }
         do {
@@ -393,8 +393,8 @@ extension SelfTest {
             check("setAllowedInIncognito(true) records the choice", allowed)
             // Chromium reloads the extension to apply it.
             try? await Task.sleep(for: .seconds(2))
-            _ = await load(base.appendingPathComponent("page"), in: browser)
-            let value = try await browser.evaluateJavaScript("document.documentElement.dataset.cefswiftFixture ?? 'absent'")
+            _ = await load(base.appendingPathComponent("page"), in: page)
+            let value = try await page.evaluateJavaScript("document.documentElement.dataset.cefswiftFixture ?? 'absent'")
             if value == "ran" {
                 check("an extension allowed in incognito runs in CefProfile.incognito()", true)
             } else {
@@ -427,15 +427,15 @@ extension SelfTest {
 
     // MARK: The Chrome Web Store
 
-    static func webStorePageInstallChecks(window: CefWindow, browser: CefBrowser, extensions: CefExtensions) async {
+    static func webStorePageInstallChecks(window: CefWindow, page: CefPage, extensions: CefExtensions) async {
         let id = CefExtension.ID(storeExtensionByPage)
-        guard await load(URL(string: "https://chromewebstore.google.com/detail/\(id)")!, in: browser, timeout: .seconds(30)) else {
+        guard await load(URL(string: "https://chromewebstore.google.com/detail/\(id)")!, in: page, timeout: .seconds(30)) else {
             skip("installing from the Chrome Web Store's page", because: "the store did not load", .environment)
             return
         }
         try? await Task.sleep(for: .seconds(2))
         let before = Set(NSApp.windows.map(ObjectIdentifier.init))
-        let clicked = try? await browser.evaluateJavaScript("""
+        let clicked = try? await page.evaluateJavaScript("""
             (() => { const b = [...document.querySelectorAll('button')].find(b => /Add to/i.test(b.innerText)); if (!b) return 'none'; b.click(); return 'clicked'; })()
             """, userGesture: true)
         var dialog: NSWindow?

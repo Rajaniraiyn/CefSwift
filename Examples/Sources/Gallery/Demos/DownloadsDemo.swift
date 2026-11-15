@@ -1,7 +1,7 @@
 import CefSwiftUI
 import SwiftUI
 
-/// `browser.downloads` lists a browser's downloads; each ``CefDownload`` is
+/// `page.downloads` lists a page's downloads; each ``CefDownload`` is
 /// observable, with its progress and state, and `pause()`, `resume()` and
 /// `cancel()`. Downloads belong to the profile: where one is saved follows
 /// the profile's `downloadPolicy` unless the profile's delegate decides, as
@@ -20,15 +20,15 @@ private struct DownloadsView: View {
 
     var body: some View {
         VSplitView {
-            CefWebView(model.browser).frame(minHeight: 160)
-            List(model.browser.downloads.reversed()) { download in
+            CefWebView(model.page).frame(minHeight: 160)
+            List(model.page.downloads.reversed()) { download in
                 DownloadRow(download: download)
             }
             .frame(minHeight: 120)
-            .overlay { if model.browser.downloads.isEmpty { Text("No downloads").foregroundStyle(.secondary) } }
+            .overlay { if model.page.downloads.isEmpty { Text("No downloads").foregroundStyle(.secondary) } }
         }
-        .readyWhenLoaded(model.browser)
-        .onDisappear { model.browser.close(force: true) }
+        .readyWhenLoaded(model.page)
+        .onDisappear { model.page.close(force: true) }
     }
 }
 
@@ -39,11 +39,11 @@ private struct DownloadsView: View {
 private final class DownloadsModel: CefProfileDelegate {
     let folder = FileManager.default.temporaryDirectory.appending(path: "Gallery Downloads")
     let profile = CefProfile.incognito()
-    lazy var browser: CefBrowser = {
+    lazy var page: CefPage = {
         profile.delegate = self
-        var configuration = CefBrowser.Configuration()
+        var configuration = CefPage.Configuration()
         configuration.profile = profile
-        return CefBrowser(url: Self.page.localURL, configuration: configuration)
+        return CefPage(url: Self.page.localURL, configuration: configuration)
     }()
 
     func profile(_ profile: CefProfile, decideDestinationFor download: CefDownload) async -> CefDownloadDecision {

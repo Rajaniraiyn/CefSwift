@@ -3,19 +3,19 @@ import CefChromium
 import CefKit
 
 /// An extension's `chrome.tabs`, `chrome.tabGroups` and `chrome.windows`
-/// and `CefTabStrip` see one tab model: what the test extension does shows
+/// and `CefTabs` see one tab model: what the test extension does shows
 /// in the strip, and what the app does through the strip shows to the
 /// extension. Runs in the `extensions` probe, which has the fixture loaded.
 extension SelfTest {
     static func extensionTabStripChecks(base: URL) async {
-        let strip = CefProfile.default.tabStrip
+        let strip = CefProfile.default.tabs
         // What an extension does to tabs reaches the strip through
         // Chromium's own events, which it listens to only when asked.
         strip.observesChromiumEvents = true
         defer { strip.observesChromiumEvents = false }
-        let page = base.appendingPathComponent("page")
+        let pageURL = base.appendingPathComponent("page")
         let window: CefChromeWindow
-        do { window = try await CefChromeWindow.open(url: page) } catch {
+        do { window = try await CefChromeWindow.open(url: pageURL) } catch {
             return check("tab strip and extensions: opens a window", false, detail: "\(error)")
         }
         window.showsChromeUI = false
@@ -23,15 +23,15 @@ extension SelfTest {
         // The extension's page as a tab of the window, so its current
         // window is this one.
         guard let extensionTab = try? await window.openChromiumTab(URL(string: tabsPage + "?op=current")!, isActive: false),
-              await waitUntil(timeout: .seconds(10), { extensionTab.browser != nil })
+              await waitUntil(timeout: .seconds(10), { extensionTab.page != nil })
         else { return check("tab strip and extensions: opens the extension's page as a tab", false) }
-        let other = try? await window.openChromiumTab(URL(string: page.absoluteString + "?other")!, isActive: false)
-        _ = await waitUntil(timeout: .seconds(5)) { other?.browser != nil }
+        let other = try? await window.openChromiumTab(URL(string: pageURL.absoluteString + "?other")!, isActive: false)
+        _ = await waitUntil(timeout: .seconds(5)) { other?.page != nil }
         func run(_ query: String) async -> String {
-            guard let browser = extensionTab.browser,
-                  await load(URL(string: tabsPage + "?" + query)!, in: browser) else { return "did not load" }
-            _ = await waitUntil(timeout: .seconds(5)) { browser.title.hasPrefix("ok ") || browser.title.hasPrefix("error ") }
-            return browser.title
+            guard let page = extensionTab.page,
+                  await load(URL(string: tabsPage + "?" + query)!, in: page) else { return "did not load" }
+            _ = await waitUntil(timeout: .seconds(5)) { page.title.hasPrefix("ok ") || page.title.hasPrefix("error ") }
+            return page.title
         }
         guard let first = window.tabs.first, let other else {
             return check("tab strip and extensions: the window has its tabs", false, detail: "\(window.tabs.count)")
@@ -60,20 +60,20 @@ extension SelfTest {
             check("tab strip and extensions: a group renamed through Chrome's editor shows to chrome.tabGroups",
                   groups.contains("\"Renamed\""), detail: groups)
         }
-        let browser = first.browser
+        let page = first.page
         let windowed = await run("op=tabToWindow&tab=\(first.id)")
         check("tab strip and extensions: chrome.windows.create({tabId}) moves the tab to a window the strip lists, with its browser",
-              await waitUntil(timeout: .seconds(5)) { first.window !== window && first.window != nil && first.browser === browser
+              await waitUntil(timeout: .seconds(5)) { first.window !== window && first.window != nil && first.page === page
                   && strip.windows.contains { $0 === first.window } },
               detail: windowed)
         await closeAll()
 
         // Every window closed, and gone, before the next checks.
         func closeAll() async {
-            for browser in CefRuntime.shared.browsers where !CefWindow.all.contains(where: { $0.browser === browser }) {
-                browser.close(force: true)
+            for page in CefRuntime.shared.pages where !CefWindow.all.contains(where: { $0.page === page }) {
+                page.close(force: true)
             }
-            _ = await waitUntil { CefRuntime.shared.browsers.allSatisfy { b in CefWindow.all.contains { $0.browser === b } } }
+            _ = await waitUntil { CefRuntime.shared.pages.allSatisfy { b in CefWindow.all.contains { $0.page === b } } }
             _ = await waitUntil(timeout: .seconds(5)) { strip.windows.isEmpty }
         }
     }

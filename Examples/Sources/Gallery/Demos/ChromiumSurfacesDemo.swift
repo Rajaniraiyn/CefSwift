@@ -29,7 +29,7 @@ private struct ChromiumSurfacesView: View {
         }
         .reportReady {
             show()
-            try await window?.browser.waitUntilLoaded(timeout: .seconds(30))
+            try await window?.page.waitUntilLoaded(timeout: .seconds(30))
         }
         .onDisappear { window?.close() }
     }
@@ -39,16 +39,16 @@ private struct ChromiumSurfacesView: View {
             window.show()
             return
         }
-        let browser = CefBrowser(url: SamplePage.tour[0].url)
-        let window = CefWindow(browser: browser)
+        let page = CefPage(url: SamplePage.tour[0].url)
+        let window = CefWindow(page: page)
         window.setToolbar {
             EmptyView()
         } principal: {
-            PageTitle(browser: browser)
+            PageTitle(page: page)
         } trailing: {
             HStack {
-                Button("Find", systemImage: "magnifyingglass") { browser.execute(.find) }
-                Button("QR Code", systemImage: "qrcode") { browser.execute(.createQRCode) }
+                Button("Find", systemImage: "magnifyingglass") { page.execute(.find) }
+                Button("QR Code", systemImage: "qrcode") { page.execute(.createQRCode) }
                     .chromiumSurfaceAnchor([.qrCode], alignment: .trailing)
             }
             .labelStyle(.iconOnly)
@@ -70,7 +70,7 @@ private struct ChromiumSurfacesView: View {
         }
         // ⌘+ and ⌘−: the zoom commands still zoom; the level shows here.
         window.setCustomPresentation(for: .zoom) { surface in
-            ZoomLevel(browser: surface.browser)
+            ZoomLevel(page: surface.page)
         }
         window.show()
         self.window = window
@@ -80,21 +80,21 @@ private struct ChromiumSurfacesView: View {
 /// The page's zoom, as Chromium's zoom bubble shows it: Chromium scales a
 /// page by 1.2 to the power of its zoom level.
 private struct ZoomLevel: View {
-    let browser: CefBrowser
+    let page: CefPage
 
     var body: some View {
         HStack {
-            Text(pow(1.2, browser.zoomLevel), format: .percent.precision(.fractionLength(0)))
+            Text(pow(1.2, page.zoomLevel), format: .percent.precision(.fractionLength(0)))
                 .monospacedDigit()
-            Button("Reset") { browser.execute(.resetZoom) }
+            Button("Reset") { page.execute(.resetZoom) }
         }
         .padding()
     }
 }
 
 private struct PageTitle: View {
-    let browser: CefBrowser
-    var body: some View { Text(browser.title).lineLimit(1) }
+    let page: CefPage
+    var body: some View { Text(page.title).lineLimit(1) }
 }
 
 private struct FindBar: View {

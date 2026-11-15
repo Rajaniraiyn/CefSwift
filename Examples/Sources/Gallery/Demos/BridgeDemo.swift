@@ -20,7 +20,7 @@ private struct BridgeView: View {
 
     var body: some View {
         HSplitView {
-            CefWebView(model.browser).frame(minWidth: 360)
+            CefWebView(model.page).frame(minWidth: 360)
             List {
                 Section("In Swift") {
                     ForEach(model.todos.indices, id: \.self) { Text(model.todos[$0].title) }
@@ -34,8 +34,8 @@ private struct BridgeView: View {
                 model.bridge.emit("accent", colors[0])
             }
         }
-        .readyWhenLoaded(model.browser)
-        .onDisappear { model.browser.close(force: true) }
+        .readyWhenLoaded(model.page)
+        .onDisappear { model.page.close(force: true) }
     }
 }
 
@@ -48,12 +48,12 @@ private struct Todo: Codable, Hashable {
 private final class TodoModel {
     var todos: [Todo] = []
     let bridge = CefBridge(name: "app")
-    let browser: CefBrowser
+    let page: CefPage
 
     init() {
-        var configuration = CefBrowser.Configuration()
+        var configuration = CefPage.Configuration()
         configuration.bridges = [bridge]
-        browser = CefBrowser(url: Self.page.url, configuration: configuration)
+        page = CefPage(url: Self.page.url, configuration: configuration)
         // app.add({ title }) → the number of todos in Swift.
         bridge.handle("add") { [weak self] (todo: Todo) -> Int in
             guard let self else { return 0 }

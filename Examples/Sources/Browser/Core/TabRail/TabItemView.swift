@@ -271,7 +271,7 @@ extension CefTab {
     /// page without a title.
     var displayTitle: String {
         guard let url, url.absoluteString != "about:blank" else { return "New Tab" }
-        let title = browser?.title ?? self.title
+        let title = page?.title ?? self.title
         guard !title.isEmpty, title != url.absoluteString else { return url.host() ?? url.absoluteString }
         return title
     }

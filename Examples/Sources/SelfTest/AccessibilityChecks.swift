@@ -18,31 +18,31 @@ extension SelfTest {
     // MARK: The tree
 
     static func accessibilityTreeChecks() async {
-        var configuration = CefBrowser.Configuration()
+        var configuration = CefPage.Configuration()
         configuration.rendering = .offscreen
-        let browser = CefBrowser(url: URL(string: "selftest://ax/page.html")!, configuration: configuration)
-        let view = hostOffscreen(browser)
+        let page = CefPage(url: URL(string: "selftest://ax/page.html")!, configuration: configuration)
+        let view = hostOffscreen(page)
         defer { view.removeFromSuperview() }
 
         let recorder = NotificationRecorder(view: view)
         defer { recorder.stop() }
 
-        check("accessibility: page loads offscreen", await loaded(browser, title: "ax"), detail: browser.title)
+        check("accessibility: page loads offscreen", await loaded(page, title: "ax"), detail: page.title)
         let assistiveAppPresent = NSWorkspace.shared.isVoiceOverEnabled || CefApplication.isAccessibilityRequested
         if assistiveAppPresent {
             skip("accessibility: tree stays off until asked", because: "an assistive app is already running", .environment)
         } else {
-            check("accessibility: tree stays off until asked", !browser.isAccessibilityEnabled)
+            check("accessibility: tree stays off until asked", !page.isAccessibilityEnabled)
         }
 
         // The first query from an assistive app turns the tree on.
         _ = view.accessibilityChildren()
-        check("accessibility: first query turns the tree on", browser.isAccessibilityEnabled)
+        check("accessibility: first query turns the tree on", page.isAccessibilityEnabled)
         let loaded = await waitUntil {
             allElements(under: view).contains { ($0.accessibilityTitle() ?? $0.accessibilityLabel()) == "Inner button" }
         }
         check("accessibility: tree arrives, iframe included", loaded,
-              detail: "\(browser.accessibilityTree.nodeCount) nodes, enabled \(browser.isAccessibilityEnabled), discarded \(browser.isDiscarded), state \(browser.state), title \(browser.title), loading \(browser.isLoading)")
+              detail: "\(page.accessibilityTree.nodeCount) nodes, enabled \(page.isAccessibilityEnabled), discarded \(page.isDiscarded), state \(page.state), title \(page.title), loading \(page.isLoading)")
 
         let children = view.accessibilityChildren() ?? []
         let webArea = children.first as? NSAccessibilityElement
@@ -92,7 +92,7 @@ extension SelfTest {
         let viewFrame = window.convertToScreen(view.convert(view.bounds, to: nil))
         await expect("accessibility: frames match the page's layout") {
             guard let button else { return false }
-            let rect = try await browser.evaluateJavaScript(
+            let rect = try await page.evaluateJavaScript(
                 "(() => { const r = document.getElementById('press').getBoundingClientRect(); return [r.x, r.y, r.width, r.height]; })()"
             ).arrayValue?.compactMap(\.doubleValue) ?? []
             guard rect.count == 4 else { return false }
@@ -122,7 +122,7 @@ extension SelfTest {
             check("accessibility: focused element is the field",
                   (view.accessibilityFocusedUIElement as AnyObject?) === field && field.isAccessibilityFocused())
             await expect("accessibility: page focus follows") {
-                try await browser.evaluateJavaScript("document.activeElement.id").stringValue == "field"
+                try await page.evaluateJavaScript("document.activeElement.id").stringValue == "field"
             }
 
             recorder.posted.removeAll()
@@ -130,7 +130,7 @@ extension SelfTest {
             field.setAccessibilityValue("Grace")
             await expect("accessibility: setting the value types into the field") {
                 let typed = await waitUntilAsync(timeout: .seconds(5)) {
-                    (try? await browser.evaluateJavaScript("document.getElementById('field').value").stringValue) == "Grace"
+                    (try? await page.evaluateJavaScript("document.getElementById('field').value").stringValue) == "Grace"
                 }
                 let reflected = await waitUntil(timeout: .seconds(5)) {
                     (field.accessibilityValue() as? String) == "Grace"
@@ -144,8 +144,8 @@ extension SelfTest {
 
         if let button {
             _ = button.accessibilityPerformPress()
-            check("accessibility: press activates the button", await waitUntil(timeout: .seconds(5)) { browser.title == "pressed" },
-                  detail: browser.title)
+            check("accessibility: press activates the button", await waitUntil(timeout: .seconds(5)) { page.title == "pressed" },
+                  detail: page.title)
         }
 
         if let far = find(.button, "Far button") {
@@ -161,15 +161,15 @@ extension SelfTest {
         }
 
         recorder.posted.removeAll()
-        browser.executeJavaScript("document.getElementById('live').textContent = 'Saved'")
+        page.executeJavaScript("document.getElementById('live').textContent = 'Saved'")
         check("accessibility: live region announces", await waitUntil(timeout: .seconds(5)) {
             recorder.posted.contains { $0.notification == .announcementRequested }
         }, detail: recorder.posted.map(\.notification.rawValue).joined(separator: ","))
 
-        browser.close(force: true)
-        check("accessibility: browser closes", await waitUntil { browser.state == .closed })
+        page.close(force: true)
+        check("accessibility: browser closes", await waitUntil { page.state == .closed })
         check("accessibility: tree is emptied at close",
-              browser.accessibilityTree.isEmpty && !browser.isAccessibilityEnabled && (view.accessibilityChildren() ?? []).isEmpty
+              page.accessibilityTree.isEmpty && !page.isAccessibilityEnabled && (view.accessibilityChildren() ?? []).isEmpty
                   && button?.isAccessibilityElement() == false)
     }
 
@@ -179,64 +179,64 @@ extension SelfTest {
     /// read it through the system's AXUIElement API, and reports whether
     /// that client's request turned the tree on.
     static func accessibilityExternalClientSession() async {
-        var configuration = CefBrowser.Configuration()
+        var configuration = CefPage.Configuration()
         configuration.rendering = .offscreen
-        let browser = CefBrowser(url: URL(string: "selftest://ax/page.html")!, configuration: configuration)
-        let view = hostOffscreen(browser)
-        _ = await loaded(browser, title: "ax")
+        let page = CefPage(url: URL(string: "selftest://ax/page.html")!, configuration: configuration)
+        let view = hostOffscreen(page)
+        _ = await loaded(page, title: "ax")
         print("READY \(ProcessInfo.processInfo.processIdentifier)")
         check("external: tree turns on for an outside client", await waitUntil(timeout: .seconds(30)) {
-            browser.isAccessibilityEnabled && browser.accessibilityTree.nodeCount > 40
+            page.isAccessibilityEnabled && page.accessibilityTree.nodeCount > 40
         })
         check("external: AXManualAccessibility was seen", CefApplication.isAccessibilityRequested)
         let hold = Double(ProcessInfo.processInfo.environment["SELFTEST_AX_HOLD"] ?? "") ?? 15
         try? await Task.sleep(for: .seconds(hold))
-        print("NOTE external: page title after the client's press: \(browser.title)")
-        await closeHosted(browser, view)
+        print("NOTE external: page title after the client's press: \(page.title)")
+        await closeHosted(page, view)
     }
 
     // MARK: Discarding
 
     static func accessibilityDiscardChecks() async {
-        var configuration = CefBrowser.Configuration()
+        var configuration = CefPage.Configuration()
         configuration.rendering = .offscreen
         configuration.offscreenAccessibility = .enabled
-        let browser = CefBrowser(url: URL(string: "selftest://ax/plain.html")!, configuration: configuration)
-        let view = hostOffscreen(browser)
+        let page = CefPage(url: URL(string: "selftest://ax/plain.html")!, configuration: configuration)
+        let view = hostOffscreen(page)
         defer { view.removeFromSuperview() }
         func hasButton() -> Bool {
             allElements(under: view).contains { ($0.accessibilityTitle() ?? $0.accessibilityLabel()) == "Plain button" }
         }
-        check("accessibility: .enabled builds the tree at creation", await waitUntil { browser.isAccessibilityEnabled && hasButton() })
+        check("accessibility: .enabled builds the tree at creation", await waitUntil { page.isAccessibilityEnabled && hasButton() })
         view.isHidden = true
         await expect("accessibility: a discarded browser empties its tree") {
-            _ = await waitUntil(timeout: .seconds(5)) { !browser.isLoading }
-            try await browser.discard()
-            return browser.isDiscarded && browser.accessibilityTree.isEmpty && (view.accessibilityChildren() ?? []).isEmpty
+            _ = await waitUntil(timeout: .seconds(5)) { !page.isLoading }
+            try await page.discard()
+            return page.isDiscarded && page.accessibilityTree.isEmpty && (view.accessibilityChildren() ?? []).isEmpty
         }
         view.isHidden = false
-        browser.restore()
-        check("accessibility: the tree comes back after a restore", await waitUntil { !browser.isDiscarded && browser.isAccessibilityEnabled && hasButton() },
-              detail: "\(browser.accessibilityTree.nodeCount) nodes, enabled \(browser.isAccessibilityEnabled), discarded \(browser.isDiscarded), state \(browser.state), title \(browser.title), loading \(browser.isLoading)")
-        browser.close(force: true)
-        _ = await waitUntil { browser.state == .closed }
+        page.restore()
+        check("accessibility: the tree comes back after a restore", await waitUntil { !page.isDiscarded && page.isAccessibilityEnabled && hasButton() },
+              detail: "\(page.accessibilityTree.nodeCount) nodes, enabled \(page.isAccessibilityEnabled), discarded \(page.isDiscarded), state \(page.state), title \(page.title), loading \(page.isLoading)")
+        page.close(force: true)
+        _ = await waitUntil { page.state == .closed }
     }
 
     // MARK: Opting out
 
     static func accessibilityDisabledChecks() async {
-        var configuration = CefBrowser.Configuration()
+        var configuration = CefPage.Configuration()
         configuration.rendering = .offscreen
         configuration.offscreenAccessibility = .disabled
-        let browser = CefBrowser(url: URL(string: "selftest://ax/page.html")!, configuration: configuration)
-        let view = hostOffscreen(browser)
-        _ = await loaded(browser, title: "ax")
+        let page = CefPage(url: URL(string: "selftest://ax/page.html")!, configuration: configuration)
+        let view = hostOffscreen(page)
+        _ = await loaded(page, title: "ax")
         _ = view.accessibilityChildren()
         try? await Task.sleep(for: .milliseconds(300))
         check("accessibility: .disabled keeps the page a single element",
-              !browser.isAccessibilityEnabled && browser.accessibilityTree.isEmpty && (view.accessibilityChildren() ?? []).isEmpty
+              !page.isAccessibilityEnabled && page.accessibilityTree.isEmpty && (view.accessibilityChildren() ?? []).isEmpty
                   && view.isAccessibilityElement())
-        await closeHosted(browser, view)
+        await closeHosted(page, view)
     }
 
     // MARK: Cost
@@ -244,27 +244,27 @@ extension SelfTest {
     /// Reports how long a large page takes to load with and without the
     /// tree. Informational: printed, not checked.
     static func accessibilityCostChecks() async {
-        for mode in [CefBrowser.AccessibilityPolicy.disabled, .enabled, .disabled, .enabled] {
-            var configuration = CefBrowser.Configuration()
+        for mode in [CefPage.AccessibilityPolicy.disabled, .enabled, .disabled, .enabled] {
+            var configuration = CefPage.Configuration()
             configuration.rendering = .offscreen
             configuration.offscreenAccessibility = mode
-            let browser = CefBrowser(url: URL(string: "selftest://ax/large.html")!, configuration: configuration)
-            let view = CefOffscreenBrowserView(browser: browser)
+            let page = CefPage(url: URL(string: "selftest://ax/large.html")!, configuration: configuration)
+            let view = CefOffscreenPageView(page: page)
             view.frame = window.contentView!.bounds
             let start = ContinuousClock.now
             window.contentView!.addSubview(view)
-            _ = await loaded(browser, title: "large", timeout: .seconds(30))
+            _ = await loaded(page, title: "large", timeout: .seconds(30))
             let loaded = ContinuousClock.now - start
             var treeReady = Duration.zero
             if mode == .enabled {
-                _ = await waitUntil(timeout: .seconds(30)) { browser.accessibilityTree.nodeCount > 6000 && browser.accessibilityTree.isLoaded }
+                _ = await waitUntil(timeout: .seconds(30)) { page.accessibilityTree.nodeCount > 6000 && page.accessibilityTree.isLoaded }
                 treeReady = ContinuousClock.now - start
             }
             let rss = residentMemory()
             print("NOTE accessibility cost: \(mode == .enabled ? "tree on " : "tree off") load \(loaded.milliseconds) ms"
-                  + (mode == .enabled ? ", tree \(browser.accessibilityTree.nodeCount) nodes at \(treeReady.milliseconds) ms" : "")
+                  + (mode == .enabled ? ", tree \(page.accessibilityTree.nodeCount) nodes at \(treeReady.milliseconds) ms" : "")
                   + ", browser-process RSS \(rss / 1_048_576) MB")
-            await closeHosted(browser, view)
+            await closeHosted(page, view)
         }
     }
 
@@ -316,12 +316,12 @@ final class NotificationRecorder {
     var posted: [(notification: NSAccessibility.Notification, element: ObjectIdentifier)] = []
     private var observer: NSObjectProtocol?
 
-    init(view: CefOffscreenBrowserView) {
+    init(view: CefOffscreenPageView) {
         observer = NotificationCenter.default.addObserver(
-            forName: CefOffscreenBrowserView.didPostAccessibilityNotification, object: view, queue: nil
+            forName: CefOffscreenPageView.didPostAccessibilityNotification, object: view, queue: nil
         ) { [weak self] note in
-            guard let name = note.userInfo?[CefOffscreenBrowserView.accessibilityNotificationKey] as? NSAccessibility.Notification,
-                  let element = note.userInfo?[CefOffscreenBrowserView.accessibilityElementKey]
+            guard let name = note.userInfo?[CefOffscreenPageView.accessibilityNotificationKey] as? NSAccessibility.Notification,
+                  let element = note.userInfo?[CefOffscreenPageView.accessibilityElementKey]
             else { return }
             let identifier = ObjectIdentifier(element as AnyObject)
             MainActor.assumeIsolated { self?.posted.append((name, identifier)) }

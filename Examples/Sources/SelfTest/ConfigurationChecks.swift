@@ -52,18 +52,18 @@ extension SelfTest {
             return
         }
         defer { server.stop() }
-        let browser = CefBrowser(url: URL(string: "http://127.0.0.1:\(server.port)/ping-page")!)
-        let view = hostWindowed(browser)
+        let page = CefPage(url: URL(string: "http://127.0.0.1:\(server.port)/ping-page")!)
+        let view = hostWindowed(page)
         defer {
-            browser.close(force: true)
+            page.close(force: true)
             view.removeFromSuperview()
         }
-        guard await loaded(browser, title: "ping-page") else {
-            check(label, false, detail: "the page did not load: '\(browser.title)'")
+        guard await loaded(page, title: "ping-page") else {
+            check(label, false, detail: "the page did not load: '\(page.title)'")
             return
         }
-        _ = try? await browser.evaluateJavaScript("document.getElementById('link').click()", userGesture: true)
-        let followed = await waitUntil { browser.title == "page" }
+        _ = try? await page.evaluateJavaScript("document.getElementById('link').click()", userGesture: true)
+        let followed = await waitUntil { page.title == "page" }
         let pinged = await waitUntil(timeout: .seconds(expectsPing ? 5 : 1)) {
             server.requestLines.contains { $0.hasPrefix("POST /ping") }
         }

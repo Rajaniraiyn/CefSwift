@@ -34,54 +34,54 @@ extension SelfTest {
         bridge.handle("fail") { (_: CefJSON) -> String in throw CefError.operationFailed("nope") }
     }
 
-    static func windowedBrowserChecks() async {
-        var configuration = CefBrowser.Configuration()
+    static func windowedPageChecks() async {
+        var configuration = CefPage.Configuration()
         configuration.bridges = [bridge]
         configuration.userScripts = [CefUserScript(source: "window.__injected = 42;")]
         configuration.requestFilter = CefRequestFilter { request in
             request.url?.path == "/blocked" ? .block : .allow
         }
         // The page calls the bridge from an inline script: it must already exist.
-        let browser = CefBrowser(url: URL(string: "selftest://app/index.html")!, configuration: configuration)
-        let view = hostWindowed(browser)
+        let page = CefPage(url: URL(string: "selftest://app/index.html")!, configuration: configuration)
+        let view = hostWindowed(page)
 
         check("windowed: bridge available at document start",
-              await waitUntil { browser.title == "Hello, Ada from main!" }, detail: browser.title)
-        check("windowed: state", browser.state == .live && !browser.isLoading && browser.url?.scheme == "selftest")
+              await waitUntil { page.title == "Hello, Ada from main!" }, detail: page.title)
+        check("windowed: state", page.state == .live && !page.isLoading && page.url?.scheme == "selftest")
 
-        await expect("evaluateJavaScript: value") { try await browser.evaluateJavaScript("1 + 2").intValue == 3 }
+        await expect("evaluateJavaScript: value") { try await page.evaluateJavaScript("1 + 2").intValue == 3 }
         await expect("evaluateJavaScript: promise") {
-            try await browser.evaluateJavaScript("new Promise(r => setTimeout(() => r('later'), 10))").stringValue == "later"
+            try await page.evaluateJavaScript("new Promise(r => setTimeout(() => r('later'), 10))").stringValue == "later"
         }
         await expect("evaluateJavaScript: typed") {
-            try await browser.evaluateJavaScript("({name: 'Grace'})", as: Person.self).name == "Grace"
+            try await page.evaluateJavaScript("({name: 'Grace'})", as: Person.self).name == "Grace"
         }
         await expect("evaluateJavaScript: exception throws") {
             do {
-                try await browser.evaluateJavaScript("throw new Error('boom')")
+                try await page.evaluateJavaScript("throw new Error('boom')")
                 return false
             } catch let error as CefJavaScriptError {
                 return error.message.contains("boom")
             }
         }
-        await expect("user script ran before page") { try await browser.evaluateJavaScript("window.__sawInjected").intValue == 42 }
+        await expect("user script ran before page") { try await page.evaluateJavaScript("window.__sawInjected").intValue == 42 }
         await expect("bridge: handler error rejects") {
-            try await browser.evaluateJavaScript("app.fail({}).then(() => 'resolved', e => e.message)").stringValue?.contains("nope") == true
+            try await page.evaluateJavaScript("app.fail({}).then(() => 'resolved', e => e.message)").stringValue?.contains("nope") == true
         }
         await expect("bridge: unknown method rejects") {
-            try await browser.evaluateJavaScript("app.missing().then(() => 'resolved', e => 'rejected')").stringValue == "rejected"
+            try await page.evaluateJavaScript("app.missing().then(() => 'resolved', e => 'rejected')").stringValue == "rejected"
         }
         await expect("bridge: event Swift → JS") {
-            try await browser.evaluateJavaScript("app.on('ping', value => { window.__ping = value.n; }); 0")
+            try await page.evaluateJavaScript("app.on('ping', value => { window.__ping = value.n; }); 0")
             bridge.emit("ping", ["n": 7])
-            return try await browser.evaluateJavaScript(
+            return try await page.evaluateJavaScript(
                 "new Promise(r => { const t = setInterval(() => { if (window.__ping) { clearInterval(t); r(window.__ping); } }, 10); })"
             ).intValue == 7
         }
         await expect("bridge: cross-site iframe cannot call") {
             // A cross-site frame lives in another process and never gets the
             // bridge; a same-process one would be refused by the access policy.
-            let outcome = try await browser.evaluateJavaScript("""
+            let outcome = try await page.evaluateJavaScript("""
                 new Promise(resolve => {
                   addEventListener('message', e => resolve(e.data), { once: true });
                   const frame = document.createElement('iframe');
@@ -92,62 +92,62 @@ extension SelfTest {
             return outcome == "missing" || outcome == "rejected"
         }
         await expect("request filter blocks") {
-            try await browser.evaluateJavaScript("fetch('selftest://app/blocked').then(() => 'loaded', () => 'blocked')").stringValue == "blocked"
+            try await page.evaluateJavaScript("fetch('selftest://app/blocked').then(() => 'loaded', () => 'blocked')").stringValue == "blocked"
         }
         await expect("devTools: event stream") {
-            try await browser.devTools.send("Network.enable")
-            async let first = browser.devTools.events("Network.requestWillBeSent").first { _ in true }
+            try await page.devTools.send("Network.enable")
+            async let first = page.devTools.events("Network.requestWillBeSent").first { _ in true }
             try await Task.sleep(for: .milliseconds(50))
-            browser.executeJavaScript("fetch('selftest://app/ping')")
+            page.executeJavaScript("fetch('selftest://app/ping')")
             return await first?["request"]["url"].stringValue == "selftest://app/ping"
         }
-        await expect("snapshot: PNG") { try await browser.snapshot().starts(with: [0x89, 0x50, 0x4E, 0x47]) }
+        await expect("snapshot: PNG") { try await page.snapshot().starts(with: [0x89, 0x50, 0x4E, 0x47]) }
         await expect("printToPDF") {
             let file = FileManager.default.temporaryDirectory.appendingPathComponent("cefswift-selftest.pdf")
             try? FileManager.default.removeItem(at: file)
-            try await browser.printToPDF(at: file)
+            try await page.printToPDF(at: file)
             return (try? Data(contentsOf: file))?.starts(with: Array("%PDF".utf8)) == true
         }
 
         check("navigation: history",
-              await load(URL(string: "selftest://app/second.html")!, in: browser, title: "second") && browser.canGoBack)
+              await load(URL(string: "selftest://app/second.html")!, in: page, title: "second") && page.canGoBack)
         await expect("bridge survives navigation") {
-            try await browser.evaluateJavaScript("app.greet({name: 'Bob'})").stringValue == "Hello, Bob from main!"
+            try await page.evaluateJavaScript("app.greet({name: 'Bob'})").stringValue == "Hello, Bob from main!"
         }
 
-        browser.close(force: true)
-        check("windowed: closes", await waitUntil { browser.state == .closed })
+        page.close(force: true)
+        check("windowed: closes", await waitUntil { page.state == .closed })
         view.removeFromSuperview()
     }
 
-    static func offscreenBrowserChecks() async {
-        var configuration = CefBrowser.Configuration()
+    static func offscreenPageChecks() async {
+        var configuration = CefPage.Configuration()
         configuration.rendering = .offscreen
-        let browser = CefBrowser(url: URL(string: "selftest://app/second.html")!, configuration: configuration)
-        let view = hostOffscreen(browser)
+        let page = CefPage(url: URL(string: "selftest://app/second.html")!, configuration: configuration)
+        let view = hostOffscreen(page)
 
-        check("offscreen: loads", await loaded(browser, title: "second"), detail: browser.title)
+        check("offscreen: loads", await loaded(page, title: "second"), detail: page.title)
         if window.occlusionState.contains(.visible) {
             check("offscreen: paints", await waitUntil { view.layer?.sublayers?.first?.contents != nil })
         } else {
             skip("offscreen: paints", because: "the test window is not visible (screen locked or asleep?)", .environment)
         }
-        await expect("offscreen: evaluateJavaScript") { try await browser.evaluateJavaScript("document.title").stringValue == "second" }
+        await expect("offscreen: evaluateJavaScript") { try await page.evaluateJavaScript("document.title").stringValue == "second" }
         if window.occlusionState.contains(.visible) {
             // From the frame the view shows, at its pixel size, without a
             // DevTools session.
-            let attachedBefore = browser.devTools.isAttached
-            let png = try? await browser.snapshot()
+            let attachedBefore = page.devTools.isAttached
+            let png = try? await page.snapshot()
             let image = png.flatMap { NSBitmapImageRep(data: $0) }
             let scale = window.backingScaleFactor
             check("offscreen: snapshot comes from the view's frame, without DevTools",
                   image?.pixelsWide == Int(view.bounds.width * scale) && image?.pixelsHigh == Int(view.bounds.height * scale)
-                    && !attachedBefore && !browser.devTools.isAttached,
+                    && !attachedBefore && !page.devTools.isAttached,
                   detail: "\(image.map { "\($0.pixelsWide)x\($0.pixelsHigh)" } ?? "no image"), view \(view.bounds.size) at \(scale), "
-                      + "DevTools attached \(browser.devTools.isAttached)")
+                      + "DevTools attached \(page.devTools.isAttached)")
         }
-        browser.close(force: true)
-        check("offscreen: closes", await waitUntil { browser.state == .closed })
+        page.close(force: true)
+        check("offscreen: closes", await waitUntil { page.state == .closed })
         view.removeFromSuperview()
     }
 
@@ -173,12 +173,12 @@ extension SelfTest {
         })
 
         // Scheme handlers registered with CefRuntime serve every profile.
-        var configuration = CefBrowser.Configuration()
+        var configuration = CefPage.Configuration()
         configuration.profile = isolated
         let privateWindow = CefWindow(
-            browser: CefBrowser(url: URL(string: "selftest://app/second.html")!, configuration: configuration))
+            page: CefPage(url: URL(string: "selftest://app/second.html")!, configuration: configuration))
         check("profile: custom scheme serves an incognito profile",
-              await loaded(privateWindow.browser, title: "second"), detail: privateWindow.browser.title)
+              await loaded(privateWindow.page, title: "second"), detail: privateWindow.page.title)
         privateWindow.close()
         _ = await waitUntil { privateWindow.isClosed }
     }
@@ -261,50 +261,50 @@ extension SelfTest {
     }
 
     static func windowChecks() async {
-        var configuration = CefBrowser.Configuration()
+        var configuration = CefPage.Configuration()
         configuration.userScripts = [
             CefUserScript(source: "window.__scoped = 1", matching: ["chrome://version/*"]),
             CefUserScript(source: "window.__elsewhere = 1", matching: ["https://*"]),
             .styleSheet("body { --cefswift-probe: 7 }", matching: ["chrome://*"]),
         ]
-        let browser = CefBrowser(url: URL(string: "chrome://version")!, configuration: configuration)
-        let browserWindow = CefWindow(browser: browser)
+        let page = CefPage(url: URL(string: "chrome://version")!, configuration: configuration)
+        let pageWindow = CefWindow(page: page)
         var popups: [CefWindow] = []
-        browserWindow.onPopup = { popups.append($0) }
-        browserWindow.show()
+        pageWindow.onPopup = { popups.append($0) }
+        pageWindow.show()
 
-        check("window: chrome:// page loads", await loaded(browser) && !browser.title.isEmpty, detail: browser.title)
-        check("window: has NSWindow", browserWindow.window != nil)
+        check("window: chrome:// page loads", await loaded(page) && !page.title.isEmpty, detail: page.title)
+        check("window: has NSWindow", pageWindow.window != nil)
         await expect("window: product name override") {
-            let text = try await browser.evaluateJavaScript("document.body.innerText").stringValue ?? ""
+            let text = try await page.evaluateJavaScript("document.body.innerText").stringValue ?? ""
             return text.contains("SelfTestBrowser")
         }
-        check("window: chrome commands", browser.canExecute(.find))
+        check("window: chrome commands", page.canExecute(.find))
         await expect("window: ad-hoc signed builds use the mock keychain") {
             // Local builds must never touch the login keychain (no password prompts).
-            let text = try await browser.evaluateJavaScript("document.body.innerText").stringValue ?? ""
+            let text = try await page.evaluateJavaScript("document.body.innerText").stringValue ?? ""
             return text.contains("--use-mock-keychain")
         }
         await expect("internal page: scoped script runs, others don't") {
             _ = await waitUntilAsync(timeout: .seconds(3)) {
-                (try? await browser.evaluateJavaScript("window.__scoped === 1").boolValue) == true
+                (try? await page.evaluateJavaScript("window.__scoped === 1").boolValue) == true
             }
-            return try await browser.evaluateJavaScript("window.__scoped === 1 && window.__elsewhere === undefined").boolValue == true
+            return try await page.evaluateJavaScript("window.__scoped === 1 && window.__elsewhere === undefined").boolValue == true
         }
         await expect("internal page: stylesheet applies") {
-            try await browser.evaluateJavaScript(
+            try await page.evaluateJavaScript(
                 "getComputedStyle(document.body).getPropertyValue('--cefswift-probe').trim()").stringValue == "7"
         }
         await expect("window: popup is hosted by the app") {
-            try await browser.evaluateJavaScript("window.open('about:blank', '_blank', 'width=320,height=240'); 0", userGesture: true)
+            try await page.evaluateJavaScript("window.open('about:blank', '_blank', 'width=320,height=240'); 0", userGesture: true)
             let arrived = await waitUntil(timeout: .seconds(5)) { !popups.isEmpty }
-            return arrived && popups[0].window != nil && popups[0].browser.opener === browser
+            return arrived && popups[0].window != nil && popups[0].page.opener === page
         }
         for popup in popups { popup.close() }
         check("window: popup closes", await waitUntil { popups.allSatisfy(\.isClosed) })
 
-        browserWindow.close()
-        check("window: closes", await waitUntil { browserWindow.isClosed && browser.state == .closed })
+        pageWindow.close()
+        check("window: closes", await waitUntil { pageWindow.isClosed && page.state == .closed })
     }
 
     /// Bookmarks, history, most-visited and autocomplete reach Chromium
@@ -361,15 +361,15 @@ extension SelfTest {
             check("bookmarks: reads return to the file once Chromium has saved", !bookmarks.hasUnsavedChanges)
         }
 
-        // Visit a page in a Chrome-style browser so Chromium records it.
+        // Visit a page in a Chrome-style page so Chromium records it.
         let visitedURL = URL(string: "selftest://app/history-probe.html")!
-        let visitor = CefWindow(browser: CefBrowser(url: visitedURL))
-        check("history: page visited", await loaded(visitor.browser, title: "CefSwift History Probe"))
+        let visitor = CefWindow(page: CefPage(url: visitedURL))
+        check("history: page visited", await loaded(visitor.page, title: "CefSwift History Probe"))
         // Most visited has eight places, and earlier checks visit other
         // pages; visit this one more often than any of them.
         for _ in 0..<12 {
-            _ = await load(URL(string: "selftest://app/second.html")!, in: visitor.browser)
-            _ = await load(visitedURL, in: visitor.browser)
+            _ = await load(URL(string: "selftest://app/second.html")!, in: visitor.page)
+            _ = await load(visitedURL, in: visitor.page)
         }
         visitor.close()
         _ = await waitUntil { visitor.isClosed }
@@ -400,8 +400,8 @@ extension SelfTest {
         }
 
         check("internal pages: service browsers stay out of public lists",
-              CefRuntime.shared.browsers.isEmpty && CefWindow.all.isEmpty,
-              detail: "\(CefRuntime.shared.browsers.count) browsers, \(CefWindow.all.count) windows")
+              CefRuntime.shared.pages.isEmpty && CefWindow.all.isEmpty,
+              detail: "\(CefRuntime.shared.pages.count) browsers, \(CefWindow.all.count) windows")
 
         if let entry {
             await expect("history: remove") {
@@ -430,25 +430,25 @@ extension SelfTest {
     /// Chromium's profile file saves (`Bookmarks` among them) wait while
     /// the app shows no page, as a group run on its own may not.
     static func withVisiblePage<T>(_ body: @MainActor () async -> T) async -> T {
-        let window = CefWindow(browser: CefBrowser(url: URL(string: "selftest://app/second.html")!))
+        let window = CefWindow(page: CefPage(url: URL(string: "selftest://app/second.html")!))
         window.show()
-        _ = await loaded(window.browser, title: "second")
+        _ = await loaded(window.page, title: "second")
         let result = await body()
         window.close()
-        _ = await waitUntil { window.isClosed && window.browser.state == .closed }
+        _ = await waitUntil { window.isClosed && window.page.state == .closed }
         return result
     }
 
     static func chromeWindowChecks() async {
-        var created: [CefBrowser] = []
-        CefRuntime.shared.onBrowserCreated = { created.append($0) }
-        let browser = CefRuntime.shared.openChromeWindow(url: URL(string: "selftest://app/second.html")!)
-        check("chrome UI window: loads", await loaded(browser, title: "second"), detail: browser.title)
+        var created: [CefPage] = []
+        CefRuntime.shared.onPageCreated = { created.append($0) }
+        let page = CefRuntime.shared.openChromeWindow(url: URL(string: "selftest://app/second.html")!)
+        check("chrome UI window: loads", await loaded(page, title: "second"), detail: page.title)
 
-        browser.execute(.newTab)
-        check("chrome UI window: new tab is adopted", await waitUntil { !created.isEmpty && CefRuntime.shared.browsers.count == 2 })
+        page.execute(.newTab)
+        check("chrome UI window: new tab is adopted", await waitUntil { !created.isEmpty && CefRuntime.shared.pages.count == 2 })
 
-        for open in CefRuntime.shared.browsers { open.close(force: true) }
-        check("all browsers close", await waitUntil { CefRuntime.shared.browsers.isEmpty })
+        for open in CefRuntime.shared.pages { open.close(force: true) }
+        check("all browsers close", await waitUntil { CefRuntime.shared.pages.isEmpty })
     }
 }

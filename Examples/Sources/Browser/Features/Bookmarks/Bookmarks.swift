@@ -25,7 +25,7 @@ final class Bookmarks: BrowserFeature {
     }
 
     /// Adds Bookmark Link to a link's context menu, after Copy Link Address.
-    func configure(_ configuration: inout CefBrowser.Configuration) {
+    func configure(_ configuration: inout CefPage.Configuration) {
         let profile = profile
         configuration.contextMenu.customize { menu, target in
             guard let link = target.linkURL, Self.canBookmark(link) else { return }
@@ -42,9 +42,9 @@ final class Bookmarks: BrowserFeature {
     }
 
     /// Bookmarks the page, or removes its bookmarks if it has any.
-    func toggleBookmark(for browser: CefBrowser) {
-        guard let url = browser.url, Self.canBookmark(url) else { return }
-        let title = browser.title.isEmpty ? (url.host() ?? url.absoluteString) : browser.title
+    func toggleBookmark(for page: CefPage) {
+        guard let url = page.url, Self.canBookmark(url) else { return }
+        let title = page.title.isEmpty ? (url.host() ?? url.absoluteString) : page.title
         Task {
             do {
                 let existing = try await profile.bookmarks.bookmarks(for: url)
@@ -87,8 +87,8 @@ final class Bookmarks: BrowserFeature {
 
     // MARK: Interface
 
-    @ViewBuilder func toolbarItems(_ placement: ToolbarPlacement, for browser: CefBrowser) -> some View {
-        if placement == .addressFieldTrailing { BookmarkButton(browser: browser, bookmarks: self) }
+    @ViewBuilder func toolbarItems(_ placement: ToolbarPlacement, for page: CefPage) -> some View {
+        if placement == .addressFieldTrailing { BookmarkButton(page: page, bookmarks: self) }
     }
 
     func commands(for controller: BrowserController) -> some Commands {
@@ -98,16 +98,16 @@ final class Bookmarks: BrowserFeature {
 
 /// The star in the address field: filled when the page is bookmarked.
 private struct BookmarkButton: View {
-    let browser: CefBrowser
+    let page: CefPage
     let bookmarks: Bookmarks
     @Environment(BrowserController.self) private var controller
     @Environment(\.isEditingAddress) private var isEditingAddress
 
     var body: some View {
-        if !isEditingAddress, Bookmarks.canBookmark(browser.url), !controller.isStartPage(browser.url) {
-            let isBookmarked = bookmarks.isBookmarked(browser.url)
+        if !isEditingAddress, Bookmarks.canBookmark(page.url), !controller.isStartPage(page.url) {
+            let isBookmarked = bookmarks.isBookmarked(page.url)
             Button(isBookmarked ? "Remove Bookmark" : "Add Bookmark", systemImage: isBookmarked ? "star.fill" : "star") {
-                bookmarks.toggleBookmark(for: browser)
+                bookmarks.toggleBookmark(for: page)
             }
             .labelStyle(.iconOnly)
             .buttonStyle(.borderless)
@@ -128,7 +128,7 @@ private struct BookmarksMenu: View {
     var body: some View {
         let url = controller.current?.url
         Button(bookmarks.isBookmarked(url) ? "Remove Bookmark" : "Add Bookmark") {
-            if let browser = controller.current { bookmarks.toggleBookmark(for: browser) }
+            if let page = controller.current { bookmarks.toggleBookmark(for: page) }
         }
         .keyboardShortcut("d")
         .disabled(!Bookmarks.canBookmark(url) || controller.isStartPage(url))

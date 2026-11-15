@@ -3,14 +3,14 @@ import SwiftUI
 
 /// Back and forward, beside the window buttons.
 struct NavigationButtons: View {
-    let browser: CefBrowser
+    let page: CefPage
 
     var body: some View {
         HStack(spacing: 2) {
-            Button("Back", systemImage: "chevron.backward", action: browser.goBack)
-                .disabled(!browser.canGoBack)
-            Button("Forward", systemImage: "chevron.forward", action: browser.goForward)
-                .disabled(!browser.canGoForward)
+            Button("Back", systemImage: "chevron.backward", action: page.goBack)
+                .disabled(!page.canGoBack)
+            Button("Forward", systemImage: "chevron.forward", action: page.goForward)
+                .disabled(!page.canGoForward)
         }
         .buttonStyle(ToolbarIconButtonStyle())
     }

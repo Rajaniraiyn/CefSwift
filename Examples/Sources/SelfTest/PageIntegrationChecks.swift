@@ -15,45 +15,45 @@ extension SelfTest {
         await focusTraversalChecks()
     }
 
-    /// A windowed browser in the test window's content view.
-    static func hostedBrowser(_ url: URL, delegate: CefBrowserDelegate? = nil) -> (CefBrowser, CefWindowedBrowserView) {
-        let browser = CefBrowser(url: url, delegate: delegate)
-        return (browser, hostWindowed(browser, inset: 40))
+    /// A windowed page in the test window's content view.
+    static func hostedPage(_ url: URL, delegate: CefPageDelegate? = nil) -> (CefPage, CefWindowedPageView) {
+        let page = CefPage(url: url, delegate: delegate)
+        return (page, hostWindowed(page, inset: 40))
     }
 
     // MARK: Frames
 
     static func frameTreeChecks() async {
-        let (browser, view) = hostedBrowser(URL(string: "selftest://frames/top.html")!)
-        let attached = await waitUntil { browser.frames.count == 3 && browser.frames.allSatisfy { $0.url != nil } }
+        let (page, view) = hostedPage(URL(string: "selftest://frames/top.html")!)
+        let attached = await waitUntil { page.frames.count == 3 && page.frames.allSatisfy { $0.url != nil } }
         check("frames: the main frame and both iframes are listed", attached,
-              detail: browser.frames.map { "\($0.name) \($0.url?.absoluteString ?? "-")" }.joined(separator: "; "))
-        let main = browser.mainFrame
+              detail: page.frames.map { "\($0.name) \($0.url?.absoluteString ?? "-")" }.joined(separator: "; "))
+        let main = page.mainFrame
         check("frames: the main frame comes first, with the page's address",
-              browser.frames.first?.isMain == true && main?.url?.absoluteString == "selftest://frames/top.html"
+              page.frames.first?.isMain == true && main?.url?.absoluteString == "selftest://frames/top.html"
                 && main?.parentID == nil)
-        let same = browser.frames.first { $0.name == "same" }
-        let cross = browser.frames.first { $0.name == "cross" }
+        let same = page.frames.first { $0.name == "same" }
+        let cross = page.frames.first { $0.name == "cross" }
         check("frames: iframes have their names and the main frame as parent",
               same?.parentID == main?.id && cross?.parentID == main?.id && same?.isMain == false,
               detail: "\(String(describing: same)) \(String(describing: cross))")
         if let same, let cross {
             await expect("frames: evaluateJavaScript runs in a same-site iframe") {
-                try await browser.evaluateJavaScript("location.href + ' ' + window.name", in: same).stringValue
+                try await page.evaluateJavaScript("location.href + ' ' + window.name", in: same).stringValue
                     == "selftest://frames/child.html?same same"
             }
             await expect("frames: evaluateJavaScript runs in a cross-site iframe") {
-                try await browser.evaluateJavaScript("location.host", as: String.self, in: cross) == "frames-other"
+                try await page.evaluateJavaScript("location.host", as: String.self, in: cross) == "frames-other"
             }
-            browser.executeJavaScript("document.getElementById('same').src = 'child.html?moved'")
+            page.executeJavaScript("document.getElementById('same').src = 'child.html?moved'")
             check("frames: an iframe's navigation updates its address", await waitUntil {
-                browser.frames.contains { $0.url?.query == "moved" }
-            }, detail: browser.frames.map { $0.url?.absoluteString ?? "-" }.joined(separator: "; "))
-            browser.executeJavaScript("document.getElementById('cross').remove()")
+                page.frames.contains { $0.url?.query == "moved" }
+            }, detail: page.frames.map { $0.url?.absoluteString ?? "-" }.joined(separator: "; "))
+            page.executeJavaScript("document.getElementById('cross').remove()")
             check("frames: a removed iframe is no longer listed",
-                  await waitUntil { !browser.frames.contains { $0.id == cross.id } && browser.frames.count == 2 })
+                  await waitUntil { !page.frames.contains { $0.id == cross.id } && page.frames.count == 2 })
             do {
-                _ = try await browser.evaluateJavaScript("1", in: cross)
+                _ = try await page.evaluateJavaScript("1", in: cross)
                 check("frames: evaluating in a removed frame throws frameDetached", false, detail: "returned")
             } catch {
                 check("frames: evaluating in a removed frame throws frameDetached",
@@ -62,18 +62,18 @@ extension SelfTest {
             }
         }
         // A cross-site navigation of the main frame replaces it.
-        let oldMain = browser.mainFrame?.id
-        browser.load(URL(string: "selftest://frames-other/child.html?top")!)
+        let oldMain = page.mainFrame?.id
+        page.load(URL(string: "selftest://frames-other/child.html?top")!)
         check("frames: a cross-site navigation gives a new main frame and drops the iframes", await waitUntil {
-            browser.frames.count == 1 && browser.mainFrame?.url?.query == "top" && !browser.isLoading
-        }, detail: browser.frames.map { "\($0.isMain) \($0.url?.absoluteString ?? "-")" }.joined(separator: "; "))
-        print("INFO frames: main frame \(oldMain ?? "-") → \(browser.mainFrame?.id ?? "-")")
-        await closeHosted(browser, view)
-        check("frames: a closed browser lists none", browser.frames.isEmpty)
+            page.frames.count == 1 && page.mainFrame?.url?.query == "top" && !page.isLoading
+        }, detail: page.frames.map { "\($0.isMain) \($0.url?.absoluteString ?? "-")" }.joined(separator: "; "))
+        print("INFO frames: main frame \(oldMain ?? "-") → \(page.mainFrame?.id ?? "-")")
+        await closeHosted(page, view)
+        check("frames: a closed browser lists none", page.frames.isEmpty)
 
         // Chrome style reports frames the same way.
-        let tab = CefBrowser(url: URL(string: "selftest://frames/top.html")!)
-        let tabWindow = CefWindow(browser: tab)
+        let tab = CefPage(url: URL(string: "selftest://frames/top.html")!)
+        let tabWindow = CefWindow(page: tab)
         tabWindow.show()
         check("frames: a Chrome-style browser lists its frames", await waitUntil { tab.frames.count == 3 },
               detail: "\(tab.frames.count)")
@@ -84,10 +84,10 @@ extension SelfTest {
     // MARK: File dialogs
 
     /// Answers file choosers with ``answer`` and records what was asked.
-    final class FileDialogRecorder: CefBrowserDelegate {
+    final class FileDialogRecorder: CefPageDelegate {
         var dialogs: [CefFileDialog] = []
         var answer: [URL]?
-        func browser(_ browser: CefBrowser, runFileDialog dialog: CefFileDialog) async -> [URL]? {
+        func page(_ page: CefPage, runFileDialog dialog: CefFileDialog) async -> [URL]? {
             dialogs.append(dialog)
             return answer
         }
@@ -101,11 +101,11 @@ extension SelfTest {
         for file in files { try? Data("hello".utf8).write(to: file) }
 
         let recorder = FileDialogRecorder()
-        let (browser, view) = hostedBrowser(URL(string: "selftest://frames/files.html")!, delegate: recorder)
-        _ = await loaded(browser, title: "files")
+        let (page, view) = hostedPage(URL(string: "selftest://frames/files.html")!, delegate: recorder)
+        _ = await loaded(page, title: "files")
 
         recorder.answer = [files[0]]
-        _ = try? await browser.evaluateJavaScript("single.click(); 0", userGesture: true)
+        _ = try? await page.evaluateJavaScript("single.click(); 0", userGesture: true)
         check("file dialog: the delegate is asked for <input type=file>", await waitUntil { recorder.dialogs.count == 1 })
         let first = recorder.dialogs.first
         check("file dialog: mode and accepted types reach the delegate",
@@ -116,46 +116,46 @@ extension SelfTest {
               first.map { dialog in dialog.acceptedTypes.flatMap(\.contentTypes).contains(.plainText) } == true)
         await expect("file dialog: the chosen file reaches the page") {
             await waitUntilAsync(timeout: .seconds(5)) {
-                (try? await browser.evaluateJavaScript("single.files.length ? single.files[0].name : ''").stringValue) == "one.txt"
+                (try? await page.evaluateJavaScript("single.files.length ? single.files[0].name : ''").stringValue) == "one.txt"
             }
         }
 
         recorder.answer = files
-        _ = try? await browser.evaluateJavaScript("multiple.click(); 0", userGesture: true)
+        _ = try? await page.evaluateJavaScript("multiple.click(); 0", userGesture: true)
         _ = await waitUntil { recorder.dialogs.count == 2 }
         check("file dialog: <input multiple> asks for several files", recorder.dialogs.last?.mode == .openMultiple)
         await expect("file dialog: several chosen files reach the page") {
             await waitUntilAsync(timeout: .seconds(5)) {
-                (try? await browser.evaluateJavaScript("multiple.files.length").intValue) == 2
+                (try? await page.evaluateJavaScript("multiple.files.length").intValue) == 2
             }
         }
 
         recorder.answer = nil
-        _ = try? await browser.evaluateJavaScript("single.click(); 0", userGesture: true)
+        _ = try? await page.evaluateJavaScript("single.click(); 0", userGesture: true)
         _ = await waitUntil { recorder.dialogs.count == 3 }
         await expect("file dialog: cancelling fires the input's cancel event") {
             await waitUntilAsync(timeout: .seconds(5)) {
-                (try? await browser.evaluateJavaScript("window.__cancelled").intValue) == 1
+                (try? await page.evaluateJavaScript("window.__cancelled").intValue) == 1
             }
         }
 
-        // The default: an NSOpenPanel sheet on the browser's window.
-        browser.delegate = nil
-        _ = try? await browser.evaluateJavaScript("single.click(); 0", userGesture: true)
+        // The default: an NSOpenPanel sheet on the page's window.
+        page.delegate = nil
+        _ = try? await page.evaluateJavaScript("single.click(); 0", userGesture: true)
         let sheetShown = await waitUntil(timeout: .seconds(10)) { window.attachedSheet is NSOpenPanel }
         check("file dialog: the default is an NSOpenPanel sheet", sheetShown,
               detail: "\(String(describing: window.attachedSheet))")
         (window.attachedSheet as? NSOpenPanel)?.cancel(nil)
         check("file dialog: cancelling the default panel reaches the page", await waitUntilAsync(timeout: .seconds(5)) {
-            (try? await browser.evaluateJavaScript("window.__cancelled").intValue) == 2
+            (try? await page.evaluateJavaScript("window.__cancelled").intValue) == 2
         })
-        await closeHosted(browser, view)
+        await closeHosted(page, view)
 
         // Chrome style asks the delegate too.
         let tabRecorder = FileDialogRecorder()
         tabRecorder.answer = [files[1]]
-        let tab = CefBrowser(url: URL(string: "selftest://frames/files.html")!, delegate: tabRecorder)
-        let tabWindow = CefWindow(browser: tab)
+        let tab = CefPage(url: URL(string: "selftest://frames/files.html")!, delegate: tabRecorder)
+        let tabWindow = CefWindow(page: tab)
         tabWindow.show()
         _ = await loaded(tab, title: "files")
         _ = try? await tab.evaluateJavaScript("single.click(); 0", userGesture: true)
@@ -176,7 +176,7 @@ extension SelfTest {
     static func focusTraversalChecks() async {
         let before = NSTextField(frame: NSRect(x: 10, y: 5, width: 200, height: 24))
         let after = NSTextField(frame: NSRect(x: 220, y: 5, width: 200, height: 24))
-        let (browser, view) = hostedBrowser(URL(string: "selftest://frames/focus.html")!)
+        let (page, view) = hostedPage(URL(string: "selftest://frames/focus.html")!)
         window.contentView!.addSubview(before)
         window.contentView!.addSubview(after)
         window.autorecalculatesKeyViewLoop = false
@@ -184,10 +184,10 @@ extension SelfTest {
         view.nextKeyView = after
         after.nextKeyView = before
         window.makeKeyAndOrderFront(nil)
-        _ = await loaded(browser, title: "focus")
+        _ = await loaded(page, title: "focus")
 
         func activeID() async -> String {
-            (try? await browser.evaluateJavaScript("document.activeElement?.id ?? ''").stringValue) ?? "?"
+            (try? await page.evaluateJavaScript("document.activeElement?.id ?? ''").stringValue) ?? "?"
         }
         func isEditing(_ field: NSTextField) -> Bool {
             window.firstResponder === field || (window.firstResponder as? NSText)?.delegate === field
@@ -212,7 +212,7 @@ extension SelfTest {
             return active == "first"
         }, detail: "active \(active), responder \(String(describing: window.firstResponder))")
         // Tab past the last element leaves the page for the next key view.
-        _ = try? await browser.evaluateJavaScript("last.focus(), 0")
+        _ = try? await page.evaluateJavaScript("last.focus(), 0")
         pressTab(shift: false)
         check("focus: Tab past the last element moves to the next AppKit key view",
               await waitUntil(timeout: .seconds(5)) { isEditing(after) },
@@ -223,7 +223,7 @@ extension SelfTest {
             active = await activeID()
             return active == "last"
         }, detail: "active \(active), responder \(String(describing: window.firstResponder))")
-        _ = try? await browser.evaluateJavaScript("first.focus(), 0")
+        _ = try? await page.evaluateJavaScript("first.focus(), 0")
         pressTab(shift: true)
         check("focus: Shift-Tab past the first element moves to the previous AppKit key view",
               await waitUntil(timeout: .seconds(5)) { isEditing(before) },
@@ -238,12 +238,12 @@ extension SelfTest {
               detail: "\(String(describing: window.firstResponder))")
 
         window.makeFirstResponder(nil)
-        await closeHosted(browser, view)
+        await closeHosted(page, view)
 
         // Offscreen: the view CefKit draws into enters the loop the same way.
-        var configuration = CefBrowser.Configuration()
+        var configuration = CefPage.Configuration()
         configuration.rendering = .offscreen
-        let offscreen = CefBrowser(url: URL(string: "selftest://frames/focus.html")!, configuration: configuration)
+        let offscreen = CefPage(url: URL(string: "selftest://frames/focus.html")!, configuration: configuration)
         let offscreenView = hostOffscreen(offscreen, inset: 40)
         before.nextKeyView = offscreenView
         offscreenView.nextKeyView = after
