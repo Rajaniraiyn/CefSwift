@@ -191,7 +191,7 @@ jobs:
       # bounds are wide: about 1.5 times what an Apple M3 measures (Minimal
       # about 100 MiB, Browser about 215 MiB in 8 processes) and today's
       # process counts. The Browser's windows are Chromium's own tabbed
-      # windows (CefChromeWindow); CefTabStrip runs no hidden host while
+      # windows (CefChromeWindow); CefTabs runs no hidden host while
       # nothing changes, and the Browser turns Chromium's WebUI omnibox
       # popup off (its preloaded renderer and off-screen drawing cost about
       # 160 MiB under the covered omnibox).
