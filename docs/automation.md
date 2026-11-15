@@ -143,7 +143,9 @@ The `ci` job:
 5. `swift build --build-tests`, then check that the built code's
    deployment target is macOS 14.
 6. `swift test`, with `CEF_FRAMEWORK_PATH` set, so the loader tests run;
-   then again with the Thread Sanitizer and with the Address Sanitizer.
+   `swift test --package-path Examples`, the Browser example's unit tests;
+   then the package's tests again with the Thread Sanitizer and with the
+   Address Sanitizer.
 7. `Scripts/check-doc-samples.py`: every Swift sample in the README and
    the docs compiles.
 8. Build the Examples package in release, then bundle SelfTest and run `cef doctor`
@@ -161,7 +163,11 @@ The `ci` job:
 10. Bundle the Gallery example and run `Gallery -smoke`, which opens each
     demo in turn and fails when one does not come up or leaves a browser
     open.
-11. Check that the build left the working tree clean.
+11. Bundle the Minimal and Browser examples and measure their idle
+    footprint with `Scripts/measure-footprint.py`, written to the run
+    summary. The bounds are wide (about 1.5 times what an Apple M3
+    measures), so only a gross regression fails.
+12. Check that the build left the working tree clean.
 
 What CI verifies, and what it does not:
 
