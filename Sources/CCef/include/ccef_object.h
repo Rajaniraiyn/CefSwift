@@ -37,11 +37,6 @@ void* ccef_object_alloc(size_t struct_size, void* swift_object,
 /// ccef_object_alloc(). `cef_self` is the pointer CEF passes as `self`.
 void* ccef_object_get_swift(void* cef_self);
 
-/// Manual refcount manipulation (rarely needed; the base callbacks installed
-/// by ccef_object_alloc are what CEF uses).
-void ccef_object_add_ref(void* cef_self);
-int ccef_object_release(void* cef_self);
-
 /// Current refcount, for tests/diagnostics only.
 int ccef_object_ref_count(void* cef_self);
 

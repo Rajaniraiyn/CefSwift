@@ -5,26 +5,28 @@ import Testing
 @testable import CefKit
 
 /// Pure-logic tests for the macOS sandbox seam: defaults and the bit that
-/// crosses into `cef_settings_t.no_sandbox`. We can't exercise the helper
-/// dlopen path in a unit test (it needs a real bundle layout), but the
-/// settings mapping is where the toggle is easy to break.
+/// crosses into `cef_settings_t.no_sandbox`, the inverse of
+/// `isSandboxEnabled`. The helper's side (Sources/CefHelper) needs a
+/// real bundle, but the settings mapping is where the toggle is easy to
+/// break.
 @Suite struct SandboxConfigTests {
-    @Test func defaultIsUnsandboxed() {
-        #expect(CefConfiguration().noSandbox == true)
-        #expect(CefConfiguration.default.noSandbox == true)
+    @Test func defaultIsSandboxed() {
+        for configuration in [CefRuntime.Configuration(), .embedded, .chrome] {
+            #expect(configuration.isSandboxEnabled)
+        }
+        let mapped = MappedCefSettings(configuration: CefRuntime.Configuration(), frameworkDirectory: nil)
+        #expect(mapped.raw.no_sandbox == 0)
     }
 
-    @Test func mappingPropagatesNoSandboxTrue() {
-        var config = CefConfiguration()
-        config.noSandbox = true
+    @Test func disabledSandboxSetsNoSandbox() {
+        var config = CefRuntime.Configuration()
+        config.isSandboxEnabled = false
         let mapped = MappedCefSettings(configuration: config, frameworkDirectory: nil)
         #expect(mapped.raw.no_sandbox == 1)
     }
 
-    @Test func mappingPropagatesNoSandboxFalse() {
-        var config = CefConfiguration()
-        config.noSandbox = false
-        let mapped = MappedCefSettings(configuration: config, frameworkDirectory: nil)
-        #expect(mapped.raw.no_sandbox == 0)
+    @Test func messagePumpIsAlwaysExternal() {
+        let mapped = MappedCefSettings(configuration: CefRuntime.Configuration(), frameworkDirectory: nil)
+        #expect(mapped.raw.external_message_pump == 1)
     }
 }

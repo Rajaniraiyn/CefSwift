@@ -4,65 +4,75 @@ import Testing
 @testable import CCef
 @testable import CefKit
 
-/// Loader tests that exercise the real CEF framework when present. They are
-/// skipped (via `.enabled(if:)`) when the framework is unavailable, e.g. on
-/// clean CI machines. They never call cef_initialize — that would take over
-/// the test process.
+/// Tests of the framework loader. Those that need the framework run only
+/// when `CEF_FRAMEWORK_PATH` points at it, and load it in `CefLoaderProbe`,
+/// a process of their own: none load it into the test process, nor call
+/// `cef_initialize`, which would take it over.
+///
+/// The framework's initializers make PartitionAlloc the default malloc
+/// zone by unregistering the system zone and registering it again. Freed
+/// in between, by any thread, a pointer the system zone allocated traps
+/// in Chromium's `free`; the test process runs other tests on many
+/// threads, and loading the framework there crashed it now and then.
 @Suite(.serialized)
 struct LoaderTests {
-    /// Resolves a usable framework binary from CEF_FRAMEWORK_PATH or the
-    /// local extracted distribution.
+    /// The framework binary named by `CEF_FRAMEWORK_PATH`, which may point at
+    /// the binary or at the `.framework` directory.
     static func frameworkBinaryPath() -> String? {
-        var candidates: [String] = []
-        if let env = ProcessInfo.processInfo.environment["CEF_FRAMEWORK_PATH"], !env.isEmpty {
-            candidates.append(env)
+        guard var path = ProcessInfo.processInfo.environment["CEF_FRAMEWORK_PATH"], !path.isEmpty else {
+            return nil
         }
-        candidates.append(
-            "/tmp/cefswift-ref/cef_binary_148.0.10+g7ee53f5+chromium-148.0.7778.218_macosarm64_minimal/"
-                + "Release/Chromium Embedded Framework.framework/Chromium Embedded Framework"
-        )
-        for candidate in candidates {
-            var resolved = candidate
-            var isDirectory: ObjCBool = false
-            if FileManager.default.fileExists(atPath: resolved, isDirectory: &isDirectory),
-                isDirectory.boolValue
-            {
-                resolved += "/Chromium Embedded Framework"
-            }
-            if FileManager.default.fileExists(atPath: resolved) {
-                return resolved
-            }
+        var isDirectory: ObjCBool = false
+        if FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory), isDirectory.boolValue {
+            path += "/Chromium Embedded Framework"
         }
-        return nil
+        return FileManager.default.fileExists(atPath: path) ? path : nil
     }
 
     static var frameworkAvailable: Bool { frameworkBinaryPath() != nil }
 
+    /// `CefLoaderProbe`, which SwiftPM builds beside the test bundle.
+    static func probeURL() throws -> URL {
+        let bundle = Bundle(for: ProbeLocator.self).bundleURL
+        let probe = bundle.deletingLastPathComponent().appendingPathComponent("CefLoaderProbe")
+        try #require(
+            FileManager.default.isExecutableFile(atPath: probe.path),
+            "CefLoaderProbe is not built beside \(bundle.path); run swift build --build-tests")
+        return probe
+    }
+
+    /// Runs the probe; how it ended and what it wrote to standard error.
+    static func runProbe(_ mode: String, framework: String) throws
+        -> (reason: Process.TerminationReason, status: Int32, errors: String) {
+        let process = Process()
+        process.executableURL = try probeURL()
+        process.arguments = [mode, framework]
+        let errors = Pipe()
+        process.standardError = errors
+        try process.run()
+        let output = errors.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        return (process.terminationReason, process.terminationStatus, String(decoding: output, as: UTF8.self))
+    }
+
     @Test(.enabled(if: LoaderTests.frameworkAvailable, "CEF framework not present; set CEF_FRAMEWORK_PATH to run loader tests."))
-    func loadVerifyAndUnloadRealFramework() throws {
+    func loadsAndVerifiesRealFramework() throws {
         let path = try #require(Self.frameworkBinaryPath())
-
+        // Loads it, checks its exports, the API hash and version the
+        // headers pin, and a string conversion the framework implements.
+        let run = try Self.runProbe("check", framework: path)
+        #expect(run.reason == .exit && run.status == 0, "\(run.errors)")
         #expect(ccef_is_framework_loaded() == 0)
-        #expect(ccef_load_framework(path) == 1, "\(String(cString: ccef_loader_error()))")
-        defer { ccef_unload_framework() }
-        #expect(ccef_is_framework_loaded() == 1)
+    }
 
-        // First CEF call in the process must be cef_api_hash.
-        let hash = try #require(cef_api_hash(CCEF_API_VERSION_VALUE, 0))
-        #expect(String(cString: hash) == CCEF_EXPECTED_API_HASH_PLATFORM)
-
-        // The configured API version must be the pinned one.
-        #expect(cef_api_version() == CCEF_API_VERSION_VALUE)
-        #expect(CCEF_API_VERSION_VALUE == 14800)
-
-        // CefRuntime's own verification should agree.
-        try CefRuntime.verifyAPIHash()
-
-        // Framework-backed string conversion round-trip.
-        var utf16 = cef_string_t()
-        #expect(cef_string_utf8_to_utf16("loader-test", 11, &utf16) == 1)
-        #expect(CefStringUtil.string(from: utf16) == "loader-test")
-        cef_string_utf16_clear(&utf16)
+    /// Why the probe exists: a free inside the window in which the
+    /// framework's initializer has unregistered the system zone traps, as
+    /// another test's thread did. The probe frees at exactly that point.
+    @Test(.enabled(if: LoaderTests.frameworkAvailable, "CEF framework not present; set CEF_FRAMEWORK_PATH to run loader tests."))
+    func aFreeWhileTheFrameworkSwapsTheDefaultZoneTraps() throws {
+        let path = try #require(Self.frameworkBinaryPath())
+        let run = try Self.runProbe("free-during-load", framework: path)
+        #expect(run.reason == .uncaughtSignal && run.status == SIGTRAP, "\(run.status): \(run.errors)")
     }
 
     @Test func loadFailureReportsError() {
@@ -95,3 +105,5 @@ struct LoaderTests {
         }
     }
 }
+
+private final class ProbeLocator {}

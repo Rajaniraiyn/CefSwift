@@ -1,46 +1,57 @@
-import SwiftUI
-import CefKit
 import CefSwiftUI
+import SwiftUI
 
-/// Embedding showcase: web content as ordinary SwiftUI cards in a native dashboard.
+/// A library of small examples, each showing one capability of CefSwift.
 ///
-/// Where `Browser` is "build a browser", `Gallery` is "drop web views into your app":
-/// runtime styles per card, muted media, console-message plumbing into native UI, and
-/// URLs driven by native controls.
+/// Chromium takes one runtime configuration per process and cannot restart,
+/// so every demo runs under this one: the `.chrome` preset, which
+/// Chrome-style windows, Chromium's data services and the media router
+/// need, with offscreen rendering on for the demos that draw over a page.
+///
+/// Launch arguments:
+///
+/// - `-demo <Type>` opens a demo, such as `-demo BridgeDemo`.
+/// - `-smoke` (or `GALLERY_SMOKE=1`) opens every demo in turn and quits;
+///   see `Support/Smoke.swift`.
+/// - `-animationShots <directory>` plays the Animation demo's scenes and
+///   saves pictures of the window during them, then quits; see
+///   `Support/AnimationShots.swift`.
 @main
 struct GalleryApp: CefSwiftApp {
-
-    static var cefConfiguration: CefConfiguration {
-        var config = CefConfiguration()
-        config.cachePath = FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("dev.rajaniraiyn.cefswift.gallery/Cache", isDirectory: true)
-        config.logSeverity = .warning
-        config.userAgentProduct = "CefSwiftGallery/1.0"
-        // Enable offscreen rendering so the OSR / Metal card can paint into a
-        // shared IOSurface composited in a native CALayer-backed subview.
-        config.windowlessRenderingEnabled = true
-        // Pluggable chromium switches flow straight through:
-        config.extraCommandLineSwitches = [
-            "autoplay-policy": "no-user-gesture-required"
-        ]
-        // Demo profile: never touch the keychain (no "Chromium Safe Storage" prompt).
-        config.safeStorage = .mockKeychain
-        // Custom scheme serving the Swift ↔ JS bridge demo page (see BridgeCard.swift).
-        config.customSchemes = [CefCustomScheme(name: "gallery")]
-        return config
+    static var runtimeConfiguration: CefRuntime.Configuration {
+        var configuration = CefRuntime.Configuration.chrome
+        configuration.isOffscreenRenderingEnabled = true
+        configuration.customSchemes = [CefCustomScheme(name: "gallery")]
+        // A demo app: a fixed key instead of the keychain, so no keychain
+        // prompt ever appears, whatever the app is signed with.
+        configuration.safeStorage = .mockKeychain
+        // The demos work offline; nothing needs Chromium's components.
+        configuration.services.componentUpdates = .disabled
+        configuration.services.protectedMedia = .disabled
+        configuration.preferences["browser.confirm_to_quit"] = false
+        if let directory = Smoke.cacheDirectory ?? AnimationShots.cacheDirectory {
+            configuration.rootCacheDirectory = directory
+        }
+        return configuration
     }
 
+    @State private var model = GalleryModel()
+
     init() {
-        // CEF is initialized before SwiftUI constructs the App; register the
-        // gallery:// page handler and the bridge functions now.
-        BridgeDemo.shared.activate()
+        // Chromium is running by now: serve the sample pages before any
+        // demo loads one.
+        CefRuntime.shared.registerSchemeHandler(scheme: "gallery", domain: "pages", handler: SamplePages())
+        Smoke.prepare()
+        AnimationShots.prepare()
     }
 
     var body: some Scene {
-        WindowGroup {
-            GalleryView()
-                .frame(minWidth: 980, minHeight: 700)
+        Window("Gallery", id: "gallery") {
+            GalleryView(model: model)
+                .task {
+                    if Smoke.isEnabled { await Smoke.run(model) }
+                }
         }
+        .defaultSize(width: 1180, height: 760)
     }
 }

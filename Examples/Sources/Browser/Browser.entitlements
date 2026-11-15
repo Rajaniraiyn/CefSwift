@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The Browser app's own entitlements, merged with those its capabilities
+  add (cefapp.json). Only unrestricted entitlements belong here, so an ad hoc
+  build signs and runs with them: hardened-runtime exceptions and resource
+  access. Restricted ones go in Browser-Distribution.entitlements.
+-->
+<plist version="1.0">
+<dict>
+	<!-- Photos in the file picker of <input type="file">, as Chrome's
+	     app-entitlements.plist grants under the hardened runtime. -->
+	<key>com.apple.security.personal-information.photos-library</key>
+	<true/>
+</dict>
+</plist>

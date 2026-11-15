@@ -1,0 +1,23 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Bundled Site</title>
+<link rel="stylesheet" href="style.css">
+<header>
+  <img src="logo.svg" width="56" height="56" alt="">
+  <h1>A site in the app's bundle</h1>
+</header>
+<p>This page, its style sheet, its image and the list below come from
+<code>Resources/Site</code>, served at <code>gallery://site/</code> by a
+<code>CefDirectorySchemeHandler</code>.</p>
+<ul id="items"></ul>
+<script>
+  fetch("data.json")
+    .then(response => response.json())
+    .then(items => {
+      for (const item of items) {
+        const li = document.createElement("li");
+        li.textContent = item;
+        document.getElementById("items").append(li);
+      }
+    });
+</script>

@@ -1,0 +1,6 @@
+:root { color-scheme: light dark; font: 15px/1.55 -apple-system, system-ui; }
+body { margin: 0 auto; padding: 28px 36px; max-width: 680px; }
+header { display: flex; align-items: center; gap: 16px; }
+h1 { font-size: 24px; }
+code { font: 13px ui-monospace, monospace; }
+li { padding: 4px 0; }

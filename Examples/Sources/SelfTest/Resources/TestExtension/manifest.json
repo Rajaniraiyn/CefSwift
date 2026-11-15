@@ -1,0 +1,90 @@
+{
+  "manifest_version": 3,
+  "name": "CefSwift Test Extension",
+  "version": "1.0",
+  "description": "A test fixture for SelfTest's extension checks. Not shipped by CefSwift.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAq7KyL4OV1GMfsK2go+6Dgre6wbUr/i7n5CPO0GP6qDl+yyfkvYU7RPy5nTRpiUaRv2sf6De0brNBfMh9QSBo/yrsY0sbtIgQf1Rz1ZMKba9OgS3mLYo4kW+iJcs41Amtgd7KarTU5F5M17Aaple36LzAi75VNNK1d4JhkAIljAld/0TdwQhEojjowzl4jBDQFXcNf4tF3z9U+NZxd9a96lKIUMBy4Cw0OzfjkhFrc3zDp8ob3/5QOXVDzgAnJFZbGDnEHn1RnG4rd701+iRA0ydPBskXAbL1dhzDaAPKgWexMqDGYkz0Zk3J6uwr4lgG7othCw9/TiPjPCCfuhcSNQIDAQAB",
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  },
+  "action": {
+    "default_title": "CefSwift Test",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icon16.png",
+      "32": "icon32.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "options_page": "options.html",
+  "side_panel": {
+    "default_path": "panel.html"
+  },
+  "permissions": [
+    "storage",
+    "tabs",
+    "scripting",
+    "declarativeNetRequest",
+    "contextMenus",
+    "sidePanel",
+    "cookies",
+    "downloads",
+    "bookmarks",
+    "history",
+    "topSites",
+    "sessions",
+    "tabGroups",
+    "notifications",
+    "identity",
+    "nativeMessaging",
+    "management",
+    "alarms",
+    "webRequest",
+    "offscreen"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "http://127.0.0.1/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_start"
+    }
+  ],
+  "commands": {
+    "_execute_action": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+Y",
+        "mac": "MacCtrl+Shift+Y"
+      }
+    },
+    "ping": {
+      "description": "Ping the test extension"
+    }
+  },
+  "declarative_net_request": {
+    "rule_resources": [
+      {
+        "id": "rules",
+        "enabled": true,
+        "path": "rules.json"
+      }
+    ]
+  },
+  "omnibox": {
+    "keyword": "cefswift"
+  },
+  "devtools_page": "devtools.html",
+  "chrome_url_overrides": {
+    "newtab": "newtab.html"
+  }
+}

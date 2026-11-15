@@ -1,13 +1,12 @@
 import Foundation
 import PackagePlugin
 
-#if arch(arm64)
-private let hostCefPlatform = "macosarm64"
-#else
-private let hostCefPlatform = "macosx64"
-#endif
-
-/// `swift package cef <download|bundle|info|clean>`.
+/// `swift package cef <download|bundle|doctor|package|notarize|info|clean>`.
+///
+/// The SwiftPM front end of the `cefswift` tool, which does the work: this
+/// plugin finds the product and CEF_VERSION.json in the package graph and
+/// builds with SwiftPM; the tool decides and assembles the bundle, the same
+/// way it does for the Xcode build phase (docs/bundling.md).
 ///
 /// Pre-approve the needed sandbox permissions on the command line:
 ///   swift package --allow-writing-to-package-directory \
@@ -19,26 +18,37 @@ struct CefPlugin: CommandPlugin {
         guard let subcommand = arguments.first, subcommand != "--help", subcommand != "help" else {
             print(Self.usage)
             if arguments.first == nil {
-                throw CefPluginError("Missing subcommand. See usage above.")
+                throw PluginError("Missing subcommand. See usage above.")
             }
             return
         }
+        let tool = try Tool(context: context)
         var extractor = ArgumentExtractor(Array(arguments.dropFirst()))
 
         switch subcommand {
         case "download":
-            try download(context: context, extractor: &extractor)
+            let manifest = try manifestPath(context: context, explicit: extractor.extractOption(named: "manifest").last)
+            try tool.run(["download", "--cache", cacheRoot(context).path, "--manifest", manifest.path]
+                         + extractor.remainingArguments)
         case "bundle":
-            try await bundle(context: context, extractor: &extractor)
+            try bundle(context: context, tool: tool, extractor: &extractor)
         case "info":
-            try info(context: context, extractor: &extractor)
+            let manifest = try manifestPath(context: context, explicit: extractor.extractOption(named: "manifest").last)
+            try rejectLeftovers(extractor)
+            try tool.run(["info", "--cache", cacheRoot(context).path, "--manifest", manifest.path])
+            print("")
+            print("  Download with: swift package --allow-writing-to-package-directory " +
+                  "--allow-network-connections all cef download")
         case "clean":
-            try clean(context: context)
+            try rejectLeftovers(extractor)
+            try tool.run(["clean", "--cache", cacheRoot(context).path])
+        case "doctor", "package", "notarize":
+            try tool.run([subcommand] + appArguments(context: context, extractor: &extractor, command: subcommand))
         default:
             print(Self.usage)
-            throw CefPluginError(
-                "Unknown subcommand '\(subcommand)'. Expected one of: download, bundle, info, clean."
-            )
+            throw PluginError(
+                "Unknown subcommand '\(subcommand)'. Expected one of: download, bundle, doctor, package, " +
+                "notarize, info, clean.")
         }
     }
 
@@ -50,341 +60,322 @@ struct CefPlugin: CommandPlugin {
                [--cef-version <V>] [--manifest <path>]
           Download the pinned CEF distribution into .cef/, verify, extract, and
           convert the framework to the versioned bundle layout. Idempotent.
+          --cef-version must match the manifest; to use another version, pass
+          --manifest with a manifest pinned to it.
 
       bundle --product <Name> [--configuration debug|release] [--flavor minimal|standard]
              [--platform macosarm64|macosx64] [--output <dir>] [--bundle-id <id>]
-             [--name <DisplayName>] [--manifest <path>] [--sign <identity|->]
-          Build <Name> and cef-helper, then assemble a runnable <Name>.app
-          (framework + five helper apps + Info.plists + codesign).
-          --sign: codesign identity; '-' forces ad-hoc. Default: auto-detect
-          (first "Apple Development", else "Developer ID Application", else
-          ad-hoc). Precedence: --sign > cefapp.json "signingIdentity" > auto.
+             [--name <DisplayName>] [--manifest <path>] [--version <1.2.3>] [--build <42>]
+             [--config <cefapp.json>] [--sign <identity|->] [--team-id <ID>] [--keychain <file>]
+             [--capability <name>]... [--info-plist <file>]... [--entitlements <file>]
+             [--provisioning-profile <file>] [--[no-]hardened-runtime] [--[no-]timestamp]
+             [--package zip|dmg] [--notarize --keychain-profile <name>]
+             [--localizations application|all|<list>] [--software-gpu-fallback include|exclude]
+          Build <Name>, compile the helper, then assemble and sign <Name>.app
+          (framework + five helper apps + Info.plists + entitlements).
+          --localizations chooses Chromium's locale packs: those of the app's
+          localizations (CFBundleLocalizations), its development language and
+          English (application, the default), all of them, or those of a
+          list such as en,fr. --software-gpu-fallback exclude leaves out
+          SwiftShader (about 16 MiB). cefapp.json "cef": {"localizations",
+          "softwareGPUFallback"} sets defaults.
+          Settings come from cefapp.json next to the target's sources (or
+          --config); options override it. --sign '-' signs ad hoc; without it,
+          the first "Apple Development", else "Developer ID Application"
+          identity, else ad hoc. The hardened runtime defaults to on for Apple
+          team identities, the secure timestamp to on for Developer ID.
+          --capability adds to cefapp.json "capabilities" (see docs/bundling.md#features).
+          --package and --notarize run the commands below on the result.
           Default output: <packageDir>/dist/<Name>.app.
-          Optional per-product overrides: cefapp.json next to the target sources.
+
+      doctor <App.app> | --product <Name> [--json]
+          Inspect a built bundle: signature, hardened runtime, each helper's
+          entitlements, the embedded profile, Info.plist usage descriptions,
+          Gatekeeper, stapling and quarantine; then, per feature, whether it
+          works and what is missing. Exits non-zero when it finds errors.
+
+      package <App.app> | --product <Name> [--format zip|dmg] [--sign <identity>] [--output <dir>]
+          Wrap the app in a zip (ditto) or disk image (hdiutil; signed with
+          --sign). Default: zip, next to the app.
+
+      notarize <App.app> | --product <Name> --keychain-profile <name> [--format zip|dmg]
+               [--sign <identity>]
+          Package, submit with 'xcrun notarytool submit --wait', and staple the
+          ticket. Create the profile once with 'xcrun notarytool store-credentials'.
+          cefapp.json "notarization": {"keychainProfile", "format"} sets defaults.
 
       info
           Print the pinned CEF version and the state of the .cef/ cache.
 
       clean
           Remove the .cef/ cache directory.
+
+    An Xcode app target runs the same tool from a build phase instead:
+    see docs/bundling.md#xcode.
     """
-
-    // MARK: - download
-
-    private func download(context: PluginContext, extractor: inout ArgumentExtractor) throws {
-        let manifestPath = extractor.extractOption(named: "manifest").last
-        let platform = extractor.extractOption(named: "platform").last ?? hostCefPlatform
-        let flavor = extractor.extractOption(named: "flavor").last ?? "minimal"
-        let cefVersionOverride = extractor.extractOption(named: "cef-version").last
-        try rejectLeftovers(extractor)
-
-        let manifest = try CefManifest.resolve(context: context, explicitPath: manifestPath)
-        if let cefVersionOverride, cefVersionOverride != manifest.cef {
-            // The manifest only carries artifacts for its own pin; an arbitrary
-            // version has no sha1 to verify against, so be explicit about it.
-            throw CefPluginError(
-                "--cef-version \(cefVersionOverride) does not match the pinned manifest version \(manifest.cef). " +
-                "Update CEF_VERSION.json (Scripts/cef-update.sh) instead of overriding ad hoc, " +
-                "or pass --manifest pointing at a manifest pinned to that version."
-            )
-        }
-
-        let downloader = Downloader(cacheRoot: cacheRoot(context: context))
-        let dist = try downloader.ensure(manifest: manifest, platform: platform, flavor: flavor)
-        print("[cef] Framework: \(downloader.frameworkURL(in: dist).path)")
-    }
 
     // MARK: - bundle
 
-    private func bundle(context: PluginContext, extractor: inout ArgumentExtractor) async throws {
-        let manifestPath = extractor.extractOption(named: "manifest").last
+    private func bundle(context: PluginContext, tool: Tool, extractor: inout ArgumentExtractor) throws {
+        let manifestOption = extractor.extractOption(named: "manifest").last
         let productName = extractor.extractOption(named: "product").last
         let configurationName = extractor.extractOption(named: "configuration").last ?? "release"
-        let platform = extractor.extractOption(named: "platform").last ?? hostCefPlatform
+        let platform = extractor.extractOption(named: "platform").last ?? Self.hostPlatform
         let flavor = extractor.extractOption(named: "flavor").last ?? "minimal"
         let outputPath = extractor.extractOption(named: "output").last
-        let bundleIDOption = extractor.extractOption(named: "bundle-id").last
-        let nameOption = extractor.extractOption(named: "name").last
-        let signOption = extractor.extractOption(named: "sign").last
-        // Hidden flags for testing the assembler without buildable products,
-        // and for forcing the CLI build fallback.
-        let testExe = extractor.extractOption(named: "_test-exe").last
-        let testHelperExe = extractor.extractOption(named: "_test-helper-exe").last
-        let forceCLIBuild = extractor.extractFlag(named: "_force-cli-build") > 0
-        try rejectLeftovers(extractor)
+        // The rest are the tool's: settings, signing, packaging.
+        let settingsArguments = extractor.remainingArguments
 
         guard let productName else {
-            throw CefPluginError(
+            throw PluginError(
                 "Missing --product. Example: swift package --allow-writing-to-package-directory " +
-                "--allow-network-connections all cef bundle --product Browser"
-            )
+                "--allow-network-connections all cef bundle --product Browser")
         }
         let configuration: PackageManager.BuildConfiguration
         switch configurationName {
         case "debug": configuration = .debug
         case "release": configuration = .release
         default:
-            throw CefPluginError("Invalid --configuration '\(configurationName)'. Use 'debug' or 'release'.")
+            throw PluginError("Invalid --configuration '\(configurationName)'. Use 'debug' or 'release'.")
+        }
+        // SwiftPM builds for the architecture it runs on; the CEF
+        // distribution must match it.
+        guard platform == Self.hostPlatform else {
+            throw PluginError(
+                "--platform \(platform) does not match this build's architecture: SwiftPM builds " +
+                "\(productName) for \(Self.hostPlatform == "macosarm64" ? "arm64" : "x86_64") here, and a bundle " +
+                "cannot mix architectures. To bundle for Intel on Apple silicon, run the command under Rosetta: " +
+                "arch -x86_64 swift package … cef bundle.")
         }
 
-        // 1. CEF distribution (downloads on first use).
-        let manifest = try CefManifest.resolve(context: context, explicitPath: manifestPath)
-        let downloader = Downloader(cacheRoot: cacheRoot(context: context))
-        let dist = try downloader.ensure(manifest: manifest, platform: platform, flavor: flavor)
-        let framework = downloader.frameworkURL(in: dist)
-
-        // 2. Build the product and the cef-helper.
-        let mainExecutable: URL
-        let helperExecutable: URL
-        if let testExe {
-            // Internal dry-run path: bundle a caller-supplied executable.
-            mainExecutable = URL(fileURLWithPath: testExe)
-            helperExecutable = URL(fileURLWithPath: testHelperExe ?? testExe)
-            print("[cef] (test mode) bundling \(mainExecutable.path)")
-        } else {
-            mainExecutable = try buildProduct(
-                named: productName, configuration: configuration, context: context,
-                manifest: manifest, forceCLIBuild: forceCLIBuild
-            )
-            helperExecutable = try buildProduct(
-                named: "cef-helper", configuration: configuration, context: context,
-                manifest: manifest, forceCLIBuild: forceCLIBuild
-            )
-        }
-
-        // 3. Per-product overrides (cefapp.json next to the target sources).
-        // Target.directory (Path) instead of .directoryURL: the latter requires
-        // PackageDescription 6.1 and this package pins tools-version 6.0.
-        let targetDirectory = context.package.targets
-            .first { $0 is SourceModuleTarget && $0.name == productName }
-            .map { URL(fileURLWithPath: $0.directory.string) }
-        let appConfig = CefAppConfig.load(near: targetDirectory)
-
-        let appName = nameOption ?? productName
-        let displayName = nameOption ?? appConfig?.displayName ?? productName
-        let bundleID = bundleIDOption
-            ?? appConfig?.bundleIdentifier
-            ?? "com.cefswift.\(productName.lowercased())"
-        let outputDirectory = outputPath
-            .map { URL(fileURLWithPath: $0, relativeTo: context.package.directoryURL).absoluteURL }
+        // 1. Settings, checked before anything slow runs. cefapp.json sits
+        // beside the sources of the product's executable target.
+        let located = try LocatedProduct.locate(productName, in: context.package)
+        let outputDirectory = outputPath.map { packageRelative($0, context: context) }
             ?? context.package.directoryURL.appendingPathComponent("dist")
-        try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
+        var bundleArguments = [
+            "bundle", "--product-name", productName,
+            "--package-directory", context.package.directoryURL.path,
+            "--work-directory", context.pluginWorkDirectoryURL.path,
+            "--output", outputDirectory.path,
+        ]
+        if let source = located.sourceDirectory { bundleArguments += ["--source-directory", source.path] }
+        bundleArguments += settingsArguments
+        try tool.run(bundleArguments + ["--check"])
 
-        // 4. Resolve the codesigning identity:
-        //    --sign flag > cefapp.json "signingIdentity" > auto-detect.
-        let signingIdentity = resolveSigningIdentity(
-            flag: signOption, configValue: appConfig?.signingIdentity
-        )
+        // 2. The CEF distribution, downloaded on first use.
+        let manifest = try manifestPath(context: context, explicit: manifestOption)
+        let framework = URL(fileURLWithPath: try tool.output([
+            "download", "--cache", cacheRoot(context).path, "--manifest", manifest.path,
+            "--platform", platform, "--flavor", flavor, "--print-framework-path",
+        ]))
+        let flags = try tool.buildFlags(framework: framework, startup: nil)
 
-        // 5. Assemble + codesign.
-        let bundler = AppBundler(
-            appName: appName,
-            displayName: displayName,
-            bundleIdentifier: bundleID,
-            minimumSystemVersion: appConfig?.minimumSystemVersion ?? "14.0",
-            mainExecutable: mainExecutable,
-            helperExecutable: helperExecutable,
-            frameworkSource: framework,
-            outputDirectory: outputDirectory,
-            signingIdentity: signingIdentity
-        )
-        let app = try bundler.assemble()
+        // 3. The product, linked to the framework; then the helper and its
+        // startup library, against it.
+        let executable = try buildProduct(named: productName, kind: .executable, configuration: configuration,
+                                          context: context, linkerFlags: flags["app"] ?? [])
+        let startup = try buildProduct(named: "cefswift_helper_startup", kind: .dynamicLibrary,
+                                       configuration: configuration, context: context,
+                                       linkerFlags: flags["startup"] ?? [])
+        let helper = try buildProduct(named: "cefswift-helper", kind: .executable, configuration: configuration,
+                                      context: context,
+                                      linkerFlags: try tool.buildFlags(framework: framework, startup: startup)["helper"] ?? [])
 
-        print("")
-        print("[cef] Created \(app.path)")
-        print("[cef] Run it with: open \"\(app.path)\"")
+        // 4. Assemble and sign.
+        try tool.run(bundleArguments + [
+            "--executable", executable.path, "--helper", helper.path, "--helper-startup", startup.path,
+            "--framework", framework.path,
+        ] + located.resourceBundleNames.flatMap { ["--resource-bundle", $0] })
     }
 
-    /// Resolves the codesigning identity for `cef bundle`.
-    /// Precedence: `--sign <identity|->` > cefapp.json `signingIdentity` >
-    /// auto-detect via `security find-identity -v -p codesigning` (first
-    /// "Apple Development", else first "Developer ID Application", else
-    /// ad-hoc "-").
-    private func resolveSigningIdentity(flag: String?, configValue: String?) -> String {
-        if let flag {
-            print(flag == "-"
-                ? "[cef] Signing: ad-hoc (--sign -)"
-                : "[cef] Signing with identity from --sign: \(flag)")
-            return flag
-        }
-        if let configValue {
-            print(configValue == "-"
-                ? "[cef] Signing: ad-hoc (cefapp.json signingIdentity)"
-                : "[cef] Signing with identity from cefapp.json: \(configValue)")
-            return configValue
-        }
-
-        // Auto-detect. `security` may be unavailable inside the plugin
-        // sandbox or list no identities — both fall back to ad-hoc.
-        let identities: [String]
-        if let result = try? Shell.run("/usr/bin/security", ["find-identity", "-v", "-p", "codesigning"]),
-           result.exitCode == 0 {
-            // Lines look like:  1) <SHA1-hash> "Apple Development: Jane Doe (TEAMID)"
-            identities = result.stdout
-                .split(separator: "\n")
-                .compactMap { line in
-                    guard let start = line.firstIndex(of: "\""),
-                          let end = line.lastIndex(of: "\""), start < end
-                    else { return nil }
-                    return String(line[line.index(after: start)..<end])
-                }
-        } else {
-            identities = []
-        }
-
-        let chosen = identities.first { $0.hasPrefix("Apple Development") }
-            ?? identities.first { $0.hasPrefix("Developer ID Application") }
-        if let chosen {
-            print("[cef] Signing with auto-detected identity: \(chosen)")
-            return chosen
-        }
-        print("[cef] Signing: ad-hoc (no codesigning identity found)")
-        print("[cef] note: with ad-hoc signing, the keychain \"Always Allow\" grant won't persist " +
-              "across rebuilds — see docs/configuration.md (safe storage).")
-        return "-"
-    }
-
-    /// Builds a product via the PackageManager proxy; when the product belongs
-    /// to a dependency package (e.g. building `cef-helper` from Examples/) and
-    /// the proxy refuses, falls back to `swift build --package-path <provider>`.
+    /// Builds a product through SwiftPM and returns the built file. A
+    /// product SwiftPM cannot build that way, such as one from a
+    /// dependency, falls back to `swift build` in the package that declares
+    /// it.
     private func buildProduct(
         named productName: String,
+        kind: PackageManager.BuildResult.BuiltArtifact.Kind,
         configuration: PackageManager.BuildConfiguration,
         context: PluginContext,
-        manifest: CefManifest,
-        forceCLIBuild: Bool = false
+        linkerFlags: [String]
     ) throws -> URL {
         print("[cef] Building product '\(productName)' (\(configuration))…")
+        let fileName = kind == .dynamicLibrary ? "lib\(productName).dylib" : productName
 
-        var proxyFailure: String? = nil
-        if forceCLIBuild {
-            proxyFailure = "skipped (--_force-cli-build)"
-        } else {
-            do {
-                let result = try packageManager.build(
-                    .product(productName),
-                    parameters: .init(configuration: configuration, logging: .concise, echoLogs: true)
-                )
-                if result.succeeded {
-                    if let artifact = result.builtArtifacts.first(where: {
-                        $0.kind == .executable && $0.url.lastPathComponent == productName
-                    }) ?? result.builtArtifacts.first(where: { $0.kind == .executable }) {
-                        return artifact.url
-                    }
-                    proxyFailure = "build succeeded but produced no executable artifact"
-                } else {
-                    proxyFailure = result.logText
-                }
-            } catch {
-                proxyFailure = "\(error)"
+        let proxyFailure: String
+        do {
+            var parameters = PackageManager.BuildParameters(
+                configuration: configuration, logging: .concise, echoLogs: true)
+            parameters.otherLinkerFlags = linkerFlags
+            let result = try packageManager.build(.product(productName), parameters: parameters)
+            let artifacts = result.builtArtifacts.filter { $0.kind == kind }
+            if result.succeeded,
+               let artifact = artifacts.first(where: { $0.url.lastPathComponent == fileName })
+                   ?? (kind == .executable ? artifacts.first : nil) {
+                return artifact.url
             }
+            proxyFailure = result.succeeded ? "the build produced no \(fileName)" : result.logText
+        } catch {
+            proxyFailure = "\(error)"
         }
 
-        // Fallback: build inside the package that provides the plugin/manifest
-        // (the CefSwift root) via the swift CLI. Uses a private --scratch-path
-        // under the plugin work directory: the parent `swift package` process
-        // holds the invoking package's .build lock for the whole plugin run,
-        // so reusing the default scratch path would deadlock when the provider
-        // package is the invoking package.
-        let providerRoot = manifest.sourceURL.deletingLastPathComponent()
+        // The running `swift package` holds the lock on the invoking package's
+        // .build directory, so the fallback builds into its own scratch path.
+        // A product builds in the package that declares it: the invoking
+        // package for the app, CefSwift for the helper.
+        let providerRoot = (try? LocatedProduct.locate(productName, in: context.package))?.package.directoryURL
+            ?? context.package.directoryURL
         let configName = configuration == .release ? "release" : "debug"
         let scratch = context.pluginWorkDirectoryURL.appendingPathComponent("fallback-build")
         print("[cef] PackageManager build of '\(productName)' did not yield a binary; " +
               "falling back to 'swift build --package-path \(providerRoot.path)'…")
-        let status = try Shell.runStreaming("/usr/bin/swift", [
+        let status = try Tool.runStreaming("/usr/bin/swift", [
             "build",
-            // We are already inside SwiftPM's plugin sandbox; a nested
-            // sandbox-exec is not permitted (manifest compilation would fail
-            // with "sandbox_apply: Operation not permitted"). The outer plugin
-            // sandbox still confines all writes.
+            // The plugin sandbox already confines the build, and a nested
+            // sandbox cannot be applied inside it.
             "--disable-sandbox",
             "--package-path", providerRoot.path,
             "--scratch-path", scratch.path,
             "--configuration", configName,
             "--product", productName,
-        ])
-        let binary = scratch
-            .appendingPathComponent(configName)
-            .appendingPathComponent(productName)
+        ] + linkerFlags.flatMap { ["-Xlinker", $0] })
+        let binary = scratch.appendingPathComponent(configName).appendingPathComponent(fileName)
         guard status == 0, FileManager.default.fileExists(atPath: binary.path) else {
-            throw CefPluginError(
+            throw PluginError(
                 "Could not build product '\(productName)'.\n" +
-                "  PackageManager proxy: \(proxyFailure ?? "unknown failure")\n" +
+                "  SwiftPM build: \(proxyFailure)\n" +
                 "  CLI fallback ('swift build --package-path \(providerRoot.path) --product \(productName)') " +
                 "exited \(status) and \(binary.path) does not exist.\n" +
-                "  Fix the build errors above, or check that the product name is spelled exactly as in Package.swift."
-            )
+                "  Fix the build errors above, or check that the product name is spelled exactly as in Package.swift.")
         }
         return binary
     }
 
-    // MARK: - info
+    // MARK: - Shared
 
-    private func info(context: PluginContext, extractor: inout ArgumentExtractor) throws {
-        let manifestPath = extractor.extractOption(named: "manifest").last
-        try rejectLeftovers(extractor)
+    #if arch(arm64)
+    static let hostPlatform = "macosarm64"
+    #else
+    static let hostPlatform = "macosx64"
+    #endif
 
-        let manifest = try CefManifest.resolve(context: context, explicitPath: manifestPath)
-        let downloader = Downloader(cacheRoot: cacheRoot(context: context))
-        let fm = FileManager.default
-
-        print("CefSwift — pinned CEF distribution")
-        print("  CEF version:      \(manifest.cef)")
-        print("  Chromium version: \(manifest.chromium)")
-        print("  Channel:          \(manifest.channel)")
-        print("  Manifest:         \(manifest.sourceURL.path)")
-        print("  Cache root:       \(downloader.cacheRoot.path)")
-        print("")
-        print("  Platforms / flavors:")
-        for platform in manifest.platforms.keys.sorted() {
-            for flavor in (manifest.platforms[platform] ?? [:]).keys.sorted() {
-                let artifact = try manifest.artifact(platform: platform, flavor: flavor)
-                let dist = downloader.distURL(cefVersion: manifest.cef, platform: platform, flavor: flavor)
-                let tarball = downloader.downloadsDirectory.appendingPathComponent(artifact.name)
-                let state: String
-                if downloader.isPrepared(dist: dist) {
-                    state = "prepared"
-                } else if fm.fileExists(atPath: dist.path) {
-                    state = "extracting (incomplete — re-run download)"
-                } else if fm.fileExists(atPath: tarball.path) {
-                    state = "downloaded (not extracted)"
-                } else {
-                    state = "not downloaded"
-                }
-                let sizeMB = artifact.size / 1_000_000
-                print("    \(platform)/\(flavor)  (\(sizeMB) MB)  —  \(state)")
-            }
-        }
-        print("")
-        print("  Download with: swift package --allow-writing-to-package-directory " +
-              "--allow-network-connections all cef download")
-    }
-
-    // MARK: - clean
-
-    private func clean(context: PluginContext) throws {
-        let root = cacheRoot(context: context)
-        if FileManager.default.fileExists(atPath: root.path) {
-            try FileManager.default.removeItem(at: root)
-            print("[cef] Removed \(root.path)")
-        } else {
-            print("[cef] Nothing to clean (\(root.path) does not exist).")
-        }
-    }
-
-    // MARK: - shared
-
-    /// `.cef/` lives at the root of the *invoking* package (the only directory
-    /// the sandbox lets us write to with --allow-writing-to-package-directory).
-    private func cacheRoot(context: PluginContext) -> URL {
+    /// `.cef/` in the invoking package, the one directory the plugin may
+    /// write to.
+    private func cacheRoot(_ context: PluginContext) -> URL {
         context.package.directoryURL.appendingPathComponent(".cef")
+    }
+
+    private func packageRelative(_ path: String, context: PluginContext) -> URL {
+        URL(fileURLWithPath: (path as NSString).expandingTildeInPath, relativeTo: context.package.directoryURL)
+            .standardizedFileURL
+    }
+
+    /// The app a subcommand works on, a path or `--product` in `dist/`,
+    /// followed by the subcommand's other options.
+    private func appArguments(context: PluginContext, extractor: inout ArgumentExtractor, command: String) throws -> [String] {
+        let product = extractor.extractOption(named: "product").last
+        let output = extractor.extractOption(named: "output").last
+        var rest = extractor.remainingArguments
+        let app: URL
+        if let index = rest.firstIndex(where: { !$0.hasPrefix("--") && !isOptionValue(at: $0, in: rest) }) {
+            app = packageRelative(rest.remove(at: index), context: context)
+        } else if let product {
+            app = context.package.directoryURL.appendingPathComponent("dist/\(product).app")
+        } else {
+            throw PluginError("Missing the app: swift package cef \(command) <App.app> (or --product <Name>).")
+        }
+        if let output { rest += ["--output", packageRelative(output, context: context).path] }
+        return [app.path] + rest
+    }
+
+    /// Whether `argument` is the value of the option before it.
+    private func isOptionValue(at argument: String, in arguments: [String]) -> Bool {
+        guard let index = arguments.firstIndex(of: argument), index > 0 else { return false }
+        return ["--format", "--sign", "--keychain", "--keychain-profile"].contains(arguments[index - 1])
+    }
+
+    /// CEF_VERSION.json: `--manifest`, else the invoking package's, else the
+    /// first of its dependencies' (breadth first), which covers an app that
+    /// depends on CefSwift.
+    private func manifestPath(context: PluginContext, explicit: String?) throws -> URL {
+        if let explicit { return packageRelative(explicit, context: context) }
+        for package in LocatedProduct.allPackages(from: context.package) {
+            let url = package.directoryURL.appendingPathComponent("CEF_VERSION.json")
+            if FileManager.default.fileExists(atPath: url.path) { return url }
+        }
+        throw PluginError(
+            "Could not find CEF_VERSION.json in \(context.package.directoryURL.path) " +
+            "or in any package dependency. Pass --manifest <path> explicitly.")
     }
 
     private func rejectLeftovers(_ extractor: ArgumentExtractor) throws {
         guard extractor.remainingArguments.isEmpty else {
-            throw CefPluginError(
-                "Unrecognized arguments: \(extractor.remainingArguments.joined(separator: " ")).\n\(Self.usage)"
-            )
+            throw PluginError("Unrecognized arguments: \(extractor.remainingArguments.joined(separator: " ")).\n\(Self.usage)")
         }
     }
+}
+
+/// The `cefswift` tool, built by SwiftPM for this plugin.
+struct Tool {
+    let url: URL
+
+    init(context: PluginContext) throws {
+        url = try context.tool(named: "cefswift").url
+    }
+
+    /// Runs the tool with its output going to the terminal.
+    func run(_ arguments: [String]) throws {
+        let status = try Self.runStreaming(url.path, arguments)
+        // The tool has printed what went wrong.
+        guard status == 0 else { throw PluginError("cefswift \(arguments.first ?? "") failed.") }
+    }
+
+    /// Runs the tool and returns its standard output, trimmed; its standard
+    /// error goes to the terminal.
+    func output(_ arguments: [String]) throws -> String {
+        let process = Process()
+        process.executableURL = url
+        process.arguments = arguments
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.standardError
+        try process.run()
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else { throw PluginError("cefswift \(arguments.first ?? "") failed.") }
+        return String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    func buildFlags(framework: URL, startup: URL?) throws -> [String: [String]] {
+        var arguments = ["build-flags", "--framework", framework.path]
+        if let startup { arguments += ["--startup", startup.path] }
+        let json = try output(arguments)
+        guard let flags = try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: [String]] else {
+            throw PluginError("cefswift build-flags printed no linker flags.")
+        }
+        return flags
+    }
+
+    static func runStreaming(_ tool: String, _ arguments: [String]) throws -> Int32 {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: tool)
+        process.arguments = arguments
+        process.standardOutput = FileHandle.standardOutput
+        process.standardError = FileHandle.standardError
+        do {
+            try process.run()
+        } catch {
+            throw PluginError("Could not run \(tool): \(error.localizedDescription)")
+        }
+        process.waitUntilExit()
+        return process.terminationStatus
+    }
+}
+
+/// An error whose message says what went wrong and how to fix it.
+struct PluginError: Error, CustomStringConvertible {
+    let message: String
+    var description: String { message }
+    init(_ message: String) { self.message = message }
 }

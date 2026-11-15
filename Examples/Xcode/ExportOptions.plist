@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Copies the app out of the archive as it is signed: ad hoc, here.
+	     With a team, use developer-id (then notarize) or debugging instead;
+	     see docs/bundling.md#xcode. -->
+	<key>method</key>
+	<string>mac-application</string>
+</dict>
+</plist>

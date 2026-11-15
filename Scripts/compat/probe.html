@@ -1,0 +1,174 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>compat probe</title>
+<style>
+  body { font: 13px ui-monospace, monospace; margin: 16px; }
+  #verdict { font: bold 20px system-ui; margin-bottom: 8px; }
+  .bad { color: #b00; } .good { color: #070; }
+</style>
+<div id="verdict">running…</div>
+<pre id="out"></pre>
+<script>
+// Page-observable signals that bot-detection pages read, measured the way
+// their published code measures them. Each result is posted to the server
+// that served this page (Scripts/compat-matrix.py), so reading the results
+// never touches the browser under test. The tag comes from the fragment.
+'use strict';
+const r = { tag: decodeURIComponent(location.hash.slice(1)) || 'untagged' };
+
+// 1. Runtime.enable: the inspector serializes console arguments, which
+// reads an Error's `stack` (the "console serialization" probe).
+function consoleProbe() {
+  let read = false;
+  const error = new Error('probe');
+  Object.defineProperty(error, 'stack', { configurable: true, get() { read = true; return ''; } });
+  console.debug(error);
+  return read;
+}
+// Variants for inspectors that no longer call an Error's `stack` getter:
+// accessors and Proxy traps that a serializer might touch, and the cost of
+// logging a large object, which grows when every call is serialized.
+function consoleVariants() {
+  const touched = [];
+  const error = new Error('probe');
+  Object.defineProperty(error, 'name', { configurable: true, get() { touched.push('error.name'); return 'Error'; } });
+  Object.defineProperty(error, 'message', { configurable: true, get() { touched.push('error.message'); return 'probe'; } });
+  console.debug(error);
+  const proxy = new Proxy({ a: 1 }, {
+    ownKeys(t) { touched.push('proxy.ownKeys'); return Reflect.ownKeys(t); },
+    get(t, k) { touched.push('proxy.get'); return Reflect.get(t, k); },
+    getOwnPropertyDescriptor(t, k) { touched.push('proxy.gOPD'); return Reflect.getOwnPropertyDescriptor(t, k); },
+  });
+  console.debug(proxy);
+  const tagged = { get [Symbol.toStringTag]() { touched.push('toStringTag'); return 'T'; } };
+  console.debug(tagged);
+  const big = Array.from({ length: 300 }, (_, i) => Object.fromEntries(Array.from({ length: 30 }, (_, j) => ['k' + j, i * j])));
+  const start = performance.now();
+  for (let i = 0; i < 20; i++) console.debug(big);
+  return { touched, bigLogMs: Math.round((performance.now() - start) * 100) / 100 };
+}
+r.runtimeEnabledAtStart = consoleProbe();
+r.consoleVariantsAtStart = consoleVariants();
+
+// 2. A debugger statement only stops when a debugger is attached with the
+// Debugger domain enabled.
+{
+  const start = performance.now();
+  // eslint-disable-next-line no-debugger
+  debugger;
+  r.debuggerStatementMs = Math.round((performance.now() - start) * 10) / 10;
+}
+
+// 3. Globals that automation adds.
+r.automationGlobals = Object.getOwnPropertyNames(window).filter(name =>
+  /cdc_|cefswift|__playwright|__pw|puppeteer|domAutomation|selenium|webdriver|callPhantom|_phantom|__nightmare|compatBridge/i.test(name));
+r.windowPropertyCount = Object.getOwnPropertyNames(window).length;
+r.documentDataset = { ...document.documentElement.dataset };
+
+// 4. Stack frames above page code.
+r.stackAtTop = (new Error().stack || '').split('\n').slice(1).map(s => s.trim());
+
+r.webdriver = navigator.webdriver;
+r.webdriverDescriptor = (() => {
+  const d = Object.getOwnPropertyDescriptor(Navigator.prototype, 'webdriver');
+  return d ? { get: typeof d.get, native: d.get ? /\[native code\]/.test(Function.prototype.toString.call(d.get)) : null } : null;
+})();
+r.userAgent = navigator.userAgent;
+r.appVersion = navigator.appVersion;
+r.platform = navigator.platform;
+r.vendor = navigator.vendor;
+r.languages = navigator.languages;
+r.hardwareConcurrency = navigator.hardwareConcurrency;
+r.deviceMemory = navigator.deviceMemory;
+r.maxTouchPoints = navigator.maxTouchPoints;
+r.pdfViewerEnabled = navigator.pdfViewerEnabled;
+r.plugins = [...navigator.plugins].map(p => p.name);
+r.mimeTypes = [...navigator.mimeTypes].map(m => m.type);
+r.windowChrome = typeof window.chrome === 'object' && window.chrome ? Object.keys(window.chrome).sort() : null;
+r.chromeFunctions = window.chrome ? {
+  loadTimes: typeof window.chrome.loadTimes, csi: typeof window.chrome.csi,
+  app: typeof window.chrome.app, runtime: typeof window.chrome.runtime,
+} : null;
+r.uaBrands = navigator.userAgentData ? navigator.userAgentData.brands.map(b => `${b.brand} ${b.version}`) : null;
+r.uaMobile = navigator.userAgentData?.mobile;
+r.uaPlatform = navigator.userAgentData?.platform;
+r.connection = navigator.connection ? { rtt: navigator.connection.rtt, effectiveType: navigator.connection.effectiveType } : null;
+r.timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+const video = document.createElement('video');
+r.canPlay = Object.fromEntries([
+  ['h264', 'video/mp4; codecs="avc1.42E01E"'], ['aac', 'audio/mp4; codecs="mp4a.40.2"'],
+  ['hevc', 'video/mp4; codecs="hvc1.1.6.L93.B0"'], ['vp9', 'video/webm; codecs="vp9"'],
+  ['av1', 'video/mp4; codecs="av01.0.05M.08"'], ['mp3', 'audio/mpeg'], ['opus', 'audio/ogg; codecs="opus"'],
+].map(([k, t]) => [k, video.canPlayType(t)]));
+r.mediaSource = window.MediaSource ? { h264: MediaSource.isTypeSupported('video/mp4; codecs="avc1.42E01E"') } : null;
+r.eme = typeof navigator.requestMediaKeySystemAccess;
+
+try {
+  const gl = document.createElement('canvas').getContext('webgl');
+  const info = gl && gl.getExtension('WEBGL_debug_renderer_info');
+  r.webgl = gl ? {
+    vendor: info ? gl.getParameter(info.UNMASKED_VENDOR_WEBGL) : gl.getParameter(gl.VENDOR),
+    renderer: info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER),
+  } : null;
+} catch (e) { r.webgl = String(e); }
+
+function geometry() {
+  return {
+    inner: [innerWidth, innerHeight], outer: [outerWidth, outerHeight],
+    screenXY: [screenX, screenY], screen: [screen.width, screen.height],
+    avail: [screen.availLeft, screen.availTop, screen.availWidth, screen.availHeight],
+    dpr: devicePixelRatio, colorDepth: screen.colorDepth,
+    visibility: document.visibilityState, hidden: document.hidden, hasFocus: document.hasFocus(),
+  };
+}
+r.geometryAtStart = geometry();
+r.notificationPermission = window.Notification ? Notification.permission : null;
+
+const pending = [];
+pending.push(navigator.permissions.query({ name: 'notifications' }).then(s => { r.notificationsQuery = s.state; }, e => { r.notificationsQuery = String(e); }));
+if (navigator.userAgentData) {
+  pending.push(navigator.userAgentData.getHighEntropyValues(['fullVersionList', 'platformVersion', 'architecture', 'bitness', 'model'])
+    .then(v => { r.uaHighEntropy = { fullVersionList: v.fullVersionList.map(b => `${b.brand} ${b.version}`), platformVersion: v.platformVersion, architecture: v.architecture, bitness: v.bitness }; }));
+}
+pending.push(navigator.mediaDevices ? navigator.mediaDevices.enumerateDevices().then(d => { r.mediaDevices = d.map(x => x.kind); }, e => { r.mediaDevices = String(e); }) : Promise.resolve());
+pending.push(new Promise(resolve => {
+  const voices = () => speechSynthesis.getVoices().length;
+  if (voices()) { r.speechVoices = voices(); resolve(); return; }
+  speechSynthesis.onvoiceschanged = () => { r.speechVoices = voices(); resolve(); };
+  setTimeout(() => { r.speechVoices = voices(); resolve(); }, 1500);
+}));
+// Animation frames in one second: zero or few when the page is throttled
+// as a hidden page is.
+pending.push(new Promise(resolve => {
+  let frames = 0; const start = performance.now();
+  const tick = () => { frames++; if (performance.now() - start < 1000) requestAnimationFrame(tick); else { r.animationFramesPerSecond = frames; resolve(); } };
+  requestAnimationFrame(tick);
+  setTimeout(() => { if (r.animationFramesPerSecond === undefined) { r.animationFramesPerSecond = frames; resolve(); } }, 2500);
+}));
+pending.push(fetch(location.href, { method: 'HEAD' }).then(() => fetch('/headers')).then(x => x.json()).then(h => { r.requestHeaders = h; }, () => {}));
+
+Promise.all(pending).then(async () => {
+  await new Promise(resolve => setTimeout(resolve, 3000));
+  // Features that attach after the page starts show up later.
+  r.runtimeEnabledLater = consoleProbe();
+  r.consoleVariantsLater = consoleVariants();
+  r.geometryLater = geometry();
+  r.automationGlobalsLater = Object.getOwnPropertyNames(window).filter(name => /cdc_|cefswift|compatBridge/i.test(name));
+  const flags = [];
+  if (r.runtimeEnabledAtStart || r.runtimeEnabledLater) flags.push('Runtime domain enabled');
+  if (r.debuggerStatementMs > 50) flags.push('debugger paused');
+  if (r.webdriver) flags.push('navigator.webdriver');
+  if (r.automationGlobals.length) flags.push('globals ' + r.automationGlobals.join(','));
+  if (r.geometryLater.outer[0] === r.geometryLater.inner[0] && r.geometryLater.outer[1] === r.geometryLater.inner[1]) flags.push('outer == inner');
+  if (r.geometryLater.visibility !== 'visible') flags.push('hidden');
+  if (!r.geometryLater.hasFocus) flags.push('no focus');
+  r.flags = flags;
+  const verdict = document.getElementById('verdict');
+  verdict.textContent = flags.length ? 'flags: ' + flags.join('; ') : 'no flags';
+  verdict.className = flags.length ? 'bad' : 'good';
+  document.getElementById('out').textContent = JSON.stringify(r, null, 1);
+  document.title = 'compat probe done';
+  fetch('/report', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(r) });
+});
+</script>
