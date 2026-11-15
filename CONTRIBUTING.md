@@ -28,7 +28,7 @@ Address Sanitizer runtime, so that one uses the native build system.
 The Command Line Tools are enough; Xcode is not required, except for the
 Xcode example. `CefKitTests`
 covers CefKit and its AppKit views, `CefPasskeysTests` the passkeys
-library, `CefChromiumTests` the CefChromium library, `CefKitAppKitTests` hosts a browser through CefKit's public API
+library, `CefChromiumTests` the CefChromium library, `CefKitAppKitTests` hosts a page through CefKit's public API
 alone (no SwiftUI), and `CefBundlingTests` the bundling logic: signing,
 entitlements, bundle assembly, `cef doctor`, and the Xcode build phase
 driven by a fake Xcode environment; none of them starts Chromium.
@@ -89,7 +89,7 @@ keeps CEF in `Examples/Xcode/.cef/` (clone `Examples/.cef` there with
 ## Verify with SelfTest
 
 SelfTest checks CefSwift against the real Chromium runtime: windowed and
-offscreen browsers, the bridge, profiles and preferences, Chrome-style
+offscreen pages, the bridge, profiles and preferences, Chrome-style
 windows, popups, downloads, `beforeunload`, renderer crashes, tab
 discarding, Chromium's own interface, swipe navigation, bookmarks, history,
 autocomplete, passkeys and a clean quit. Bundle and run it before sending a
@@ -175,8 +175,8 @@ SelfTest removes its own cache directories in `$TMPDIR` when it exits, and
 those of earlier runs whose process is gone. With the live-object census
 on, it prints a `CENSUS` line after each group and checks before quitting
 that nothing but process-lifetime objects is alive. A group's line waits
-for its browsers to finish closing only when something other than the
-process-lifetime objects and an open service host is left. The browsers
+for its pages to finish closing only when something other than the
+process-lifetime objects and an open service host is left. The pages
 left discarded for the quit open after the final check.
 
 ## Measure web compatibility
@@ -195,7 +195,7 @@ loop.
 `Scripts/check-doc-samples.py` compiles every Swift block in `README.md`
 and `docs/*.md` against this checkout, for macOS 14; CI runs it. It does
 not read `CONTRIBUTING.md` or `Examples/README.md`. Run it after
-changing public API or a sample. Names an app would define (`browser`,
+changing public API or a sample. Names an app would define (`page`,
 `openTab`, …) come from stubs in the script; add one there when a sample
 needs it, never a stub of CefSwift API. A sample that needs a later macOS
 says so in a comment (`// macOS 15`).
@@ -242,21 +242,30 @@ reading as one.
   the `.chrome` runtime preset (Chrome's services), `onChromeTab` (tabs
   Chromium opens in its own window), `webAuthnAuthenticators`. Words such
   as "browser window" or "browser preset" describe a product an app builds.
-- **Principal types** carry the `Cef` prefix: `CefRuntime`, `CefBrowser`,
+- **Unless CEF's word is a product word that collides with Chromium's.**
+  Then Apple's platform word wins. CEF calls one web content a
+  `cef_browser_t` (Chromium's `WebContents`), but to Chromium and to an app
+  a browser is the product, with windows of tabs; so the type is `CefPage`,
+  as WebKit's page, and it is `page` wherever it is a property, parameter or
+  label. Keep "browser" where it means the browser process, CEF Views'
+  `cef_browser_view_t`, or a product (the `Browser` example). Likewise the
+  profile's model of Chromium's tabs is `CefTabs` (`profile.tabs`): a tab
+  strip is one window's in Chromium.
+- **Principal types** carry the `Cef` prefix: `CefRuntime`, `CefPage`,
   `CefWindow`, `CefProfile`, `CefDevTools`. So do types several owners
   share, and the values delegate methods take and return (`CefNavigationAction`,
   `CefDownload`, `CefPermissionRequest`).
 - **Types that belong to one owner nest in it**, without the prefix:
-  `CefBrowser.Configuration`, `CefBrowser.FindResult`,
+  `CefPage.Configuration`, `CefPage.FindResult`,
   `CefRuntime.ProcessPolicy`, `CefChromiumSurface.Anchor`,
   `CefPermissionRequest.Kinds`. A runtime-wide option nests in `CefRuntime`,
-  a browser option in `CefBrowser`, a window option in `CefWindow`. So
+  a page option in `CefPage`, a window option in `CefWindow`. So
   does a value only one type produces or takes: `CefHistory.Entry`,
   `CefHistory.TopSite`, `CefAutocomplete.Suggestion`, `CefMediaRouter.Sink`,
   `CefBridge.Call`, `CefChromiumSurface.Policy`.
 - **`Configuration`** is the creation-time value bag of a principal type:
-  `CefRuntime.Configuration`, `CefBrowser.Configuration`,
-  `CefWindow.Configuration`, `CefBrowser.PDFConfiguration` for one
+  `CefRuntime.Configuration`, `CefPage.Configuration`,
+  `CefWindow.Configuration`, `CefPage.PDFConfiguration` for one
   operation. Its property is `configuration`, and so is the initializer
   label. Never `Options`.
 - **Groups** inside a configuration are named for their topic, without a
@@ -273,14 +282,14 @@ reading as one.
   `chrome://settings`), `.disabled` turns a facility off; not `.default`,
   `.standard`, `.off` or `.disable`. A shared on-or-off choice is
   `CefRuntime.Setting`.
-- **Delegates** take the asking object first, `browser(_:…)`. A method that
+- **Delegates** take the asking object first, `page(_:…)`. A method that
   returns a choice is `decide<Thing>For:` and returns a `Cef<Thing>Decision`
   (`decidePolicyFor:` → `CefNavigationDecision`, `decideWindowOpenFor:` →
   `CefWindowOpenDecision`, `decidePasskeyFor:` → `CefPasskeyDecision`); an
   event is `did…`/`…Did…`. A request a native sheet can answer has a
   `Cef…Presenter`, whose `present` shows that sheet and returns the answer.
   `credentialFor:`, `shouldProceedDespite:`, `selectClientCertificateFor:`
-  and `browserPageIsUnresponsive` are deliberately not `decide…For:`: each
+  and `pageIsUnresponsive` are deliberately not `decide…For:`: each
   supplies a value (a credential, a certificate, whether to proceed, what to
   do with a hung page) rather than allowing or denying a request, so do not
   rename them or wrap their answers in new enums for uniformity.
@@ -289,10 +298,10 @@ reading as one.
   identifiers) and name their types as CefKit does
   (`CefPasskeyController`, `CefPasskeyStore`, `CefBookmarks`).
   CefKit never names them: a module plugs in through an extension point
-  (`CefBrowserAttachment`, per-profile or
+  (`CefPageAttachment`, per-profile or
   per-window module state, a Chrome-command interceptor, the service-host
   engine) and gets its own delegate (`CefPasskeyDelegate`) rather than
-  members on `CefBrowserDelegate`. What it needs from CefKit and apps
+  members on `CefPageDelegate`. What it needs from CefKit and apps
   should not use is `package`, not public; what no other module uses any
   more goes back to internal.
 - **What an app could write itself stays out of the library**: UI copy
@@ -314,8 +323,8 @@ reading as one.
   attachments, permission and download decisions, Chromium settings) is a
   member of `CefProfile` or a method of `CefProfileDelegate`, so pages
   Chromium creates itself get it too. A page's override has the same name
-  in `CefBrowser.Configuration` (`requestFilter`, `userScripts`) or on
-  `CefBrowserDelegate`, and its precedence (page, then profile, then
+  in `CefPage.Configuration` (`requestFilter`, `userScripts`) or on
+  `CefPageDelegate`, and its precedence (page, then profile, then
   runtime) is documented once, in the guide's "What is configured where".
   What is process-wide stays on `CefRuntime`; what every profile starts
   from is `CefRuntime.Configuration.profiles`.
@@ -324,7 +333,7 @@ reading as one.
   a task manager row) have a public memberwise initializer, documented
   "for previews and tests", labelled as their properties. A value that
   means something only coming from CEF (a request bound to a callback, a
-  browser reference, a Chromium node's identifier) has none.
+  page reference, a Chromium node's identifier) has none.
 - **Files** are named for the type they declare, `Type+Concern.swift` for an
   extension; split a file that passes about 600 lines along its concerns.
 

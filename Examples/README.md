@@ -25,12 +25,12 @@ Chrome, under the browser's own tab rail and toolbar.
 
 - `BrowserController`: the windows, Chromium's tabbed windows of the
   default profile and of the private session (`CefChromeWindow`). It keeps
-  no list of tabs: it reads them from `CefTabStrip`. It opens windows and
+  no list of tabs: it reads them from `CefTabs`. It opens windows and
   tabs (`openTab` with the features' configuration), turns rail gestures
   into Chromium commands (select, ⌘/⇧-select, drop, drag out to a new
-  window), and is every tab's `CefBrowserDelegate`, handing navigation and
+  window), and is every tab's `CefPageDelegate`, handing navigation and
   permission decisions to the features; tabs Chromium opens itself get it
-  through `CefRuntime.onBrowserCreated`. Popups (`window.open` with
+  through `CefRuntime.onPageCreated`. Popups (`window.open` with
   features) are Chromium's own popup windows, which show the site's
   address.
 - `BrowserWindow`: dresses each window: Chrome's tab strip and toolbar
@@ -51,10 +51,10 @@ Chrome, under the browser's own tab rail and toolbar.
 - `BrowserFeature`: the points a feature plugs into, each with a default
   that does nothing.
 - `BrowserScene`: the Settings window and the menu bar, filled with the
-  features' rows and commands; the example's runtime configuration (`CefRuntime.Configuration.browser`, the library's `.chrome` under the example's name, with its scheme).
+  features' rows and commands; the example's runtime configuration (`CefRuntime.Configuration.page`, the library's `.chrome` under the example's name, with its scheme).
 - Reopening what closed: File › Reopen Closed Tab (⌘⇧T) and File ›
   Recently Closed, tabs and whole windows (with their tab counts), each
-  reopened as Chromium closed it (`CefTabStrip.reopen`); Settings › On
+  reopened as Chromium closed it (`CefTabs.reopen`); Settings › On
   startup reopens the windows from last time after a quit; after a crash,
   a small prompt under the toolbar offers to (`previousSession`,
   `RestorePrompt`).
@@ -78,7 +78,7 @@ Chrome, under the browser's own tab rail and toolbar.
 | `StatusBubble` | The hovered link's address over the page, in place of Chromium's | `statusText`, `showsChromiumStatusBubble`, `setPageOverlay` |
 | `SwipeIndicator` | The browser's own back and forward swipe indicator | `navigationGestureProgress`, `pageOverlay` |
 | `Appearance` | Settings › Appearance, for the windows and the pages | `CefProfile.setColorScheme` |
-| `Downloads` | A toolbar button listing downloads | `CefBrowser.downloads` |
+| `Downloads` | A toolbar button listing downloads | `CefPage.downloads` |
 | `Extensions` | Pinned extension actions in the toolbar and a menu of the rest; each action's popup page under its button, in a small Chrome-style window of its own (Chromium opens action popups only from its own toolbar); a Manage Extensions window that lists, turns on and off, removes and loads extensions and opens the Chrome Web Store | `CefExtensions` |
 | `TabDiscarding` | Memory Saver: background tabs put to sleep after a while or under memory pressure; Settings › Put tabs to sleep; a button that wakes them. Background tabs are Chromium's real background tabs now, so Chromium's own discarding applies to them too | `discard()`, `lifecycle` |
 | `ChromiumPanels` | QR code and Share buttons and View › Cast: Chromium's bubbles under the buttons, or the browser's own QR code and Cast panels (Settings, `-customChromiumPanels YES`) | `chromiumSurfaceAnchor`, `CefChromeWindow.setCustomPresentation`, `CefMediaRouter` |
@@ -89,7 +89,7 @@ Chrome, under the browser's own tab rail and toolbar.
 | `TaskManager` | Window › Task Manager | `CefTaskManager` |
 | `SingleInstance` | Launching the app again opens a tab, or one for each URL or file passed | `CefRuntime.onRelaunch` |
 
-`Sources/SystemEngine` (`SystemBrowser`, `SystemWebView`) is a small
+`Sources/SystemEngine` (`SystemPage`, `SystemWebView`) is a small
 `WKWebView` wrapper on CefKit's public API, for pages that need FairPlay or
 H.264 and AAC, which Chromium in CefSwift does not have.
 
@@ -98,7 +98,7 @@ H.264 and AAC, which Chromium in CefSwift does not have.
 A feature is a type conforming to `BrowserFeature` that implements only
 the points it uses (`Core/BrowserFeature.swift`): `start(_:)` once
 Chromium runs; `configure(_:)` for each new tab's
-`CefBrowser.Configuration`; `windowDidOpen(_:)` for each tab and popup
+`CefPage.Configuration`; `windowDidOpen(_:)` for each tab and popup
 window; `decidePolicy(for:in:)` and `decidePermission(for:in:)`, which
 return `nil` to leave the decision to the features after it; and views and
 commands: `commands(for:)`, `settings`, `toolbarItems(_:for:)` and
@@ -138,7 +138,7 @@ detail shows the running demo, what it shows, and its file.
 - **Web Views**: observable state and awaited loads; offscreen rendering
   under SwiftUI; windowed and offscreen pages under animations and
   transforms (`AnimationDemo`); swipe navigation with the app's own
-  indicator; `CefWindowedBrowserView` in an `NSViewRepresentable`, without
+  indicator; `CefWindowedPageView` in an `NSViewRepresentable`, without
   CefSwiftUI.
 - **Page**: find in page (`CefFindSession`); the context menu; PDF and
   printing; DevTools and the DevTools Protocol.
@@ -173,7 +173,7 @@ symbol, category, `makeView()`) in `Demos/`, and list it in `Demos.all`.
 reports ready (its pages loaded, or its own work done), prints
 `PASS <demo>` or `FAIL <demo> — <reason>` and a `SUMMARY` line, and quits
 with the number of failures as its exit status. A demo also fails if it
-leaves a browser or window open. `GALLERY_SMOKE_ONLY=BridgeDemo,RequestsDemo`
+leaves a page or window open. `GALLERY_SMOKE_ONLY=BridgeDemo,RequestsDemo`
 runs only those. It keeps Chromium's data in a temporary directory.
 
 ## Minimal

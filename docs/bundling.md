@@ -209,7 +209,7 @@ Chromium cannot start its helpers. `CefSwiftApp` does not start Chromium in
 previews (`XCODE_RUNNING_FOR_PREVIEWS`), and a `CefWebView` shows a
 placeholder until Chromium runs, so a `#Preview` of a view that contains
 one renders the rest of the view. Run the app to see the page. An AppKit
-host view (`CefWindowedBrowserView`) needs a running runtime; keep it out
+host view (`CefWindowedPageView`) needs a running runtime; keep it out
 of previews.
 
 ### Universal apps

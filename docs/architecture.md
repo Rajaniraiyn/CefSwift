@@ -5,7 +5,7 @@ How CefSwift works inside, and why. For how to use it, see the
 
 CefSwift is a library for embedding CEF in a macOS app. The core, `CefKit`,
 wraps CEF's C API and the Chromium behavior an embedder has to work with or
-around: the runtime and its processes, browsers and their handlers,
+around: the runtime and its processes, pages and their handlers,
 profiles, AppKit host views, CEF Views windows, offscreen rendering and its
 accessibility, discarding. `CefSwiftUI` adds SwiftUI. `CefPasskeys` and
 `CefChromium` are optional modules that reach Chromium internals some apps
@@ -14,9 +14,9 @@ examples.
 
 | Where | What | Examples |
 |---|---|---|
-| `CefKit` (core) | What any app embedding CEF needs and could not write itself: the runtime, browsers, profiles, the AppKit host views, CEF Views windows (`CefWindow`), handlers and delegates, offscreen rendering and its accessibility, discarding | `CefRuntime`, `CefBrowser`, `CefProfile`, `CefOffscreenBrowserView`, `CefWindow` |
+| `CefKit` (core) | What any app embedding CEF needs and could not write itself: the runtime, pages, profiles, the AppKit host views, CEF Views windows (`CefWindow`), handlers and delegates, offscreen rendering and its accessibility, discarding | `CefRuntime`, `CefPage`, `CefProfile`, `CefOffscreenPageView`, `CefWindow` |
 | `CefSwiftUI` | SwiftUI on top of `CefKit`, nothing else | `CefSwiftApp`, `CefWebView`, `setToolbar`, `setPageOverlay` |
-| `CefPasskeys`, `CefChromium` (optional) | Capabilities on Chromium internals some apps want: passkeys the app answers; Chromium's bookmark, history and suggestion stores, its extensions, its tabbed windows and tab strip, and its bubbles | `CefPasskeyController`, `CefBookmarks`, `CefExtensions`, `CefChromeWindow`, `CefTabStrip`, `CefChromiumSurface` |
+| `CefPasskeys`, `CefChromium` (optional) | Capabilities on Chromium internals some apps want: passkeys the app answers; Chromium's bookmark, history and suggestion stores, its extensions, its tabbed windows and tab strip, and its bubbles | `CefPasskeyController`, `CefBookmarks`, `CefExtensions`, `CefChromeWindow`, `CefTabs`, `CefChromiumSurface` |
 | `CefBundling`, `cefswift`, `CefPlugin` | Build time: the app bundle, its helpers, signing and checks | `swift package cef bundle`, `Scripts/xcode-embed.sh` |
 | `Examples` | Product decisions written against the public API: UI, defaults, heuristics for when to use a capability | the Browser's tab rail, toolbar, swipe indicator, Memory Saver, permission names |
 
@@ -31,16 +31,16 @@ implemented, each replaceable. Everything else belongs to the app.
 ```
 CefSwiftUI   CefSwiftApp, CefWebView (over CefKit's host views), SwiftUI modifiers,
     │        CefWindow.setToolbar, setTabAccessory and setPageOverlay
-    │  CefPasskeys  optional: CefPasskeyController (a CefBrowserAttachment), passkey
+    │  CefPasskeys  optional: CefPasskeyController (a CefPageAttachment), passkey
     │     │         stores and the passkey sheet
     │     │  CefChromium  optional, bound to the pinned CEF: CefBookmarks, CefHistory,
-    │     │     │         CefAutocomplete, CefExtensions, CefTabStrip, CefChromeWindow,
+    │     │     │         CefAutocomplete, CefExtensions, CefTabs, CefChromeWindow,
     │     │     │         CefTab and CefTabGroup (on CefKit's service hosts);
     │     │     │         CefChromiumSurface, chromiumSurfacePolicy and their SwiftUI
     │     │     │         glue (on Chromium's AppKit classes)
-CefKit       CefRuntime, CefBrowser, CefWindow, CefBrowserDelegate, CefBridge,
-    │        CefDevTools, CefProfile, CefBrowserAttachment, configuration and policy types; the AppKit
-    │        host views CefWindowedBrowserView and CefOffscreenBrowserView
+CefKit       CefRuntime, CefPage, CefWindow, CefPageDelegate, CefBridge,
+    │        CefDevTools, CefProfile, CefPageAttachment, configuration and policy types; the AppKit
+    │        host views CefWindowedPageView and CefOffscreenPageView
     │        (with its compositor and accessibility elements), the internal
     │        service hosts and tab discarding, no SwiftUI
 CCef         vendored CEF C headers, the generated bridge, the runtime loader (C)
@@ -67,20 +67,20 @@ CefPlugin    swift package cef download | bundle | info | clean | doctor |
 CefKit names no optional feature. An optional module, such as
 CefPasskeys or CefChromium, plugs into it at these points:
 
-- `CefBrowserAttachment` (public), through `CefProfile.attachments` (every
+- `CefPageAttachment` (public), through `CefProfile.attachments` (every
   page of a profile, Chromium's own included) and
-  `CefBrowser.Configuration.attachments`: told when Chromium has created a
-  browser (`browserDidCreate(_:)`), when a discarded one is created anew
-  (`browserDidRestore(_:)`) and when it closes (`browserDidClose(_:)`). An
+  `CefPage.Configuration.attachments`: told when Chromium has created a
+  page (`pageDidCreate(_:)`), when a discarded one is created anew
+  (`pageDidRestore(_:)`) and when it closes (`pageDidClose(_:)`). An
   attachment whose `preparesBeforeFirstDocument` is `true` holds the first
-  page: the browser starts on `about:blank`, `CefBrowser.bootstrap()`
+  page: the page starts on `about:blank`, `CefPage.bootstrap()`
   awaits every attachment with the task-local `settingUp` set (so their
   DevTools calls do not wait for `ready()`), and only then loads the page.
   Without such an attachment nothing is held: `adopt(_:)` completes
   `ready()` and then tells the attachments, in a task, so that one
-  attachment cannot delay every browser.
-  Such a browser's native popups are opened in a browser CefKit creates
-  (`openPopupInNewBrowser`), since Chromium runs a native popup's first
+  attachment cannot delay every page.
+  Such a page's native popups are opened in a page CefKit creates
+  (`openPopupInNewPage`), since Chromium runs a native popup's first
   document before anything can attach to it.
 - `CefProfile.moduleState(_:make:)` (package): one object per type that a
   module keeps for a profile, made on first use.
@@ -90,12 +90,12 @@ CefPasskeys or CefChromium, plugs into it at these points:
   (`windowDidClose(_:)`).
 - `CefWindow.addChromeCommandInterceptor(_:)` (package): decides
   Chrome commands in every `CefWindow`, from Chrome's UI and from
-  `CefBrowser.execute(_:disposition:)`, after the browser's delegate and
+  `CefPage.execute(_:disposition:)`, after the page's delegate and
   before Chromium runs them.
 - `CefWindow.Configuration.moduleValues` (package): values a module
   keeps in a window configuration, by type, dropped for the window's
   popups; `showsChromiumStatusBubble` and `showsChromiumZoomBubble`
-  (package) set the browser's `chrome_status_bubble` and
+  (package) set the page's `chrome_status_bubble` and
   `chrome_zoom_bubble`. CefChromium's status bubble uses the public
   `pageOverlay`.
 - The internal service hosts (package): `CefServiceHosts`
@@ -103,18 +103,18 @@ CefPasskeys or CefChromium, plugs into it at these points:
   declares its own hosts and modules and calls them
   ([Internal-page services](#internal-page-services)).
 
-Inside CefKit, an object holding CEF references outside any browser is a
+Inside CefKit, an object holding CEF references outside any page is a
 `CefShutdownParticipant`: it adds itself with
 `CefRuntime.addShutdownParticipant(_:)`, held weakly, and is told to
-release them after the last browser and window and before the profiles'
+release them after the last page and window and before the profiles'
 request contexts and `cef_shutdown()`. The service hosts (a module's
 included) and the media router are participants.
 
 A module also uses a few `package` members of CefKit that are not public
 API: `CefDevTools.addListener(for:_:)`, `removeListener(_:for:)` and
 `leaseCount(_:)` (synchronous, ordered event listeners and domain leases),
-`CefBrowser.decision(_:_:)` with `CefBrowser.DecisionScope` (a question
-cancelled when its page or browser goes), `CefDialogPresenter.run(_:in:)`
+`CefPage.decision(_:_:)` with `CefPage.DecisionScope` (a question
+cancelled when its page or document goes), `CefDialogPresenter.run(_:in:)`
 (an alert that dismisses itself on cancellation), `CefLog`,
 `CefWindow.owning(_:)`, `CefProfile.storageDirectory` (now public), and `CefObjCHook`
 for overrides of Chromium's AppKit classes.
@@ -265,22 +265,22 @@ CEF 156's `cef_render_process_handler_t` reports only frames' contexts
 worker or service-worker contexts, so the renderer side has no worker
 hooks.
 
-## Browsers and clients
+## Pages and clients
 
-A `CefBrowser` is created as a model and bound to a Chromium browser when it
+A `CefPage` is created as a model and bound to a Chromium page when it
 is first hosted. Each one gets a `CefBrowserClient` that owns its handler
-structs. Browsers that Chromium creates itself (popups, DevTools, tabs opened
+structs. Pages that Chromium creates itself (popups, DevTools, tabs opened
 from Chrome's UI) share their opener's client or the runtime's default
-client, so every callback looks up its `CefBrowser` by Chromium's browser
-identifier in `CefRuntime`'s registry. Such browsers are wrapped as they
+client, so every callback looks up its `CefPage` by Chromium's page
+identifier in `CefRuntime`'s registry. Such pages are wrapped as they
 appear: a popup inherits its opener's delegate, which hears about it through
-`browser(_:didOpen:)`. A browser in one of Chromium's own tabbed windows
+`page(_:didOpen:)`. A page in one of Chromium's own tabbed windows
 arrives on the default client (`get_default_client`) without a browser
 view, so CEF cannot move it into a `CefWindow`; it goes to
 `CefRuntime.onChromeTab` when that is set, with its window kept off
-screen until the handler answers. Its opener is the browser whose
+screen until the handler answers. Its opener is the page whose
 `on_open_urlfrom_tab` (⌘- and ⇧-clicks) or `on_before_popup` CefKit left
-to Chromium just before, which CEF does not report itself. The rest are passed to `CefRuntime.onBrowserCreated`.
+to Chromium just before, which CEF does not report itself. The rest are passed to `CefRuntime.onPageCreated`.
 
 Policy callbacks that Chromium can wait on become `async` delegate methods:
 the CEF callback object is kept alive in a `Task` and completed with the
@@ -290,7 +290,7 @@ Some state has no CEF event of its own. `favicon` is downloaded with
 `download_image` when the display handler reports the page's icon
 addresses. `zoomLevel` is read back with `get_zoom_level` after each
 navigation, each zoom command and each change made through the property,
-in every browser, since Chromium keeps one level per site.
+in every page, since Chromium keeps one level per site.
 
 ### Profile policy
 
@@ -322,7 +322,7 @@ can per request context, so CefKit scopes it there too:
   initiator comes from `get_resource_request_handler`), runs the filter,
   and whose `get_cookie_access_filter` applies `.restrictCookies(to:)`.
 - **Scheme handlers.** `register_scheme_handler_factory` registers on the
-  browser context, so every context of a profile shares a registration.
+  page context, so every context of a profile shares a registration.
   A runtime registration goes to the global context
   (`cef_register_scheme_handler_factory`) and to every other profile's
   context as it is made; a profile's own goes to its context and wins
@@ -333,7 +333,7 @@ can per request context, so CefKit scopes it there too:
   to the page's delegate, whose default implementation asks the profile's
   `CefProfileDelegate`. A popup takes its opener's configuration; a tab
   Chromium opens inside a CefKit window takes that window's first
-  browser's, since CEF gives it that browser's client, settings and
+  page's, since CEF gives it that page's client, settings and
   `extra_info`; one in a window Chromium opens itself has the default
   client and no `extra_info`, so only its profile's policy applies.
 - **Settings.** `CefProfile.Configuration` maps onto the profile's
@@ -369,23 +369,23 @@ exists, which is how Chromium's silent fall-back to memory is caught. A
 failed profile drops its context, and every call on it fails or does
 nothing.
 
-Browser creation goes through `CefBrowser.profileAllowsCreation(for:_:)`
+Page creation goes through `CefPage.profileAllowsCreation(for:_:)`
 first, in every path: windowed, offscreen, Chrome's own window and
 `CefWindow`'s browser view. `cef_browser_host_create_browser_sync` and
 `cef_browser_view_create` fail on a context that is not initialized
 yet, and the asynchronous `cef_browser_host_create_browser` would go
-ahead on the in-memory fallback, so a browser on a profile still loading
+ahead on the in-memory fallback, so a page on a profile still loading
 stays `.pending` and the creation runs again once the profile reports;
 the last host asked for wins. The deferred creation is a token,
 `creationAwaitingProfile`, checked when the profile reports: a host view
 given another browser or none (`stopHosting(in:)`) or leaving its
 window, a close, or a quit clears it, and nothing is created. Such
-browsers are in no browser list, so `CefRuntime` tracks them
-(`browsersAwaitingProfiles`) and quitting closes them first, which ends
-their `ready()` with `CefError.browserClosed`. A `CefWindow` creates its window at once
+pages are in no page list, so `CefRuntime` tracks them
+(`pagesAwaitingProfiles`) and quitting closes them first, which ends
+their `ready()` with `CefError.pageClosed`. A `CefWindow` creates its window at once
 and adds the browser view when the profile is ready. Popups need nothing:
 they share their opener's context, which is loaded. The default profile
-and loaded profiles take the direct path, with no wait. A browser on a
+and loaded profiles take the direct path, with no wait. A page on a
 failed profile closes as it would on a failed creation, and its
 `ready()` throws `CefError.profileUnavailable`.
 
@@ -393,8 +393,8 @@ failed profile closes as it would on a failed creation, and its
 
 | Host | Style | How it draws |
 |---|---|---|
-| `CefWebView`, `.windowed` | Alloy | Chromium's native `NSView` as a subview of `CefWindowedBrowserView` |
-| `CefWebView`, `.offscreen` | Alloy | Frames in a shared `IOSurface`, copied into a surface of its own and set as layer contents by `CefOffscreenBrowserView`, which forwards input |
+| `CefWebView`, `.windowed` | Alloy | Chromium's native `NSView` as a subview of `CefWindowedPageView` |
+| `CefWebView`, `.offscreen` | Alloy | Frames in a shared `IOSurface`, copied into a surface of its own and set as layer contents by `CefOffscreenPageView`, which forwards input |
 | `CefWindow` | Chrome | A CEF Views window; your toolbar is an `NSToolbar` and your accessory a title-bar accessory view |
 | `CefRuntime.openChromeWindow` | Chrome | Chrome's own window and UI |
 | `CefChromeWindow` (CefChromium) | Chrome | Chrome's own window, with the app's views laid over Chrome's tab strip and toolbar |
@@ -409,9 +409,9 @@ paints everything except the page's rectangle and passes events through.
 
 Three things are kept apart, each usable alone:
 
-- **Content**: `CefBrowser`, one page's model, whatever shows it.
-- **View**: where content shows. `CefWebView` (`CefWindowedBrowserView`,
-  `CefOffscreenBrowserView`) puts a page anywhere in the app's own view
+- **Content**: `CefPage`, one page's model, whatever shows it.
+- **View**: where content shows. `CefWebView` (`CefWindowedPageView`,
+  `CefOffscreenPageView`) puts a page anywhere in the app's own view
   tree, Alloy style: such pages are not Chromium tabs. A Chrome-style
   window's content area shows its active tab's page.
 - **Window and tab**: Chromium's model of tabs. A `CefWindow` is a CEF Views
@@ -420,7 +420,7 @@ Three things are kept apart, each usable alone:
   Chrome-style browser view in it. Tabbed windows are the windows Chromium
   draws itself (`cef_browser_host_create_browser` with Chrome style and no
   CEF Views): CefChromium's `CefChromeWindow`, with its `CefTab`s and
-  `CefTabGroup`s, all listed by the profile's `CefTabStrip`.
+  `CefTabGroup`s, all listed by the profile's `CefTabs`.
 
 `CefWindow` and `CefChromeWindow` stay two types because they are two
 different things in CEF: the first is a CEF Views object CefKit creates and
@@ -428,12 +428,12 @@ lays out (toolbar, insets, popups through `onPopup`, Chromium's surfaces
 recognised per window); the second has no CEF object at all, only the
 `NSWindow` Chromium made and the tab model Chromium keeps, reached through
 Chromium's WebUI hosts (`chrome://bookmarks`' `chrome.tabs`,
-`tab_strip_internals.mojom`, `tab_search.mojom`). `CefTabStrip` follows
-the events CEF and AppKit deliver for every browser and window, and asks a
+`tab_strip_internals.mojom`, `tab_search.mojom`). `CefTabs` follows
+the events CEF and AppKit deliver for every page and window, and asks a
 host only when they report a change to the tab model's structure; hosts
 close seconds after their last call. Chromium's surfaces are one
 controller for both window kinds (`ChromiumSurfaceHost`: the window's
-`NSWindow` and the browser it shows, a `CefChromeWindow`'s active tab's).
+`NSWindow` and the page it shows, a `CefChromeWindow`'s active tab's).
 A one-tab `CefChromeWindow` is a different
 Chromium window from a `CefWindow`: a `normal` one, with a toolbar for
 extensions' action popups and a tab strip extensions can group and move
@@ -499,7 +499,7 @@ moves each presented surface to its kind's new presentation through the
 same two paths. Custom surfaces end with what they show: the find bar
 with `CefFindSession.isActive`, the status bubble with `statusText`,
 the others with a main-frame navigation to another document (observed on
-`CefBrowser.url`), as Chromium's bubbles close. Closing the window ends
+`CefPage.url`), as Chromium's bubbles close. Closing the window ends
 every surface (`.window`) and drops the app's presenters and callbacks.
 A zoom command the window replaces is passed on to Chromium, which runs
 the interceptor again through `on_chrome_command` in the same turn; that
@@ -520,7 +520,7 @@ first specific class name. The QR code bubble's address comes from its text
 field's accessibility value.
 
 Commands that open a surface the window replaces or hides never reach
-Chromium: `CefBrowser.execute(_:)` and the command handler's
+Chromium: `CefPage.execute(_:)` and the command handler's
 `on_chrome_command` hand them to CefChromium's command interceptor first. The custom
 find bar drives CEF's `find`/`stop_finding` and reads `on_find_result`. A
 new search only highlights its matches (Chromium reports an active ordinal
@@ -537,7 +537,7 @@ anchors them to its toolbar's buttons. `CEF_CTT_NORMAL` and
 which does not add Chrome's toolbar view (`get_chrome_toolbar`) to its
 window; adding it would draw Chrome's toolbar.
 
-**Swipes.** For Chrome-style browsers, Chromium sets a
+**Swipes.** For Chrome-style pages, Chromium sets a
 `ChromeRenderWidgetHostViewMacDelegate` on each page's
 `RenderWidgetHostViewCocoa`; its `HistorySwiper` turns overscrolling
 two-finger swipes into navigation and draws progress with a
@@ -546,7 +546,7 @@ two-finger swipes into navigation and draws progress with a
 `allowsBackForwardNavigationGestures`, and the controller's
 `-initForMode:`, `-showPanelForView:`, `-setProgress:finished:` and
 `-dismiss`, to report progress to `navigationGestureProgress` and to skip
-Chrome's overlay unless `showsChromiumNavigationGestureIndicator` is on. Alloy-style browsers have no
+Chrome's overlay unless `showsChromiumNavigationGestureIndicator` is on. Alloy-style pages have no
 such delegate; views track swipes themselves with
 `NSEvent.trackSwipeEvent`, the offscreen view from its own scroll events
 and the windowed view from a local event monitor, since Chromium's view
@@ -557,8 +557,8 @@ page and passing every event through.
 
 ## Frame timing
 
-Offscreen browsers are created without external begin frames, so
-Chromium's compositor times frames from its own timer at the browser's
+Offscreen pages are created without external begin frames, so
+Chromium's compositor times frames from its own timer at the page's
 frame rate (`windowless_frame_rate`), and each frame arrives through
 `on_accelerated_paint` as an `IOSurface`.
 
@@ -617,16 +617,16 @@ rendering into a delivered surface:
   on every image. Holding the `IOSurfaceRef`, `IOSurfaceIncrementUseCount`
   or showing it as a layer's contents keeps the kernel object alive but
   not out of the pool.
-- The browser's `IOSurfaceRef` is the GPU process's surface
+- The page's `IOSurfaceRef` is the GPU process's surface
   (`IOSurfaceLookupFromMachPort` on the receiving side of the mojo
   handle), and `DidCopyFrame` blits each capture straight into the pooled
   image. A delivered surface is rendered into again by the capture two or
   three frames later, or the next one when the frame was not marked:
   8 to 25 ms at 120 frames a second. `Stop()`, which runs whenever the
-  browser is hidden, and `Start()` replace the pool.
+  page is hidden, and `Start()` replace the pool.
 
 So the surface is copied, and the copy is limited to what changed.
-`CefOffscreenBrowserView` copies each frame on the GPU with a Metal blit
+`CefOffscreenPageView` copies each frame on the GPU with a Metal blit
 into an `IOSurface` of its own (`CefOffscreenCompositor`) and waits for
 the copy before the callback returns. That surface becomes the layer's
 contents. A surface is written again only when it is not the layer's
@@ -723,7 +723,7 @@ presents, and the new frame shows a few milliseconds to a refresh or two
 later. An offscreen page is told of a size by `was_resized`, asks
 `get_view_rect`, lays out and rasters, and its frames arrive through
 `on_accelerated_paint` on the main thread, timed by Chromium's own timer
-(see [Frame timing](#frame-timing)), where `CefOffscreenBrowserView`
+(see [Frame timing](#frame-timing)), where `CefOffscreenPageView`
 copies each into a surface of its own (see [Frame ownership](#frame-ownership))
 and makes it its content layer's contents with implicit actions off.
 
@@ -740,7 +740,7 @@ size, into a surface of the new size and letterboxes it, filling the rest
 with black; 10 of the 24 frames presented during a spring were
 letterboxed. Each frame carries the part its content fills
 (`content_rect` in `cef_accelerated_paint_info_common_t`), and
-`CefOffscreenBrowserView` shows only that part, placed as
+`CefOffscreenPageView` shows only that part, placed as
 `framePlacement` says (stretched by default), so a resize shows the last
 frame stretched rather than a black band. The frame also carries the
 size of what was captured (`source_size`): the page's size in the frame,
@@ -751,7 +751,7 @@ maps through that size.
 
 What each rendering can do:
 
-| | Offscreen (`CefOffscreenBrowserView`) | Windowed (`CefWindowedBrowserView`) |
+| | Offscreen (`CefOffscreenPageView`) | Windowed (`CefWindowedPageView`) |
 |---|---|---|
 | Who draws | The app's layer, with Chromium's frame copied into it | Chromium's layer tree, from the GPU process |
 | Transforms, opacity, masks, corner radius, blur, shadows | Applied to the app's layer: exact, interpolated by SwiftUI or Core Animation like any layer | Applied by the render server to Chromium's layers; nothing in the process can read the result |
@@ -777,19 +777,19 @@ Three things were wrong and are fixed (more in
 
 - **Per-refresh screen changes under a transform.** AppKit's
   `viewDidChangeBackingProperties` on every refresh of a `scaleEffect` or
-  `rotationEffect` made `CefOffscreenBrowserView` send
+  `rotationEffect` made `CefOffscreenPageView` send
   `notify_screen_info_changed` and `was_resized` 30 to 45 times in 1.2 s,
   and the main thread hitched for up to 50 ms. The view now tells
   Chromium only when the backing scale or the screen changes.
 - **Black bands while resizing**: letterboxed frames, above.
 - **A windowed page closed when its view left the hierarchy.** CEF's
-  `CefBrowserHostView` closes its browser when it is deallocated, and
+  `CefPageHostView` closes its page when it is deallocated, and
   nothing else held Chromium's view once `stopHosting(in:)` took it out of
   its host, as happens when SwiftUI removes a `CefWebView`, with or
-  without a transition. `CefBrowser` now keeps the view while no host
-  shows it, and lets it go when the browser closes.
+  without a transition. `CefPage` now keeps the view while no host
+  shows it, and lets it go when the page closes.
 
-`CefOffscreenBrowserView` also tells Chromium of a size once per pass of
+`CefOffscreenPageView` also tells Chromium of a size once per pass of
 the main run loop rather than on each of SwiftUI's frame changes, halving
 `was_resized` during a spring, and a page moving to another offscreen
 view arrives with the frame it last showed, so it is never blank there.
@@ -829,7 +829,7 @@ path, and the Gallery's `-animationShots` and the Browser's
   animation, and the rounding added up: after a 0.6 s spring the layer was
   7 points larger than the view, after a few springs 30, and the page
   showed shifted up by that much, cut off at the top, its canvas along the
-  bottom. `CefWindowedBrowserView` now sizes Chromium's view in whole
+  bottom. `CefWindowedPageView` now sizes Chromium's view in whole
   points (rounded up, the fraction clipped), which Core Animation resizes
   exactly.
 - **`CefChromeWindow` covering its own page.** With `showsChromeUI` off,
@@ -900,13 +900,13 @@ The display had no 120 Hz mode to measure ProMotion with.
 
 ## Offscreen accessibility
 
-Windowed browsers expose Chromium's own `NSAccessibility` objects. For
-offscreen browsers Chromium only computes the tree ("tree only" mode) and
+Windowed pages expose Chromium's own `NSAccessibility` objects. For
+offscreen pages Chromium only computes the tree ("tree only" mode) and
 hands it to CEF's accessibility handler, which the render handler returns
 from `get_accessibility_handler`:
 
 - `set_accessibility_state(STATE_ENABLED)` starts the tree. With
-  `CefBrowser.AccessibilityPolicy.automatic`, `CefOffscreenBrowserView` calls it
+  `CefPage.AccessibilityPolicy.automatic`, `CefOffscreenPageView` calls it
   on the first sign of an assistive app: VoiceOver running, the first
   children, hit-test or focus query on the view, or `CefApplication`
   receiving `AXEnhancedUserInterface` or `AXManualAccessibility`, which
@@ -935,7 +935,7 @@ from `get_accessibility_handler`:
   CEF does not forward them, so the document's scroll position, which the
   render handler's `on_scroll_offset_changed` reports, is written into the
   root node.
-- `CefOffscreenBrowserView` keeps one `NSAccessibilityElement` per node.
+- `CefOffscreenPageView` keeps one `NSAccessibilityElement` per node.
   Elements hold only a node identifier and read the tree on every query;
   the role table follows Chromium's macOS mapping. Ignored nodes are
   skipped, and leaves (text, images, buttons, plain text fields) hide
@@ -955,7 +955,7 @@ are looked up this way: a frame in another renderer process numbers its
 nodes independently, so a number from it could name a different node in
 the main frame's process. Nodes in frames are clicked instead.
 
-When the browser closes or the tree is turned off, the tree is emptied
+When the page closes or the tree is turned off, the tree is emptied
 and the view posts `AXUIElementDestroyed` for every element it handed out.
 
 ## Page-facing features
@@ -969,7 +969,7 @@ and the DevTools Protocol is used only for what nothing else offers.
 **The renderer side.** The helper executable is Swift
 (`Sources/CefHelper`, `Sources/CefRenderer`). It gives `cef_execute_process`
 an app whose render process handler drives a list of
-`CefRendererExtension`s, each with hooks for a browser's arrival in the
+`CefRendererExtension`s, each with hooks for a page's arrival in the
 process (with the `extra_info` it was created with), each JavaScript
 context created and released, and process messages whose names start with
 its prefix. Everything runs on the renderer's main thread, which on macOS
@@ -982,15 +982,15 @@ A later renderer-side feature is one more extension type.
 `PageScripting` is the extension behind bridges, user scripts and
 `evaluateJavaScript`:
 
-- A browser's bridges and user scripts, its profile's and its own, travel
+- A page's bridges and user scripts, its profile's and its own, travel
   as JSON in the `extra_info` of its creation
   (`cef_browser_host_create_browser`, `cef_browser_view_create`, and
   `on_before_popup` for popups). CEF hands `extra_info` to every renderer
-  process that shows a frame of the browser, before that frame's first
+  process that shows a frame of the page, before that frame's first
   document starts, so nothing waits on a message and no first document
-  runs on `about:blank`. A browser Chromium creates in a window of its own
+  runs on `about:blank`. A page Chromium creates in a window of its own
   has no `extra_info`; its configuration reaches each renderer as the
-  browser's frames attach (`on_frame_attached`), which CEF reports once a
+  page's frames attach (`on_frame_attached`), which CEF reports once a
   frame's first document has committed, so that document goes without.
 - When a context is created in a frame's main world, the user scripts that
   match run with `cef_v8_context_t.eval`, as scripts without a URL; scripts
@@ -1004,7 +1004,7 @@ A later renderer-side feature is one more extension type.
   ([Data paths](#data-paths)), with no `JSON` object or injected script;
   the page's getters, `Proxy` traps and `Object.keys` run as they would
   for `JSON.stringify`. Cross-site frames run in other renderer
-  processes, which get the configuration with the browser, so `access`
+  processes, which get the configuration with the page, so `access`
   decides for them as for any frame.
 - The browser process does not take the renderer's word for the origin.
   It establishes the caller's origin from its own record of the frame's
@@ -1049,11 +1049,11 @@ A later renderer-side feature is one more extension type.
   back the same way. A returned promise is awaited through its `then`.
 - Changes after creation (`addUserScript`, `removeUserScript`, a
   profile's `userScripts` or `bridges`, `CefBridge.access`) go as a
-  `cefswift.page.configure` message to every frame of the browser, and to
+  `cefswift.page.configure` message to every frame of the page, and to
   each frame that attaches later. A renderer process reports its
   configuration generation (-1 for none) the first time it sees one of the
-  browser's documents, and gets the current one if it differs.
-  Generations come from one counter for every browser, so a configuration
+  page's documents, and gets the current one if it differs.
+  Generations come from one counter for every page, so a configuration
   made later is always newer than any a renderer has.
 
 Two CEF 156 behaviors shape this code. A message from the browser process
@@ -1065,22 +1065,22 @@ never reaches its Swift side when called; such functions are looked up
 through an interceptor on each call (`V8Context.durableFunction`).
 
 **What still uses the DevTools Protocol.** `CefDevTools` attaches a DevTools
-message observer to the browser and speaks the protocol in-process. CEF
-attaches the session on the first message and keeps it until the browser
+message observer to the page and speaks the protocol in-process. CEF
+attaches the session on the first message and keeps it until the page
 closes. An attached session with no domain enabled changes nothing a page
 can measure; enabled domains do (see the guide's "Compatibility with bot
 protection"). These use it:
 
 | Feature | Protocol use |
 |---|---|
-| `browser.devTools` | Whatever the app sends. |
+| `page.devTools` | Whatever the app sends. |
 | `evaluateJavaScript(_:userGesture: true)` | `Runtime.evaluate` with `userGesture`, the only way to grant a user activation. |
-| `snapshot()` | `Page.captureScreenshot`, for windowed browsers; an offscreen browser's snapshot is the frame its view shows. |
-| CefPasskeys' `CefPasskeyController` | `WebAuthn`, `Debugger`, `Page` and `Runtime` enabled for the browser's lifetime; see [Passkeys](#passkeys). |
+| `snapshot()` | `Page.captureScreenshot`, for windowed pages; an offscreen page's snapshot is the frame its view shows. |
+| CefPasskeys' `CefPasskeyController` | `WebAuthn`, `Debugger`, `Page` and `Runtime` enabled for the page's lifetime; see [Passkeys](#passkeys). |
 | `discard()`, `discardBlockers()` | `DOMDebugger.getEventListeners` on every frame's window, to find a `beforeunload` listener, which JavaScript cannot list: the main frame's window from `Runtime.evaluate`, a same-process subframe's from `Page.getFrameTree`, `DOM.getFrameOwner`, `DOM.describeNode`, `DOM.resolveNode` and `Runtime.callFunctionOn` (`defaultView`), a cross-site frame's the same way in a session of its own (`Target.getTargets`, `Target.attachToTarget` with `flatten`, `Target.detachFromTarget`). No domain is enabled. |
 | Offscreen accessibility actions | `Accessibility.enable` for the length of one lookup, then `DOM.focus`, `DOM.scrollIntoViewIfNeeded`; `Input.insertText` only for a field that takes no input-method text. |
 
-A browser created again after a discard enables the domains its session
+A page created again after a discard enables the domains its session
 had enabled before, before its page loads; a session that was never used
 stays unattached.
 
@@ -1122,7 +1122,7 @@ its own nine bytes, so a reader skips any value without reading it.
 
 **Malformed payloads.** A renderer may be compromised, so the browser
 process treats every payload as untrusted, and the renderer does the same
-for the browser's as a matter of robustness. Before building anything from
+for the page's as a matter of robustness. Before building anything from
 a value, a reader checks its whole structure
 (`CefWireReader.validateValue()`, which recurses no deeper than the depth limit):
 every tag known; every run, key and element inside the payload and inside
@@ -1292,7 +1292,7 @@ once, for the call waiting on it.
 CEF has no API for bookmarks, history, most-visited sites, omnibox
 suggestions or tab discarding, but Chromium's own WebUI pages reach those
 services. `CefServiceHosts`, one per profile, calls them from hidden
-Chrome-style browsers it calls service hosts. The engine is CefKit's,
+Chrome-style pages it calls service hosts. The engine is CefKit's,
 since native tab discarding uses it; the bookmark, history, most-visited
 and omnibox hosts and modules are CefChromium's, declared there and
 registered with the engine by being called.
@@ -1314,8 +1314,8 @@ Chromium locks a WebUI renderer to its host, and neither
 
 | Host | Reaches | Used for |
 |---|---|---|
-| `chrome://bookmarks` | `chrome.bookmarks`, `chrome.tabs`, `chrome.windows`, `chrome://favicon2` | `CefBookmarks`, `CefHistory.favicon`, `CefTabStrip`'s reads of tabs and windows and its changes (no `chrome.tabs` event listeners: one on this page crashed Chromium later, when an extension was disabled or an incognito window opened) |
-| `chrome://tab-strip-internals` | `tab_strip_internals.mojom.PageHandlerFactory` | `CefTabStrip`'s groups (names, colours, collapsing), tab alerts, recently closed, and the updates that wake its reads |
+| `chrome://bookmarks` | `chrome.bookmarks`, `chrome.tabs`, `chrome.windows`, `chrome://favicon2` | `CefBookmarks`, `CefHistory.favicon`, `CefTabs`'s reads of tabs and windows and its changes (no `chrome.tabs` event listeners: one on this page crashed Chromium later, when an extension was disabled or an incognito window opened) |
+| `chrome://tab-strip-internals` | `tab_strip_internals.mojom.PageHandlerFactory` | `CefTabs`'s groups (names, colours, collapsing), tab alerts, recently closed, and the updates that wake its reads |
 | `chrome://history` | `history.mojom.PageHandler`, `chrome://favicon2` | `CefHistory.search`, `remove` |
 | `chrome://new-tab-page-third-party` | `most_visited.mojom.MostVisitedPageHandlerFactory` | `CefHistory.topSites` |
 | `chrome://omnibox` | `mojom.OmniboxPageHandler` | `CefAutocomplete` |
@@ -1405,10 +1405,10 @@ the host, and waiting as long again would double the delay.
 
 **Lifetime.** A host starts on the first call that needs it and closes 30
 seconds after its last one, when macOS reports memory pressure, when its
-profile's last browser closes (except the default profile's), and when
+profile's last page closes (except the default profile's), and when
 the app quits. A call that times out, or a renderer that dies, closes the
 host; the call throws and the next one starts the host again. Service
-browsers are left out of `CefRuntime.browsers` and
+pages are left out of `CefRuntime.pages` and
 `CefWindow.all`. Their windows are 1 × 1 point, since a hidden
 window's compositor keeps buffers the size of the window, about 11 MB of
 GPU memory for a default-sized one, and they are transparent, ignore the
@@ -1416,7 +1416,7 @@ mouse and are ordered out whenever Chromium shows them, as it does when it
 brings its windows forward. Chromium saves every Chrome-style window in
 its session, these included, and reopens them after a crash; their
 addresses carry a marker fragment, so `CefRuntime` recognizes and closes
-them. Alloy-style and offscreen browsers do not get WebUI bindings for
+them. Alloy-style and offscreen pages do not get WebUI bindings for
 these hosts, so a service host has to be a Chrome-style window.
 
 **Reads without a renderer.** Chromium saves a profile's bookmarks to the
@@ -1458,7 +1458,7 @@ mode), `packDirectory` and `loadUnpacked`. Two need what a page's user
 gives Chrome's own:
 
 - `loadUnpacked` asks for the directory with a file dialog of the calling
-  page. CEF routes a Chrome-style browser's file dialogs to its client, so
+  page. CEF routes a Chrome-style page's file dialogs to its client, so
   the service host's delegate answers it: `CefServiceHosts.fileDialogAnswers`
   holds the answer for the next dialog of a host.
 - `management.uninstall` runs only with a user activation and always
@@ -1492,11 +1492,11 @@ to the window to place (`cef_browser_view_t::get_chrome_toolbar`), hidden.
 ## Passkeys
 
 A `CefPasskeyController` (CefPasskeys) is an attachment that prepares
-before the first document. For each browser it is attached to, a
-`CefPasskeySession` takes the WebAuthn calls over through the browser's
-DevTools connection, before the browser loads its first page:
+before the first document. For each page it is attached to, a
+`CefPasskeySession` takes the WebAuthn calls over through the page's
+DevTools connection, before the page loads its first document:
 
-- `WebAuthn.enable`, without Chromium's UI, puts the browser's pages in a
+- `WebAuthn.enable`, without Chromium's UI, puts the page's documents in a
   virtual authenticator environment. Chromium's dialog and its real
   authenticators (security keys, iCloud Keychain, phones) are not used
   there, and a call waits for an authenticator until its timeout.
@@ -1517,8 +1517,8 @@ DevTools connection, before the browser loads its first page:
   `throwOnSideEffect`, so the read cannot change the page. Nothing in the
   page is changed. Any other pause, such as a `debugger` statement in the
   page, is resumed at once unless someone else debugs the page: the app,
-  holding its own `Debugger.enable` lease on the browser's session, or
-  the browser's DevTools window. Those pauses are theirs to resume.
+  holding its own `Debugger.enable` lease on the page's session, or
+  the page's DevTools window. Those pauses are theirs to resume.
 - While the page is stopped, the delegate decides, and the session adds a
   virtual authenticator (CTAP 2.1, internal transport, resident keys,
   user verification) for that one call: empty for a registration, holding
@@ -1534,9 +1534,9 @@ DevTools connection, before the browser loads its first page:
   authenticator left over from an earlier call is removed before the next
   decision, so no call is answered unasked.
 
-An Alloy browser discarded by closing it gets a new DevTools session when
+An Alloy page discarded by closing it gets a new DevTools session when
 it is created again, so the controller sets the environment and the
-breakpoints up again in `browserDidRestore(_:)`; a Chrome-style tab
+breakpoints up again in `pageDidRestore(_:)`; a Chrome-style tab
 discarded in place keeps them.
 
 The private key of a passkey lives in the store, and in Chromium's browser
@@ -1544,8 +1544,8 @@ process only while an authenticator answers one call. A page learns only
 what WebAuthn gives it: the credential ID, the public key, the user handle
 and signatures.
 
-Chromium's own WebAuthn dialog (a browser without a controller) is a views widget: a child
-window of a `CefWindow`, or a free-standing window for a browser in
+Chromium's own WebAuthn dialog (a page without a controller) is a views widget: a child
+window of a `CefWindow`, or a free-standing window for a page in
 a view. CefSwift leaves it alone; closing it from AppKit crashes Chromium.
 The iCloud Keychain authenticator in Chromium (`device/fido/mac`) calls
 AuthenticationServices itself and checks for the
@@ -1554,19 +1554,19 @@ without it, Chromium does not offer it.
 
 ## Discarding
 
-`CefBrowser.discard()` frees a hidden browser's page and keeps the
-`CefBrowser`. How depends on the runtime style.
+`CefPage.discard()` frees a hidden page's document and keeps the
+`CefPage`. How depends on the runtime style.
 
-A Chrome-style browser is a tab in a Chromium tab strip, so Chromium
+A Chrome-style page is a tab in a Chromium tab strip, so Chromium
 discards it. CefKit starts Chromium with the `WebContentsDiscard` feature,
 which discards a tab in place: the frame tree is torn down and the renderer
 process exits once no other frame uses it, while the `WebContents` and its
 navigation entries stay, marked to load again. Without the feature Chromium
-replaces the `WebContents` with a new one, which CEF reports as the browser
+replaces the `WebContents` with a new one, which CEF reports as the page
 closing and another opening.
 
 Chromium's own policies (Memory Saver, urgent discarding under memory
-pressure) never pick a `CefWindow`'s tab. Each such browser is the only,
+pressure) never pick a `CefWindow`'s tab. Each such page is the only,
 and so the active, tab of its own Chromium window, and the discard
 eligibility policy protects the active tab of every window, as it does a
 tab with DevTools attached, which CefKit's DevTools connection counts as.
@@ -1583,19 +1583,19 @@ blocker, `.unknown(reason)`, as is a check that fails or times out.
 `TabDiscardsInfo` (Chromium 156) carries a tab's last committed URL, its
 title and an `id` that `GetTabDiscardsInfo` numbers from 1 on every call;
 nothing in it, such as a process or frame identifier, maps to a CEF
-browser. CefKit therefore takes a browser's tab to be the one tab with its
+page. CefKit therefore takes a page's tab to be the one tab with its
 address or, when several share it, the one that also has its title, and
 treats any other outcome as a blocker. The look-up, the check of that
 tab's protections and visibility, and `DiscardById` run in one call on
 the service host, so the tab discarded is the tab just checked. CEF's
-frame count for a browser drops to zero when Chromium discards its tab;
-if another of CefKit's browsers loses its frames instead, the discard
+frame count for a page drops to zero when Chromium discards its tab;
+if another of CefKit's pages loses its frames instead, the discard
 reloads it and fails.
 
-`discard()` records the browser's navigation generation (counted at each
+`discard()` records the page's navigation generation (counted at each
 main-frame load start) and address before its checks. After the checks,
-and again after `browserWillDiscard(_:)` and the snapshot, immediately
-before unloading, it checks the browser is still hidden, idle and on the
+and again after `pageWillDiscard(_:)` and the snapshot, immediately
+before unloading, it checks the page is still hidden, idle and on the
 same document, and stops otherwise.
 `chrome.tabs`, which the bookmarks host also has, numbers tabs stably and
 discards with the same reason, but reports none of the protections other
@@ -1607,26 +1607,26 @@ saved page state. A command sent to a hidden discarded tab reloads it. The
 DevTools session survives the discard, so bridges, user scripts and event
 streams carry on unchanged.
 
-An Alloy browser is not a tab, and Chromium has no lifecycle unit for it.
-CefKit closes the Chromium browser and keeps the `CefBrowser` in
-`CefRuntime.browsers` without an identifier. When its view is shown again,
-or the browser is used, a new Chromium browser is created in the same view.
+An Alloy page is not a tab, and Chromium has no lifecycle unit for it.
+CefKit closes the Chromium page and keeps the `CefPage` in
+`CefRuntime.pages` without an identifier. When its view is shown again,
+or the page is used, a new Chromium page is created in the same view.
 It always starts on `about:blank` and is set up before it navigates to the
 saved address: `CefDevTools` enables again the domains enabled before, so
 event streams keep delivering; the accessibility state is applied; the
-attachments' `browserDidRestore(_:)` runs (a passkey controller sets
+attachments' `pageDidRestore(_:)` runs (a passkey controller sets
 itself up again there); user scripts (scripts added with `addUserScript`
-included) and bridges are installed, as for a new browser. Calls that wait for the
+included) and bridges are installed, as for a new page. Calls that wait for the
 restore resume when that page starts loading, and
-`browserDidRestore(_:)` follows. Its back/forward list starts from that
-page. Closing a browser
+`pageDidRestore(_:)` follows. Its back/forward list starts from that
+page. Closing a page
 never ends a renderer process another browser shares; Chromium keeps the
 process until its last frame goes.
 
-An Alloy browser's blockers come from its own state (on screen, loading,
+An Alloy page's blockers come from its own state (on screen, loading,
 DevTools, downloads, media capture from `on_media_access_change`), the
 `beforeunload` listeners the DevTools Protocol reports for every frame
-(`CefBeforeUnloadListeners`, as for Chrome-style browsers), and, for audio
+(`CefBeforeUnloadListeners`, as for Chrome-style pages), and, for audio
 and form input, Chromium's performance-manager graph. CEF's API has no
 audible state short of an audio handler, which takes the audio over, and
 nothing about form input. The performance manager keeps a `PageNode` for
@@ -1640,7 +1640,7 @@ interface behind the Graph view of `chrome://discards`, on the same
 service host as tab discarding. Its module subscribes once per host
 document (`SubscribeToChanges`) and keeps each frame node's page id and
 frame token from the `FrameInfo` descriptions. CEF's frame identifier is
-`"<render process id in hexadecimal>-<frame token>"`, so a browser's page is the page of
+`"<render process id in hexadecimal>-<frame token>"`, so a page's document is the page of
 the frame node whose token is its main frame's, with no address or title
 matching. Each check asks for that page's current description
 (`RequestNodeDescriptions`) and reads `PageNodeImpl`'s `is_audible`,
@@ -1651,7 +1651,7 @@ Chromium change keeps pages loaded instead of losing them, and SelfTest's
 `discard blockers (view)` checks fail. With the host running a check takes
 about a millisecond; the first starts the host (0.2 to 1.5 s measured), which
 closes after the service hosts' idle timeout as for any call. Picture in
-picture, devices and exemptions are not reported for Alloy browsers.
+picture, devices and exemptions are not reported for Alloy pages.
 
 The graph also describes `has_nonempty_beforeunload` on frame and page
 nodes, but nothing in Blink sets it: it stayed `false` with listeners in
@@ -1663,14 +1663,14 @@ frame lives in another renderer and is reached in a flat session
 attached for the check. CEF's typed DevTools callbacks do not handle
 messages carrying a `sessionId`, so `CefDevTools` takes them in
 `on_dev_tools_message`: a reply completes its call, an event is dropped
-rather than delivered as the browser's own session's.
+rather than delivered as the page's own session's.
 
 The library has the capability, not a policy: nothing in CefKit discards a
-browser unasked. The lifecycle coordinator restores a discarded browser
-when it comes on screen (a new Chromium browser for one discarded by
+page unasked. The lifecycle coordinator restores a discarded page
+when it comes on screen (a new Chromium page for one discarded by
 closing it; a reload, after a moment, for a Chrome-style tab that
 Chromium has not loaded by itself). When to discard is the app's:
-`CefBrowser.lifecycle` and `lifecycleChangedAt` tell how long a browser
+`CefPage.lifecycle` and `lifecycleChangedAt` tell how long a page
 has been hidden, and `DispatchSource.makeMemoryPressureSource` reports
 memory pressure. The Browser example's Memory Saver
 (`Examples/Sources/Browser/Features/TabDiscarding`) builds the usual policy
@@ -1679,11 +1679,11 @@ from those.
 ## Lifecycle
 
 `CefLifecycleCoordinator` turns window, app and system signals into what
-Chromium is told, and publishes `CefBrowser.lifecycle`. It listens for
+Chromium is told, and publishes `CefPage.lifecycle`. It listens for
 window occlusion, miniaturizing, key-window and first-responder changes
 (`firstResponder` is key-value observable), app hiding and activation,
 screen changes, screen sleep, thermal state and Low Power Mode, and
-updates every browser once per run-loop turn.
+updates every page once per run-loop turn.
 
 What Chromium does by itself decides what is left to do. Measured with an
 animated page and `document.visibilityState`:
@@ -1694,8 +1694,8 @@ animated page and `document.visibilityState`:
 | Chrome style (`CefWindow`) | Hidden by Chromium | Hidden by Chromium | Hidden by Chromium | Hidden by Chromium |
 | Offscreen | Hidden by the view (`was_hidden`) | Same | Same | Same |
 
-`was_hidden` does nothing for windowed browsers in CEF 156. For an Alloy
-browser in an app's view, the coordinator hides Chromium's `NSView`
+`was_hidden` does nothing for windowed pages in CEF 156. For an Alloy
+page in an app's view, the coordinator hides Chromium's `NSView`
 whenever its window cannot be seen (its occlusion state is not visible,
 or it is minimized or ordered out, or the app is hidden), which
 Chromium's `WebContentsViewCocoa` reports as hidden. Covered windows are
@@ -1706,16 +1706,16 @@ to the responder that had it when it shows the view again, and shows it
 on `willUnhide`, before the windows return. With the app hidden, an
 animated page then takes 2% of a CPU core instead of 23%.
 
-An offscreen view that could not be seen when it asked for its browser
-told nobody, since the browser did not exist yet, and Chromium creates
-offscreen browsers visible; a new browser starts hidden when its host
+An offscreen view that could not be seen when it asked for its page
+told nobody, since the page did not exist yet, and Chromium creates
+offscreen pages visible; a new page starts hidden when its host
 last reported so.
 
 The lifecycle is derived the way Chromium decides visibility: hidden
 unless the window is visible, unminimized and not covered (occlusion
 state), the host view is in it and not hidden, and Chromium's view is in
 a window; active when, in addition, the app is active, the window is key
-and the first responder is the browser's view or inside it.
+and the first responder is the page's view or inside it.
 
 Chromium handles the rest itself. It listens for memory pressure and
 system sleep in every process, and sets `NSAppSleepDisabled`, which keeps
@@ -1727,20 +1727,20 @@ it, but a timer added later kept running, and a hidden page with busy
 timers took more CPU frozen than not; CefKit offers no freezing.
 
 **Energy.** While Low Power Mode is on or the thermal state is serious or
-critical, `CefRuntime.energyPolicy` caps offscreen browsers' frame rate
+critical, `CefRuntime.energyPolicy` caps offscreen pages' frame rate
 (`set_windowless_frame_rate`) at 30. An animated offscreen page takes
 about 30% of a core at 30 frames a second and 50% at 60. A rate below the
-one a browser was created with does not hold by itself: every few
+one a page was created with does not hold by itself: every few
 seconds Chromium paints at the creation rate again while
 `get_windowless_frame_rate` still reports the lower one, so the
 coordinator sets the reduced rate again twice a second while it applies. Windowed and
-Chrome-style browsers draw at the display's rate, which CEF cannot change.
+Chrome-style pages draw at the display's rate, which CEF cannot change.
 
 ## Quitting
 
 `CefApplication.terminate(_:)` asks `CefRuntime` first. The runtime closes
-every browser, so pages can run `beforeunload`, and declines the request. As
-the last browser and the last Chromium window are destroyed, it calls
+every page, so pages can run `beforeunload`, and declines the request. As
+the last page and the last Chromium window are destroyed, it calls
 `terminate(_:)` again from the run loop. It then waits for the profile
 requests in flight to end on the IO thread (see “The app’s requests”), declining once
 more and calling `terminate(_:)` again when they have, and shuts Chromium
@@ -1754,11 +1754,11 @@ waiting it out. `CefRuntime.state` is `.stopping` meanwhile and `.stopped`
 after; `initialize` then throws `CefError.shutDown`, as Chromium cannot
 start twice in a process. Calling `cef_shutdown()` earlier, or from inside
 a CEF callback, crashes, so the shutdown is internal to this path. A page that
-asks to stay cancels the quit. A browser discarded by closing has no
-Chromium browser left and is marked closed at once.
+asks to stay cancels the quit. A page discarded by closing has no
+Chromium page left and is marked closed at once.
 
 Logging out, restarting and shutting down send the app a quit Apple Event,
-which AppKit handles with `terminate(_:)`. While the browsers close, the
+which AppKit handles with `terminate(_:)`. While the pages close, the
 runtime suspends that event (`NSAppleEventManager.suspendCurrentAppleEvent`),
 as `NSApplication.TerminateReply.terminateLater` does, and resumes it when
 they are gone, or with `userCanceledErr` when a page asks to stay, which

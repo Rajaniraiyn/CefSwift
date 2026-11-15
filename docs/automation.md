@@ -161,7 +161,7 @@ The `ci` job:
    crash reports written during the run are uploaded as the
    `selftest-diagnostics` artifact.
 10. Bundle the Gallery example and run `Gallery -smoke`, which opens each
-    demo in turn and fails when one does not come up or leaves a browser
+    demo in turn and fails when one does not come up or leaves a page
     open.
 11. Bundle the Minimal and Browser examples and measure their idle
     footprint with `Scripts/measure-footprint.py`, written to the run

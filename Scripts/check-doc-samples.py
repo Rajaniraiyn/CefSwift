@@ -12,7 +12,7 @@ oldest system CefSwift supports. A block compiles as one of:
 - statements, functions included: inside an async throwing `@MainActor`
   function.
 
-Samples use names a real app defines (`browser`, `options`, `openTab`, …).
+Samples use names a real app defines (`page`, `options`, `openTab`, …).
 PRELUDE declares them, as stubs; it declares no CefSwift API. A sample
 that needs a name it does not have fails, and so does one that uses API
 CefSwift does not have.
@@ -53,11 +53,11 @@ import SwiftUI
 
 // Names the samples use that an app defines. Stubs only: no CefSwift API.
 
-@MainActor var browser = CefBrowser()
-@MainActor var tab = CefBrowser()
-@MainActor var browserConfiguration = CefBrowser.Configuration()
+@MainActor var page = CefPage()
+@MainActor var tab = CefPage()
+@MainActor var pageConfiguration = CefPage.Configuration()
 @MainActor var configuration = CefRuntime.Configuration.embedded
-@MainActor var window = CefWindow(browser: CefBrowser())
+@MainActor var window = CefWindow(page: CefPage())
 @MainActor var profile = CefProfile.default
 @MainActor var bridge = CefBridge(name: "app")
 @MainActor var store = CefKeychainPasskeyStore()
@@ -85,8 +85,8 @@ struct AppSettings { var blockedHosts: [String] = [] }
 @MainActor final class Library { var html = "" }
 struct MediaLibrary: Sendable { func file(for url: URL?) -> URL? { nil } }
 
-@MainActor final class BrowserController: CefBrowserDelegate { func openTab() {} }
-@MainActor final class Policy: CefBrowserDelegate {}
+@MainActor final class BrowserController: CefPageDelegate { func openTab() {} }
+@MainActor final class Policy: CefPageDelegate {}
 @MainActor final class AppDelegate: NSObject, NSApplicationDelegate {}
 
 @MainActor func openTab(_ url: URL?) {}
@@ -101,13 +101,13 @@ struct MediaLibrary: Sendable { func file(for url: URL?) -> URL? { nil } }
 @MainActor func choose(from passkeys: [CefPasskey]) async -> CefPasskey? { nil }
 
 struct ContentView: View { var body: some View { EmptyView() } }
-struct NavigationButtons: View { let browser: CefBrowser; var body: some View { EmptyView() } }
-struct AddressBar: View { let browser: CefBrowser; var body: some View { EmptyView() } }
-struct AddressField: View { let browser: CefBrowser; var body: some View { EmptyView() } }
-struct MyIndicator: View { let browser: CefBrowser; var body: some View { EmptyView() } }
-struct LinkStatus: View { let browser: CefBrowser; var body: some View { EmptyView() } }
+struct NavigationButtons: View { let page: CefPage; var body: some View { EmptyView() } }
+struct AddressBar: View { let page: CefPage; var body: some View { EmptyView() } }
+struct AddressField: View { let page: CefPage; var body: some View { EmptyView() } }
+struct MyIndicator: View { let page: CefPage; var body: some View { EmptyView() } }
+struct LinkStatus: View { let page: CefPage; var body: some View { EmptyView() } }
 struct FindBar: View { let session: CefFindSession; var body: some View { EmptyView() } }
-struct TabIcon: View { let browser: CefBrowser; var body: some View { EmptyView() } }
+struct TabIcon: View { let page: CefPage; var body: some View { EmptyView() } }
 struct StatusBubble: View { let text: String; var body: some View { EmptyView() } }
 struct QRCodeView: View { let url: URL?; var body: some View { EmptyView() } }
 """
