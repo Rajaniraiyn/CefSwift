@@ -33,7 +33,7 @@
 // by hand. See the translator.README.txt file in the tools directory for
 // more information.
 //
-// $hash=e3c50af52b94e7fd0f4a4648f1f07bf5b3f09e2c$
+// $hash=87e2097d8f5c99107ff91addc3ab85432a4b72ec$
 //
 
 #ifndef CEF_INCLUDE_CAPI_CEF_AUDIO_HANDLER_CAPI_H_
@@ -52,7 +52,10 @@ extern "C" {
 #endif
 
 ///
-/// Implement this structure to handle audio events.
+/// Implement this structure to receive captured audio from Alloy style
+/// browsers. The browser's audio output is muted during capture. Clients that
+/// require audible playback must provide their own playback of the audio data
+/// received via OnAudioStreamPacket.
 ///
 /// NOTE: This struct is allocated client-side.
 ///
@@ -64,9 +67,10 @@ typedef struct _cef_audio_handler_t {
 
   ///
   /// Called on the UI thread to allow configuration of audio stream parameters.
-  /// Return true (1) to proceed with audio stream capture, or false (0) to
-  /// cancel it. All members of |params| can optionally be configured here, but
-  /// they are also pre-filled with some sensible defaults.
+  /// Return true (1) to proceed with audio stream capture and mute the
+  /// browser's audio output, or false (0) to cancel capture and leave normal
+  /// audio playback unchanged. All members of |params| can optionally be
+  /// configured here, but they are also pre-filled with some sensible defaults.
   ///
   int(CEF_CALLBACK* get_audio_parameters)(struct _cef_audio_handler_t* self,
                                           struct _cef_browser_t* browser,
@@ -102,7 +106,7 @@ typedef struct _cef_audio_handler_t {
                                              int64_t pts);
 
   ///
-  /// Called on the UI thread when the stream has stopped. OnAudioSteamStopped
+  /// Called on the UI thread when the stream has stopped. OnAudioStreamStopped
   /// will always be called after OnAudioStreamStarted; both functions may be
   /// called multiple times for the same stream.
   ///

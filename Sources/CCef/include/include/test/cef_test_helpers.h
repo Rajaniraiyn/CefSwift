@@ -51,6 +51,8 @@
 #include "include/cef_browser.h"
 #include "include/cef_callback.h"
 #include "include/cef_frame.h"
+#include "include/cef_image.h"
+#include "include/views/cef_window.h"
 
 ///
 /// Execute JavaScript with a user gesture to trigger functionality like
@@ -76,6 +78,63 @@ void CefSetDataDirectoryForTests(const CefString& dir);
 ///
 /*--cef()--*/
 bool CefIsFeatureEnabledForTests(const CefString& feature_name);
+
+#if CEF_API_ADDED(15800)
+///
+/// Receives a browser-window capture on the browser process UI thread.
+///
+/*--cef(source=client,added=15800)--*/
+class CefCaptureBrowserWindowCallback : public virtual CefBaseRefCounted {
+ public:
+  ///
+  /// Called once after capture completes. |image| is NULL if the browser has
+  /// no supported window, the window is unavailable or capture fails.
+  /// A non-NULL image owns its pixels and remains usable after the browser
+  /// window closes.
+  ///
+  /*--cef(optional_param=image)--*/
+  virtual void OnCaptureComplete(CefRefPtr<CefImage> image) = 0;
+};
+
+///
+/// Capture the window containing |browser|, including other views in the same
+/// window. Supports Chrome style and Views-hosted Alloy style. If |native| is
+/// true use the platform snapshot implementation (AppKit window on macOS,
+/// HWND client area on Windows, Aura window on Linux); otherwise capture the
+/// Chromium compositor root layer, excluding the native frame.
+/// The window must be visible. Native captures may require
+/// platform screen-capture permission. Off-screen browsers and windows without
+/// a Views widget are not supported. The image has one representation at the
+/// window's device scale factor. Native capture geometry and alpha depend on
+/// the platform; window-manager decorations and effects may be excluded.
+/// |callback| is required and will execute asynchronously on the browser
+/// process UI thread, including on failure. Must be called on that thread. Does
+/// not activate the window or wait for pending page updates to paint.
+///
+/*--cef(added=15800,optional_param=browser)--*/
+void CefCaptureBrowserWindowForTests(
+    CefRefPtr<CefBrowser> browser,
+    bool native,
+    CefRefPtr<CefCaptureBrowserWindowCallback> callback);
+
+///
+/// Send a left mouse click to the center of the identified target. If |is_menu|
+/// is true, |target_id| is a command ID in the open Views menu owned by
+/// |owner|. Otherwise, |target_id| is a view ID in |owner|. The target must be
+/// drawn, enabled and have visible bounds. Hidden submenus and native platform
+/// menus are not supported. |modifiers| may contain EVENTFLAG_SHIFT_DOWN,
+/// EVENTFLAG_CONTROL_DOWN, EVENTFLAG_ALT_DOWN and EVENTFLAG_COMMAND_DOWN.
+/// Returns false if the target is unavailable, |modifiers| is unsupported or
+/// another call to this function is already dispatching input. Returns true
+/// after dispatching input; test callbacks must verify its effect. Does not
+/// activate the target window. Must be called on the browser process UI thread.
+///
+/*--cef(added=15800)--*/
+bool CefSendMouseClickForTesting(CefRefPtr<CefWindow> owner,
+                                 int target_id,
+                                 bool is_menu,
+                                 uint32_t modifiers);
+#endif  // CEF_API_ADDED(15800)
 
 #if CEF_API_ADDED(CEF_EXPERIMENTAL)
 ///

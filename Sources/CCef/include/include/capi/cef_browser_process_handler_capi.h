@@ -33,7 +33,7 @@
 // by hand. See the translator.README.txt file in the tools directory for
 // more information.
 //
-// $hash=b40850e8ba80bba2825354b35250fcce90f57052$
+// $hash=36b44e82b6c487310ba4e291a790d03f41fd9d04$
 //
 
 #ifndef CEF_INCLUDE_CAPI_CEF_BROWSER_PROCESS_HANDLER_CAPI_H_
@@ -144,9 +144,18 @@ typedef struct _cef_browser_process_handler_t {
   /// CefDoMessageLoopWork). This callback should schedule a
   /// cef_do_message_loop_work() call to happen on the main (UI) thread.
   /// |delay_ms| is the requested delay in milliseconds. If |delay_ms| is <= 0
-  /// then the call should happen reasonably soon. If |delay_ms| is > 0 then the
-  /// call should be scheduled to happen after the specified delay and any
-  /// currently pending scheduled call should be cancelled.
+  /// then the call should happen reasonably soon. If |delay_ms| is > 0 then
+  /// replace any pending scheduled call with a call after the specified delay
+  /// or after the application's maximum pumping interval, whichever is shorter.
+  ///
+  /// The application must also schedule cef_do_message_loop_work() calls when
+  /// no callback is received. Scheduling callbacks do not provide a complete
+  /// sequence of requests for processing all CEF work. A maximum pumping
+  /// interval of approximately 33 milliseconds between calls (30 calls per
+  /// second) is recommended. Marshal scheduling requests to the main
+  /// application thread and avoid recursively calling
+  /// cef_do_message_loop_work(); defer additional work until the active call
+  /// returns.
   ///
   void(CEF_CALLBACK* on_schedule_message_pump_work)(
       struct _cef_browser_process_handler_t* self,

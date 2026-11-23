@@ -746,6 +746,7 @@ class CefBrowserHost : public virtual CefBaseRefCounted {
 
   ///
   /// Send a key event to the browser.
+  /// DEPRECATED: Use SendKeyboardEvent with CefKeyboardInputEvent instead.
   ///
   /*--cef()--*/
   virtual void SendKeyEvent(const CefKeyEvent& event) = 0;
@@ -753,6 +754,7 @@ class CefBrowserHost : public virtual CefBaseRefCounted {
   ///
   /// Send a mouse click event to the browser. The |x| and |y| coordinates are
   /// relative to the upper-left corner of the view.
+  /// DEPRECATED: Use SendMouseEvent with CefMouseInputEvent instead.
   ///
   /*--cef()--*/
   virtual void SendMouseClickEvent(const CefMouseEvent& event,
@@ -763,6 +765,7 @@ class CefBrowserHost : public virtual CefBaseRefCounted {
   ///
   /// Send a mouse move event to the browser. The |x| and |y| coordinates are
   /// relative to the upper-left corner of the view.
+  /// DEPRECATED: Use SendMouseEvent with CefMouseInputEvent instead.
   ///
   /*--cef()--*/
   virtual void SendMouseMoveEvent(const CefMouseEvent& event,
@@ -775,6 +778,7 @@ class CefBrowserHost : public virtual CefBaseRefCounted {
   /// respectively. In order to scroll inside select popups with window
   /// rendering disabled CefRenderHandler::GetScreenPoint should be implemented
   /// properly.
+  /// DEPRECATED: Use SendWheelEvent with CefWheelInputEvent instead.
   ///
   /*--cef()--*/
   virtual void SendMouseWheelEvent(const CefMouseEvent& event,
@@ -782,7 +786,26 @@ class CefBrowserHost : public virtual CefBaseRefCounted {
                                    int deltaY) = 0;
 
   ///
-  /// Send a touch event to the browser for a windowless browser.
+  /// Send a portable touch event to web content. Supports off-screen and native
+  /// browser views with Chromium input routing, including out-of-process
+  /// frames. May be called on any thread. Coordinates are in DIPs relative to
+  /// the upper-left corner of the browser view.
+  ///
+  /// Send coherent pressed/moved/released or cancelled sequences with a unique
+  /// ID for each active contact. Delivers raw DOM touch events and lets
+  /// Chromium recognize gestures. Web-content processing and
+  /// CefInputHandler::OnPreGestureEvent apply to the generated gestures.
+  /// Invalid event data is ignored with a warning. Invalid contact sequencing
+  /// is silently ignored.
+  ///
+  /// For windowed browsers, events enter the native browser view's touch-
+  /// processing path, including gesture recognition and touch acknowledgments.
+  /// This does not synthesize native OS touch events or require a physical
+  /// touchscreen or --touch-events=enabled. The caller must manage browser
+  /// focus.
+  ///
+  /// To submit an already recognized gesture without raw touch delivery or
+  /// touch recognition, use SendGestureEvent with CefGestureInputEvent instead.
   ///
   /*--cef()--*/
   virtual void SendTouchEvent(const CefTouchEvent& event) = 0;
@@ -821,15 +844,18 @@ class CefBrowserHost : public virtual CefBaseRefCounted {
   virtual void SetWindowlessFrameRate(int frame_rate) = 0;
 
   ///
-  /// Begins a new composition or updates the existing composition. Blink has a
-  /// special node (a composition node) that allows the input method to change
-  /// text without affecting other DOM nodes. |text| is the optional text that
-  /// will be inserted into the composition node. |underlines| is an optional
-  /// set of ranges that will be underlined in the resulting text.
+  /// Begins a new composition or updates the existing composition. |text| is
+  /// the optional composition text to insert. |underlines| is an optional set
+  /// of styles for ranges relative to the beginning of the composition text.
   /// |replacement_range| is an optional range of the existing text that will be
-  /// replaced. |selection_range| is an optional range of the resulting text
-  /// that will be selected after insertion or replacement. The
-  /// |replacement_range| value is only used on OS X.
+  /// replaced. |selection_range| must be a valid range, relative to the
+  /// beginning of the composition text, that will be selected after insertion
+  /// or replacement. A collapsed range specifies the cursor position. Text
+  /// offsets and ranges are measured in UTF-16 code units. An empty |text|
+  /// cancels the composition, if any, and can delete the current selection.
+  ///
+  /// IME methods should be called with an editable element focused. Calls with
+  /// a non-editable target may dispatch DOM events without changing its text.
   ///
   /// This method may be called multiple times as the composition changes. When
   /// the client is done making changes the composition should either be
@@ -853,13 +879,15 @@ class CefBrowserHost : public virtual CefBaseRefCounted {
       const CefRange& selection_range) = 0;
 
   ///
-  /// Completes the existing composition by optionally inserting the specified
-  /// |text| into the composition node. |replacement_range| is an optional range
-  /// of the existing text that will be replaced. |relative_cursor_pos| is where
-  /// the cursor will be positioned relative to the current cursor position. See
-  /// comments on ImeSetComposition for usage. The |replacement_range| and
-  /// |relative_cursor_pos| values are only used on OS X.
-  /// This method is only used when window rendering is disabled.
+  /// Inserts |text| and completes the existing composition, if any.
+  /// |replacement_range| is an optional range of the existing text that will be
+  /// replaced, preserving the current selection. When |replacement_range| is
+  /// not specified, |relative_cursor_pos| positions the cursor relative to the
+  /// end of the inserted text. Text offsets and ranges are measured in UTF-16
+  /// code units. An empty |text| can delete the current selection or
+  /// composition text. To apply the current composition text without replacing
+  /// it, call ImeFinishComposingText. See comments on ImeSetComposition for
+  /// usage. This method is only used when window rendering is disabled.
   ///
   /*--cef(optional_param=text)--*/
   virtual void ImeCommitText(const CefString& text,
@@ -868,18 +896,17 @@ class CefBrowserHost : public virtual CefBaseRefCounted {
 
   ///
   /// Completes the existing composition by applying the current composition
-  /// node contents. If |keep_selection| is false the current selection, if any,
-  /// will be discarded. See comments on ImeSetComposition for usage. This
+  /// text. If |keep_selection| is false the cursor moves to the end of the
+  /// composition text. See comments on ImeSetComposition for usage. This
   /// method is only used when window rendering is disabled.
   ///
   /*--cef()--*/
   virtual void ImeFinishComposingText(bool keep_selection) = 0;
 
   ///
-  /// Cancels the existing composition and discards the composition node
-  /// contents without applying them. See comments on ImeSetComposition for
-  /// usage.
-  /// This method is only used when window rendering is disabled.
+  /// Cancels the existing composition and discards the composition text
+  /// without applying it. See comments on ImeSetComposition for usage. This
+  /// method is only used when window rendering is disabled.
   ///
   /*--cef()--*/
   virtual void ImeCancelComposition() = 0;
@@ -997,14 +1024,19 @@ class CefBrowserHost : public virtual CefBaseRefCounted {
                                     const CefSize& max_size) = 0;
 
   ///
-  /// Set whether the browser's audio is muted.
+  /// Set whether the browser's audio is muted. This method does not affect the
+  /// muting of audio output caused by capture via CefAudioHandler. Calling this
+  /// method with false will not restore normal audio playback while capture is
+  /// active.
   ///
   /*--cef()--*/
   virtual void SetAudioMuted(bool mute) = 0;
 
   ///
-  /// Returns true if the browser's audio is muted.  This method can only be
-  /// called on the UI thread.
+  /// Returns true if the browser's audio is muted. This method can only be
+  /// called on the UI thread. The returned value does not reflect the muting of
+  /// audio output caused by capture via CefAudioHandler and may be false while
+  /// capture is active.
   ///
   /*--cef()--*/
   virtual bool IsAudioMuted() = 0;
@@ -1089,6 +1121,99 @@ class CefBrowserHost : public virtual CefBaseRefCounted {
   /*--cef(added=experimental)--*/
   virtual void SetAxViewportCollapse(bool enabled) = 0;
 #endif
+
+#if CEF_API_ADDED(15800)
+  ///
+  /// Send a complete portable keyboard snapshot. Key identity and text are
+  /// preserved without consulting the receiving keyboard layout. Zero timestamp
+  /// uses the dispatch time. Invalid snapshots are ignored with a warning,
+  /// including unsupported types/modifier bits, invalid nonzero DOM encodings,
+  /// negative timestamps, unterminated text buffers, and is_system_key values
+  /// other than zero or one. Supports off-screen and native browser views. May
+  /// be called on any thread.
+  ///
+  /// For windowed browsers, events are forwarded directly to the focused web-
+  /// content renderer, bypassing the native browser view's key-event entry
+  /// point. This does not dispatch input to other native controls or run native
+  /// IME processing. Browser keyboard callbacks and unhandled-event fallback
+  /// handling still apply, including Views accelerator handling.
+  ///
+  /// Text in CEF_KEY_EVENT_RAWKEYDOWN is metadata and does not generate a
+  /// CEF_KEY_EVENT_CHAR event. For ordinary portable typing, send separate
+  /// RAWKEYDOWN, CHAR, and KEYUP events. Native key conversion alone does not
+  /// perform text insertion or IME composition. For off-screen IME composition,
+  /// use ImeSetComposition and related methods.
+  ///
+  /*--cef(added=15800)--*/
+  virtual void SendKeyboardEvent(const CefKeyboardInputEvent& event) = 0;
+
+  ///
+  /// Send a portable mouse snapshot to web content. Supports off-screen and
+  /// native browser views with Chromium input routing, including out-of-process
+  /// frames. Events are injected directly into web content, bypassing native
+  /// controls and OS event synthesis. Zero timestamp uses the dispatch time.
+  /// Invalid snapshots are ignored with a warning. May be called on any thread.
+  /// Coordinates are in DIPs; provide both widget and screen positions.
+  ///
+  /// Down/up events must specify the changed button, click count, and the
+  /// held-button modifiers appropriate for that event.
+  ///
+  /// For windowed browsers, this bypasses the native browser view's mouse-
+  /// event entry point. It does not deliver events to browser chrome or Views
+  /// controls, or perform native focus/capture handling. The caller must manage
+  /// browser focus and any required native input capture. Web-content
+  /// processing and CefInputHandler::OnPreMouseEvent still apply.
+  ///
+  /*--cef(added=15800)--*/
+  virtual void SendMouseEvent(const CefMouseInputEvent& event) = 0;
+
+  ///
+  /// Send a portable gesture snapshot to web content. Supports off-screen and
+  /// native browser views with Chromium input routing, including out-of-process
+  /// frames. Events are injected directly into web content, bypassing native
+  /// controls and OS event synthesis. Zero timestamp uses the dispatch time.
+  /// Invalid snapshots are ignored with a warning. May be called on any thread.
+  /// Coordinates are in DIPs; provide both widget and screen positions.
+  ///
+  /// Send coherent begin/update/end sequences and populate only the fields
+  /// that apply to the gesture type. Chromium may consume or filter gestures
+  /// before the pre-handler, for example disabled pinch zoom.
+  ///
+  /// For windowed browsers, this bypasses the native browser view's gesture-
+  /// event entry point. It does not deliver events to browser chrome or Views
+  /// controls, or perform native focus/capture handling. The caller must manage
+  /// browser focus and any required native input capture. Web-content
+  /// processing and CefInputHandler::OnPreGestureEvent still apply.
+  ///
+  /// This submits an already recognized gesture without running a native
+  /// touch/trackpad recognizer or synthesizing the underlying DOM touch events.
+  /// For raw touch delivery and Chromium gesture recognition, use
+  /// SendTouchEvent instead.
+  ///
+  /*--cef(added=15800)--*/
+  virtual void SendGestureEvent(const CefGestureInputEvent& event) = 0;
+
+  ///
+  /// Send a portable wheel snapshot to web content. Supports off-screen and
+  /// native browser views with Chromium input routing, including out-of-process
+  /// frames. Events are injected directly into web content, bypassing native
+  /// controls and OS event synthesis. Zero timestamp uses the dispatch time.
+  /// Invalid snapshots are ignored with a warning. May be called on any thread.
+  /// Coordinates are in DIPs; provide both widget and screen positions.
+  ///
+  /// For windowed browsers, this bypasses native OS wheel-event dispatch and
+  /// translation. It does not deliver events to browser chrome or Views
+  /// controls, or perform native focus/capture handling. The caller must manage
+  /// browser focus and any required native input capture. DOM wheel listeners
+  /// and Chromium's wheel acknowledgment, scrolling and gesture processing
+  /// still apply. There is currently no CefInputHandler callback for wheels.
+  ///
+  /// Use this method for wheel/trackpad scrolling. SendGestureEvent submits
+  /// already recognized gestures and does not replace DOM wheel delivery.
+  ///
+  /*--cef(added=15800)--*/
+  virtual void SendWheelEvent(const CefWheelInputEvent& event) = 0;
+#endif  // CEF_API_ADDED(15800)
 };
 
 #endif  // CEF_INCLUDE_CEF_BROWSER_H_

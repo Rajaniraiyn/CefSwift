@@ -33,7 +33,7 @@
 // by hand. See the translator.README.txt file in the tools directory for
 // more information.
 //
-// $hash=8d83f8f613ef1659d0057ed2f329c242c378fc6d$
+// $hash=020bf5bcfc56a61a87dfb0951a83657d99a1f55f$
 //
 
 #ifndef CEF_INCLUDE_CAPI_VIEWS_CEF_VIEW_DELEGATE_CAPI_H_
@@ -136,7 +136,12 @@ typedef struct _cef_view_delegate_t {
                                         const cef_rect_t* new_bounds);
 
   ///
-  /// Called when |view| gains focus.
+  /// Called when |view| gains focus within its containing Window. Containers,
+  /// including cef_window_t, are not focusable by default; call
+  /// SetFocusable(true (1)) and request_focus() to focus them. This callback
+  /// does not report focus gained by child Views or activation of the native
+  /// Window. Use cef_window_delegate_t::OnWindowActivationChanged for native
+  /// Window activation.
   ///
   void(CEF_CALLBACK* on_focus)(struct _cef_view_delegate_t* self,
                                struct _cef_view_t* view);

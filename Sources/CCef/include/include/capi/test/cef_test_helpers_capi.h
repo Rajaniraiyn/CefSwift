@@ -33,7 +33,7 @@
 // by hand. See the translator.README.txt file in the tools directory for
 // more information.
 //
-// $hash=4b79dbc9c8add3d687829498e390b5a896c12ce2$
+// $hash=f11ffdab9674dc1f7874a94c39a408eb32c374b3$
 //
 
 #ifndef CEF_INCLUDE_CAPI_TEST_CEF_TEST_HELPERS_CAPI_H_
@@ -51,10 +51,37 @@
 #include "include/capi/cef_browser_capi.h"
 #include "include/capi/cef_callback_capi.h"
 #include "include/capi/cef_frame_capi.h"
+#include "include/capi/cef_image_capi.h"
+#include "include/capi/views/cef_window_capi.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+#if CEF_API_ADDED(15800)
+
+///
+/// Receives a browser-window capture on the browser process UI thread.
+///
+/// NOTE: This struct is allocated client-side.
+///
+typedef struct _cef_capture_browser_window_callback_t {
+  ///
+  /// Base structure.
+  ///
+  cef_base_ref_counted_t base;
+
+  ///
+  /// Called once after capture completes. |image| is NULL if the browser has no
+  /// supported window, the window is unavailable or capture fails. A non-NULL
+  /// image owns its pixels and remains usable after the browser window closes.
+  ///
+  void(CEF_CALLBACK* on_capture_complete)(
+      struct _cef_capture_browser_window_callback_t* self,
+      struct _cef_image_t* image);
+} cef_capture_browser_window_callback_t;
+
+#endif  // CEF_API_ADDED(15800)
 
 ///
 /// Execute JavaScript with a user gesture to trigger functionality like
@@ -79,6 +106,47 @@ CEF_EXPORT void cef_set_data_directory_for_tests(const cef_string_t* dir);
 ///
 CEF_EXPORT int cef_is_feature_enabled_for_tests(
     const cef_string_t* feature_name);
+
+#if CEF_API_ADDED(15800)
+///
+/// Capture the window containing |browser|, including other views in the same
+/// window. Supports Chrome style and Views-hosted Alloy style. If |native| is
+/// true (1) use the platform snapshot implementation (AppKit window on macOS,
+/// HWND client area on Windows, Aura window on Linux); otherwise capture the
+/// Chromium compositor root layer, excluding the native frame. The window must
+/// be visible. Native captures may require platform screen-capture permission.
+/// Off-screen browsers and windows without a Views widget are not supported.
+/// The image has one representation at the window's device scale factor. Native
+/// capture geometry and alpha depend on the platform; window-manager
+/// decorations and effects may be excluded. |callback| is required and will
+/// execute asynchronously on the browser process UI thread, including on
+/// failure. Must be called on that thread. Does not activate the window or wait
+/// for pending page updates to paint.
+///
+CEF_EXPORT void cef_capture_browser_window_for_tests(
+    struct _cef_browser_t* browser,
+    int native,
+    cef_capture_browser_window_callback_t* callback);
+#endif
+
+#if CEF_API_ADDED(15800)
+///
+/// Send a left mouse click to the center of the identified target. If |is_menu|
+/// is true (1), |target_id| is a command ID in the open Views menu owned by
+/// |owner|. Otherwise, |target_id| is a view ID in |owner|. The target must be
+/// drawn, enabled and have visible bounds. Hidden submenus and native platform
+/// menus are not supported. |modifiers| may contain EVENTFLAG_SHIFT_DOWN,
+/// EVENTFLAG_CONTROL_DOWN, EVENTFLAG_ALT_DOWN and EVENTFLAG_COMMAND_DOWN.
+/// Returns false (0) if the target is unavailable, |modifiers| is unsupported
+/// or another call to this function is already dispatching input. Returns true
+/// (1) after dispatching input; test callbacks must verify its effect. Does not
+/// activate the target window. Must be called on the browser process UI thread.
+///
+CEF_EXPORT int cef_send_mouse_click_for_testing(struct _cef_window_t* owner,
+                                                int target_id,
+                                                int is_menu,
+                                                uint32_t modifiers);
+#endif
 
 #if CEF_API_ADDED(CEF_EXPERIMENTAL)
 ///

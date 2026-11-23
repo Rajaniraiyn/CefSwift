@@ -33,7 +33,7 @@
 // by hand. See the translator.README.txt file in the tools directory for
 // more information.
 //
-// $hash=26429475022ab86051aac691af67d87dd927acc3$
+// $hash=de165242dfca697372ff4b40d70c6084050cc6b7$
 //
 
 #ifndef CEF_INCLUDE_CAPI_VIEWS_CEF_TEXTFIELD_DELEGATE_CAPI_H_
@@ -68,7 +68,11 @@ typedef struct _cef_textfield_delegate_t {
   ///
   /// Called when |textfield| receives a keyboard event. |event| contains
   /// information about the keyboard event. Return true (1) if the keyboard
-  /// event was handled or false (0) otherwise for default handling.
+  /// event was handled or false (0) otherwise for default handling. On macOS,
+  /// native Views text interpretation may deliver KEYEVENT_CHAR instead of a
+  /// printable keydown, followed by KEYEVENT_KEYUP. Do not assume that every
+  /// keyup has a corresponding keydown callback. DEPRECATED: Use
+  /// OnKeyboardEvent with CefKeyboardInputEvent instead.
   ///
   int(CEF_CALLBACK* on_key_event)(struct _cef_textfield_delegate_t* self,
                                   struct _cef_textfield_t* textfield,
@@ -80,6 +84,23 @@ typedef struct _cef_textfield_delegate_t {
   void(CEF_CALLBACK* on_after_user_action)(
       struct _cef_textfield_delegate_t* self,
       struct _cef_textfield_t* textfield);
+
+#if CEF_API_ADDED(15800)
+  ///
+  /// Called when |textfield| receives a keyboard event. |event| contains the
+  /// resolved platform-independent keyboard snapshot. Return true (1) to handle
+  /// the event or false (0) to try OnKeyEvent before default handling.
+  ///
+  /// On macOS, native Views text interpretation may consume a printable keydown
+  /// and deliver CEF_KEY_EVENT_CHAR instead. CEF_KEY_EVENT_KEYUP can still
+  /// follow, so do not assume that every keyup has a corresponding keydown
+  /// callback.
+  ///
+  int(CEF_CALLBACK* on_keyboard_event)(
+      struct _cef_textfield_delegate_t* self,
+      struct _cef_textfield_t* textfield,
+      const struct _cef_keyboard_input_event_t* event);
+#endif
 } cef_textfield_delegate_t;
 
 #ifdef __cplusplus

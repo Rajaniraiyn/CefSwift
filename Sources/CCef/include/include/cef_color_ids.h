@@ -196,6 +196,12 @@
   E_CPONLY(CEF_ColorSysSurface4) \
   E_CPONLY(CEF_ColorSysSurface5) \
   E_CPONLY(CEF_ColorSysSurfaceNumberedForeground) \
+  /* Material 3 surface container roles, ordered Lowest to Highest. */ \
+  E_CPONLY(CEF_ColorSysSurfaceContainerLowest) \
+  E_CPONLY(CEF_ColorSysSurfaceContainerLow) \
+  E_CPONLY(CEF_ColorSysSurfaceContainer) \
+  E_CPONLY(CEF_ColorSysSurfaceContainerHigh) \
+  E_CPONLY(CEF_ColorSysSurfaceContainerHighest) \
   /* General. */ \
   E_CPONLY(CEF_ColorSysOnSurfaceSecondary) \
   E_CPONLY(CEF_ColorSysOnSurfaceSubtle) \
@@ -780,7 +786,9 @@
   E_CPONLY(CEF_ColorAppMenuChipInkDropHover) \
   E_CPONLY(CEF_ColorAppMenuChipInkDropRipple) \
   E_CPONLY(CEF_ColorAppMenuYourChromeBackground) \
+  E_CPONLY(CEF_ColorAppMenuYourChromeForeground) \
   E_CPONLY(CEF_ColorAppMenuToolsAndActionsBackground) \
+  E_CPONLY(CEF_ColorAppMenuToolsAndActionsForeground) \
   E_CPONLY(CEF_ColorAppMenuBlockButtonBackground) \
   E_CPONLY(CEF_ColorAppMenuBlockButtonBackgroundHovered) \
   E_CPONLY(CEF_ColorAppMenuBlockButtonBorder) \
@@ -997,6 +1005,8 @@
   E_CPONLY(CEF_ColorInfoBarButtonIconHovered) \
   E_CPONLY(CEF_ColorInfoBarContentAreaSeparator) \
   E_CPONLY(CEF_ColorInfoBarForeground) \
+  E_CPONLY(CEF_ColorInfoBarQueuedCountPillBackground) \
+  E_CPONLY(CEF_ColorInfoBarQueuedCountPillForeground) \
   /* There is also a CEF_ColorInfoBarIcon in /ui/color/color_id.h */ \
   /* Intent Picker colors. */ \
   E_CPONLY(CEF_ColorIntentPickerItemBackgroundHovered) \
@@ -1057,7 +1067,9 @@
   E_CPONLY(CEF_ColorNewTabButtonInkDropFrameInactive) \
   E_CPONLY(CEF_ColorTabStripComboButtonSeparator) \
   E_CPONLY(CEF_ColorTabStripControlButtonInkDrop) \
+  E_CPONLY(CEF_ColorTabStripControlButtonInkDropFrameInactive) \
   E_CPONLY(CEF_ColorTabStripControlButtonInkDropRipple) \
+  E_CPONLY(CEF_ColorTabStripControlButtonInkDropRippleFrameInactive) \
   E_CPONLY(CEF_ColorTabStripScrollButtonBackground) \
   E_CPONLY(CEF_ColorTabStripScrollButtonIcon) \
   /* New tab button colors for ChromeRefresh.*/ \
@@ -1088,7 +1100,8 @@
   E_CPONLY(CEF_ColorNewTabPageActionChipTextTitle) \
   E_CPONLY(CEF_ColorNewTabPageActionChipDeepSearchIcon) \
   E_CPONLY(CEF_ColorNewTabPageThreadsRailBackground) \
-  E_CPONLY(CEF_ColorNewTabPageThreadsRailIconButton) \
+  E_CPONLY(CEF_ColorNewTabPageThreadsRailPrimaryFont) \
+  E_CPONLY(CEF_ColorNewTabPageThreadsRailHoverBackground) \
   E_CPONLY(CEF_ColorNewTabPageChipBackground) \
   E_CPONLY(CEF_ColorNewTabPageChipForeground) \
   E_CPONLY(CEF_ColorNewTabPageComposeboxSubmitButtonBackground) \
@@ -1096,6 +1109,7 @@
   E_CPONLY(CEF_ColorComposeboxFileChipSpinner) \
   E_CPONLY(CEF_ColorComposeboxFont) \
   E_CPONLY(CEF_ColorComposeboxFontLight) \
+  E_CPONLY(CEF_ColorComposeboxGhostCardBackground) \
   E_CPONLY(CEF_ColorComposeboxCancelButton) \
   E_CPONLY(CEF_ColorComposeboxCancelButtonLight) \
   E_CPONLY(CEF_ColorComposeboxErrorScrimBackground) \
@@ -1115,7 +1129,6 @@
   E_CPONLY(CEF_ColorComposeboxTypeAhead) \
   E_CPONLY(CEF_ColorComposeboxTypeAheadChip) \
   E_CPONLY(CEF_ColorComposeboxUploadButton) \
-  E_CPONLY(CEF_ColorComposeboxUploadButtonDisabled) \
   E_CPONLY(CEF_ColorComposeboxFileChipBackground) \
   E_CPONLY(CEF_ColorComposeboxFileChipFaviconBackground) \
   E_CPONLY(CEF_ColorComposeboxFileChipText) \
@@ -1298,6 +1311,11 @@
   E_CPONLY(CEF_ColorOmniboxSelectionForeground) \
   E_CPONLY(CEF_ColorOmniboxText) \
   E_CPONLY(CEF_ColorOmniboxTextDimmed) \
+  /* Organizer Panel colors. */ \
+  E_CPONLY(CEF_ColorOrganizerPanelBackground) \
+  E_CPONLY(CEF_ColorOrganizerPanelDivider) \
+  E_CPONLY(CEF_ColorOrganizerPanelForeground) \
+  E_CPONLY(CEF_ColorOrganizerPanelForegroundSubtle) \
   /* Page Info colors */ \
   E_CPONLY(CEF_ColorPageInfoChosenObjectDeleteButtonIcon) \
   E_CPONLY(CEF_ColorPageInfoChosenObjectDeleteButtonIconDisabled) \
@@ -1622,6 +1640,8 @@
   E_CPONLY(CEF_ColorSettingsWebuiPageBackground) \
   E_CPONLY(CEF_ColorSettingsTitleText) \
   E_CPONLY(CEF_ColorSettingsSectionBackground) \
+  E_CPONLY(CEF_ColorSettingsRowBackgroundHovered) \
+  E_CPONLY(CEF_ColorSettingsRowBackgroundActive) \
   /* Share-this-tab dialog colors. */ \
   E_CPONLY(CEF_ColorShareThisTabAudioToggleBackground) \
   E_CPONLY(CEF_ColorShareThisTabSourceViewBorder) \
@@ -1751,6 +1771,8 @@
   E_CPONLY(CEF_ColorTabForegroundActiveFrameInactive) \
   E_CPONLY(CEF_ColorTabForegroundInactiveFrameActive) \
   E_CPONLY(CEF_ColorTabForegroundInactiveFrameInactive) \
+  E_CPONLY(CEF_ColorTabForegroundInactiveHoverFrameActive) \
+  E_CPONLY(CEF_ColorTabForegroundInactiveHoverFrameInactive) \
   E_CPONLY(CEF_ColorTabDividerFrameActive) \
   E_CPONLY(CEF_ColorTabDividerFrameInactive) \
   E_CPONLY(CEF_ColorTabHoverCardBackground) \
@@ -1954,6 +1976,13 @@
     E_CPONLY(CEF_ColorCaptionForegroundInactive) \
     /* Tab search caption button colors. */ \
     E_CPONLY(CEF_ColorTabSearchCaptionButtonFocusRing)
+#elif defined(OS_ANDROID)
+#define CHROME_PLATFORM_SPECIFIC_COLOR_IDS \
+    /* History colors. */ \
+    E_CPONLY(CEF_ColorHistoryPageCardBackground) \
+    E_CPONLY(CEF_ColorHistoryPageMenuBackground) \
+    E_CPONLY(CEF_ColorHistoryPageSearchFieldBackground) \
+    E_CPONLY(CEF_ColorHistoryPageSelectionToolbarBackground)
 #else
 #define CHROME_PLATFORM_SPECIFIC_COLOR_IDS
 #endif  // defined(OS_WIN)
