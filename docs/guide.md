@@ -905,6 +905,11 @@ In return the host drives the page as AppKit drives a view:
   `performDrop(at:modifiers:)` and `draggingSessionEnded(at:operation:)`,
   which mirror `NSDraggingDestination` and `NSDraggingSource`.
 
+With CEF 158, `sendTouchEvent(_:)` also delivers touch sequences to web
+content in a focused windowed page. Use coordinates relative to the
+top-left of the page view and keep each contact's ID stable until it ends
+or is cancelled.
+
 The page's tooltips (a `title` under the mouse) reach the host through
 `offscreenDidChangeToolTip(_:)`; `CefOffscreenPageView` shows them as
 its own `toolTip`, as AppKit does for any view (see [Tooltips](#tooltips)).

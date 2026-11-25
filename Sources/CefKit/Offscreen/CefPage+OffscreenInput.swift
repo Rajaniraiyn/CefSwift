@@ -16,7 +16,7 @@ public enum CefMouseButton: Sendable {
     }
 }
 
-/// A touch sent to an offscreen page with ``CefPage/sendTouchEvent(_:)``.
+/// A touch sent to web content with ``CefPage/sendTouchEvent(_:)``.
 public struct CefTouchEvent: Sendable, Equatable {
     /// Where the touch is in its sequence. A touch begins, moves zero or
     /// more times, then ends or is cancelled.
@@ -155,7 +155,10 @@ extension CefPage {
         }
     }
 
-    /// Forwards a touch.
+    /// Sends a touch to web content. CEF 158 supports this in both offscreen
+    /// and windowed pages. Coordinates are relative to the top-left of the
+    /// page view. Keep each contact's ID stable until it ends or is cancelled.
+    /// For windowed pages, focus the page before sending input.
     public func sendTouchEvent(_ event: CefTouchEvent) {
         withHost { host in
             var event = event.cefValue

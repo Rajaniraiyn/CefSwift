@@ -379,6 +379,15 @@ struct StaticPage: CefSchemeHandler {
                 <h1>Transfer</h1>
                 <script>
                   addEventListener('mousedown', e => { document.title = 'down ' + e.clientX + ',' + e.clientY; });
+                  const touches = [];
+                  for (const type of ['touchstart', 'touchend']) {
+                    addEventListener(type, e => {
+                      const touch = e.changedTouches[0];
+                      touches.push(`${type} ${touch.clientX},${touch.clientY}`);
+                      document.title = touches.join('; ');
+                      e.preventDefault();
+                    }, {passive: false});
+                  }
                 </script>
                 """
         case "/history-probe.html":
