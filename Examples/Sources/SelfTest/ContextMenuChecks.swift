@@ -84,7 +84,14 @@ extension SelfTest {
         let url = base.appendingPathComponent(target.page)
         if page.url != url || reload {
             guard await load(url, in: page) else { return nil }
-            try? await Task.sleep(for: target.settle)
+            if target.page == "doc.pdf" {
+                try? await Task.sleep(for: target.settle)
+            } else {
+                // Let Chromium update hit testing after the navigation.
+                _ = try? await page.evaluateJavaScript("""
+                    new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))))
+                    """, timeout: .seconds(2))
+            }
         }
         var point = target.point
         if !target.prepare.isEmpty || target.element != nil {
@@ -107,7 +114,8 @@ extension SelfTest {
         let before = recorder.menus.count
         for type in ["mousePressed", "mouseReleased"] {
             _ = try? await page.devTools.send("Input.dispatchMouseEvent", [
-                "type": .string(type), "x": .number(point.x), "y": .number(point.y), "button": "right", "buttons": 2, "clickCount": 1,
+                "type": .string(type), "x": .number(point.x), "y": .number(point.y), "button": "right",
+                "buttons": .number(type == "mousePressed" ? 2 : 0), "clickCount": 1,
             ])
         }
         guard await waitUntil(timeout: .seconds(5), { recorder.menus.count > before && chromium != nil }) else { return nil }
