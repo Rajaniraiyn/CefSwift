@@ -22,6 +22,15 @@ extension CefPage {
         // The document has committed, so a level set before the page
         // existed applies to its site.
         applyPendingZoomLevel(for: url)
+        if pendingAudioMuted != nil, let url, url.scheme != "about" {
+            // Let Chromium's sound policy finish processing the commit first.
+            let browserID = identifier
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.identifier == browserID else { return }
+                self.applyPendingAudioMuted(afterFirstCommit: true)
+                self.refreshAudioMuted()
+            }
+        }
         pageDidStartLoading()
         // The new document reports its own icon. A restored page keeps the
         // one it had until then, so its tab does not flash empty.

@@ -73,9 +73,10 @@ maintainer and any other repository, a fork included, adds no trailer.
 
 ## Moving `CEF_API_VERSION`
 
-The pin in `Sources/CCef/include/ccef_config.h` keeps the C API the Swift
-code sees the same across CEF updates; newer CEF APIs stay hidden until the
-pin moves. Moving it is a separate, reviewed change:
+The pin in `Sources/CCef/include/ccef_config.h` selects a versioned CEF ABI.
+Newer versioned CEF APIs stay hidden until the pin moves. Swift also imports
+unversioned headers such as Chromium's command IDs, which can change with
+the CEF release. Moving the API pin is a separate, reviewed change:
 
 - Run **CEF Update** by hand with `api_version` set to `latest` (the newest
   version in the vendored `cef_api_versions.h`) or a number such as `15700`.

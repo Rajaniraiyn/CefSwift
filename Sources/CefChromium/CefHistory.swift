@@ -246,8 +246,9 @@ public final class CefHistory {
                 return { url: e.url, title: e.title, time: e.time, times: times.length ? times : [e.time], starred: !!e.starred };
               };
               const batch = async (first, text, size) => {
+                // Chromium 158 requires clientIds. An empty list leaves the client filter unset.
                 const results = (await (first
-                  ? handler.queryHistory(text, size, null, true, false)
+                  ? handler.queryHistory(text, size, null, true, false, [])
                   : handler.queryHistoryContinuation())).results;
                 return { entries: results.value, finished: !!results.info?.finished || !results.value.length };
               };

@@ -7,7 +7,32 @@ extension SelfTest {
     static func hostingChecks() async {
         await offscreenTransferChecks()
         await windowedTransferChecks()
+        await windowedTouchChecks()
         await settersBeforeCreationChecks()
+    }
+
+    private static func windowedTouchChecks() async {
+        let name = "hosting: a windowed page receives a touch sequence at the requested coordinates"
+        guard window.occlusionState.contains(.visible) else {
+            skip(name, because: "the test window is not visible (screen locked or asleep?)", .environment)
+            return
+        }
+
+        let page = CefPage(url: URL(string: "selftest://app/windowed-touch.html")!)
+        let view = hostWindowed(page)
+        guard await loaded(page), await waitUntil({ page.title == "touch ready" }) else {
+            check(name, false, detail: "touch target did not paint: \(page.title)")
+            await closeHosted(page, view)
+            return
+        }
+        page.hostViewDidBecomeKey()
+        let point = CGPoint(x: 30, y: 40)
+        page.sendTouchEvent(.init(id: 1, location: point, phase: .began, pressure: 1))
+        let began = await waitUntil { page.title == "touchstart 30,40" }
+        page.sendTouchEvent(.init(id: 1, location: point, phase: .ended))
+        let ended = await waitUntil { page.title == "touchstart 30,40; touchend 30,40" }
+        check(name, began && ended, detail: page.title)
+        await closeHosted(page, view)
     }
 
     /// Zoom and mute set before Chromium creates the page apply once it

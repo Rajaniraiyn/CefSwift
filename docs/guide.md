@@ -388,6 +388,18 @@ keychain of ad hoc builds has no item.
 when the keychain has one; [bundling](bundling.md#distribution) lists what
 each kind of signature allows.
 
+#### Upgrading profiles from CEF 156
+
+Chromium 158 uses a different encryption key for custom macOS data directories,
+including CefSwift's per-app default. Plan for users to sign in to sites again
+after upgrading an existing profile. Chromium discards unreadable cookies on
+first use. Other data encrypted with the old key, such as saved passwords,
+may also be unreadable. CefSwift keeps Chromium's new key protection enabled.
+
+In an upgrade test with ad hoc signing, persistent cookies were lost across all
+three profiles. Browsing history and local storage survived. Team-signed keychain
+profiles were outside that test. [Chromium's key selection](https://chromium.googlesource.com/chromium/src/+/refs/tags/158.0.8127.89/chrome/browser/browser_process_impl.cc)
+
 ### Enterprise policies
 
 Chromium applies the policies an administrator manages for Chrome
@@ -904,6 +916,11 @@ In return the host drives the page as AppKit drives a view:
   `draggingUpdated(at:modifiers:allowedOperations:)`, `draggingExited()`,
   `performDrop(at:modifiers:)` and `draggingSessionEnded(at:operation:)`,
   which mirror `NSDraggingDestination` and `NSDraggingSource`.
+
+With CEF 158, `sendTouchEvent(_:)` also delivers touch sequences to web
+content in a focused windowed page. Use coordinates relative to the
+top-left of the page view and keep each contact's ID stable until it ends
+or is cancelled.
 
 The page's tooltips (a `title` under the mouse) reach the host through
 `offscreenDidChangeToolTip(_:)`; `CefOffscreenPageView` shows them as
@@ -1472,6 +1489,8 @@ starting audio, a `beforeunload` prompt. `evaluateJavaScript(_:userGesture:
 true)` runs the script as if the user had just clicked. Only the DevTools
 Protocol can do that, so it attaches `devTools` to the page; see
 [Compatibility with bot protection](#compatibility-with-bot-protection).
+In Chromium 158, a gesture-based fullscreen request also requires the page
+view to have keyboard focus. Focus the hosted view before evaluating the script.
 
 ### Frames
 
@@ -1861,7 +1880,8 @@ a `window.open` without a user gesture never reaches
 `decideWindowOpenFor`, unless the site's `.popups` setting allows popups
 (the default blocks them). An app that wants to see such popups, to offer
 "Show blocked popup" or to open them itself, allows the setting and decides
-in the delegate, where `hasUserGesture` is `false`:
+in the delegate. `hasUserGesture` reflects the document's activation at the
+time of the request, which can carry over from an earlier interaction.
 
 ```swift
 profile.siteSettings.set(.allow, for: .popups, origin: URL(string: "https://example.com")!)
@@ -3268,7 +3288,7 @@ for try await result in profile.autocomplete.results(following: texts) {
 
 CEF has no API for any of this. CefChromium uses the services Chromium's own
 pages use (`chrome.bookmarks`, and the Mojo handlers of the history, new
-tab and `chrome://omnibox` pages) from hidden service hosts, one renderer
+tab and `chrome://omnibox-internals` pages) from hidden service hosts, one renderer
 process each. A host starts on the first call that needs it, in about a
 tenth of a second, and closes 30 seconds after its last call, when macOS
 runs low on memory, and when its profile's last page closes, which lets
@@ -3284,7 +3304,7 @@ in a new profile that has no file yet, those reads start the host
 
 These interfaces are internal to Chromium and more likely than CefKit to
 change with a Chromium update, which is why they live in the optional
-`CefChromium` library, bound to the pinned CEF; `chrome://omnibox` is a
+`CefChromium` library, bound to the pinned CEF; `chrome://omnibox-internals` is a
 debugging page, so `autocomplete` is experimental. SelfTest exercises all
 of them, so a CEF update that breaks one fails CI.
 
@@ -3308,7 +3328,7 @@ latency the median of five calls.
 | `history.search`, `remove` | `chrome://history` | 27 MB | 175 ms | 2 ms |
 | `history.topSites()` | `chrome://new-tab-page-third-party` | 21 MB | 127 ms | 1 ms |
 | `history.favicon(for:size:)` | `chrome://bookmarks` or `chrome://history`, whichever runs | 0 when one runs | 16 ms | 2 ms |
-| `autocomplete` | `chrome://omnibox` | 23 MB | 234 ms | 9 ms |
+| `autocomplete` | `chrome://omnibox-internals` | 23 MB | 234 ms | 9 ms |
 | Discarding | `chrome://discards` | 22 MB | 122 ms | 1 ms |
 
 The Browser example uses them for address-field suggestions

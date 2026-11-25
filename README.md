@@ -194,6 +194,9 @@ These come from CEF 156 and official CEF builds. The guide's
 The CEF version is pinned in `CEF_VERSION.json` and updated by
 [automation](docs/automation.md).
 
+Upgrading an existing profile from CEF 156 to 158 can require signing in to
+sites again. [Profile upgrade details](docs/guide.md#upgrading-profiles-from-cef-156)
+
 ## Documentation
 
 - [Guide](docs/guide.md): how to do each task.

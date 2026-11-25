@@ -51,6 +51,8 @@
 #include "include/capi/cef_frame_handler_capi.h"
 #include "include/capi/cef_i18n_util_capi.h"
 #include "include/capi/cef_image_capi.h"
+#include "include/capi/cef_input_event_utils_capi.h"
+#include "include/capi/cef_input_handler_capi.h"
 #include "include/capi/cef_jsdialog_handler_capi.h"
 #include "include/capi/cef_keyboard_handler_capi.h"
 #include "include/capi/cef_life_span_handler_capi.h"

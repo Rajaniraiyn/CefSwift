@@ -94,20 +94,23 @@ extension CefPage {
                 observedAudioMuted = newValue
                 return
             }
+            pendingAudioMuted = nil
             withHost { $0.pointee.set_audio_muted($0, newValue ? 1 : 0) }
             refreshAudioMuted()
         }
     }
 
-    /// Applies a mute set before the page existed.
-    func applyPendingAudioMuted() {
+    /// Mutes at creation and reapplies after the first document commits,
+    /// when Chromium has finished initializing the site's sound settings.
+    func applyPendingAudioMuted(afterFirstCommit: Bool = false) {
         guard let muted = pendingAudioMuted, raw != nil else { return }
-        pendingAudioMuted = nil
+        if afterFirstCommit { pendingAudioMuted = nil }
         withHost { $0.pointee.set_audio_muted($0, muted ? 1 : 0) }
     }
 
     /// Reads the mute state back from Chromium.
     func refreshAudioMuted() {
+        guard pendingAudioMuted == nil else { return }
         let muted = withHost { $0.pointee.is_audio_muted($0) != 0 } ?? false
         if muted != observedAudioMuted { observedAudioMuted = muted }
     }

@@ -33,7 +33,7 @@
 // by hand. See the translator.README.txt file in the tools directory for
 // more information.
 //
-// $hash=998158196fdbff4445978a92c8865ce981b4d955$
+// $hash=92d4e9f808f01552647cbc84bad0691b2220d8d8$
 //
 
 #ifndef CEF_INCLUDE_CAPI_CEF_APP_CAPI_H_
@@ -178,10 +178,21 @@ CEF_EXPORT void cef_shutdown(void);
 /// usage. It is recommended to enable the cef_settings_t.external_message_pump
 /// option when using this function so that
 /// cef_browser_process_handler_t::on_schedule_message_pump_work() callbacks can
-/// facilitate the scheduling process. This function should only be called on
-/// the main application thread and only if cef_initialize() is called with a
-/// cef_settings_t.multi_threaded_message_loop value of false (0). This function
-/// will not block.
+/// facilitate the scheduling process.
+///
+/// This function must be called regularly, including when external_message_pump
+/// is enabled and no on_schedule_message_pump_work() callback has been
+/// received. Scheduling callbacks do not provide a complete sequence of
+/// requests for processing all CEF work. A maximum interval of approximately 33
+/// milliseconds between calls (30 calls per second) is recommended. Calling too
+/// infrequently may starve CEF work; calling too frequently may increase CPU
+/// usage.
+///
+/// This function should only be called on the main application thread and only
+/// if cef_initialize() is called with a
+/// cef_settings_t.multi_threaded_message_loop value of false (0). Avoid
+/// recursively calling this function; defer additional work until the active
+/// call returns. This function will not block.
 ///
 CEF_EXPORT void cef_do_message_loop_work(void);
 

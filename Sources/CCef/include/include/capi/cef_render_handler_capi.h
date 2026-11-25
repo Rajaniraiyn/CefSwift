@@ -33,7 +33,7 @@
 // by hand. See the translator.README.txt file in the tools directory for
 // more information.
 //
-// $hash=dc7ec3b13cc21a4b15675ed1139834b076e97dde$
+// $hash=38ad51a1a9ceecdfafed5065346f09911bcbabac$
 //
 
 #ifndef CEF_INCLUDE_CAPI_CEF_RENDER_HANDLER_CAPI_H_
@@ -237,8 +237,8 @@ typedef struct _cef_render_handler_t {
 
   ///
   /// Called when the IME composition range has changed. |selected_range| is the
-  /// range of characters that have been selected. |character_bounds| is the
-  /// bounds of each character in view coordinates.
+  /// range of the composition text in UTF-16 code units. |character_bounds|
+  /// contains the bounds of each UTF-16 code unit in view coordinates.
   ///
   void(CEF_CALLBACK* on_ime_composition_range_changed)(
       struct _cef_render_handler_t* self,
@@ -250,7 +250,13 @@ typedef struct _cef_render_handler_t {
   ///
   /// Called when text selection has changed for the specified |browser|.
   /// |selected_text| is the currently selected text and |selected_range| is the
-  /// character range.
+  /// range in UTF-16 code units.
+  ///
+  /// |selected_text| is NULL for editable password fields, including fields
+  /// Chromium identifies as having previously contained password text. Password
+  /// selection ranges are accurate for ASCII input. Non-ASCII input can produce
+  /// ranges that differ from DOM selection offsets due to Chromium's password
+  /// masking.
   ///
   void(CEF_CALLBACK* on_text_selection_changed)(
       struct _cef_render_handler_t* self,

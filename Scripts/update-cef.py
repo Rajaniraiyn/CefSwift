@@ -286,8 +286,9 @@ def describe(cef_old, cef_new, chromium_old, chromium_new, api_old, api_new, sym
                  "It does not merge itself: review the function changes below and the struct/enum "
                  "changes in the header diff.")
     else:
-        intro = ("Moves the pinned CEF to the newest stable release. `CEF_API_VERSION` is unchanged, "
-                 "so the Swift code sees the same C API. This merges itself once CI passes.")
+        intro = ("Moves the pinned CEF to the newest stable release and keeps `CEF_API_VERSION` fixed. "
+                 "Chromium command IDs and other unversioned headers can still change. "
+                 "This merges itself once CI passes.")
 
     def row(label, before, after):
         return f"| {label} | `{before}` | `{after}` |" if before != after else f"| {label} | `{before}` | unchanged |"
@@ -578,14 +579,15 @@ def self_test():
                          cef_c="CCEF_SYM(void, cef_c, (long x), (x))")
             del after["cef_b"]
             self.assertEqual(gb.diff_symbols(before, after), (["cef_d"], ["cef_b"], ["cef_c"]))
-            self.assertEqual(gb.describe_diff(before, before, True), "C API: unchanged (3 functions).")
+            self.assertEqual(gb.describe_diff(before, before, True), "C bridge: 3 bound functions unchanged.")
             self.assertIn("- Added: `cef_d`", gb.describe_diff(before, after, True))
 
         def test_describes_each_kind_of_change(self):
             a, b = v("156.0.26"), v("156.0.28")
-            subject, body, text = describe(a, b, "1", "2", 15600, 15600, "C API: unchanged (1 functions).")
+            subject, body, text = describe(a, b, "1", "2", 15600, 15600, "C bridge: 1 bound function unchanged.")
             self.assertEqual((subject, body), (f"Update CEF to {b}", f"From {a}."))
             self.assertIn("merges itself", text)
+            self.assertIn("Chromium command IDs and other unversioned headers can still change", text)
             self.assertIn("| `CEF_API_VERSION` | `15600` | unchanged |", text)
             subject, body, text = describe(a, a, "1", "1", 15600, 15700, "")
             self.assertEqual((subject, body), ("Update CEF_API_VERSION to 15700", "From CEF_API_VERSION 15600."))

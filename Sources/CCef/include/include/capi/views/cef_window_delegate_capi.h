@@ -33,7 +33,7 @@
 // by hand. See the translator.README.txt file in the tools directory for
 // more information.
 //
-// $hash=436fe664d147e9d9c0c84ef1d0aab437ad00b18f$
+// $hash=ab6d81e578601504d5fa2afc18f2ebee69c40197$
 //
 
 #ifndef CEF_INCLUDE_CAPI_VIEWS_CEF_WINDOW_DELEGATE_CAPI_H_
@@ -239,7 +239,11 @@ typedef struct _cef_window_delegate_t {
   ///
   /// Called after all other controls in the window have had a chance to handle
   /// the event. |event| contains information about the keyboard event. Return
-  /// true (1) if the keyboard event was handled or false (0) otherwise.
+  /// true (1) if the keyboard event was handled or false (0) otherwise. On
+  /// macOS, native Views text interpretation may deliver KEYEVENT_CHAR instead
+  /// of a printable keydown, followed by KEYEVENT_KEYUP. Do not assume that
+  /// every keyup has a corresponding keydown callback. DEPRECATED: Use
+  /// OnKeyboardEvent with CefKeyboardInputEvent instead.
   ///
   int(CEF_CALLBACK* on_key_event)(struct _cef_window_delegate_t* self,
                                   struct _cef_window_t* window,
@@ -295,6 +299,25 @@ typedef struct _cef_window_delegate_t {
       struct _cef_window_delegate_t* self,
       struct _cef_window_t* window,
       struct _cef_linux_window_properties_t* properties);
+
+#if CEF_API_ADDED(15800)
+  ///
+  /// Called after all other controls in the window have had a chance to handle
+  /// the event. |event| contains the resolved platform-independent keyboard
+  /// snapshot. Return true (1) to handle the event or false (0) to try
+  /// OnKeyEvent before default handling.
+  ///
+  /// On macOS, native Views text interpretation may consume a printable keydown
+  /// and deliver CEF_KEY_EVENT_CHAR instead. CEF_KEY_EVENT_KEYUP can still
+  /// follow, so do not assume that every keyup has a corresponding keydown
+  /// callback. This applies to input routed through native Views controls;
+  /// BrowserView input follows the browser keyboard event dispatch path.
+  ///
+  int(CEF_CALLBACK* on_keyboard_event)(
+      struct _cef_window_delegate_t* self,
+      struct _cef_window_t* window,
+      const struct _cef_keyboard_input_event_t* event);
+#endif
 } cef_window_delegate_t;
 
 #ifdef __cplusplus

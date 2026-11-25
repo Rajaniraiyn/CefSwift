@@ -41,6 +41,7 @@
 #include "include/internal/cef_time.h"
 #include "include/internal/cef_types_content_settings.h"
 #include "include/internal/cef_types_geometry.h"
+#include "include/internal/cef_types_input.h"
 
 // Bring in platform-specific definitions.
 #if defined(OS_WIN)
@@ -245,9 +246,9 @@ typedef struct _cef_settings_t {
 
   ///
   /// Set to true (1) to have the browser process message loop run in a separate
-  /// thread. If false (0) then the CefDoMessageLoopWork() function must be
-  /// called from your application message loop. This option is only supported
-  /// on Windows and Linux.
+  /// thread. If false (0) then use CefRunMessageLoop() or call
+  /// CefDoMessageLoopWork() regularly from your application message loop. This
+  /// option is only supported on Windows and Linux.
   ///
   int multi_threaded_message_loop;
 
@@ -257,10 +258,12 @@ typedef struct _cef_settings_t {
   /// callback. This option is recommended for use in combination with the
   /// CefDoMessageLoopWork() function in cases where the CEF message loop must
   /// be integrated into an existing application message loop (see additional
-  /// comments and warnings on CefDoMessageLoopWork). Enabling this option is
-  /// not recommended for most users; leave this option disabled and use either
-  /// the CefRunMessageLoop() function or multi_threaded_message_loop if
-  /// possible.
+  /// comments and warnings on CefDoMessageLoopWork). Scheduling callbacks
+  /// supplement regular CefDoMessageLoopWork() calls; the application must
+  /// continue to schedule calls even when no callback is received. Enabling
+  /// this option is not recommended for most users; leave this option disabled
+  /// and use either the CefRunMessageLoop() function or
+  /// multi_threaded_message_loop if possible.
   ///
   int external_message_pump;
 
@@ -965,6 +968,13 @@ typedef enum {
   /// On Windows, the OS terminated the process due to code integrity failure.
   ///
   TS_INTEGRITY_FAILURE,
+
+#if CEF_API_ADDED(15800)
+  ///
+  /// The process was proactively terminated by the browser to reclaim memory.
+  ///
+  TS_EVICTED_FOR_MEMORY,
+#endif
 
   TS_NUM_VALUES,
 } cef_termination_status_t;
@@ -2085,16 +2095,10 @@ typedef enum {
 } cef_menu_id_t;
 
 ///
-/// Mouse button types.
-///
-typedef enum {
-  MBT_LEFT = 0,
-  MBT_MIDDLE,
-  MBT_RIGHT,
-} cef_mouse_button_type_t;
-
-///
 /// Structure representing mouse event information.
+/// Used by drag-and-drop and legacy input APIs. For input injection, use
+/// cef_mouse_input_event_t for mouse input or cef_wheel_input_event_t for wheel
+/// input instead.
 ///
 typedef struct _cef_mouse_event_t {
   ///
@@ -2115,7 +2119,7 @@ typedef struct _cef_mouse_event_t {
 } cef_mouse_event_t;
 
 ///
-/// Touch points states types.
+/// States of a touch contact.
 ///
 typedef enum {
   CEF_TET_RELEASED = 0,
@@ -2125,74 +2129,77 @@ typedef enum {
 } cef_touch_event_type_t;
 
 ///
-/// The device type that caused the event.
-///
-typedef enum {
-  CEF_POINTER_TYPE_TOUCH = 0,
-  CEF_POINTER_TYPE_MOUSE,
-  CEF_POINTER_TYPE_PEN,
-  CEF_POINTER_TYPE_ERASER,
-  CEF_POINTER_TYPE_UNKNOWN
-} cef_pointer_type_t;
-
-///
-/// Structure representing touch event information.
+/// Portable event for one contact in a touch sequence. Positions and contact
+/// radii are in DIPs. Initialize unused fields to zero. Use with
+/// CefBrowserHost::SendTouchEvent for raw touch delivery and Chromium gesture
+/// recognition.
 ///
 typedef struct _cef_touch_event_t {
   ///
-  /// Id of a touch point. Must be unique per touch, can be any number except
-  /// -1. Note that a maximum of 16 concurrent touches will be tracked; touches
-  /// beyond that will be ignored.
+  /// Identifier of this contact. Must remain unchanged from PRESSED through
+  /// RELEASED or CANCELLED and be unique among active contacts in this browser.
+  /// Any value except -1 is allowed. May be reused after the contact ends.
+  /// Chromium may map this to a different DOM touch identifier. At most 16
+  /// concurrent contacts are tracked; additional contacts are ignored.
   ///
   int id;
 
   ///
-  /// X coordinate relative to the left side of the view.
+  /// Horizontal position in DIPs relative to the left edge of the browser view.
+  /// Preserve fractional values when converting native coordinates.
   ///
   float x;
 
   ///
-  /// Y coordinate relative to the top side of the view.
+  /// Vertical position in DIPs relative to the top edge of the browser view.
   ///
   float y;
 
   ///
-  /// X radius in pixels. Set to 0 if not applicable.
+  /// Horizontal radius of the contact ellipse in DIPs, before applying
+  /// |rotation_angle|. Must be non-negative. Set both radii to zero when
+  /// contact geometry is unavailable; Chromium then uses a default contact
+  /// size.
   ///
   float radius_x;
 
   ///
-  /// Y radius in pixels. Set to 0 if not applicable.
+  /// Vertical radius of the contact ellipse in DIPs, before applying
+  /// |rotation_angle|. Same constraints and default behavior as |radius_x|.
   ///
   float radius_y;
 
   ///
-  /// Rotation angle in radians. Set to 0 if not applicable.
+  /// Clockwise rotation of the contact ellipse in degrees, in the range
+  /// [0, 180). Set to zero if rotation is unavailable. Chromium may swap the
+  /// radii and normalize the angle when producing DOM touch events.
   ///
   float rotation_angle;
 
   ///
-  /// The normalized pressure of the pointer input in the range of [0,1].
-  /// Set to 0 if not applicable.
+  /// Normalized contact pressure in the range [0, 1]. Zero represents no
+  /// pressure and should also be used when pressure is unavailable.
   ///
   float pressure;
 
   ///
-  /// The state of the touch point. Touches begin with one CEF_TET_PRESSED event
-  /// followed by zero or more CEF_TET_MOVED events and finally one
-  /// CEF_TET_RELEASED or CEF_TET_CANCELLED event. Events not respecting this
-  /// order will be ignored.
+  /// State of this contact. Send one CEF_TET_PRESSED event, followed by zero or
+  /// more CEF_TET_MOVED events, then one CEF_TET_RELEASED or CEF_TET_CANCELLED
+  /// event. Duplicate presses and updates for inactive IDs are ignored. Moves
+  /// with unchanged positions are ignored even if other contact data changes.
   ///
   cef_touch_event_type_t type;
 
   ///
-  /// Bit flags describing any pressed modifier keys. See
-  /// cef_event_flags_t for values.
+  /// Combination of cef_event_flags_t values describing keyboard modifiers
+  /// when this event occurred.
   ///
   uint32_t modifiers;
 
   ///
-  /// The device type that caused the event.
+  /// Contact tool type. Use CEF_POINTER_TYPE_TOUCH for a finger,
+  /// CEF_POINTER_TYPE_PEN or CEF_POINTER_TYPE_ERASER for a stylus, and
+  /// CEF_POINTER_TYPE_UNKNOWN when unavailable. Zero selects a finger.
   ///
   cef_pointer_type_t pointer_type;
 
@@ -2205,30 +2212,6 @@ typedef enum {
   PET_VIEW = 0,
   PET_POPUP,
 } cef_paint_element_type_t;
-
-///
-/// Supported event bit flags.
-///
-typedef enum {
-  EVENTFLAG_NONE = 0,
-  EVENTFLAG_CAPS_LOCK_ON = 1 << 0,
-  EVENTFLAG_SHIFT_DOWN = 1 << 1,
-  EVENTFLAG_CONTROL_DOWN = 1 << 2,
-  EVENTFLAG_ALT_DOWN = 1 << 3,
-  EVENTFLAG_LEFT_MOUSE_BUTTON = 1 << 4,
-  EVENTFLAG_MIDDLE_MOUSE_BUTTON = 1 << 5,
-  EVENTFLAG_RIGHT_MOUSE_BUTTON = 1 << 6,
-  /// Mac OS-X command key.
-  EVENTFLAG_COMMAND_DOWN = 1 << 7,
-  EVENTFLAG_NUM_LOCK_ON = 1 << 8,
-  EVENTFLAG_IS_KEY_PAD = 1 << 9,
-  EVENTFLAG_IS_LEFT = 1 << 10,
-  EVENTFLAG_IS_RIGHT = 1 << 11,
-  EVENTFLAG_ALTGR_DOWN = 1 << 12,
-  EVENTFLAG_IS_REPEAT = 1 << 13,
-  EVENTFLAG_PRECISION_SCROLLING_DELTA = 1 << 14,
-  EVENTFLAG_SCROLL_BY_PAGE = 1 << 15,
-} cef_event_flags_t;
 
 ///
 /// Supported menu item types.
@@ -2365,36 +2348,10 @@ typedef enum {
 } cef_quick_menu_edit_state_flags_t;
 
 ///
-/// Key event types.
-///
-typedef enum {
-  ///
-  /// Notification that a key transitioned from "up" to "down".
-  ///
-  KEYEVENT_RAWKEYDOWN = 0,
-
-  ///
-  /// Notification that a key was pressed. This does not necessarily correspond
-  /// to a character depending on the key and language. Use KEYEVENT_CHAR for
-  /// character input.
-  ///
-  KEYEVENT_KEYDOWN,
-
-  ///
-  /// Notification that a key was released.
-  ///
-  KEYEVENT_KEYUP,
-
-  ///
-  /// Notification that a character was typed. Use this for text input. Key
-  /// down events may generate 0, 1, or more than one character event depending
-  /// on the key, locale, and operating system.
-  ///
-  KEYEVENT_CHAR
-} cef_key_event_type_t;
-
-///
 /// Structure representing keyboard event information.
+/// DEPRECATED: Use cef_keyboard_input_event_t with the unified browser and
+/// Views keyboard callbacks instead. This structure remains supported by legacy
+/// keyboard callbacks.
 ///
 typedef struct _cef_key_event_t {
   ///
@@ -3402,9 +3359,7 @@ typedef enum {
 } cef_composition_underline_style_t;
 
 ///
-/// Structure representing IME composition underline information. This is a thin
-/// wrapper around Blink's WebCompositionUnderline class and should be kept in
-/// sync with that.
+/// Structure representing IME composition underline information.
 ///
 typedef struct _cef_composition_underline_t {
   ///
@@ -3413,12 +3368,14 @@ typedef struct _cef_composition_underline_t {
   size_t size;
 
   ///
-  /// Underline character range.
+  /// Range in UTF-16 code units relative to the beginning of the composition
+  /// text.
   ///
   cef_range_t range;
 
   ///
-  /// Text color.
+  /// Underline color. Also used as the text color when composition text
+  /// coloring is enabled.
   ///
   cef_color_t color;
 
@@ -3766,6 +3723,9 @@ typedef enum {
 #endif
 #if CEF_API_ADDED(15400)
   CEF_CPAIT_WALLET_REMINDER_NOTICE,
+#endif
+#if CEF_API_ADDED(15800)
+  CEF_CPAIT_GMAIL_OTP_OPT_IN,
 #endif
   CEF_CPAIT_NUM_VALUES,
 } cef_chrome_page_action_icon_type_t;

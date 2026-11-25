@@ -7,7 +7,7 @@ import SwiftUI
 /// history, bookmarks, open tabs and search, as Chromium's providers
 /// answer. Query on every keystroke: a newer query stops the one still
 /// running, and `.task(id:)` ends the stream of the text it replaces.
-/// Experimental, as it uses Chromium's `chrome://omnibox` debugging page.
+/// Experimental, as it uses Chromium's `chrome://omnibox-internals` debugging page.
 struct SuggestionsDemo: Demo {
     let title = "Address Suggestions"
     let summary = "Chromium's ranked address-bar suggestions for what you type, each with its kind and inline completion."

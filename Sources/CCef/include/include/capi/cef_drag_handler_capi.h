@@ -33,7 +33,7 @@
 // by hand. See the translator.README.txt file in the tools directory for
 // more information.
 //
-// $hash=d89c4ef6c0e182ea2b0d77ed585770a5dbe13a63$
+// $hash=fc626f23dc8509624363701a9c7c1598ea4e73bd$
 //
 
 #ifndef CEF_INCLUDE_CAPI_CEF_DRAG_HANDLER_CAPI_H_
@@ -66,10 +66,12 @@ typedef struct _cef_drag_handler_t {
   cef_base_ref_counted_t base;
 
   ///
-  /// Called when an external drag event enters the browser window. |dragData|
-  /// contains the drag event data and |mask| represents the type of drag
-  /// operation. Return false (0) for default drag handling behavior or true (1)
-  /// to cancel the drag event.
+  /// Called when a drag event enters the browser's web view. Drag events may
+  /// originate outside the browser or within the web view itself. |dragData|
+  /// contains the drag event data and |mask| represents the allowed drag
+  /// operations. Return false (0) for default drag handling behavior or true
+  /// (1) to cancel the drag event, including dropping within the web view. Only
+  /// used with Alloy style.
   ///
   int(CEF_CALLBACK* on_drag_enter)(struct _cef_drag_handler_t* self,
                                    struct _cef_browser_t* browser,

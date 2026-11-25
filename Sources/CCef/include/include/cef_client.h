@@ -49,6 +49,7 @@
 #include "include/cef_find_handler.h"
 #include "include/cef_focus_handler.h"
 #include "include/cef_frame_handler.h"
+#include "include/cef_input_handler.h"
 #include "include/cef_jsdialog_handler.h"
 #include "include/cef_keyboard_handler.h"
 #include "include/cef_life_span_handler.h"
@@ -66,7 +67,9 @@
 class CefClient : public virtual CefBaseRefCounted {
  public:
   ///
-  /// Return the handler for audio rendering events.
+  /// Return the handler for audio capture events. Only supported with Alloy
+  /// style browsers. If no handler is provided normal audio playback will be
+  /// used. See CefAudioHandler for audio capture behavior.
   ///
   /*--cef()--*/
   virtual CefRefPtr<CefAudioHandler> GetAudioHandler() { return nullptr; }
@@ -151,6 +154,8 @@ class CefClient : public virtual CefBaseRefCounted {
 
   ///
   /// Return the handler for keyboard events.
+  /// DEPRECATED: Implement GetInputHandler() and use CefInputHandler for
+  /// keyboard callbacks instead.
   ///
   /*--cef()--*/
   virtual CefRefPtr<CefKeyboardHandler> GetKeyboardHandler() { return nullptr; }
@@ -198,6 +203,15 @@ class CefClient : public virtual CefBaseRefCounted {
                                         CefRefPtr<CefProcessMessage> message) {
     return false;
   }
+#if CEF_API_ADDED(15800)
+  ///
+  /// Return the unified input handler. Its keyboard callbacks run before
+  /// CefKeyboardHandler callbacks, which are called when the unified callback
+  /// is unhandled.
+  ///
+  /*--cef(added=15800)--*/
+  virtual CefRefPtr<CefInputHandler> GetInputHandler() { return nullptr; }
+#endif  // CEF_API_ADDED(15800)
 };
 
 #endif  // CEF_INCLUDE_CEF_CLIENT_H_

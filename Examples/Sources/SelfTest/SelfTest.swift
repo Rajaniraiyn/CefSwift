@@ -381,6 +381,25 @@ struct StaticPage: CefSchemeHandler {
                   addEventListener('mousedown', e => { document.title = 'down ' + e.clientX + ',' + e.clientY; });
                 </script>
                 """
+        case "/windowed-touch.html":
+            html = """
+                <title>touch loading</title>
+                <style>body { margin: 0; min-height: 100vh; touch-action: none; }</style>
+                <script>
+                  const touches = [];
+                  for (const type of ['touchstart', 'touchend']) {
+                    document.addEventListener(type, e => {
+                      const touch = e.changedTouches[0];
+                      touches.push(`${type} ${touch.clientX},${touch.clientY}`);
+                      document.title = touches.join('; ');
+                      if (e.cancelable) e.preventDefault();
+                    }, {passive: false});
+                  }
+                  addEventListener('load', () => requestAnimationFrame(() => requestAnimationFrame(() => {
+                    document.title = 'touch ready';
+                  })));
+                </script>
+                """
         case "/history-probe.html":
             html = "<title>CefSwift History Probe</title><h1>history</h1>"
         default:

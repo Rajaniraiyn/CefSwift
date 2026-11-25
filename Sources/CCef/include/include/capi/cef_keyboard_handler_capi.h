@@ -33,7 +33,7 @@
 // by hand. See the translator.README.txt file in the tools directory for
 // more information.
 //
-// $hash=3d046833b19495f81a3f54a3832db0f324b2990f$
+// $hash=d1855e9884ca426f15ef9833c0a81ec2228689fc$
 //
 
 #ifndef CEF_INCLUDE_CAPI_CEF_KEYBOARD_HANDLER_CAPI_H_
@@ -69,7 +69,8 @@ typedef struct _cef_keyboard_handler_t {
   /// event message, if any. Return true (1) if the event was handled or false
   /// (0) otherwise. If the event will be handled in on_key_event() as a
   /// keyboard shortcut set |is_keyboard_shortcut| to true (1) and return false
-  /// (0).
+  /// (0). DEPRECATED: Use cef_input_handler_t::OnPreKeyboardEvent instead,
+  /// which provides a platform-independent CefKeyboardInputEvent.
   ///
   int(CEF_CALLBACK* on_pre_key_event)(struct _cef_keyboard_handler_t* self,
                                       struct _cef_browser_t* browser,
@@ -81,7 +82,9 @@ typedef struct _cef_keyboard_handler_t {
   /// Called after the renderer and JavaScript in the page has had a chance to
   /// handle the event. |event| contains information about the keyboard event.
   /// |os_event| is the operating system event message, if any. Return true (1)
-  /// if the keyboard event was handled or false (0) otherwise.
+  /// if the keyboard event was handled or false (0) otherwise. DEPRECATED: Use
+  /// cef_input_handler_t::OnKeyboardEvent instead, which provides a platform-
+  /// independent CefKeyboardInputEvent.
   ///
   int(CEF_CALLBACK* on_key_event)(struct _cef_keyboard_handler_t* self,
                                   struct _cef_browser_t* browser,

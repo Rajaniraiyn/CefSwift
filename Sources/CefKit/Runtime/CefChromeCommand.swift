@@ -44,7 +44,7 @@ public struct CefChromeCommand: RawRepresentable, Hashable, Sendable {
     public static let showSharingHub = Self(rawValue: Int(IDC_SHARING_HUB))
     public static let sendTabToSelf = Self(rawValue: Int(IDC_SEND_TAB_TO_SELF))
     public static let castMedia = Self(rawValue: Int(IDC_ROUTE_MEDIA))
-    public static let showReadingMode = Self(rawValue: Int(IDC_SHOW_READING_MODE_SIDE_PANEL))
+    public static let showReadingMode = Self(rawValue: Int(IDC_SHOW_READING_MODE))
     public static let showPasswordManager = Self(rawValue: Int(IDC_SHOW_PASSWORD_MANAGER))
     public static let showPerformance = Self(rawValue: Int(IDC_PERFORMANCE))
     public static let installWebApp = Self(rawValue: Int(IDC_INSTALL_PWA))
