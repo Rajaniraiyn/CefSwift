@@ -105,7 +105,7 @@ extension CefAutocomplete {
 /// typed text as a sequence and does exactly that.
 ///
 /// - Important: Experimental. Chromium has no public interface for omnibox
-///   ranking; this drives the Mojo interface of the `chrome://omnibox`
+///   ranking; this drives the Mojo interface of the `chrome://omnibox-internals`
 ///   debugging page from a hidden service host. Of the internal-page APIs
 ///   it is the most likely to change when Chromium updates.
 ///
@@ -259,7 +259,7 @@ public final class CefAutocomplete {
         return stream
     }
 
-    /// Binds an own `mojom.OmniboxPageHandler`, sends each response of the
+    /// Binds an own `mojom.OmniboxInternalsPageHandler`, sends each response of the
     /// debug controller for the latest query as progress, and resolves with
     /// the one Chromium marks done.
     ///
@@ -271,9 +271,9 @@ public final class CefAutocomplete {
         name: "omnibox", hosts: [.omnibox],
         setup: """
         async () => {
-          const m = await import('chrome://omnibox/omnibox_internals.mojom-webui.js');
-          const router = new m.OmniboxPageCallbackRouter();
-          const handler = m.OmniboxPageHandler.getRemote();
+          const m = await import('chrome://omnibox-internals/omnibox_internals.mojom-webui.js');
+          const router = new m.OmniboxInternalsPageCallbackRouter();
+          const handler = m.OmniboxInternalsPageHandler.getRemote();
           handler.setClientPage(router.$.bindNewPipeAndPassRemote());
           const service = { pending: null };
           const settle = (pending, results) => {

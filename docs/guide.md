@@ -3273,7 +3273,7 @@ for try await result in profile.autocomplete.results(following: texts) {
 
 CEF has no API for any of this. CefChromium uses the services Chromium's own
 pages use (`chrome.bookmarks`, and the Mojo handlers of the history, new
-tab and `chrome://omnibox` pages) from hidden service hosts, one renderer
+tab and `chrome://omnibox-internals` pages) from hidden service hosts, one renderer
 process each. A host starts on the first call that needs it, in about a
 tenth of a second, and closes 30 seconds after its last call, when macOS
 runs low on memory, and when its profile's last page closes, which lets
@@ -3289,7 +3289,7 @@ in a new profile that has no file yet, those reads start the host
 
 These interfaces are internal to Chromium and more likely than CefKit to
 change with a Chromium update, which is why they live in the optional
-`CefChromium` library, bound to the pinned CEF; `chrome://omnibox` is a
+`CefChromium` library, bound to the pinned CEF; `chrome://omnibox-internals` is a
 debugging page, so `autocomplete` is experimental. SelfTest exercises all
 of them, so a CEF update that breaks one fails CI.
 
@@ -3313,7 +3313,7 @@ latency the median of five calls.
 | `history.search`, `remove` | `chrome://history` | 27 MB | 175 ms | 2 ms |
 | `history.topSites()` | `chrome://new-tab-page-third-party` | 21 MB | 127 ms | 1 ms |
 | `history.favicon(for:size:)` | `chrome://bookmarks` or `chrome://history`, whichever runs | 0 when one runs | 16 ms | 2 ms |
-| `autocomplete` | `chrome://omnibox` | 23 MB | 234 ms | 9 ms |
+| `autocomplete` | `chrome://omnibox-internals` | 23 MB | 234 ms | 9 ms |
 | Discarding | `chrome://discards` | 22 MB | 122 ms | 1 ms |
 
 The Browser example uses them for address-field suggestions

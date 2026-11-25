@@ -61,7 +61,7 @@ final class ServiceBench {
     /// Prints the methods of the Mojo interfaces the services use.
     func probeInterfaces() async {
         let probes: [(String, String)] = [
-            ("omnibox", "import('chrome://omnibox/omnibox_internals.mojom-webui.js').then(m => ({ handler: Object.getOwnPropertyNames(m.OmniboxPageHandlerRemote.prototype), router: Object.getOwnPropertyNames(new m.OmniboxPageCallbackRouter()), types: Object.keys(m.AutocompleteControllerType) }))"),
+            ("omnibox", "import('chrome://omnibox-internals/omnibox_internals.mojom-webui.js').then(m => ({ handler: Object.getOwnPropertyNames(m.OmniboxInternalsPageHandlerRemote.prototype), router: Object.getOwnPropertyNames(new m.OmniboxInternalsPageCallbackRouter()), types: Object.keys(m.AutocompleteControllerType) }))"),
             ("history", "import('chrome://resources/cr_components/history/history.mojom-webui.js').then(m => ({ handler: Object.getOwnPropertyNames(m.PageHandlerRemote.prototype), src: m.PageHandlerRemote.prototype.queryHistory.toString().slice(0, 400) }))"),
             ("bookmarks", "Promise.resolve({ bookmarks: Object.keys(chrome.bookmarks), favicon: typeof chrome.favicon })"),
             ("bookmarks", "fetch('chrome://favicon2/?pageUrl=https%3A%2F%2Fexample.com&size=16').then(r => ({ ok: r.ok, type: r.type, ct: r.headers.get('content-type') }), e => String(e))"),

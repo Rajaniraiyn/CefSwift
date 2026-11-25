@@ -1313,7 +1313,7 @@ Chromium locks a WebUI renderer to its host, and neither
 | `chrome://tab-strip-internals` | `tab_strip_internals.mojom.PageHandlerFactory` | `CefTabs`'s groups (names, colours, collapsing), tab alerts, recently closed, and the updates that wake its reads |
 | `chrome://history` | `history.mojom.PageHandler`, `chrome://favicon2` | `CefHistory.search`, `remove` |
 | `chrome://new-tab-page-third-party` | `most_visited.mojom.MostVisitedPageHandlerFactory` | `CefHistory.topSites` |
-| `chrome://omnibox` | `mojom.OmniboxPageHandler` | `CefAutocomplete` |
+| `chrome://omnibox-internals` | `mojom.OmniboxInternalsPageHandler` | `CefAutocomplete` |
 | `chrome://discards` | `discards.mojom.DetailsProvider`, `discards.mojom.GraphDump` | Discarding: Chrome-style tabs, and audio and form input of Alloy-style pages |
 | `chrome://extensions` | `chrome.developerPrivate`, `chrome.management` | `CefExtensions` (not in incognito: Chromium ends the process when an incognito profile opens it) |
 
@@ -1322,7 +1322,7 @@ Chromium locks a WebUI renderer to its host, and neither
 queries with Chromium's autocomplete. It ranks for the new tab page,
 though: a web search first even when a bookmark matches the typed
 address, no match on bookmark titles, and no relevance or bookmarked flag
-in its results. CefChromium keeps `chrome://omnibox`, whose controller is
+in its results. CefChromium keeps `chrome://omnibox-internals`, whose controller is
 the address bar's.
 
 **The smallest document.** A service host loads the host's
@@ -1383,8 +1383,8 @@ of 10 000 bookmark changes into about 600 deliveries. Autocomplete streams
 each response of Chromium's controller as progress, so local matches
 arrive before the search engine's.
 
-**Autocomplete.** `mojom.OmniboxPageHandler` drives one controller per
-handler, and `chrome://omnibox` binds one handler per page, so a profile
+**Autocomplete.** `mojom.OmniboxInternalsPageHandler` drives one controller per
+handler, and `chrome://omnibox-internals` binds one handler per page, so a profile
 has one query at a time: `CefAutocomplete` lets the latest win, ending the
 stream before it, and the module settles a query superseded in the host.
 The handler has no stop call; an aborted query starts a query for no

@@ -122,7 +122,7 @@ extension CefServiceHost {
     static let mostVisited = CefServiceHost(
         name: "most-visited", document: "chrome://new-tab-page-third-party/strings.m.js",
         isAvailableInIncognito: false)
-    /// `mojom.OmniboxPageHandler`, the address bar's autocomplete controller.
+    /// `mojom.OmniboxInternalsPageHandler`, the address bar's autocomplete controller.
     static let omnibox = CefServiceHost(
-        name: "omnibox", document: "chrome://omnibox/strings.m.js", isAvailableInIncognito: true)
+        name: "omnibox", document: "chrome://omnibox-internals/strings.m.js", isAvailableInIncognito: true)
 }
