@@ -339,7 +339,7 @@
 #define CEF_API_HASH_15800 "8897ebe542a667ae7611766e9f5be0d6d3d4d471"
 #endif
 
-// Next version last updated November 19, 2026.
+// Next version last updated November 25, 2026.
 #define CEF_API_VERSION_999998 999998
 #if defined(OS_WIN)
 #define CEF_API_HASH_999998 "30117326d4dc19db39e31a890ef52c85b8680e76"
@@ -349,7 +349,7 @@
 #define CEF_API_HASH_999998 "8897ebe542a667ae7611766e9f5be0d6d3d4d471"
 #endif
 
-// Experimental version last updated November 19, 2026.
+// Experimental version last updated November 25, 2026.
 #define CEF_API_VERSION_999999 999999
 #if defined(OS_WIN)
 #define CEF_API_HASH_999999 "14400c7a2a1d409ff2c224be448e173545463ee5"
