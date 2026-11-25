@@ -118,7 +118,7 @@ public struct CefWindowOpenRequest: Sendable, Equatable {
     public var frameName: String
     /// Where Chromium intends the content to open.
     public var disposition: CefWindowOpenDisposition
-    /// Whether a user gesture, rather than script alone, caused the request.
+    /// Whether Chromium reported a user gesture for this request.
     public var hasUserGesture: Bool
     /// The window features the page requested.
     public var features: CefPopupFeatures
@@ -176,12 +176,10 @@ public enum CefWindowOpenDecision: Sendable, Equatable {
     /// blank popup only when not offscreen. Return it from your own
     /// implementation for requests you don't handle.
     ///
-    /// Chromium's popup blocker stops a Chrome-style page's popups
-    /// without a gesture before the delegate is asked, unless the
-    /// ``CefSitePermission/popups`` site setting allows them; Alloy-style
-    /// pages have no popup blocker, so the delegate sees every request,
-    /// and this default keeps a script's `window.open` from navigating the
-    /// page away.
+    /// Chromium's popup blocker stops popups without a gesture before the
+    /// delegate is asked, unless the ``CefSitePermission/popups`` site setting
+    /// allows them. In Alloy style this default keeps a script's `window.open`
+    /// without a gesture from navigating the page away.
     public static func `default`(for request: CefWindowOpenRequest) -> CefWindowOpenDecision {
         if request.isSourceChromeStyle {
             return .allowNativePopup

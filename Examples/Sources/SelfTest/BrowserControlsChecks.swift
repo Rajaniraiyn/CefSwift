@@ -18,7 +18,8 @@ extension SelfTest {
               spoof == "https://xn--80ak6aa92e.com" && safe == "https://bücher.de",
               detail: "\(spoof ?? "nil"), \(safe ?? "nil")")
 
-        let page = CefPage(url: URL(string: "selftest://app/second.html?controls")!)
+        let origin = URL(string: "https://cefswift.test")!
+        let page = CefPage(url: origin.appendingPathComponent("second.html"))
         let view = hostWindowed(page)
         guard await loaded(page, title: "second") else {
             check("controls: page loads", false, detail: page.title)
@@ -47,13 +48,19 @@ extension SelfTest {
         }, detail: "\(String(describing: page.findResult))")
         page.stopFinding()
 
-        // Leaving fullscreen, which an Alloy-style page needs the app for.
-        _ = try? await page.evaluateJavaScript("document.body.requestFullscreen().then(() => 0)", userGesture: true)
+        // Exercise exitFullscreen even when the isolated test process is
+        // in the background. Chromium 158 requires focus for gesture-based entry.
+        let settings = CefProfile.default.siteSettings
+        settings.set(.allow, for: .automaticFullscreen, origin: origin)
+        defer { settings.set(.default, for: .automaticFullscreen, origin: origin) }
+        let fullscreenResult = try? await page.evaluateJavaScript("""
+            document.body.requestFullscreen().then(() => 'entered', error => error.message)
+            """, timeout: .seconds(5)).stringValue
         if await waitUntil(timeout: .seconds(5), { page.isFullscreen }) {
             page.exitFullscreen()
             check("controls: exitFullscreen leaves fullscreen", await waitUntil(timeout: .seconds(5)) { !page.isFullscreen })
         } else {
-            check("controls: the page enters fullscreen", false)
+            check("controls: the page enters fullscreen", false, detail: fullscreenResult ?? "no result")
         }
         _ = await waitUntil(timeout: .seconds(3)) { view.window?.styleMask.contains(.fullScreen) != true }
 

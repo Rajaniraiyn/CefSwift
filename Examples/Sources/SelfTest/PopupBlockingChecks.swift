@@ -23,7 +23,24 @@ extension SelfTest {
         }
         let page = URL(string: "http://127.0.0.1:\(server.port)/page")!
         let target = "http://127.0.0.1:\(server.port)/status"
-        let script = "window.open('\(target)'); 0"
+        // Window activation can leave a transient gesture. Wait for it to
+        // expire so each request actually exercises Chromium's popup policy.
+        let script = """
+            new Promise(resolve => {
+              const attempt = () => {
+                if (navigator.userActivation.isActive) {
+                  setTimeout(attempt, 50);
+                  return;
+                }
+                window.open('\(target)');
+                resolve(true);
+              };
+              attempt();
+            })
+            """
+        func requestWithoutGesture(_ page: CefPage) async -> Bool {
+            (try? await page.evaluateJavaScript(script, timeout: .seconds(10)).boolValue) == true
+        }
 
         // Both runtime styles run Chromium's popup blocker before the
         // delegate is asked; with the popups site setting allowed, the
@@ -39,17 +56,17 @@ extension SelfTest {
         alloy.delegate = alloyRecorder
         let view = hostWindowed(alloy)
         if await loaded(alloy, title: "page") {
-            _ = try? await alloy.evaluateJavaScript(script)
+            let attemptedBlockedPopup = await requestWithoutGesture(alloy)
             try? await Task.sleep(for: .milliseconds(1500))
             check("popups: Alloy — Chromium's popup blocker stops a gesture-less window.open before the delegate",
-                  alloyRecorder.requests.isEmpty && alloy.url?.path == "/page",
+                  attemptedBlockedPopup && alloyRecorder.requests.isEmpty && alloy.url?.path == "/page",
                   detail: "\(alloyRecorder.requests.count) requests")
             settings.set(.allow, for: .popups, origin: origin)
-            _ = try? await alloy.evaluateJavaScript(script)
+            let attemptedAllowedPopup = await requestWithoutGesture(alloy)
             _ = await waitUntil(timeout: .seconds(3)) { !alloyRecorder.requests.isEmpty }
             try? await Task.sleep(for: .milliseconds(500))
             check("popups: Alloy — with the popups setting allowed, the delegate sees it, and the default keeps the page",
-                  alloyRecorder.requests.first?.hasUserGesture == false && alloy.url?.path == "/page"
+                  attemptedAllowedPopup && alloyRecorder.requests.first?.hasUserGesture == false && alloy.url?.path == "/page"
                       && alloy.title == "page",
                   detail: "\(alloyRecorder.requests.count) requests, at \(alloy.url?.absoluteString ?? "-")")
             settings.reset(origin: origin)
@@ -69,20 +86,20 @@ extension SelfTest {
         window.show()
         defer { for popup in popups { popup.close() } }
         if await loaded(chrome, title: "page") {
-            _ = try? await chrome.evaluateJavaScript(script)
+            let attemptedBlockedPopup = await requestWithoutGesture(chrome)
             try? await Task.sleep(for: .milliseconds(1500))
             check("popups: Chrome style — Chromium's popup blocker stops a gesture-less window.open before the delegate",
-                  chromeRecorder.requests.isEmpty && popups.isEmpty && chrome.url?.path == "/page",
+                  attemptedBlockedPopup && chromeRecorder.requests.isEmpty && popups.isEmpty && chrome.url?.path == "/page",
                   detail: "\(chromeRecorder.requests.count) requests, \(popups.count) popups")
 
             // The recipe for an app that wants to see such popups: allow
             // the site setting, then decide in decideWindowOpenFor.
             settings.set(.allow, for: .popups, origin: origin)
-            _ = try? await chrome.evaluateJavaScript(script)
+            let attemptedAllowedPopup = await requestWithoutGesture(chrome)
             _ = await waitUntil(timeout: .seconds(3)) { !chromeRecorder.requests.isEmpty }
             check("popups: Chrome style — with the popups setting allowed, the delegate sees it, without a gesture",
-                  chromeRecorder.requests.first?.hasUserGesture == false,
-                  detail: "\(chromeRecorder.requests.count) requests")
+                  attemptedAllowedPopup && chromeRecorder.requests.first?.hasUserGesture == false,
+                  detail: "\(chromeRecorder.requests.count) requests, CEF gesture \(String(describing: chromeRecorder.requests.first?.hasUserGesture))")
         } else {
             check("popups: Chrome-style page loads", false, detail: chrome.title)
         }
