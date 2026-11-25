@@ -316,7 +316,20 @@ public final class CefRuntime {
         messagePump?.stop()
         messagePump = nil
         CefThreadExecutor.all.forEach { $0.willStop() }
+        // Chromium 158 queues an AppKit occlusion check when its last window
+        // closes. AppKit may fire it in its termination run loop after CEF
+        // has destroyed the content client it consults.
+        let checkerType = NSClassFromString("WebContentsOcclusionCheckerMac") as? NSObject.Type
+        let sharedInstance = NSSelectorFromString("sharedInstance")
+        let checker: AnyObject? = checkerType.flatMap { type in
+            guard class_getClassMethod(type, sharedInstance) != nil else { return nil }
+            return type.perform(sharedInstance)?.takeUnretainedValue()
+        }
         cef_shutdown()
+        if let checker {
+            NSObject.cancelPreviousPerformRequests(
+                withTarget: checker, selector: NSSelectorFromString("performOcclusionStateUpdates"), object: nil)
+        }
         CefThreadExecutor.all.forEach { $0.didStop() }
         appContext = nil
         settings = nil
