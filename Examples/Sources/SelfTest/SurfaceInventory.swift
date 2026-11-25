@@ -431,8 +431,8 @@ final class SurfaceInventory {
             T(name: "Bookmarks side panel", how: "`IDC_SHOW_BOOKMARK_SIDE_PANEL`", run: Self.command(IDC_SHOW_BOOKMARK_SIDE_PANEL)),
             T(name: "Reading list side panel", how: "`IDC_READING_LIST_MENU_SHOW_UI`", run: Self.command(IDC_READING_LIST_MENU_SHOW_UI)),
             T(name: "History side panel", how: "`IDC_SHOW_HISTORY_SIDE_PANEL`", run: Self.command(IDC_SHOW_HISTORY_SIDE_PANEL)),
-            T(name: "Reading mode side panel", how: "`IDC_SHOW_READING_MODE`",
-              run: Self.command(IDC_SHOW_READING_MODE)),
+            T(name: "Reading mode side panel", how: "`CefChromeCommand.showReadingMode`",
+              run: { $0.page.execute(.showReadingMode) }),
             T(name: "New tab group", how: "`IDC_CREATE_NEW_TAB_GROUP`", run: Self.command(IDC_CREATE_NEW_TAB_GROUP)),
         ]
         let common: [Trigger] = [
