@@ -264,7 +264,7 @@ def diff_symbols(before, after):
 def describe_diff(before, after, markdown):
     added, removed, changed = diff_symbols(before, after)
     if not (added or removed or changed):
-        return f"C API: unchanged ({len(after)} functions)."
+        return f"C bridge: {len(after)} bound functions unchanged."
     counts = ", ".join(f"{n} {label}" for n, label in
                        ((len(added), "added"), (len(removed), "removed"), (len(changed), "changed")) if n)
     groups = [(label, names) for label, names in
@@ -273,7 +273,7 @@ def describe_diff(before, after, markdown):
         body = [f"- {label}: {', '.join(f'`{n}`' for n in names)}" for label, names in groups]
     else:
         body = [f"  {label}: {', '.join(names)}" for label, names in groups]
-    return "\n".join([f"C API: {len(before)} → {len(after)} functions ({counts}).", *([""] if markdown else []), *body])
+    return "\n".join([f"C bridge: {len(before)} → {len(after)} bound functions ({counts}).", *([""] if markdown else []), *body])
 
 
 # --- framework audit ---------------------------------------------------------
