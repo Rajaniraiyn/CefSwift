@@ -477,10 +477,14 @@ adopted or tried. SelfTest keeps its two limitation skips.
 
 ## Docked DevTools, measured and not used
 
-Measured 2026-11-28 with CEF 158.0.6 on macOS 27.2, with a SelfTest probe
-(not kept) that ran each route in a process of its own, debug build. None
-gives DevTools in a view the app places beside the page that survives
-being closed, so DevTools stays in a window of its own.
+Measured 2026-11-28 with CEF 158.0.6 on macOS 27.2, with SelfTest probes
+that ran each route in a process of its own, debug build. None gives
+DevTools in a view the app places beside the page that survives being
+closed, so DevTools stays in a window of its own. The `CefWindow` route is
+kept behind `@_spi(Testing) CefWindow.devToolsPlacement`, off, with the
+crash in a `TODO(upstream)` at `dockDevTools(_:)`; SelfTest's
+`devToolsDocking` group opens it in a probe and skips the close as a
+limitation, so a CEF update that fixes the close shows there.
 
 - **A parent `NSView` for DevTools (Alloy pages).** `show_dev_tools` with
   `window_info.parent_view` set, for a page in a `CefWindowedPageView`,

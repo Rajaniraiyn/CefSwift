@@ -4287,6 +4287,11 @@ the switches measured and not used.
   and it opens and draws there, but the window's next layout after that
   (DevTools hidden, closed or taken out) stops the app at a Chromium
   check ([design notes](design-notes.md#docked-devtools-measured-and-not-used)).
+  CefKit keeps that route, off and for tests only
+  (`@_spi(Testing) CefWindow.devToolsPlacement`), with the crash and its
+  reproduction in a `TODO(upstream)` at `dockDevTools(_:)` in
+  [`CefWindow+DevTools.swift`](../Sources/CefKit/Page/CefWindow+DevTools.swift),
+  and SelfTest's `devToolsDocking` group skips the close as a limitation.
 - In offscreen pages, assistive apps can focus elements inside frames
   only by clicking text fields, and press them only while they are in
   view; elements of the main frame have no such limit. The scroll

@@ -29,6 +29,7 @@ extension SelfTest {
         "extensions": extensionProbeChecks,
         "tabResearch": tabResearchProbe,
         "sessionRestore": sessionRestoreProbe,
+        "devToolsDocking": devToolsDockingProbe,
     ]
 
     /// Changes the configuration for the probe `name`.

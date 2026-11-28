@@ -119,8 +119,8 @@ public final class CefWindow: Identifiable {
     /// included. Shutting down has to wait for this to reach zero.
     private(set) static var liveCount = 0
 
-    @ObservationIgnored private var cefWindow: CefRef<cef_window_t>?
-    @ObservationIgnored private var browserView: CefRef<cef_browser_view_t>?
+    @ObservationIgnored var cefWindow: CefRef<cef_window_t>?
+    @ObservationIgnored var browserView: CefRef<cef_browser_view_t>?
     @ObservationIgnored private var accessoryController: NSTitlebarAccessoryViewController?
 
     /// Creates the window and its page. `page` must not have been
@@ -384,6 +384,23 @@ public final class CefWindow: Identifiable {
         }
     }
 
+    /// Experimental, for tests, and off: where DevTools opens for this
+    /// window's page. ``DevToolsPlacement/automatic``, the default, is a
+    /// window of its own, as Chromium opens it; `.docked` puts DevTools in
+    /// this window beside the page. Docked DevTools opens and draws, but
+    /// closing it, hiding it or taking it out of the window stops the app
+    /// at a Chromium check (CEF 158.0.6); see the `TODO(upstream)` at
+    /// ``dockDevTools(_:)``. Read when DevTools opens.
+    @ObservationIgnored @_spi(Testing) public var devToolsPlacement: DevToolsPlacement = .automatic
+
+    /// The docked DevTools view and the panel it fills, its placement when
+    /// it opened, and at the trailing edge the row panel that holds the
+    /// page and DevTools.
+    @ObservationIgnored var dockedDevTools: CefRef<cef_browser_view_t>?
+    @ObservationIgnored var devToolsContainer: CefRef<cef_panel_t>?
+    @ObservationIgnored var devToolsRow: CefRef<cef_panel_t>?
+    @ObservationIgnored var dockedPlacement: DevToolsPlacement?
+
     /// Space reserved around the page inside the window's content area, for
     /// native views you place alongside it (a sidebar, a status bar).
     public var contentInsets = NSEdgeInsets() {
@@ -441,6 +458,7 @@ public final class CefWindow: Identifiable {
                 cefAddRef(toolbar.pointer)
                 layout.pointee.set_flex_for_view(layout, toolbar.pointer, 0)
             }
+            if let layout { layOutDockedDevTools(in: layout) }
             cefRelease(layout)
             panel.pointee.layout(panel)
         }
@@ -592,6 +610,10 @@ public final class CefWindow: Identifiable {
         windowWaiters = []
         cefWindow = nil
         chromeToolbarView = nil
+        dockedDevTools = nil
+        devToolsContainer = nil
+        devToolsRow = nil
+        dockedPlacement = nil
         browserView = nil
         extraViewsForTesting = []
         isClosed = true

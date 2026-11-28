@@ -219,6 +219,7 @@ enum SelfTest {
         ("contextMenu", contextMenuChecks),
         ("background", backgroundChecks),
         ("extensions", extensionChecks),
+        ("devToolsDocking", devToolsDockingChecks),
     ]
 
     static func runChecks() async {
