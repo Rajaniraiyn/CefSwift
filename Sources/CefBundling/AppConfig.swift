@@ -41,6 +41,9 @@ struct CefAppConfig: Decodable, Sendable {
     /// Chrome extensions the app ships, `.crx` packages or unpacked
     /// directories, copied into `Contents/Resources/Extensions`.
     var extensions: [String]?
+    /// The architectures to build and bundle: `arm64`, `x86_64`, or
+    /// `universal`. Defaults to the build machine's.
+    var architectures: [String]?
 
     struct Notarization: Decodable, Sendable {
         /// A `notarytool store-credentials` profile name.
@@ -56,7 +59,8 @@ struct CefAppConfig: Decodable, Sendable {
     private enum CodingKeys: String, CodingKey, CaseIterable {
         case bundleIdentifier, displayName, minimumSystemVersion, version, build, signingIdentity,
              teamIdentifier, signingKeychain, hardenedRuntime, timestamp, capabilities, usageDescriptions,
-             infoPlist, entitlements, helperEntitlements, provisioningProfile, notarization, cef, extensions
+             infoPlist, entitlements, helperEntitlements, provisioningProfile, notarization, cef, extensions,
+             architectures
     }
 
     static let fileName = "cefapp.json"
@@ -113,6 +117,9 @@ struct CefAppConfig: Decodable, Sendable {
         }
         if let value = config.cef?.softwareGPUFallback {
             _ = try FrameworkTrimPolicy.includesSoftwareGPU(from: value, source: source.path)
+        }
+        if let architectures = config.architectures {
+            _ = try FrameworkArchitectures.parse(architectures, source: "\(source.path): architectures")
         }
         for name in config.helperEntitlements?.keys.sorted() ?? [] where HelperKind(rawValue: name) == nil {
             throw BundlingError(

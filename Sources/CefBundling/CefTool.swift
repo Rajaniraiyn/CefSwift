@@ -25,12 +25,8 @@ public enum CefTool {
       notarize <App.app> --keychain-profile <name> [--format zip|dmg] [--sign <identity>] [--keychain <file>]
           As 'swift package cef doctor|package|notarize', for an app built any way.
 
-      framework --xcframework <ChromiumEmbeddedFramework.xcframework>
-          Print the path of the framework inside the XCFramework that SwiftPM
-          resolved for CefSwift's ChromiumEmbeddedFramework binary target.
-
-      download --cache <dir> --manifest <CEF_VERSION.json> [--platform <p>] [--flavor <f>]
-               [--cef-version <V>] [--print-framework-path]
+      download --cache <dir> --manifest <CEF_VERSION.json> [--platform <p> | --architectures <a>]
+               [--flavor <f>] [--cef-version <V>] [--print-framework-path]
       info --cache <dir> --manifest <CEF_VERSION.json>
       clean --cache <dir>
       bundle …, build-flags …
@@ -52,7 +48,6 @@ public enum CefTool {
             case "embed": try XcodeEmbed(environment: environment).run()
             case "bundle": try BundleCommand(arguments: rest).run()
             case "download": try download(rest)
-            case "framework": try framework(rest)
             case "build-flags": try buildFlags(rest)
             case "doctor": return try doctor(rest)
             case "package": try package(rest)
@@ -83,6 +78,11 @@ public enum CefTool {
         var args = Arguments(arguments)
         let (downloader, manifest) = try cacheAndManifest(&args, command: "download")
         let platform = args.option("platform") ?? hostCefPlatform
+        // arm64, x86_64 or universal: each architecture's distribution, and
+        // for both the universal framework merged from them.
+        let architectures = try args.option("architectures").map {
+            try FrameworkArchitectures.parse([$0], source: "--architectures")
+        }
         let flavor = args.option("flavor") ?? "minimal"
         let cefVersion = args.option("cef-version")
         let printPath = args.flag("print-framework-path")
@@ -94,6 +94,13 @@ public enum CefTool {
                 "\(manifest.sourceURL.path). Pass --manifest with a manifest pinned to \(cefVersion), " +
                 "or update CEF_VERSION.json with Scripts/update-cef.py.")
         }
+        func prepare() throws -> URL {
+            if let architectures {
+                return try FrameworkArchitectures.framework(
+                    for: architectures, manifest: manifest, flavor: flavor, downloader: downloader)
+            }
+            return downloader.frameworkURL(in: try downloader.ensure(manifest: manifest, platform: platform, flavor: flavor))
+        }
         // With --print-framework-path, standard output holds the path alone;
         // progress goes to standard error.
         let framework: URL
@@ -101,22 +108,13 @@ public enum CefTool {
             let saved = dup(STDOUT_FILENO)
             dup2(STDERR_FILENO, STDOUT_FILENO)
             defer { fflush(stdout); dup2(saved, STDOUT_FILENO); close(saved) }
-            framework = downloader.frameworkURL(in: try downloader.ensure(manifest: manifest, platform: platform, flavor: flavor))
+            framework = try prepare()
         } else {
-            framework = downloader.frameworkURL(in: try downloader.ensure(manifest: manifest, platform: platform, flavor: flavor))
+            framework = try prepare()
             Log.info("Framework: \(framework.path)")
             return
         }
         print(framework.path)
-    }
-
-    private static func framework(_ arguments: [String]) throws {
-        var args = Arguments(arguments)
-        guard let xcframework = args.option("xcframework").map({ URL(fileURLWithPath: $0) }) else {
-            throw BundlingError("Missing --xcframework.")
-        }
-        try args.rejectLeftovers(usage: usage)
-        print(try CefXCFramework.framework(in: xcframework).path)
     }
 
     /// The linker flags the plugin builds the app, the startup library and

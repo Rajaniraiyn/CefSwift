@@ -12,11 +12,8 @@
 #   - One more in parallel, `xcode`: the Xcode example built, archived and
 #     run by xcodebuild (about 2.5 minutes on an M3; more on a runner). It
 #     is not a required check, so it never holds up a CEF update.
-#   - SwiftPM resolves the CEF XCFramework that Package.swift pins (~265 MB,
-#     both architectures) from its release asset. `ci` also downloads the
-#     two minimal CEF distributions (~290 MB, cached in `.cef/downloads`
-#     keyed on the pinned CEF version) to rebuild the XCFramework and check
-#     that the asset is the official framework, file for file.
+#   - Only the minimal arm64 CEF flavor is downloaded, and `.cef/downloads`
+#     (~135 MB) is cached keyed on the pinned CEF version.
 #
 # What this verifies, and what it does not (docs/automation.md#ci):
 #   - Everything compiles against the macOS 14 deployment target that
@@ -44,10 +41,7 @@ jobs:
     # Keep the job name "ci": it is the required status check that gates the
     # auto-merged CEF update pull requests.
     runs-on: macos-15
-    timeout-minutes: 70
-    env:
-      GH_TOKEN: ${{ github.token }}
-      GH_REPO: ${{ github.repository }}
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -57,63 +51,36 @@ jobs:
           xcodebuild -version
           swift --version
 
-      - name: Read the pins
+      - name: Read the pinned CEF version
         id: cef
         run: |
-          {
-            echo "version=$(jq -r .cef CEF_VERSION.json)"
-            echo "tag=$(jq -r .xcframework.tag CEF_VERSION.json)"
-            echo "framework=$GITHUB_WORKSPACE/.cef/xcframework/ChromiumEmbeddedFramework.xcframework/macos-arm64_x86_64/Chromium Embedded Framework.framework"
-          } >> "$GITHUB_OUTPUT"
+          version="$(jq -r .cef CEF_VERSION.json)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "framework=$GITHUB_WORKSPACE/.cef/dist/${version}_macosarm64_minimal/Release/Chromium Embedded Framework.framework" >> "$GITHUB_OUTPUT"
 
-      # Offline checks of the update and packaging logic (release selection,
-      # manifest, archive extraction, API-version handling, the universal
-      # merge and the deterministic zip).
-      - name: Script self-tests
-        run: |
-          Scripts/update-cef.py --self-test
-          Scripts/package-cef.py --self-test
+      # Offline checks of the update logic (release selection, manifest,
+      # archive extraction, API-version handling).
+      - name: Update script self-test
+        run: Scripts/update-cef.py --self-test
 
       # Same key as the update workflow saves, so an update branch restores
-      # the archives that workflow already downloaded.
+      # the archive that workflow already downloaded.
       - name: Cache CEF downloads
         uses: actions/cache@v4
         with:
           path: .cef/downloads
-          key: cef-${{ steps.cef.outputs.version }}-minimal
+          key: cef-${{ steps.cef.outputs.version }}-macosarm64-minimal
 
-      # Repackages the official distributions and requires the zip to have
-      # the checksum Package.swift pins: the hosted framework is the
-      # official one, file for file.
-      - name: Rebuild the XCFramework
-        run: Scripts/package-cef.py --check
-
-      # SwiftPM resolves the binary target from the release asset
-      # Package.swift pins, and checks its checksum. On main and the update
-      # branches the asset must be published (the update workflow does that
-      # before it starts CI). Other branches that pin an unpublished asset
-      # build against the rebuilt framework instead, with a warning: publish
-      # it before merging.
-      - name: The pinned release asset
-        env:
-          TAG: ${{ steps.cef.outputs.tag }}
-          REF: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
+      - name: Download CEF (minimal, arm64)
         run: |
-          if gh release view "$TAG" --json assets --jq '.assets[].name' 2>/dev/null |
-             grep -qx ChromiumEmbeddedFramework.xcframework.zip; then
-            exit 0
-          fi
-          echo "The release $TAG has no ChromiumEmbeddedFramework.xcframework.zip."
-          case "$REF" in
-            main|cef-update|cef-api-update) exit 1 ;;
-          esac
-          echo "::warning::The $TAG release asset that Package.swift pins is not published; building against the rebuilt framework. Publish it before merging (docs/automation.md)."
-          echo "CEFSWIFT_LOCAL_FRAMEWORK=1" >> "$GITHUB_ENV"
+          swift package \
+            --allow-writing-to-package-directory \
+            --allow-network-connections all \
+            cef download
 
       # The generated bridge must match the vendored headers, and every
-      # function it binds must be exported by the framework it will load
-      # (both architectures) — a mismatch would otherwise abort at first
-      # call.
+      # function it binds must be exported by the framework it will load —
+      # a mismatch would otherwise abort at first call.
       - name: C bridge matches the headers and the framework
         run: Scripts/generate-bindings.py --check --framework "${{ steps.cef.outputs.framework }}"
 
@@ -159,9 +126,13 @@ jobs:
       - name: Build examples
         run: swift build --package-path Examples --configuration release
 
-      # The plugin takes the framework from the XCFramework SwiftPM resolved.
+      # The plugin keeps its cache in the invoking package's .cef/, so the
+      # Examples package would download the same archive again; give it a
+      # copy-on-write clone of the one already here.
       - name: Bundle SelfTest
         run: |
+          mkdir -p Examples/.cef
+          cp -Rc .cef/downloads Examples/.cef/
           swift package --package-path Examples \
             --allow-writing-to-package-directory \
             --allow-network-connections all \
@@ -273,8 +244,8 @@ jobs:
 
   # The package and its tests compile for Intel. CefKit loads the CEF
   # framework at run time and the plugin builds the helper only when it
-  # bundles, so compiling needs no framework beyond the XCFramework SwiftPM
-  # resolves; running for Intel would need an Intel Mac (docs/automation.md#ci).
+  # bundles, so compiling needs no x86_64 CEF download; bundling and
+  # running for Intel would (docs/automation.md#ci).
   intel:
     runs-on: macos-15
     timeout-minutes: 30
@@ -283,40 +254,6 @@ jobs:
 
       - name: Toolchain
         run: swift --version
-
-      # As in `ci`: an unpublished asset on a branch other than main and the
-      # update branches builds against the XCFramework rebuilt from the
-      # official distributions.
-      - name: The pinned release asset
-        id: asset
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          REF: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
-        run: |
-          tag="$(jq -r .xcframework.tag CEF_VERSION.json)"
-          echo "version=$(jq -r .cef CEF_VERSION.json)" >> "$GITHUB_OUTPUT"
-          if gh release view "$tag" --json assets --jq '.assets[].name' 2>/dev/null |
-             grep -qx ChromiumEmbeddedFramework.xcframework.zip; then
-            echo "published=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          case "$REF" in
-            main|cef-update|cef-api-update) echo "The release $tag has no ChromiumEmbeddedFramework.xcframework.zip."; exit 1 ;;
-          esac
-          echo "published=false" >> "$GITHUB_OUTPUT"
-          echo "CEFSWIFT_LOCAL_FRAMEWORK=1" >> "$GITHUB_ENV"
-
-      - name: Cache CEF downloads
-        if: steps.asset.outputs.published == 'false'
-        uses: actions/cache@v4
-        with:
-          path: .cef/downloads
-          key: cef-${{ steps.asset.outputs.version }}-minimal
-
-      - name: Rebuild the XCFramework
-        if: steps.asset.outputs.published == 'false'
-        run: Scripts/package-cef.py --no-zip
 
       - name: Build for x86_64
         run: swift build --build-tests --arch x86_64
@@ -331,8 +268,8 @@ jobs:
   # The Xcode track: Examples/Xcode built with xcodebuild, Debug and Release,
   # archived and exported, each launched with -smoke YES, and cef doctor on
   # the exported app (Scripts/check-xcode-example.sh, docs/bundling.md#xcode).
-  # Its build phase takes the framework from the XCFramework SwiftPM resolved
-  # for the package.
+  # Its build phase downloads CEF into Examples/Xcode/.cef unless the cache
+  # has the archive.
   xcode:
     runs-on: macos-15
     timeout-minutes: 40
@@ -350,40 +287,15 @@ jobs:
           xcodebuild -version
           swift --version
 
-
-      # As in `ci`: an unpublished asset on a branch other than main and the
-      # update branches builds against the XCFramework rebuilt from the
-      # official distributions.
-      - name: The pinned release asset
-        id: asset
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          REF: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
-        run: |
-          tag="$(jq -r .xcframework.tag CEF_VERSION.json)"
-          echo "version=$(jq -r .cef CEF_VERSION.json)" >> "$GITHUB_OUTPUT"
-          if gh release view "$tag" --json assets --jq '.assets[].name' 2>/dev/null |
-             grep -qx ChromiumEmbeddedFramework.xcframework.zip; then
-            echo "published=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          case "$REF" in
-            main|cef-update|cef-api-update) echo "The release $tag has no ChromiumEmbeddedFramework.xcframework.zip."; exit 1 ;;
-          esac
-          echo "published=false" >> "$GITHUB_OUTPUT"
-          echo "CEFSWIFT_LOCAL_FRAMEWORK=1" >> "$GITHUB_ENV"
+      - name: Read the pinned CEF version
+        id: cef
+        run: echo "version=$(jq -r .cef CEF_VERSION.json)" >> "$GITHUB_OUTPUT"
 
       - name: Cache CEF downloads
-        if: steps.asset.outputs.published == 'false'
         uses: actions/cache@v4
         with:
-          path: .cef/downloads
-          key: cef-${{ steps.asset.outputs.version }}-minimal
-
-      - name: Rebuild the XCFramework
-        if: steps.asset.outputs.published == 'false'
-        run: Scripts/package-cef.py --no-zip
+          path: Examples/Xcode/.cef/downloads
+          key: cef-${{ steps.cef.outputs.version }}-macosarm64-minimal
 
       - name: Build, archive and run the Xcode example
         run: Scripts/check-xcode-example.sh

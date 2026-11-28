@@ -52,13 +52,7 @@ struct CefEmbedder {
         } else {
             try FrameworkLayout.validate(framework: framework)
         }
-        // Before signing, which seals what is left. The XCFramework holds
-        // both architectures; the app keeps its own.
-        let thinning = try CefXCFramework.thin(framework, to: architectures)
-        if thinning.thinnedFiles > 0 {
-            print("[cef] Framework thinned to \(architectures.joined(separator: ", ")): " +
-                  "\(FrameworkTrim.formatted(thinning.removedBytes)) of other architectures left out")
-        }
+        // Before signing, which seals what is left.
         let trimmed = try FrameworkTrim.apply(
             trim, to: framework, appLocalizations: FrameworkTrim.appLocalizations(infoPlist: appInfoPlist),
             developmentLanguage: FrameworkTrim.developmentLanguage(infoPlist: appInfoPlist))
@@ -185,9 +179,8 @@ struct CefEmbedder {
             throw BundlingError(
                 "\(executableName) is built for \(required.joined(separator: ", ")), but these parts of the " +
                 "bundle are not:\n  " + mismatched.joined(separator: "\n  ") +
-                "\n  Build every part for the same architecture, and bundle the CEF distribution for it. " +
-                "CEF's distributions hold one architecture each, so an app built for several (an Xcode " +
-                "Release build with ARCHS = $(ARCHS_STANDARD)) needs ARCHS = $(NATIVE_ARCH_ACTUAL).")
+                "\n  Build every part for the same architectures; cef bundle --architectures and the Xcode " +
+                "phase build the helper and fetch the framework for the app's.")
         }
     }
 

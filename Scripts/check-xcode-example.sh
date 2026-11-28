@@ -2,9 +2,8 @@
 # Builds the Xcode example (Examples/Xcode) with xcodebuild against this
 # checkout, Debug and Release, archives and exports it, and runs each app's
 # smoke test (launch, load a page, quit). Then runs cef doctor on the
-# exported app. Signs ad hoc; needs no team, keychain or network once
-# SwiftPM's cache has the CEF XCFramework Package.swift pins (with
-# CEFSWIFT_LOCAL_FRAMEWORK=1, the one in .cef/xcframework).
+# exported app. Signs ad hoc; needs no team, keychain or network once the
+# CEF distribution is in Examples/Xcode/.cef (CEF_CACHE_DIR overrides).
 #
 #   Scripts/check-xcode-example.sh
 #

@@ -27,11 +27,5 @@
         "size": 360051036
       }
     }
-  },
-  "xcframework": {
-    "tag": "cef-158.0.6",
-    "url": "https://github.com/Rajaniraiyn/CefSwift/releases/download/cef-158.0.6/ChromiumEmbeddedFramework.xcframework.zip",
-    "checksum": "b1a729be19bb22a13e638f27ed43e2bf9d7f6523f4011c59a485ae609ed46c1e",
-    "size": 277730027
   }
 }

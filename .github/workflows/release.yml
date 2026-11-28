@@ -1,8 +1,6 @@
 # Tag-driven release. Push a `v*` tag and this creates a GitHub Release with
-# generated notes. SwiftPM consumers resolve the tag itself; the CEF framework
-# its Package.swift pins is the asset of a `cef-<version>` release, which this
-# checks and marks as a full release, so the retention rule keeps it
-# (docs/automation.md).
+# generated notes. SwiftPM consumers resolve the tag itself, so there are no
+# assets to build or upload.
 #
 #   git tag v0.1.0 && git push origin v0.1.0
 #
@@ -26,7 +24,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 80
     permissions:
-      contents: write   # create the release, promote the framework release
+      contents: write   # create the release
       checks: read      # read CI's results for the tagged commit
     steps:
       - name: CI passed on the tagged commit
@@ -59,20 +57,8 @@ jobs:
             sleep 30
           done
 
-      - uses: actions/checkout@v4
-
-      # A version whose framework asset is missing or differs could not be
-      # resolved by anyone.
-      - name: Check and promote the pinned framework
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          tag="$(jq -r .xcframework.tag CEF_VERSION.json)"
-          Scripts/cef-release.sh verify "$tag" "$(jq -r .xcframework.checksum CEF_VERSION.json)"
-          Scripts/cef-release.sh promote "$tag"
-
-      # --verify-tag fails if the tag is not on GitHub.
+      # No checkout: gh works from the API, and --verify-tag fails if the tag
+      # is not on GitHub.
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -81,5 +67,4 @@ jobs:
           gh release create "$GITHUB_REF_NAME" \
             --title "$GITHUB_REF_NAME" \
             --generate-notes \
-            --verify-tag \
-            --notes "CEF $(jq -r .cef CEF_VERSION.json), framework: $(jq -r .xcframework.url CEF_VERSION.json)"
+            --verify-tag

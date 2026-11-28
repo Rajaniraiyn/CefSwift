@@ -7,16 +7,6 @@ swift build
 swift test
 ```
 
-Resolving the package downloads the CEF framework that `Package.swift`
-pins (an XCFramework of both architectures, from a GitHub release). For a
-CEF version whose asset is not published yet, build it from the official
-distributions and point the package at it:
-
-```sh
-Scripts/package-cef.py --no-zip
-export CEFSWIFT_LOCAL_FRAMEWORK=1     # for every swift command after this
-```
-
 The Browser example's own logic (typed addresses and launch options, the
 feature list, the swipe indicator, the Memory Saver policy and the tab
 rail's arithmetic) has unit tests in the Examples package:
@@ -57,16 +47,13 @@ either the `.framework` directory or the binary inside it. They load it in
 `CefLoaderProbe` (`Tests/CefLoaderProbe`), a process of its own: as it
 loads, the framework swaps the default malloc zone, and a free on another
 thread at that moment traps, so no test loads it into the test process.
-Point it at the framework in the XCFramework SwiftPM resolved, with an
-absolute path:
+Download one with the plugin and point at it with an absolute path:
 
 ```sh
-CEF_FRAMEWORK_PATH="$PWD/.build/artifacts/cefswift/ChromiumEmbeddedFramework/ChromiumEmbeddedFramework.xcframework/macos-arm64_x86_64/Chromium Embedded Framework.framework" \
+swift package --allow-writing-to-package-directory --allow-network-connections all cef download
+CEF_FRAMEWORK_PATH="$PWD/.cef/dist/<version>_macosarm64_minimal/Release/Chromium Embedded Framework.framework" \
     swift test
 ```
-
-(With `CEFSWIFT_LOCAL_FRAMEWORK=1`, the XCFramework is
-`.cef/xcframework/ChromiumEmbeddedFramework.xcframework`.)
 
 `swift package cef info` prints the pinned version and the cache's state.
 Tests that need a downloaded framework or a repository checkout are
@@ -86,15 +73,16 @@ open Examples/dist/Browser.app
 ```
 
 The other products are `Gallery`, `Minimal`, `Compat` and `SelfTest`. The
-plugin takes the framework from the XCFramework SwiftPM resolved for
-CefSwift. [Examples/README.md](Examples/README.md) lists the launch
+plugin keeps its cache in the invoking package, so the Examples package
+downloads CEF into `Examples/.cef/`. [Examples/README.md](Examples/README.md) lists the launch
 arguments.
 
 `Scripts/check-xcode-example.sh` builds the Xcode example
 (`Examples/Xcode`) with `xcodebuild`, Debug and Release, archives and
 exports it, and runs each build's smoke test; run it after changing
-`CefBundling`, `Scripts/xcode-embed.sh` or the example. It needs Xcode
-and keeps its derived data, with the XCFramework Xcode resolved, in
+`CefBundling`, `Scripts/xcode-embed.sh` or the example. It needs Xcode,
+keeps CEF in `Examples/Xcode/.cef/` (clone `Examples/.cef` there with
+`cp -Rc` to skip the download) and its derived data in
 `Examples/Xcode/build/`.
 
 ## Verify with SelfTest

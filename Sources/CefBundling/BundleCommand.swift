@@ -22,6 +22,9 @@ struct BundleCommand {
     var helperStartup: URL?
     var framework: URL?
     var isCheckOnly = false
+    /// With --check: print the architectures to build for, alone on
+    /// standard output, for the plugin.
+    var printsArchitectures = false
 
     // The user's options.
     var configPath: String?
@@ -43,10 +46,11 @@ struct BundleCommand {
     var packageFormat: String?
     var notarize = false
     var keychainProfileOption: String?
+    var architecturesOption: String?
 
     static let usage = """
     USAGE: cefswift bundle --product-name <Name> --package-directory <dir> --work-directory <dir>
-                           --output <dir> [--source-directory <dir>] [--check]
+                           --output <dir> [--source-directory <dir>] [--check [--print-architectures]]
                            [--executable <file> --resource-bundle <name>... --helper <file>
                             --helper-startup <file> --framework <dir>]
                            [the options of 'swift package cef bundle']
@@ -72,6 +76,7 @@ struct BundleCommand {
         helperStartup = args.option("helper-startup").map { URL(fileURLWithPath: $0) }
         framework = args.option("framework").map { URL(fileURLWithPath: $0) }
         isCheckOnly = args.flag("check")
+        printsArchitectures = args.flag("print-architectures")
 
         configPath = args.option("config")
         bundleIDOption = args.option("bundle-id")
@@ -92,6 +97,7 @@ struct BundleCommand {
         packageFormat = args.option("package")
         notarize = args.flag("notarize")
         keychainProfileOption = args.option("keychain-profile")
+        architecturesOption = args.option("architectures")
         try args.rejectLeftovers(usage: Self.usage)
     }
 
@@ -102,6 +108,22 @@ struct BundleCommand {
     func run() throws {
         // A second run resolves the same settings; say them once.
         Log.isQuiet = !isCheckOnly
+        if isCheckOnly, printsArchitectures {
+            // Standard output holds the architectures alone; the rest goes
+            // to standard error.
+            let saved = dup(STDOUT_FILENO)
+            dup2(STDERR_FILENO, STDOUT_FILENO)
+            let settings: Settings
+            do {
+                settings = try resolveSettings()
+            } catch {
+                fflush(stdout); dup2(saved, STDOUT_FILENO); close(saved)
+                throw error
+            }
+            fflush(stdout); dup2(saved, STDOUT_FILENO); close(saved)
+            print(settings.architectures.joined(separator: ","))
+            return
+        }
         let settings = try resolveSettings()
         Log.isQuiet = false
         if isCheckOnly { return }
@@ -171,6 +193,9 @@ struct BundleCommand {
         var profileURL: URL?
         var trim: FrameworkTrimPolicy
         var notarization: NotarizationSettings?
+        /// What to build for: `--architectures`, else cefapp.json's, else
+        /// the build machine's.
+        var architectures: [String]
     }
 
     /// cefapp.json beside the sources of the product's executable target,
@@ -235,9 +260,18 @@ struct BundleCommand {
         let trim = try (config ?? CefAppConfig()).trimPolicy(
             localizationsOption: localizationsOption, softwareGPUOption: softwareGPUOption)
         let notarization = try notarizationSettings(config: config, identity: identity, plan: plan)
+        let architectures: [String]
+        if let architecturesOption {
+            architectures = try FrameworkArchitectures.parse([architecturesOption], source: "--architectures")
+        } else if let configured = config?.architectures {
+            architectures = try FrameworkArchitectures.parse(configured, source: "\(config!.source.path): architectures")
+        } else {
+            architectures = [FrameworkArchitectures.host]
+        }
+        if isCheckOnly { Log.info("Architectures: \(FrameworkArchitectures.describe(architectures))") }
         return Settings(config: config, appName: appName, displayName: displayName, bundleIdentifier: bundleID,
                         keychain: keychain, identity: identity, plan: plan, profileURL: profileURL, trim: trim,
-                        notarization: notarization)
+                        notarization: notarization, architectures: architectures)
     }
 
     struct NotarizationSettings {

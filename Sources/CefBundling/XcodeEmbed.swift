@@ -33,7 +33,6 @@ struct XcodeEmbed {
         ("CEF_FLAVOR", "(--flavor)"),
         ("CEF_DOCTOR", "(cef doctor)"),
         ("CEF_EMBED_FRAMEWORK", "(none)"),
-        ("CEF_XCFRAMEWORK", "(none)"),
     ]
 
     /// cefapp.json keys whose setting Xcode owns, and that setting.
@@ -51,6 +50,7 @@ struct XcodeEmbed {
         ("entitlements", "CODE_SIGN_ENTITLEMENTS"),
         ("provisioningProfile", "PROVISIONING_PROFILE_SPECIFIER"),
         ("notarization", "Xcode's Organizer, or xcrun notarytool"),
+        ("architectures", "ARCHS and ONLY_ACTIVE_ARCH"),
     ]
 
     /// Capabilities Xcode turns on with an entitlement, which the helpers
@@ -96,8 +96,9 @@ struct XcodeEmbed {
         var executableName: String
         var infoPlistURL: URL
         var entitlementsURL: URL?
+        /// What Xcode builds the app for, and so what the helper is built
+        /// for and the framework holds: one architecture, or both.
         var architectures: [String]
-        var platform: String
         var cacheDirectory: URL
         var manifest: URL
         var flavor: String
@@ -130,23 +131,7 @@ struct XcodeEmbed {
         guard let executableName = setting("EXECUTABLE_NAME") ?? info["CFBundleExecutable"]?.stringValue else {
             throw BundlingError("EXECUTABLE_NAME is not set.")
         }
-        // Debug builds have the active architecture only; Release builds
-        // every one in ARCHS, unless ONLY_ACTIVE_ARCH.
-        let archs: [String]
-        if isYes("ONLY_ACTIVE_ARCH"), let active = setting("NATIVE_ARCH_ACTUAL") ?? setting("CURRENT_ARCH") {
-            archs = [active]
-        } else {
-            archs = (setting("ARCHS") ?? "arm64").split(separator: " ").map(String.init)
-        }
-        let platform: String
-        switch archs {
-        case ["arm64"]: platform = "macosarm64"
-        case ["x86_64"]: platform = "macosx64"
-        default:
-            throw BundlingError(
-                "This build is for \(archs.joined(separator: " and ")), but CEF's distributions hold one " +
-                "architecture each. Set ARCHS = $(NATIVE_ARCH_ACTUAL) for this target (see docs/bundling.md#xcode).")
-        }
+        let architectures = try buildArchitectures()
         guard let packageDirectory = setting("CEFSWIFT_PACKAGE_DIR").map({ URL(fileURLWithPath: $0) }) else {
             throw BundlingError("CEFSWIFT_PACKAGE_DIR is not set; run cefswift embed through Scripts/xcode-embed.sh.")
         }
@@ -157,8 +142,7 @@ struct XcodeEmbed {
             executableName: executableName,
             infoPlistURL: infoPlistURL,
             entitlementsURL: entitlements.flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil },
-            architectures: archs,
-            platform: platform,
+            architectures: architectures,
             cacheDirectory: path("CEF_CACHE_DIR")
                 ?? URL(fileURLWithPath: setting("PROJECT_DIR") ?? ".").appendingPathComponent(".cef"),
             manifest: path("CEF_MANIFEST") ?? packageDirectory.appendingPathComponent("CEF_VERSION.json"),
@@ -168,6 +152,17 @@ struct XcodeEmbed {
                 ?? tempDirectory.appendingPathComponent("CefSwift"),
             stampFile: tempDirectory.appendingPathComponent("cefswift-embed.json"),
             workDirectory: tempDirectory.appendingPathComponent("CefSwiftEmbed"))
+    }
+
+    /// What Xcode builds the app for: the active architecture only in a
+    /// Debug build (ONLY_ACTIVE_ARCH), every one in ARCHS otherwise, so an
+    /// archive for both is universal. The phase fetches each one's CEF
+    /// distribution, and for both merges a universal framework from them.
+    func buildArchitectures() throws -> [String] {
+        if isYes("ONLY_ACTIVE_ARCH"), let active = setting("NATIVE_ARCH_ACTUAL") ?? setting("CURRENT_ARCH") {
+            return try FrameworkArchitectures.parse([active], source: "NATIVE_ARCH_ACTUAL")
+        }
+        return try FrameworkArchitectures.parse([setting("ARCHS") ?? "arm64"], source: "ARCHS")
     }
 
     // MARK: - Signing
@@ -296,17 +291,23 @@ struct XcodeEmbed {
     /// cefapp.json keys an Xcode build takes from Xcode instead: a warning,
     /// at the key's line, for each that disagrees with Xcode's value.
     private func reportXcodeOwnedKeys(in config: CefAppConfig, info: PlistDictionary, bundleIdentifier: String) {
-        let xcodeValues: [String: String?] = [
+        var xcodeValues: [String: String?] = [
             "bundleIdentifier": bundleIdentifier,
             "displayName": info["CFBundleDisplayName"]?.stringValue ?? info["CFBundleName"]?.stringValue,
             "version": info["CFBundleShortVersionString"]?.stringValue,
             "build": info["CFBundleVersion"]?.stringValue,
             "minimumSystemVersion": info["LSMinimumSystemVersion"]?.stringValue ?? setting("MACOSX_DEPLOYMENT_TARGET"),
         ]
-        let configValues: [String: String?] = [
+        var configValues: [String: String?] = [
             "bundleIdentifier": config.bundleIdentifier, "displayName": config.displayName,
             "version": config.version, "build": config.build, "minimumSystemVersion": config.minimumSystemVersion,
         ]
+        if let configured = config.architectures,
+           let wanted = try? FrameworkArchitectures.parse(configured, source: "architectures"),
+           let built = try? buildArchitectures() {
+            configValues["architectures"] = FrameworkArchitectures.describe(wanted)
+            xcodeValues["architectures"] = FrameworkArchitectures.describe(built)
+        }
         for (key, setting) in Self.xcodeOwnedKeys {
             guard let configValue = configValues[key] ?? nil else { continue }
             let xcodeValue = xcodeValues[key] ?? nil
@@ -357,19 +358,13 @@ struct XcodeEmbed {
         let manifest = try CefManifest.load(from: build.manifest)
         let existingFramework = build.app.appendingPathComponent("Contents/Frameworks/\(BuiltProduct.cefFrameworkName)")
         // CEF_EMBED_FRAMEWORK = NO: Xcode embeds the framework itself, from
-        // CefSwift's ChromiumEmbeddedFramework product, which the target
-        // depends on; this phase keeps that copy. Otherwise the phase copies
-        // the XCFramework SwiftPM resolved, or, for another manifest or
-        // flavor, the CEF distribution it downloads.
+        // a binary framework product the target depends on (the
+        // XCFramework of pull request #27); this phase keeps that copy.
         var frameworkSource: URL?
         if setting("CEF_EMBED_FRAMEWORK")?.uppercased() != "NO" {
-            if let xcframework = resolvedXCFramework(build: build) {
-                frameworkSource = try CefXCFramework.framework(in: xcframework)
-            } else {
-                let downloader = Downloader(cacheRoot: build.cacheDirectory)
-                let dist = try downloader.ensure(manifest: manifest, platform: build.platform, flavor: build.flavor)
-                frameworkSource = downloader.frameworkURL(in: dist)
-            }
+            frameworkSource = try FrameworkArchitectures.framework(
+                for: build.architectures, manifest: manifest, flavor: build.flavor,
+                downloader: Downloader(cacheRoot: build.cacheDirectory))
         }
 
         let framework = frameworkSource ?? existingFramework
@@ -399,38 +394,31 @@ struct XcodeEmbed {
         }
     }
 
-    /// The XCFramework of CefSwift's `ChromiumEmbeddedFramework` binary
-    /// target: `CEF_XCFRAMEWORK`; else, unless `CEF_MANIFEST` or
-    /// `CEF_FLAVOR` asks for another distribution, the copy Xcode resolved
-    /// in `SourcePackages`, the one SwiftPM resolved for Scripts/xcode-embed.sh's
-    /// build of the helper, or with `CEFSWIFT_LOCAL_FRAMEWORK=1` the one
-    /// Scripts/package-cef.py built in the CefSwift checkout.
-    func resolvedXCFramework(build: Build) -> URL? {
-        if let explicit = path("CEF_XCFRAMEWORK") { return explicit }
-        guard setting("CEF_MANIFEST") == nil, build.flavor == "minimal" else { return nil }
-        var candidates: [URL] = []
-        if let buildDirectory = setting("BUILD_DIR") {
-            candidates.append(CefXCFramework.resolvedArtifact(underScratch: URL(fileURLWithPath: buildDirectory)
-                .appendingPathComponent("../../SourcePackages").standardizedFileURL))
-        }
-        candidates.append(CefXCFramework.resolvedArtifact(underScratch: build.scratchDirectory))
-        if !["", "0"].contains(setting("CEFSWIFT_LOCAL_FRAMEWORK") ?? "") {
-            candidates.insert(CefXCFramework.localArtifact(inPackage: build.packageDirectory), at: 0)
-        }
-        return candidates.first {
-            FileManager.default.fileExists(atPath: $0.appendingPathComponent("Info.plist").path)
-        }
-    }
-
     /// Builds the helper and its startup library with SwiftPM, in release,
     /// into a scratch directory of this build: they are CefSwift's code and
     /// the same for every configuration of the app. Returns the built files,
     /// before ``HelperLink/prepare(startup:helper:framework:in:)``.
     private func buildHelper(build: Build, framework: URL) throws -> HelperLink.Products {
-        // The tool's own directory: Scripts/xcode-embed.sh built it with
-        // the same package, scratch path and configuration.
-        let binDirectory = setting("CEFSWIFT_BIN_DIR").map { URL(fileURLWithPath: $0) }
-            ?? URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent()
+        // For the build machine's architecture, the tool's own directory:
+        // Scripts/xcode-embed.sh built it with the same package, scratch
+        // path and configuration. For others, SwiftPM's directory for them.
+        let architectureFlags = build.architectures == [FrameworkArchitectures.host]
+            ? [] : build.architectures.flatMap { ["--arch", $0] }
+        let common = ["swift", "build", "--package-path", build.packageDirectory.path,
+                      "--scratch-path", build.scratchDirectory.path, "--configuration", "release"] + architectureFlags
+        let binDirectory: URL
+        if architectureFlags.isEmpty {
+            binDirectory = setting("CEFSWIFT_BIN_DIR").map { URL(fileURLWithPath: $0) }
+                ?? URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent()
+        } else {
+            let result = try Shell.run("/usr/bin/xcrun", common + ["--show-bin-path"],
+                                       environment: Self.swiftEnvironment(environment))
+            guard result.exitCode == 0 else {
+                throw BundlingError("SwiftPM could not name its products directory for " +
+                                    "\(build.architectures.joined(separator: ", ")).")
+            }
+            binDirectory = URL(fileURLWithPath: result.stdout.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
         let startup = binDirectory.appendingPathComponent("lib\(HelperLink.startupProduct).dylib")
         let helper = binDirectory.appendingPathComponent(HelperLink.helperProduct)
         let flags = HelperLink.helperLinkerFlags(startupLibrary: startup, framework: framework)
@@ -439,7 +427,7 @@ struct XcodeEmbed {
         // the products are newer than the sources they are built from and
         // were linked against this framework.
         let stampFile = build.scratchDirectory.appendingPathComponent("cefswift-helper.flags")
-        let stamp = flags.joined(separator: "\n")
+        let stamp = (architectureFlags + flags).joined(separator: "\n")
         if (try? String(contentsOf: stampFile, encoding: .utf8)) == stamp,
            let builtAt = [startup, helper].compactMap(Self.modificationDate).min(),
            let newest = Self.newestSource(of: HelperLink.sourceDirectories, in: build.packageDirectory),
@@ -448,9 +436,7 @@ struct XcodeEmbed {
         }
 
         func swiftBuild(_ product: String, _ linkerFlags: [String]) throws {
-            let arguments = ["swift", "build", "--package-path", build.packageDirectory.path,
-                             "--scratch-path", build.scratchDirectory.path, "--configuration", "release",
-                             "--product", product] + linkerFlags.flatMap { ["-Xlinker", $0] }
+            let arguments = common + ["--product", product] + linkerFlags.flatMap { ["-Xlinker", $0] }
             Log.info("Building \(product)…")
             let status = try Shell.runStreaming("/usr/bin/xcrun", arguments, environment: Self.swiftEnvironment(environment))
             guard status == 0 else {
@@ -490,11 +476,9 @@ struct XcodeEmbed {
 
     /// The environment for SwiftPM: Xcode's build settings (SDKROOT, ARCHS,
     /// deployment targets and the like) would otherwise leak into its build.
-    /// `CEFSWIFT_LOCAL_FRAMEWORK` goes through: CefSwift's manifest reads it
-    /// to choose where its binary target comes from.
     static func swiftEnvironment(_ environment: [String: String]) -> [String: String] {
         var clean: [String: String] = ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"]
-        for key in ["HOME", "DEVELOPER_DIR", "TMPDIR", "USER", "LOGNAME", "CEFSWIFT_LOCAL_FRAMEWORK"] {
+        for key in ["HOME", "DEVELOPER_DIR", "TMPDIR", "USER", "LOGNAME"] {
             if let value = environment[key] { clean[key] = value }
         }
         return clean

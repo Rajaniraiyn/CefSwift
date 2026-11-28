@@ -1,28 +1,6 @@
 // swift-tools-version: 6.0
 import PackageDescription
 
-// The official CEF framework for the version CEF_VERSION.json pins, both
-// architectures in one XCFramework, as Scripts/package-cef.py packages it
-// and the `cef-<version>` GitHub release hosts it (docs/automation.md).
-// SwiftPM downloads and verifies it when it resolves the package, into its
-// shared cache, so `swift package cef bundle` and the Xcode build phase find
-// it without a download of their own. Scripts/package-cef.py --write and
-// Scripts/update-cef.py rewrite these two lines.
-let cefFramework = (
-    url: "https://github.com/Rajaniraiyn/CefSwift/releases/download/cef-158.0.6/ChromiumEmbeddedFramework.xcframework.zip",
-    checksum: "b1a729be19bb22a13e638f27ed43e2bf9d7f6523f4011c59a485ae609ed46c1e"
-)
-
-// CEFSWIFT_LOCAL_FRAMEWORK=1 uses the XCFramework Scripts/package-cef.py
-// builds in .cef/xcframework instead of the release asset: for work on
-// CefSwift itself, and for a CEF version whose asset is not published yet.
-// An environment variable rather than a check for the directory, because
-// SwiftPM caches the evaluated manifest by its text and environment.
-let cefFrameworkTarget: Target =
-    ["", "0"].contains(Context.environment["CEFSWIFT_LOCAL_FRAMEWORK"] ?? "")
-    ? .binaryTarget(name: "ChromiumEmbeddedFramework", url: cefFramework.url, checksum: cefFramework.checksum)
-    : .binaryTarget(name: "ChromiumEmbeddedFramework", path: ".cef/xcframework/ChromiumEmbeddedFramework.xcframework")
-
 let package = Package(
     name: "CefSwift",
     // The built-in sheets' strings are English, in each target's
@@ -34,12 +12,6 @@ let package = Package(
         .library(name: "CefSwiftUI", targets: ["CefSwiftUI"]),
         .library(name: "CefPasskeys", targets: ["CefPasskeys"]),
         .library(name: "CefChromium", targets: ["CefChromium"]),
-        // The CEF framework, for an Xcode app target that wants Xcode to
-        // link and embed it (docs/bundling.md#xcode). No library depends on
-        // it: CefKit loads the framework at run time when the process has
-        // not linked it, so libraries and tests build without it, and
-        // `swift package cef bundle` links the app to it.
-        .library(name: "ChromiumEmbeddedFramework", targets: ["ChromiumEmbeddedFramework"]),
         .plugin(name: "CefPlugin", targets: ["CefPlugin"]),
         // Assembles, signs and checks CEF app bundles: what the `cef` plugin
         // and the Xcode build phase (Scripts/xcode-embed.sh) both run.
@@ -51,7 +23,6 @@ let package = Package(
         .library(name: "cefswift_helper_startup", type: .dynamic, targets: ["CefHelperStartup"]),
     ],
     targets: [
-        cefFrameworkTarget,
         // Vendored CEF C API headers + runtime dlopen/dlsym loader.
         .target(
             name: "CCef",
