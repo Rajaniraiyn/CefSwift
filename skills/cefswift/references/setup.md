@@ -33,9 +33,12 @@ let package = Package(
   `.defaultLaunchBehavior(.suppressed)` need `.macOS(.v15)`.
 - `exclude` keeps SwiftPM from warning about `cefapp.json` and
   entitlements files kept beside the sources.
-- A Swift 6 toolchain. SwiftPM needs an Xcode toolchain where SwiftUI's
-  macros (`@Entry`, and `@State` in the macOS 27 SDK) are used: the
-  SwiftUI macro plugin ships with Xcode.
+- A Swift 6 toolchain. The Command Line Tools are enough for SwiftPM,
+  plain `swift build` and `swift package cef bundle` included; Xcode 16 or
+  later only for Xcode projects. Three tracks build the same bundle: a
+  SwiftPM package, a hand-written SwiftUI app with plain SwiftPM, or an
+  Xcode project. Prefer `@Environment` keys written out by hand over
+  `@Entry` in app code, so the app builds with the Command Line Tools too.
 
 ## The cef command
 
@@ -111,6 +114,6 @@ needs a usage description where macOS shows one.
 | `bootstrap_check_in …MachPortRendezvousServer…: Permission denied (1100)` | App Sandbox is on. Remove it. |
 | `SIGKILL (Code Signature Invalid)` | A restricted entitlement with no matching profile. `cef doctor`. |
 | Camera or microphone fails without a prompt | Add the capability and its usage description. |
-| `external macro implementation type 'SwiftUIMacros…' could not be found` | The toolchain is the Command Line Tools without SwiftUI's macro plugin. Install Xcode and `sudo xcode-select -s /Applications/Xcode.app`. |
+| `external macro implementation type 'SwiftUIMacros…' could not be found` | A CefSwift older than #35 (or your own code) uses a SwiftUI macro such as `@Entry`, whose plugin the Command Line Tools lack. Update CefSwift to a version that includes #35, or point `SDKROOT` at the 26.x SDK (`SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk swift package …`), and write environment keys out by hand instead of `@Entry`. You do not need Xcode. |
 | `CefChromeWindow.open` throws "Chromium did not open the window" on a cold first launch | CefChromium's hidden service host took longer than its timeout, seen on a Mac under heavy CPU load. Relaunch. |
 | "MyApp is damaged" on another Mac | Notarize, or for a test `xattr -dr com.apple.quarantine MyApp.app`. |

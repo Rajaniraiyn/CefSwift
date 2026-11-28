@@ -96,6 +96,7 @@ Signatures of the calls below: the `cefswift` skill's `references/api.md`.
 | Swipe back and forward | `CefPage.Configuration.allowsBackForwardNavigationGestures`, `navigationGestureProgress` | `SwipeIndicator` |
 | QR code, share, Cast | `chromiumSurfaceAnchor`, `setCustomPresentation(for:)`, `CefMediaRouter` | `ChromiumPanels` |
 | `chrome://settings` and other internal pages | `page.execute(.showSettings)`, `CefUserScript.styleSheet` on `chrome://` | `ChromiumPages` |
+| Sign in with Google | Works as in Chrome, nothing to add (verified by hand) | – |
 | Passkeys | Chromium's by default; `CefPasskeyController` (CefPasskeys) for your own UI | `Passkeys` |
 | Streaming (Netflix, Disney+) | A `WKWebView` window beside Chromium (FairPlay) | `WebKitTabs` |
 | Task manager | `CefTaskManager` | `TaskManager` |

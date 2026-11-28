@@ -120,6 +120,8 @@ the source under `Sources/` the same way.
 
 ## Limits to plan around
 
+Google sign-in works (verified by hand). What does not:
+
 - No H.264, HEVC or AAC in Chromium, and Widevine only as software L3:
   Netflix-class services do not play. Show them in a `WKWebView` (FairPlay),
   as the Browser example's `WebKitTabs` does.

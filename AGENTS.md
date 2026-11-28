@@ -49,9 +49,11 @@ SELFTEST_ONLY=passkeys,discard Examples/dist/SelfTest.app/Contents/MacOS/SelfTes
 cd www && bun install && bun run build
 ```
 
-Building SwiftUI targets needs an Xcode toolchain: SwiftUI's macro plugin
-(`@Entry`, and `@State` in the macOS 27 SDK) is not in the Command Line
-Tools.
+The Command Line Tools are enough for all of this; Xcode is needed only
+for the Xcode example. Three tracks are supported equally: SwiftPM, a
+hand-written SwiftUI app with plain SwiftPM, and Xcode projects. Do not
+use SwiftUI macros such as `@Entry` in the library: the Command Line Tools
+lack their plugin, and CI guards that.
 
 ## Rules
 
