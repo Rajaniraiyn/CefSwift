@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Compiles the Swift samples in README.md and docs/*.md against CefSwift.
+"""Compiles the Swift samples in README.md, docs/*.md, www/pages/ and skills/
+against CefSwift.
 
 Each fenced ```swift block becomes a file of a scratch package that depends
 on this checkout's CefSwiftUI, CefPasskeys and CefChromium, and the package is built for macOS 14, the
@@ -25,6 +26,11 @@ that what it shows needs no SwiftUI.
     Scripts/check-doc-samples.py            # build every sample
     Scripts/check-doc-samples.py --list     # print the samples and how each compiles
 
+Blocks that are files of one app, which use each other's types, start with
+the file's path as a comment (`// Sources/MyBrowser/TopBar.swift`): the
+blocks of a document under one `Sources/<App>/` compile together as one
+sample.
+
 A sample that needs a later macOS says so in a comment (`// macOS 15`) and
 compiles as available from it.
 
@@ -38,11 +44,18 @@ import argparse
 import re
 import shutil
 import subprocess
+import textwrap
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-DOCUMENTS = [ROOT / "README.md", *sorted((ROOT / "docs").glob("*.md"))]
+DOCUMENTS = [
+    ROOT / "README.md",
+    *sorted((ROOT / "docs").glob("*.md")),
+    # The website's page openings and the agent skills.
+    *sorted((ROOT / "www" / "pages").glob("**/*.md")),
+    *sorted((ROOT / "skills").glob("**/*.md")),
+]
 
 PRELUDE = """\
 import AppKit
@@ -112,7 +125,7 @@ struct StatusBubble: View { let text: String; var body: some View { EmptyView() 
 struct QRCodeView: View { let url: URL?; var body: some View { EmptyView() } }
 """
 
-DECLARATION = re.compile(r"^(@main|@MainActor|@objc|struct |final class |class |enum |actor |extension |protocol )")
+DECLARATION = re.compile(r"^(@main|@MainActor|@Observable|@objc|struct |final class |class |enum |actor |extension |protocol )")
 MEMBER = re.compile(r"^(@State |@Environment|static var |static let |var body|private var |let [a-z]\w*: )")
 GLOBAL_ACTOR_VAR = re.compile(r"^@\w+Actor var ")
 
@@ -128,9 +141,32 @@ def samples():
                 end = start
                 while end < len(lines) and lines[end].strip() != "```":
                     end += 1
-                yield document, start + 1, "\n".join(lines[start:end])
+                # A block inside a list item is indented with it.
+                yield document, start + 1, textwrap.dedent("\n".join(lines[start:end]))
                 index = end
             index += 1
+
+
+APP = re.compile(r"\A// Sources/([^/\s]+)/\S+\.swift\s*$", re.MULTILINE)
+
+
+def join_apps(found):
+    """Joins the blocks of one document that name the same app."""
+    joined, apps = [], {}
+    for document, line, source in found:
+        match = APP.search(source)
+        if not match:
+            joined.append((document, line, source))
+            continue
+        key = (document, match.group(1))
+        if key in apps:
+            index = apps[key]
+            first_document, first_line, first_source = joined[index]
+            joined[index] = (first_document, first_line, first_source + "\n" + source)
+        else:
+            apps[key] = len(joined)
+            joined.append((document, line, source))
+    return joined
 
 
 def kind(source):
@@ -179,7 +215,7 @@ def main():
     parser.add_argument("--list", action="store_true")
     args = parser.parse_args()
 
-    found = list(samples())
+    found = join_apps(list(samples()))
     if args.list:
         for number, (document, line, source) in enumerate(found, 1):
             appkit = ", AppKit only" if is_appkit_only(source) else ""
