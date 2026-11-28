@@ -15,7 +15,7 @@ struct SwipeNavigationDemo: Demo {
 }
 
 private struct SwipeNavigationView: View {
-    @State private var page: CefPage = {
+    @ViewState private var page: CefPage = {
         var configuration = CefPage.Configuration()
         configuration.rendering = .offscreen
         configuration.allowsBackForwardNavigationGestures = true

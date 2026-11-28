@@ -65,10 +65,19 @@ enum ToolbarPlacement {
     case trailing
 }
 
+// Written out rather than with `@Entry`, whose macro plugin comes with
+// Xcode, not with the Command Line Tools.
+private struct IsEditingAddressKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
 extension EnvironmentValues {
     /// Whether the address field is being edited, for its accessories that
     /// make way while it is.
-    @Entry var isEditingAddress = false
+    var isEditingAddress: Bool {
+        get { self[IsEditingAddressKey.self] }
+        set { self[IsEditingAddressKey.self] = newValue }
+    }
 }
 
 extension BrowserFeature {

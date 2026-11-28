@@ -15,7 +15,7 @@ struct ChromeWindowDemo: Demo {
 }
 
 private struct ChromeWindowView: View {
-    @State private var window: CefWindow?
+    @ViewState private var window: CefWindow?
 
     var body: some View {
         ContentUnavailableView {
@@ -70,7 +70,7 @@ private struct NavigationButtons: View {
 
 private struct AddressField: View {
     let page: CefPage
-    @State private var text = ""
+    @ViewState private var text = ""
     @FocusState private var isEditing: Bool
 
     var body: some View {

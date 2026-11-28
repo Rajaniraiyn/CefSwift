@@ -16,7 +16,7 @@ struct AppKitHostingDemo: Demo {
 }
 
 private struct AppKitHostingView: View {
-    @State private var page = CefPage(url: SamplePage.tour[0].url)
+    @ViewState private var page = CefPage(url: SamplePage.tour[0].url)
 
     var body: some View {
         WindowedPageView(page: page)

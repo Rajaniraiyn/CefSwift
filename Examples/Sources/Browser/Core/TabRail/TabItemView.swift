@@ -15,7 +15,7 @@ struct TabItemView: View {
     var isCompact = false
 
     @Environment(BrowserController.self) private var controller
-    @State private var isHovered = false
+    @ViewState private var isHovered = false
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: style == .tab ? 8 : 7, style: .continuous)
@@ -160,8 +160,8 @@ struct GroupHeaderView: View {
     let axis: TabRail.Axis
 
     @Environment(BrowserController.self) private var controller
-    @State private var isRenaming = false
-    @State private var name = ""
+    @ViewState private var isRenaming = false
+    @ViewState private var name = ""
 
     static func width(for title: String) -> CGFloat {
         title.isEmpty ? 22 : min(140, CGFloat(title.count) * 7 + 22)
@@ -225,7 +225,7 @@ private struct CloseButtonStyle: ButtonStyle {
 
     private struct Styled: View {
         let configuration: ButtonStyleConfiguration
-        @State private var isHovered = false
+        @ViewState private var isHovered = false
 
         var body: some View {
             configuration.label

@@ -15,9 +15,9 @@ struct FramesDemo: Demo {
 }
 
 private struct FramesView: View {
-    @State private var page = CefPage(url: FramesPages.top.url)
-    @State private var selection: CefFrame.ID?
-    @State private var result = ""
+    @ViewState private var page = CefPage(url: FramesPages.top.url)
+    @ViewState private var selection: CefFrame.ID?
+    @ViewState private var result = ""
 
     var body: some View {
         HSplitView {

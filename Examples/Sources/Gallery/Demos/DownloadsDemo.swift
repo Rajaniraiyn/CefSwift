@@ -16,7 +16,7 @@ struct DownloadsDemo: Demo {
 }
 
 private struct DownloadsView: View {
-    @State private var model = DownloadsModel()
+    @ViewState private var model = DownloadsModel()
 
     var body: some View {
         VSplitView {

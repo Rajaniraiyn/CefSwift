@@ -15,8 +15,8 @@ struct ObservableStateDemo: Demo {
 }
 
 private struct ObservableStateView: View {
-    @State private var page = CefPage(url: SamplePage.tour[0].url)
-    @State private var lastLoad = "Choose a page from the menu to await its load."
+    @ViewState private var page = CefPage(url: SamplePage.tour[0].url)
+    @ViewState private var lastLoad = "Choose a page from the menu to await its load."
 
     var body: some View {
         VStack(spacing: 0) {
