@@ -179,9 +179,8 @@ struct CefEmbedder {
             throw BundlingError(
                 "\(executableName) is built for \(required.joined(separator: ", ")), but these parts of the " +
                 "bundle are not:\n  " + mismatched.joined(separator: "\n  ") +
-                "\n  Build every part for the same architecture, and bundle the CEF distribution for it. " +
-                "CEF's distributions hold one architecture each, so an app built for several (an Xcode " +
-                "Release build with ARCHS = $(ARCHS_STANDARD)) needs ARCHS = $(NATIVE_ARCH_ACTUAL).")
+                "\n  Build every part for the same architectures; cef bundle --architectures and the Xcode " +
+                "phase build the helper and fetch the framework for the app's.")
         }
     }
 

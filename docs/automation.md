@@ -178,11 +178,10 @@ What CI verifies, and what it does not:
   macOS 14 executor path is compiled but not exercised, and the unit
   tests and SelfTest run on macOS 15 only.
 - Everything compiles for Intel, and nothing runs there. Running on Intel
-  needs an Intel runner (`macos-15-intel`), the `macosx64` CEF archive in
-  the cache, `cef bundle --platform macosx64` there, and a SelfTest run;
-  on a schedule rather than per pull request, given what those runners
-  cost. (`cef bundle` cannot cross-bundle: it bundles for the architecture
-  SwiftPM builds for.)
+  needs an Intel runner (`macos-15-intel`) and a SelfTest run there, on a
+  schedule rather than per pull request, given what those runners cost.
+  An arm64 runner can bundle for Intel (`cef bundle --architectures
+  x86_64`) but not run the result.
 - One toolchain: whichever Xcode the runner image selects. CI does not
   build with the oldest Swift 6 toolchain the package claims.
 

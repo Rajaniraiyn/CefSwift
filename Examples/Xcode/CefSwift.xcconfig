@@ -18,7 +18,8 @@ ENABLE_APP_SANDBOX = NO
 // framework. Remove this line once the target signs with your team.
 RUNTIME_EXCEPTION_DISABLE_LIBRARY_VALIDATION = YES
 
-// CEF's distributions hold one architecture each: build for this Mac's.
+// Build for this Mac only, so the phase fetches one CEF distribution. Remove
+// it to archive a universal app: the phase then fetches both and merges them.
 ARCHS = $(NATIVE_ARCH_ACTUAL)
 
 // Where Xcode checks out the CefSwift package. For a local package, set it

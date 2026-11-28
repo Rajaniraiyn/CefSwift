@@ -67,7 +67,7 @@ private struct FakeXcodeBuild {
         let build = try XcodeEmbed(environment: fake.environment()).build()
         #expect(build.app == fake.app)
         #expect(build.executableName == "App")
-        #expect(build.platform == "macosarm64")
+        #expect(build.architectures == ["arm64"])
         #expect(build.entitlementsURL == fake.xcent)
         #expect(build.cacheDirectory.path == fake.root.appendingPathComponent(".cef").path)
         #expect(build.manifest.path == "/CefSwift/CEF_VERSION.json")
@@ -78,7 +78,11 @@ private struct FakeXcodeBuild {
             "ARCHS": "arm64 x86_64", "ONLY_ACTIVE_ARCH": "YES", "NATIVE_ARCH_ACTUAL": "x86_64",
             "CEF_CACHE_DIR": "/var/cef", "CEF_FLAVOR": "standard",
         ])).build()
-        #expect(debug.platform == "macosx64")
+        #expect(debug.architectures == ["x86_64"])
+
+        // A Release build or archive for both is universal, in ARCHS' order or not.
+        let universal = try XcodeEmbed(environment: fake.environment(["ARCHS": "x86_64 arm64"])).build()
+        #expect(universal.architectures == ["arm64", "x86_64"])
         #expect(debug.cacheDirectory.path == "/var/cef")
         #expect(debug.flavor == "standard")
     }
@@ -86,11 +90,11 @@ private struct FakeXcodeBuild {
     @Test func refusesWhatThePhaseCannotDo() throws {
         let fake = try FakeXcodeBuild()
         defer { fake.remove() }
-        // A universal Release build: one CEF distribution has one architecture.
-        let universal = #expect(throws: BundlingError.self) {
-            try XcodeEmbed(environment: fake.environment(["ARCHS": "arm64 x86_64"])).build()
+        // An architecture CEF does not ship.
+        let arm64e = #expect(throws: BundlingError.self) {
+            try XcodeEmbed(environment: fake.environment(["ARCHS": "arm64e"])).build()
         }
-        #expect(universal?.message.contains("ARCHS = $(NATIVE_ARCH_ACTUAL)") == true)
+        #expect(arm64e?.message.contains("arm64, x86_64 or universal") == true)
         let sandboxed = #expect(throws: BundlingError.self) {
             try XcodeEmbed(environment: fake.environment(["ENABLE_USER_SCRIPT_SANDBOXING": "YES"])).build()
         }

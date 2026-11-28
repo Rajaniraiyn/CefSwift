@@ -64,7 +64,7 @@ struct CefPlugin: CommandPlugin {
           --manifest with a manifest pinned to it.
 
       bundle --product <Name> [--configuration debug|release] [--flavor minimal|standard]
-             [--platform macosarm64|macosx64] [--output <dir>] [--bundle-id <id>]
+             [--architectures arm64|x86_64|universal] [--output <dir>] [--bundle-id <id>]
              [--name <DisplayName>] [--manifest <path>] [--version <1.2.3>] [--build <42>]
              [--config <cefapp.json>] [--sign <identity|->] [--team-id <ID>] [--keychain <file>]
              [--capability <name>]... [--info-plist <file>]... [--entitlements <file>]
@@ -73,6 +73,9 @@ struct CefPlugin: CommandPlugin {
              [--localizations application|all|<list>] [--software-gpu-fallback include|exclude]
           Build <Name>, compile the helper, then assemble and sign <Name>.app
           (framework + five helper apps + Info.plists + entitlements).
+          --architectures (cefapp.json "architectures") chooses what to build
+          and bundle, the build machine's by default: CEF's distribution for
+          each architecture is downloaded once, and universal merges the two.
           --localizations chooses Chromium's locale packs: those of the app's
           localizations (CFBundleLocalizations), its development language and
           English (application, the default), all of them, or those of a
@@ -120,7 +123,9 @@ struct CefPlugin: CommandPlugin {
         let manifestOption = extractor.extractOption(named: "manifest").last
         let productName = extractor.extractOption(named: "product").last
         let configurationName = extractor.extractOption(named: "configuration").last ?? "release"
-        let platform = extractor.extractOption(named: "platform").last ?? Self.hostPlatform
+        if extractor.extractOption(named: "platform").last != nil {
+            throw PluginError("--platform is gone: use --architectures arm64, x86_64 or universal.")
+        }
         let flavor = extractor.extractOption(named: "flavor").last ?? "minimal"
         let outputPath = extractor.extractOption(named: "output").last
         // The rest are the tool's: settings, signing, packaging.
@@ -138,15 +143,6 @@ struct CefPlugin: CommandPlugin {
         default:
             throw PluginError("Invalid --configuration '\(configurationName)'. Use 'debug' or 'release'.")
         }
-        // SwiftPM builds for the architecture it runs on; the CEF
-        // distribution must match it.
-        guard platform == Self.hostPlatform else {
-            throw PluginError(
-                "--platform \(platform) does not match this build's architecture: SwiftPM builds " +
-                "\(productName) for \(Self.hostPlatform == "macosarm64" ? "arm64" : "x86_64") here, and a bundle " +
-                "cannot mix architectures. To bundle for Intel on Apple silicon, run the command under Rosetta: " +
-                "arch -x86_64 swift package … cef bundle.")
-        }
 
         // 1. Settings, checked before anything slow runs. cefapp.json sits
         // beside the sources of the product's executable target.
@@ -161,25 +157,31 @@ struct CefPlugin: CommandPlugin {
         ]
         if let source = located.sourceDirectory { bundleArguments += ["--source-directory", source.path] }
         bundleArguments += settingsArguments
-        try tool.run(bundleArguments + ["--check"])
+        // The architectures to build for: --architectures, cefapp.json's,
+        // or the build machine's.
+        let architectures = try tool.output(bundleArguments + ["--check", "--print-architectures"])
+            .split(separator: ",").map(String.init)
 
-        // 2. The CEF distribution, downloaded on first use.
+        // 2. The CEF framework for those architectures: each one's
+        // distribution, downloaded on first use, and for both the universal
+        // framework merged from them.
         let manifest = try manifestPath(context: context, explicit: manifestOption)
         let framework = URL(fileURLWithPath: try tool.output([
             "download", "--cache", cacheRoot(context).path, "--manifest", manifest.path,
-            "--platform", platform, "--flavor", flavor, "--print-framework-path",
+            "--architectures", architectures.joined(separator: ","), "--flavor", flavor, "--print-framework-path",
         ]))
         let flags = try tool.buildFlags(framework: framework, startup: nil)
 
         // 3. The product, linked to the framework; then the helper and its
         // startup library, against it.
         let executable = try buildProduct(named: productName, kind: .executable, configuration: configuration,
-                                          context: context, linkerFlags: flags["app"] ?? [])
+                                          architectures: architectures, context: context,
+                                          linkerFlags: flags["app"] ?? [])
         let startup = try buildProduct(named: "cefswift_helper_startup", kind: .dynamicLibrary,
-                                       configuration: configuration, context: context,
+                                       configuration: configuration, architectures: architectures, context: context,
                                        linkerFlags: flags["startup"] ?? [])
         let helper = try buildProduct(named: "cefswift-helper", kind: .executable, configuration: configuration,
-                                      context: context,
+                                      architectures: architectures, context: context,
                                       linkerFlags: try tool.buildFlags(framework: framework, startup: startup)["helper"] ?? [])
 
         // 4. Assemble and sign.
@@ -191,20 +193,24 @@ struct CefPlugin: CommandPlugin {
 
     /// Builds a product through SwiftPM and returns the built file. A
     /// product SwiftPM cannot build that way, such as one from a
-    /// dependency, falls back to `swift build` in the package that declares
-    /// it.
+    /// dependency, or one for architectures other than the build
+    /// machine's, which PackageManager cannot ask for, is built with
+    /// `swift build` in the package that declares it.
     private func buildProduct(
         named productName: String,
         kind: PackageManager.BuildResult.BuiltArtifact.Kind,
         configuration: PackageManager.BuildConfiguration,
+        architectures: [String],
         context: PluginContext,
         linkerFlags: [String]
     ) throws -> URL {
-        print("[cef] Building product '\(productName)' (\(configuration))…")
+        print("[cef] Building product '\(productName)' (\(configuration), \(architectures.joined(separator: ", ")))…")
         let fileName = kind == .dynamicLibrary ? "lib\(productName).dylib" : productName
 
         let proxyFailure: String
-        do {
+        if architectures != [Self.hostArchitecture] {
+            proxyFailure = "PackageManager builds for \(Self.hostArchitecture) only"
+        } else { do {
             var parameters = PackageManager.BuildParameters(
                 configuration: configuration, logging: .concise, echoLogs: true)
             parameters.otherLinkerFlags = linkerFlags
@@ -218,7 +224,7 @@ struct CefPlugin: CommandPlugin {
             proxyFailure = result.succeeded ? "the build produced no \(fileName)" : result.logText
         } catch {
             proxyFailure = "\(error)"
-        }
+        } }
 
         // The running `swift package` holds the lock on the invoking package's
         // .build directory, so the fallback builds into its own scratch path.
@@ -227,10 +233,14 @@ struct CefPlugin: CommandPlugin {
         let providerRoot = (try? LocatedProduct.locate(productName, in: context.package))?.package.directoryURL
             ?? context.package.directoryURL
         let configName = configuration == .release ? "release" : "debug"
-        let scratch = context.pluginWorkDirectoryURL.appendingPathComponent("fallback-build")
-        print("[cef] PackageManager build of '\(productName)' did not yield a binary; " +
-              "falling back to 'swift build --package-path \(providerRoot.path)'…")
-        let status = try Tool.runStreaming("/usr/bin/swift", [
+        // The build machine's architecture keeps the scratch path it always
+        // had; other sets get their own, so switching does not rebuild.
+        let isHost = architectures == [Self.hostArchitecture]
+        let scratch = context.pluginWorkDirectoryURL.appendingPathComponent(
+            isHost ? "fallback-build" : "fallback-build-\(architectures.joined(separator: "-"))")
+        print("[cef] PackageManager build of '\(productName)' did not yield a binary (\(proxyFailure.prefix(80))); " +
+              "building with 'swift build --package-path \(providerRoot.path)'…")
+        let arguments = [
             "build",
             // The plugin sandbox already confines the build, and a nested
             // sandbox cannot be applied inside it.
@@ -238,9 +248,15 @@ struct CefPlugin: CommandPlugin {
             "--package-path", providerRoot.path,
             "--scratch-path", scratch.path,
             "--configuration", configName,
-            "--product", productName,
-        ] + linkerFlags.flatMap { ["-Xlinker", $0] })
-        let binary = scratch.appendingPathComponent(configName).appendingPathComponent(fileName)
+        ] + (isHost ? [] : architectures.flatMap { ["--arch", $0] })
+        let status = try Tool.runStreaming("/usr/bin/swift", arguments + ["--product", productName]
+                                           + linkerFlags.flatMap { ["-Xlinker", $0] })
+        // A build for several architectures puts its products elsewhere.
+        let binDirectory = isHost
+            ? scratch.appendingPathComponent(configName)
+            : URL(fileURLWithPath: (try? Tool.capture("/usr/bin/swift", arguments + ["--show-bin-path"]))
+                ?? scratch.appendingPathComponent(configName).path)
+        let binary = binDirectory.appendingPathComponent(fileName)
         guard status == 0, FileManager.default.fileExists(atPath: binary.path) else {
             throw PluginError(
                 "Could not build product '\(productName)'.\n" +
@@ -255,9 +271,9 @@ struct CefPlugin: CommandPlugin {
     // MARK: - Shared
 
     #if arch(arm64)
-    static let hostPlatform = "macosarm64"
+    static let hostArchitecture = "arm64"
     #else
-    static let hostPlatform = "macosx64"
+    static let hostArchitecture = "x86_64"
     #endif
 
     /// `.cef/` in the invoking package, the one directory the plugin may
@@ -355,6 +371,21 @@ struct Tool {
             throw PluginError("cefswift build-flags printed no linker flags.")
         }
         return flags
+    }
+
+    /// Runs a program and returns its standard output, trimmed.
+    static func capture(_ tool: String, _ arguments: [String]) throws -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: tool)
+        process.arguments = arguments
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.standardError
+        try process.run()
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else { throw PluginError("\(tool) failed.") }
+        return String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     static func runStreaming(_ tool: String, _ arguments: [String]) throws -> Int32 {
