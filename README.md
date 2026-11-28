@@ -40,6 +40,26 @@ same `cefswift` tool to add the framework and helpers, sign them and check
 the result, so the bundles are the same. [Bundling](docs/bundling.md)
 covers each track.
 
+### From a template
+
+A browser of your own, from nothing, in two commands: the first creates
+the package (`--template app` for an app shell of web pages, `minimal` for
+one web view, `--xcode` for an Xcode project too), the second builds and
+opens it.
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Rajaniraiyn/CefSwift/main/Scripts/new-app.sh \
+    | sh -s -- MyBrowser --template browser
+cd MyBrowser && swift package --allow-writing-to-package-directory --allow-network-connections all \
+    cef bundle --product MyBrowser --open
+```
+
+The browser template is a trimmed copy of the Browser example: the tab
+rail, address bar with suggestions, bookmarks, history, extensions,
+downloads, find bar and tab discarding, one folder per feature. In a
+package that depends on CefSwift, `swift package cef new <Name>` does the
+same ([Starting from a template](docs/bundling.md#starting-from-a-template)).
+
 ### With SwiftPM
 
 1. Depend on CefSwift:

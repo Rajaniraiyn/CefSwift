@@ -1,0 +1,5 @@
+{
+  "summary": "One window with one web page, on the .embedded configuration",
+  "products": ["CefSwiftUI"],
+  "macOS": "14.0"
+}

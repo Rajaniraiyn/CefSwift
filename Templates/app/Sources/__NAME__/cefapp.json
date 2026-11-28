@@ -1,0 +1,12 @@
+// Settings for `swift package cef bundle --product __NAME__`; see
+// https://github.com/Rajaniraiyn/CefSwift/blob/main/docs/bundling.md.
+// Comments and trailing commas are allowed.
+{
+  "bundleIdentifier": "__BUNDLE_ID__",
+  "displayName": "__DISPLAY_NAME__",
+  "version": "1.0",
+  "build": "1",
+  // Each capability adds the Info.plist keys and entitlements it needs,
+  // such as "camera" or "microphone" (docs/bundling.md#features).
+  "capabilities": [],
+}

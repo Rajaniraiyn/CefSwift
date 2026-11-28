@@ -1,0 +1,30 @@
+// Settings for `swift package cef bundle --product __NAME__`; see
+// https://github.com/Rajaniraiyn/CefSwift/blob/main/docs/bundling.md.
+// Comments and trailing commas are allowed.
+{
+  "bundleIdentifier": "__BUNDLE_ID__",
+  "displayName": "__DISPLAY_NAME__",
+  "version": "1.0",
+  "build": "1",
+  "minimumSystemVersion": "15.0",
+
+  // Each capability adds the Info.plist keys and entitlements it needs
+  // (docs/bundling.md#features). defaultBrowser offers the app as the
+  // Mac's default web browser.
+  "capabilities": ["camera", "microphone", "location", "defaultBrowser"],
+  "usageDescriptions": {
+    "camera": "Websites you allow can use the camera, for example for video calls.",
+    "microphone": "Websites you allow can use the microphone, for example for video calls and voice input.",
+    "location": "Websites you allow can see your approximate location, for example to show nearby places.",
+  },
+  "infoPlist": {
+    "LSApplicationCategoryType": "public.app-category.productivity",
+  },
+  // A browser's users pick Chromium's interface language: keep every pack.
+  "cef": { "localizations": "all" },
+  "entitlements": "Browser.entitlements",
+
+  // For a build others can run, sign with a Developer ID and notarize:
+  // "signingIdentity": "Developer ID Application: Example Corp (A1B2C3D4E5)",
+  // "notarization": { "keychainProfile": "notary" },
+}

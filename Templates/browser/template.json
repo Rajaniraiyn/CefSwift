@@ -1,0 +1,26 @@
+{
+  "summary": "A tabbed browser: tab rail, address bar with suggestions, bookmarks, history, extensions, downloads, find bar and tab discarding",
+  "products": ["CefSwiftUI", "CefChromium"],
+  "macOS": "15.0",
+  "entitlements": "Browser.entitlements",
+  "copy": [
+    {"from": "Examples/Sources/Browser/Browser.entitlements", "to": "Sources/__NAME__/Browser.entitlements"},
+    {"from": "Examples/Sources/Browser/Core", "to": "Sources/__NAME__/Core",
+     "replace": {"BrowserScene.swift": [["configuration.productName = \"CefSwift Browser\"",
+                                         "configuration.productName = \"__DISPLAY_NAME__\""]]}},
+    {"from": "Examples/Sources/Browser/Features/AddressBar", "to": "Sources/__NAME__/Features/AddressBar"},
+    {"from": "Examples/Sources/Browser/Features/Bookmarks", "to": "Sources/__NAME__/Features/Bookmarks"},
+    {"from": "Examples/Sources/Browser/Features/History", "to": "Sources/__NAME__/Features/History"},
+    {"from": "Examples/Sources/Browser/Features/StartPage", "to": "Sources/__NAME__/Features/StartPage"},
+    {"from": "Examples/Sources/Browser/Features/FindBar", "to": "Sources/__NAME__/Features/FindBar"},
+    {"from": "Examples/Sources/Browser/Features/Downloads", "to": "Sources/__NAME__/Features/Downloads"},
+    {"from": "Examples/Sources/Browser/Features/Extensions", "to": "Sources/__NAME__/Features/Extensions"},
+    {"from": "Examples/Sources/Browser/Features/TabDiscarding", "to": "Sources/__NAME__/Features/TabDiscarding"},
+    {"from": "Examples/Tests/BrowserTests/AddressTests.swift", "to": "Tests/__NAME__Tests/AddressTests.swift",
+     "replace": {"": [["@testable import Browser", "@testable import __NAME__"]]}},
+    {"from": "Examples/Tests/BrowserTests/TabRailTests.swift", "to": "Tests/__NAME__Tests/TabRailTests.swift",
+     "replace": {"": [["@testable import Browser", "@testable import __NAME__"]]}},
+    {"from": "Examples/Tests/BrowserTests/TabDiscardingTests.swift", "to": "Tests/__NAME__Tests/TabDiscardingTests.swift",
+     "replace": {"": [["@testable import Browser", "@testable import __NAME__"]]}}
+  ]
+}

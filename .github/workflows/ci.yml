@@ -12,6 +12,9 @@
 #   - One more in parallel, `xcode`: the Xcode example built, archived and
 #     run by xcodebuild (about 2.5 minutes on an M3; more on a runner). It
 #     is not a required check, so it never holds up a CEF update.
+#   - One more, `templates`: each `cefswift new` template generated, bundled
+#     and launched, and the browser one's Xcode project built. Not required
+#     either.
 #   - Only the minimal arm64 CEF flavor is downloaded, and `.cef/downloads`
 #     (~135 MB) is cached keyed on the pinned CEF version.
 #
@@ -299,6 +302,90 @@ jobs:
 
       - name: Build, archive and run the Xcode example
         run: Scripts/check-xcode-example.sh
+
+      - name: Working tree must stay clean
+        run: |
+          git diff --exit-code
+          test -z "$(git status --porcelain)"
+
+  # `cefswift new`'s templates (Templates/), each generated against this
+  # checkout, unit-tested where it has tests, bundled, checked with
+  # cef doctor and launched; then the browser template's Xcode project built
+  # with xcodebuild and launched. The templates are what a new user runs
+  # first, and the browser one copies the Browser example's code, so this
+  # also catches an example change that breaks it. Not a required check.
+  templates:
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      # The Browser example and the templates use SwiftUI macros, whose
+      # plugin only Xcode ships.
+      - name: Toolchain
+        run: |
+          newest="$(ls -d /Applications/Xcode_*.app | grep -vi beta | sort -V | tail -1)"
+          echo "DEVELOPER_DIR=$newest/Contents/Developer" >> "$GITHUB_ENV"
+          export DEVELOPER_DIR="$newest/Contents/Developer"
+          xcodebuild -version
+          swift --version
+
+      - name: Read the pinned CEF version
+        id: cef
+        run: echo "version=$(jq -r .cef CEF_VERSION.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache CEF downloads
+        uses: actions/cache@v4
+        with:
+          path: .cef/downloads
+          key: cef-${{ steps.cef.outputs.version }}-macosarm64-minimal
+
+      - name: Download CEF and build cefswift
+        run: |
+          swift package --allow-writing-to-package-directory --allow-network-connections all cef download
+          swift build --configuration release --product cefswift
+
+      - name: Generate, test, bundle and launch each template
+        shell: bash
+        run: |
+          set -euo pipefail
+          tool="$(swift build --configuration release --show-bin-path)/cefswift"
+          printf '<!doctype html><title>Template</title><h1>Template</h1>' > "$RUNNER_TEMP/page.html"
+          for entry in minimal:TemplateMinimal app:TemplateApp browser:TemplateBrowser; do
+            template="${entry%%:*}" name="${entry#*:}"
+            dir="$RUNNER_TEMP/templates/$name"
+            echo "::group::$template"
+            "$tool" new "$name" --template "$template" --output "$dir" --cefswift-path "$GITHUB_WORKSPACE" --xcode
+            mkdir -p "$dir/.cef"
+            cp -Rc .cef/downloads "$dir/.cef/"
+            if [ -d "$dir/Tests" ]; then swift test --package-path "$dir"; fi
+            swift package --package-path "$dir" --allow-writing-to-package-directory \
+              --allow-network-connections all cef bundle --product "$name"
+            swift package --package-path "$dir" --allow-writing-to-package-directory \
+              --allow-network-connections all cef doctor --product "$name"
+            app="$dir/dist/$name.app/Contents/MacOS/$name"
+            case "$template" in
+              minimal) "$app" -smoke YES -url "file://$RUNNER_TEMP/page.html" ;;
+              app) "$app" -smoke YES ;;
+              browser)
+                "$app" -urls "file://$RUNNER_TEMP/page.html" -cacheDirectory "$RUNNER_TEMP/browser-cache" \
+                  -screenshot "$RUNNER_TEMP/$name.png"
+                test -s "$RUNNER_TEMP/$name.png" ;;
+            esac
+            echo "::endgroup::"
+          done
+
+      - name: Build and launch the browser template's Xcode project
+        shell: bash
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/templates/TemplateBrowser"
+          xcodebuild -project "$dir/TemplateBrowser.xcodeproj" -scheme TemplateBrowser -configuration Debug \
+            -derivedDataPath "$RUNNER_TEMP/templates-dd" -quiet build
+          "$RUNNER_TEMP/templates-dd/Build/Products/Debug/TemplateBrowser.app/Contents/MacOS/TemplateBrowser" \
+            -urls "file://$RUNNER_TEMP/page.html" -cacheDirectory "$RUNNER_TEMP/browser-cache-xcode" \
+            -screenshot "$RUNNER_TEMP/TemplateBrowser-xcode.png"
+          test -s "$RUNNER_TEMP/TemplateBrowser-xcode.png"
 
       - name: Working tree must stay clean
         run: |

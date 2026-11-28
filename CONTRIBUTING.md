@@ -85,6 +85,28 @@ keeps CEF in `Examples/Xcode/.cef/` (clone `Examples/.cef` there with
 `cp -Rc` to skip the download) and its derived data in
 `Examples/Xcode/build/`.
 
+## Templates
+
+`cefswift new` (and `swift package cef new`) writes a package from
+`Templates/<name>`: its files, with `__NAME__`, `__DISPLAY_NAME__`,
+`__BUNDLE_ID__` and `__CEFSWIFT_PACKAGE__` filled in, and the files its
+`template.json` copies from elsewhere in the checkout. The browser template
+copies the Browser example's core, eight of its features and three of its
+test files, so a change there changes the template too; a `replace` pair in
+`template.json` that no longer matches stops `cefswift new`. Its own
+`BrowserApp.swift` lists the features it keeps. Generate and bundle a
+template against your checkout to try it:
+
+```sh
+swift run cefswift new MyBrowser --output /tmp/MyBrowser --cefswift-path "$PWD"
+swift package --package-path /tmp/MyBrowser --allow-writing-to-package-directory \
+    --allow-network-connections all cef bundle --product MyBrowser --open
+```
+
+CI's `templates` job generates each template, builds and runs its tests,
+bundles it and launches it; its Xcode project is built with `xcodebuild`
+in the same job.
+
 ## Verify with SelfTest
 
 SelfTest checks CefSwift against the real Chromium runtime: windowed and

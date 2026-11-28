@@ -1,0 +1,5 @@
+{
+  "summary": "An app shell: native sections that are web pages, its own content at app://content/ and a JavaScript bridge to Swift",
+  "products": ["CefSwiftUI"],
+  "macOS": "14.0"
+}

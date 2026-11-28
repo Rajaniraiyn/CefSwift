@@ -14,6 +14,11 @@ public enum CefTool {
     USAGE: cefswift <subcommand>
 
     SUBCOMMANDS:
+      new <Name> [--template browser|app|minimal] [--output <dir>] [--xcode] …
+          Creates a package for a new app from a template: Package.swift, its
+          sources, cefapp.json and a .gitignore, ready for
+          'swift package cef bundle'. 'cefswift new --help' lists the options.
+
       embed
           The Xcode build phase: adds Chromium's framework, the helpers' startup
           library and five helper apps to the app this build made, signed like
@@ -45,6 +50,7 @@ public enum CefTool {
         do {
             let rest = Array(arguments.dropFirst())
             switch subcommand {
+            case "new": try new(rest)
             case "embed": try XcodeEmbed(environment: environment).run()
             case "bundle": try BundleCommand(arguments: rest).run()
             case "download": try download(rest)
@@ -65,6 +71,32 @@ public enum CefTool {
     }
 
     // MARK: - Subcommands
+
+    private static func new(_ arguments: [String]) throws {
+        if arguments.contains("--help") || arguments.contains("-h") {
+            print(Scaffold.usage)
+            return
+        }
+        let scaffold = try Scaffold(
+            arguments: arguments,
+            workingDirectory: URL(fileURLWithPath: FileManager.default.currentDirectoryPath),
+            toolLocation: Bundle.main.executableURL)
+        let files = try scaffold.run()
+        Log.info("Created \(scaffold.output.path) from the \(scaffold.template) template (\(files.count) files).")
+        switch scaffold.dependency {
+        case .path(let path): Log.info("It depends on the CefSwift checkout at \(path).")
+        case .version(let version): Log.info("It depends on CefSwift \(version) and its patch releases (up to the next minor version).")
+        case .branch(let branch): Log.info("It depends on CefSwift's \(branch) branch.")
+        }
+        print("""
+
+          Build and open it:
+
+            cd \(scaffold.output.path.replacingOccurrences(of: " ", with: "\\ "))
+            swift package --allow-writing-to-package-directory --allow-network-connections all \\
+                cef bundle --product \(scaffold.name) --open
+        """ + (scaffold.makesXcodeProject ? "\n\n  Or open \(scaffold.name).xcodeproj in Xcode and Run." : ""))
+    }
 
     private static func cacheAndManifest(_ args: inout Arguments, command: String) throws -> (Downloader, CefManifest) {
         guard let cache = args.option("cache"), let manifest = args.option("manifest") else {
