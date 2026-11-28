@@ -213,6 +213,7 @@ enum SelfTest {
         ("siteSettings", siteSettingsChecks),
         ("processes", processChecks),
         ("pdf", pdfChecks),
+        ("devToolsCommands", devToolsCommandChecks),
         ("security", securityChecks),
         ("pageIntegration", pageIntegrationChecks),
         ("discard", discardChecks),
