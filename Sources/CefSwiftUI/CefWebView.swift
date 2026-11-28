@@ -55,11 +55,13 @@ public struct CefWebView: View {
         let url: URL
         // SwiftUI keeps the first page and discards the ones later
         // initializers make; a page does nothing in Chromium until hosted.
-        @State private var page: CefPage
+        // Stored, not `@State`: see the environment keys below.
+        private let pageState: State<CefPage>
+        private var page: CefPage { pageState.wrappedValue }
 
         init(url: URL, configuration: CefPage.Configuration) {
             self.url = url
-            _page = State(initialValue: CefPage(url: url, configuration: configuration))
+            pageState = State(initialValue: CefPage(url: url, configuration: configuration))
         }
 
         var body: some View {
@@ -152,10 +154,37 @@ private struct PageRepresentable<HostView: CefPageHostView>: NSViewRepresentable
 
 // MARK: - Offscreen geometry
 
+// Environment keys written out rather than with `@Entry`, and the owned
+// page's `State` stored rather than wrapped: from the macOS 27 SDK, both
+// are macros whose plugin only Xcode ships, so with the Command Line
+// Tools alone `@Entry` and `@State` do not compile.
+private struct OffscreenResizePolicyKey: EnvironmentKey {
+    static let defaultValue = CefOffscreenPageView.ResizePolicy.live
+}
+
+private struct OffscreenFramePlacementKey: EnvironmentKey {
+    static let defaultValue = CefOffscreenPageView.FramePlacement.stretch
+}
+
+private struct OffscreenPageSizeKey: EnvironmentKey {
+    static let defaultValue: CGSize? = nil
+}
+
 extension EnvironmentValues {
-    @Entry var offscreenResizePolicy: CefOffscreenPageView.ResizePolicy = .live
-    @Entry var offscreenFramePlacement: CefOffscreenPageView.FramePlacement = .stretch
-    @Entry var offscreenPageSize: CGSize? = nil
+    var offscreenResizePolicy: CefOffscreenPageView.ResizePolicy {
+        get { self[OffscreenResizePolicyKey.self] }
+        set { self[OffscreenResizePolicyKey.self] = newValue }
+    }
+
+    var offscreenFramePlacement: CefOffscreenPageView.FramePlacement {
+        get { self[OffscreenFramePlacementKey.self] }
+        set { self[OffscreenFramePlacementKey.self] = newValue }
+    }
+
+    var offscreenPageSize: CGSize? {
+        get { self[OffscreenPageSizeKey.self] }
+        set { self[OffscreenPageSizeKey.self] = newValue }
+    }
 }
 
 extension View {
