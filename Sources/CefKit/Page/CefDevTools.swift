@@ -107,6 +107,28 @@ public final class CefDevTools {
     }
 
     private func send(_ method: String, _ params: CefJSON, session childSession: String?) async throws -> CefJSON {
+        let (page, current) = try await attachedPage()
+        if let childSession { return try await deliver(method, params, to: page, session: childSession) }
+        if let lease = Self.lease(for: method), lease.isDisable, (domainLeases[lease.enable] ?? 0) > 1 {
+            // Another user of the domain still needs it.
+            domainLeases[lease.enable, default: 1] -= 1
+            return [:]
+        }
+        let result = try await deliver(method, params, to: page)
+        if current == session { recordDomainState(method, params) }
+        return result
+    }
+
+    /// Calls a method that is not `X.enable` or `X.disable` with
+    /// parameters already encoded as a JSON object, and returns the reply
+    /// as Chromium sent it: its result is not parsed here.
+    func sendEncoded(_ method: String, params: Data) async throws -> Reply {
+        let (page, _) = try await attachedPage()
+        return try await deliver(method, encodedParams: params, to: page)
+    }
+
+    /// The page, ready and attached, and the session it is in.
+    private func attachedPage() async throws -> (CefPage, Int) {
         guard let page else { throw CefError.pageClosed }
         // Each suspension can outlive the session: start over in the new
         // one after a discard; fail once the page has closed.
@@ -119,19 +141,11 @@ public final class CefDevTools {
             guard page.state != .closed else { throw CefError.pageClosed }
         } while current != session || page.raw == nil
         attachIfNeeded(to: page)
-        if let childSession { return try await deliver(method, params, to: page, session: childSession) }
-        if let lease = Self.lease(for: method), lease.isDisable, (domainLeases[lease.enable] ?? 0) > 1 {
-            // Another user of the domain still needs it.
-            domainLeases[lease.enable, default: 1] -= 1
-            return [:]
-        }
-        let result = try await deliver(method, params, to: page)
-        if current == session { recordDomainState(method, params) }
-        return result
+        return (page, current)
     }
 
     /// For `X.enable` or `X.disable`, the enable method and which it is.
-    private static func lease(for method: String) -> (enable: String, isDisable: Bool)? {
+    static func lease(for method: String) -> (enable: String, isDisable: Bool)? {
         guard let dot = method.lastIndex(of: ".") else { return nil }
         let enable = String(method[..<dot]) + ".enable"
         switch method[method.index(after: dot)...] {
@@ -193,13 +207,38 @@ public final class CefDevTools {
         let reply = try await pending.wait { id in
             var fields: [String: CefJSON] = ["id": .number(Double(id)), "method": .string(method), "params": params]
             if let session { fields["sessionId"] = .string(session) }
-            let message = CefJSON.object(fields).data
-            let sent = page.withHost { host in
-                message.withUnsafeBytes { host.pointee.send_dev_tools_message(host, $0.baseAddress, $0.count) != 0 }
-            }
-            if sent != true { pending.complete(id, .failure(CefError.pageClosed)) }
+            post(CefJSON.object(fields).data, id: id, to: page)
         }
         return try Self.result(of: reply, for: method)
+    }
+
+    /// Sends a message whose parameters are JSON text already, spliced in
+    /// as they are.
+    private func deliver(_ method: String, encodedParams params: Data, to page: CefPage) async throws -> Reply {
+        sentMessageCount += 1
+        return try await pending.wait { id in
+            post(Self.message(id: id, method: method, encodedParams: params), id: id, to: page)
+        }
+    }
+
+    /// `{"id":…,"method":…,"params":…}` around parameters that are a JSON
+    /// object already.
+    static func message(id: Int, method: String, encodedParams params: Data) -> Data {
+        var message = Data()
+        message.reserveCapacity(params.count + method.utf8.count + 40)
+        message.append(contentsOf: #"{"id":\#(id),"method":"#.utf8)
+        message.append(CefJSON.string(method).data)
+        message.append(contentsOf: #","params":"#.utf8)
+        message.append(params)
+        message.append(UInt8(ascii: "}"))
+        return message
+    }
+
+    private func post(_ message: Data, id: Int, to page: CefPage) {
+        let sent = page.withHost { host in
+            message.withUnsafeBytes { host.pointee.send_dev_tools_message(host, $0.baseAddress, $0.count) != 0 }
+        }
+        if sent != true { pending.complete(id, .failure(CefError.pageClosed)) }
     }
 
     /// A reply's result object, or the error it reports. A reply that is
@@ -218,11 +257,23 @@ public final class CefDevTools {
         return json
     }
 
-    /// Calls a protocol method and decodes its result as `Result`.
+    /// Calls a protocol method and decodes its result as `Result`, straight
+    /// from the reply's bytes.
     public func send<Result: Decodable>(
         _ method: String, _ params: CefJSON = [:], as type: Result.Type
     ) async throws -> Result {
-        try await send(method, params).decode(Result.self)
+        // Enabling and disabling a domain goes through its lease.
+        if Self.lease(for: method) != nil { return try await send(method, params).decode(Result.self) }
+        return try Self.decode(Result.self, from: await sendEncoded(method, params: params.data), for: method)
+    }
+
+    /// A reply's result decoded as `Result`, or the error it reports.
+    static func decode<Result: Decodable>(_ type: Result.Type, from reply: Reply, for method: String) throws -> Result {
+        guard reply.succeeded else {
+            _ = try result(of: reply, for: method)
+            throw CefError.operationFailed("\(method) failed")
+        }
+        return try JSONDecoder().decode(Result.self, from: reply.result)
     }
 
     /// How many undelivered events ``events(_:bufferingPolicy:)`` keeps by
@@ -249,6 +300,12 @@ public final class CefDevTools {
     }
 
     private var streams: [UUID: AsyncStream<CefJSON>.Continuation] = [:]
+    /// The listeners of typed event streams, by event method: each decodes
+    /// its type from the event's bytes, borrowed for the call. They outlive
+    /// a discard, as the streams do.
+    var eventDecoders: [String: [UUID: @MainActor (Data) -> Void]] = [:]
+    /// Ends each typed event stream, at page close.
+    var typedStreamFinishers: [UUID: @MainActor () -> Void] = [:]
 
     // MARK: Internal listeners
 
@@ -286,6 +343,9 @@ public final class CefDevTools {
         listeners = [:]
         streams.values.forEach { $0.finish() }
         streams = [:]
+        eventDecoders = [:]
+        typedStreamFinishers.values.forEach { $0() }
+        typedStreamFinishers = [:]
     }
 
     // MARK: Observer
@@ -332,9 +392,13 @@ public final class CefDevTools {
     /// An event, its parameters borrowed for the call. Nothing is copied
     /// or parsed for an event nobody listens to.
     func received(event method: String, params: UnsafeRawBufferPointer) {
-        guard let handlers = listeners[method], !handlers.isEmpty, let base = params.baseAddress else { return }
+        let handlers = listeners[method] ?? [:], decoders = eventDecoders[method] ?? [:]
+        guard !handlers.isEmpty || !decoders.isEmpty, let base = params.baseAddress else { return }
         // Parsed before the call returns, so the bytes need no copy.
         let params = Data(bytesNoCopy: UnsafeMutableRawPointer(mutating: base), count: params.count, deallocator: .none)
+        // Typed streams decode their event type straight from the bytes.
+        decoders.values.forEach { $0(params) }
+        guard !handlers.isEmpty else { return }
         // An event whose parameters are not a JSON object is malformed.
         guard let json = try? CefJSON(data: params), json.objectValue != nil else {
             CefLog.error("devTools: dropped \(method) with malformed parameters")

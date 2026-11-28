@@ -3760,6 +3760,66 @@ enable the event's domain first. A consumer that falls behind keeps the
 newest 1,000 events (`CefDevTools.defaultEventBuffering`); pass
 `.unbounded` to keep every one.
 
+### Typed commands
+
+A `CefDevToolsCommand` is a command with typed parameters and a typed
+result, and a `CefDevToolsEvent` an event with typed parameters. CefKit
+declares the commands an agent or an automated browser needs to see and
+drive a page, under `CefDevTools`: `Page.CaptureScreenshot`,
+`Accessibility.GetFullAXTree`, `DOMSnapshot.CaptureSnapshot` and
+`Input.DispatchMouseEvent`, `DispatchKeyEvent` and `InsertText`. Input
+reaches windowed and offscreen pages alike, in CSS pixels from the
+viewport's top left.
+
+```swift
+let devTools = page.devTools
+// What the page shows, as assistive apps see it.
+let tree = try await devTools.send(CefDevTools.Accessibility.GetFullAXTree())
+let buttons = tree.nodes.filter { $0.role == "button" }
+
+// Where things are, with every frame's nodes and their bounds.
+let snapshot = try await devTools.send(CefDevTools.DOMSnapshot.CaptureSnapshot())
+
+// Click, then type.
+for kind in [CefDevTools.Input.DispatchMouseEvent.Kind.pressed, .released] {
+    try await devTools.send(CefDevTools.Input.DispatchMouseEvent(
+        kind, at: CGPoint(x: 160, y: 100), button: .left, clickCount: 1))
+}
+try await devTools.send(CefDevTools.Input.InsertText("hello"))
+
+let screenshot = try await devTools.send(CefDevTools.Page.CaptureScreenshot(format: .jpeg, quality: 70))
+```
+
+Declare any other command or event the same way:
+
+```swift
+struct RequestWillBeSent: CefDevToolsEvent {
+    static let method = "Network.requestWillBeSent"
+    struct Request: Decodable, Sendable { var url: String }
+    var request: Request
+}
+
+try await page.devTools.send("Network.enable")
+for await event in page.devTools.events(RequestWillBeSent.self) {
+    print(event.request.url)
+}
+```
+
+A typed command's parameters are encoded once into the message, and its
+result is decoded straight from the reply's bytes, as `send(_:_:as:)`'s
+now is: there is no `CefJSON` tree in between. A typed event stream
+decodes each event from Chromium's buffer the same way, and an event
+that does not decode is dropped and logged. The saving is small next to
+what Chromium does: decoding a reply holding a 4 MB image took 14.8 ms
+typed against 15.9 ms through `CefJSON` and `Data(base64Encoded:)`, and a
+whole-page PNG of a 1600 × 1000 window at 2× took about 210 ms either way,
+nearly all of it Chromium's (median of 12 and 15 runs, release build, M2,
+macOS 27.2.1 on AC power with other builds running, CEF 158.0.6, 2026-11-28).
+
+`DOMSnapshot` bounds are in device pixels, CSS pixels times
+`window.devicePixelRatio` (2 on a Retina display, and more when the page
+is zoomed); divide by it for the coordinates `Input` takes.
+
 `page.showDevTools()` opens the DevTools window, and
 `showDevTools(inspecting:)` inspects the element at a point in view
 coordinates.
