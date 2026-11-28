@@ -1072,6 +1072,56 @@ checks: it skips SwiftPM when the tool and helper are newer than their
 sources, since SwiftPM's own checks (three builds, each with its own linker flags,
 and their `--show-bin-path`) took 15.7 s to find nothing to do.
 
+## The framework as a binary target
+
+Both tracks used to download CEF's own distribution (a `.tar.bz2` from
+`cef-builds.spotifycdn.com`) on the first build, into each project's
+`.cef/`. The framework is now CefSwift's `ChromiumEmbeddedFramework`
+binary target, an XCFramework zip on a GitHub release that SwiftPM and
+Xcode download, verify and cache as they resolve the package. Measured
+with CEF 158.0.6 on an M3, with other builds running:
+
+| | Before (distribution) | After (XCFramework) |
+|---|---|---|
+| Download | 141 MB (arm64 `.tar.bz2`) | 278 MB (zip, both architectures) |
+| Where it is kept | `.cef/` of each package or project | SwiftPM's cache, shared by every project |
+| Unpacked | 352 MB (the whole distribution) | 612 MB |
+| `Minimal.app` (arm64, English only) | 306,148 KiB | 306,136 KiB, the same files |
+
+**Why one universal zip.** A binary target's conditions are platforms,
+not architectures, so a package cannot have SwiftPM fetch the arm64
+framework on Apple silicon and the x86_64 one on Intel. The arm64 framework
+alone, zipped the same way, is 154 MB: an arm64-only target would save
+124 MB per download and leave Intel to the old download path, so Intel
+bundles would keep two ways to get the framework. One universal target is
+what this does; bundling thins it (`lipo -thin`, and the resources CEF
+names by architecture removed: 266.6 MiB for an arm64 app), so the bundle
+is the size it was.
+
+**What SwiftPM downloads.** SwiftPM fetches every remote binary target of
+every package in the graph when it resolves it, whether or not a product
+being built uses it: a manifest whose unused binary target names a missing
+asset fails `swift build` of an unrelated product with
+`badResponseStatusCode(404)` (checked with a two-package fixture). So every
+package that depends on CefSwift downloads the 278 MB once, also when it
+only builds a library, and nothing can opt out. The release asset limit
+(2 GiB a file) leaves room.
+
+**Reproducible bytes.** `Scripts/package-cef.py` writes the zip with
+sorted entries, fixed dates and modes and no extra fields, so CI can
+rebuild it from the official distributions and require the pinned
+checksum: two runs on this Mac gave the same SHA-256
+(`b1a729be…46c1e`). Packaging took 289 s with other builds running.
+
+**Idle memory.** The app's framework is the same arm64 slice as before
+(`package-cef.py` checks each slice against the official file, byte for
+byte), signed the same way. `Scripts/measure-footprint.py --runs 3`,
+alternating main and this change twice on AC power with other builds
+running: median 98.7 and 98.8 MiB on main, 123.8 and 95.4 MiB with the
+change. The 123.8 MiB round had its GPU process at 33.3 MiB instead of
+11 to 14 MiB, and one run's helpers outlived the quit, which is the
+machine's load, not the bundle; the quieter round matches main.
+
 ## Request filter matching
 
 A profile's request filter is consulted for every request of every page

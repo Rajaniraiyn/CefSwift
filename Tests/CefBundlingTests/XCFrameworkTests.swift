@@ -149,5 +149,11 @@ import Testing
         #expect(try found(environment.merging(["CEF_FLAVOR": "standard"]) { $1 }) == nil)
         #expect(try found(environment.merging(["CEF_MANIFEST": "/x/CEF_VERSION.json"]) { $1 }) == nil)
         #expect(try found(environment.merging(["CEF_XCFRAMEWORK": "/x/F.xcframework"]) { $1 }) == "/x/F.xcframework")
+
+        // The phase's SwiftPM build of the helper resolves the same binary
+        // target, so the switch reaches it; Xcode's settings do not.
+        let swift = XcodeEmbed.swiftEnvironment(environment.merging(["SDKROOT": "/sdk", "HOME": "/h"]) { $1 })
+        #expect(swift["CEFSWIFT_LOCAL_FRAMEWORK"] == "1")
+        #expect(swift["SDKROOT"] == nil && swift["HOME"] == "/h")
     }
 }

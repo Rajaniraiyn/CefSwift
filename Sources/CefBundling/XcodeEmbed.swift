@@ -490,9 +490,11 @@ struct XcodeEmbed {
 
     /// The environment for SwiftPM: Xcode's build settings (SDKROOT, ARCHS,
     /// deployment targets and the like) would otherwise leak into its build.
+    /// `CEFSWIFT_LOCAL_FRAMEWORK` goes through: CefSwift's manifest reads it
+    /// to choose where its binary target comes from.
     static func swiftEnvironment(_ environment: [String: String]) -> [String: String] {
         var clean: [String: String] = ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"]
-        for key in ["HOME", "DEVELOPER_DIR", "TMPDIR", "USER", "LOGNAME"] {
+        for key in ["HOME", "DEVELOPER_DIR", "TMPDIR", "USER", "LOGNAME", "CEFSWIFT_LOCAL_FRAMEWORK"] {
             if let value = environment[key] { clean[key] = value }
         }
         return clean
