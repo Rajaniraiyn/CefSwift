@@ -1,0 +1,8 @@
+:root { color-scheme: light dark; }
+body { font: 15px/1.5 -apple-system, system-ui, sans-serif; margin: 0; }
+main { max-width: 640px; margin: 48px auto; padding: 0 24px; }
+h1 { font-size: 28px; margin-bottom: 8px; }
+code { font: 13px ui-monospace, monospace; }
+input { font: inherit; padding: 6px 8px; width: 60%; }
+button { font: inherit; padding: 6px 12px; }
+.muted { color: GrayText; }

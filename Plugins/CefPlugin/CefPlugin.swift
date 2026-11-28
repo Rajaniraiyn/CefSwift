@@ -30,6 +30,8 @@ struct CefPlugin: CommandPlugin {
             let manifest = try manifestPath(context: context, explicit: extractor.extractOption(named: "manifest").last)
             try tool.run(["download", "--cache", cacheRoot(context).path, "--manifest", manifest.path]
                          + extractor.remainingArguments)
+        case "new":
+            try newPackage(context: context, tool: tool, extractor: &extractor)
         case "bundle":
             try bundle(context: context, tool: tool, extractor: &extractor)
         case "info":
@@ -47,7 +49,7 @@ struct CefPlugin: CommandPlugin {
         default:
             print(Self.usage)
             throw PluginError(
-                "Unknown subcommand '\(subcommand)'. Expected one of: download, bundle, doctor, package, " +
+                "Unknown subcommand '\(subcommand)'. Expected one of: new, download, bundle, doctor, package, " +
                 "notarize, info, clean.")
         }
     }
@@ -56,6 +58,17 @@ struct CefPlugin: CommandPlugin {
     USAGE: swift package [--allow-writing-to-package-directory --allow-network-connections all] cef <subcommand>
 
     SUBCOMMANDS:
+      new <Name> [--template browser|app|minimal] [--output <dir>] [--display-name <name>]
+          [--bundle-id <id>] [--xcode] [--cefswift-path <dir> | --cefswift-version <V> |
+          --cefswift-branch <name>]
+          Create a package for a new app from a template, ready to bundle:
+          Package.swift, its sources, cefapp.json and a .gitignore; with
+          --xcode, an Xcode project too. browser (the default) is a trimmed
+          copy of the Browser example; app is an app shell of web pages with
+          a JavaScript bridge; minimal is one web view. Default output:
+          <packageDir>/<Name>; a directory outside the package needs
+          --allow-writing-to-directory <dir> before 'cef'.
+
       download [--platform macosarm64|macosx64] [--flavor minimal|standard]
                [--cef-version <V>] [--manifest <path>]
           Download the pinned CEF distribution into .cef/, verify, extract, and
@@ -71,8 +84,10 @@ struct CefPlugin: CommandPlugin {
              [--provisioning-profile <file>] [--[no-]hardened-runtime] [--[no-]timestamp]
              [--package zip|dmg] [--notarize --keychain-profile <name>]
              [--localizations application|all|<list>] [--software-gpu-fallback include|exclude]
+             [--open]
           Build <Name>, compile the helper, then assemble and sign <Name>.app
           (framework + five helper apps + Info.plists + entitlements).
+          --open opens the app once it is bundled.
           --localizations chooses Chromium's locale packs: those of the app's
           localizations (CFBundleLocalizations), its development language and
           English (application, the default), all of them, or those of a
@@ -123,6 +138,7 @@ struct CefPlugin: CommandPlugin {
         let platform = extractor.extractOption(named: "platform").last ?? Self.hostPlatform
         let flavor = extractor.extractOption(named: "flavor").last ?? "minimal"
         let outputPath = extractor.extractOption(named: "output").last
+        let opensApp = extractor.extractFlag(named: "open") > 0
         // The rest are the tool's: settings, signing, packaging.
         let settingsArguments = extractor.remainingArguments
 
@@ -187,6 +203,44 @@ struct CefPlugin: CommandPlugin {
             "--executable", executable.path, "--helper", helper.path, "--helper-startup", startup.path,
             "--framework", framework.path,
         ] + located.resourceBundleNames.flatMap { ["--resource-bundle", $0] })
+
+        if opensApp {
+            let app = outputDirectory.appendingPathComponent("\(productName).app")
+            print("[cef] Opening \(app.path)")
+            guard try Tool.runStreaming("/usr/bin/open", [app.path]) == 0 else {
+                throw PluginError("Could not open \(app.path); open it yourself.")
+            }
+        }
+    }
+
+    // MARK: - new
+
+    /// `cef new`: runs `cefswift new` with the CefSwift package the plugin
+    /// comes from, writing into the invoking package unless `--output` says
+    /// otherwise.
+    private func newPackage(context: PluginContext, tool: Tool, extractor: inout ArgumentExtractor) throws {
+        let output = extractor.extractOption(named: "output").last
+        var rest = extractor.remainingArguments
+        if rest.contains("--help") || rest.contains("-h") {
+            try tool.run(["new", "--help"])
+            return
+        }
+        let valued: Set = ["--template", "--display-name", "--bundle-id", "--cefswift-path", "--cefswift-version",
+                           "--cefswift-branch", "--cefswift-root"]
+        let name = rest.indices.first { index in
+            !rest[index].hasPrefix("--") && (index == 0 || !valued.contains(rest[index - 1]))
+        }.map { rest[$0] }
+        guard let name else {
+            throw PluginError("Missing the app's name: swift package cef new <Name> [--template browser|app|minimal].")
+        }
+        let cefSwift = try LocatedProduct.locate("cefswift", in: context.package).package.directoryURL
+        if !rest.contains("--cefswift-root") { rest += ["--cefswift-root", cefSwift.path] }
+        if let path = rest.firstIndex(of: "--cefswift-path"), path + 1 < rest.count {
+            rest[path + 1] = packageRelative(rest[path + 1], context: context).path
+        }
+        let destination = output.map { packageRelative($0, context: context) }
+            ?? context.package.directoryURL.appendingPathComponent(name)
+        try tool.run(["new"] + rest + ["--output", destination.path])
     }
 
     /// Builds a product through SwiftPM and returns the built file. A

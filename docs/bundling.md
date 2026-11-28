@@ -32,6 +32,7 @@ The two `--allow-…` options pre-approve the plugin's permissions: it writes
 
 | Subcommand | Does |
 |---|---|
+| `new <Name>` | Creates a package for a new app from a template. See [Starting from a template](#starting-from-a-template). |
 | `download` | Downloads the pinned CEF distribution into `.cef/`, verifies its size and SHA-1, extracts it and converts the framework to the versioned layout. Does nothing if it is already prepared. |
 | `bundle` | Builds the product, compiles the helper, then assembles and signs `<Name>.app`. Downloads CEF first if needed. See [What `bundle` puts in the app](#what-bundle-puts-in-the-app). |
 | `doctor <App.app>` | Inspects a built bundle and reports, per feature, whether it works and what is missing. See [cef doctor](#cef-doctor). |
@@ -69,6 +70,7 @@ Options of `bundle`:
 | `--flavor minimal\|standard` | `minimal` | Which CEF distribution to download. See [Flavors](#flavors). |
 | `--platform macosarm64\|macosx64` | The build machine's | Which architecture's CEF to bundle. It must be the architecture SwiftPM builds for, which is the one `swift package` runs as; anything else is an error. Run `arch -x86_64 swift package …` to bundle for Intel on Apple silicon. |
 | `--manifest <path>` | `CEF_VERSION.json` | A different CEF manifest. |
+| `--open` | Off | Opens the app once it is bundled. |
 
 `download` takes `--platform`, `--flavor` and `--manifest` as well, and
 `info` takes `--manifest`.
@@ -87,6 +89,52 @@ The plugin finds the product in the package graph, builds it, the helper
 and the helper's startup library with SwiftPM, and runs `cefswift` for the
 rest: it checks the settings before building, downloads CEF, then
 assembles and signs the bundle.
+
+### Starting from a template
+
+`cef new` writes a package for a new app, ready to bundle: `Package.swift`,
+its sources, `cefapp.json`, a `README.md` and a `.gitignore` that leaves out
+`.cef/` and `dist/`. Without a CefSwift checkout, a script fetches
+CefSwift, builds its `cefswift` tool and runs `cefswift new` in the current
+directory; then one command builds and opens the app:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Rajaniraiyn/CefSwift/main/Scripts/new-app.sh \
+    | sh -s -- MyBrowser --template browser
+cd MyBrowser && swift package --allow-writing-to-package-directory --allow-network-connections all \
+    cef bundle --product MyBrowser --open
+```
+
+In a package that already depends on CefSwift, or in a checkout of it,
+`swift package cef new <Name>` does the same, writing `<Name>/` inside the
+package (`--output` elsewhere, with `--allow-writing-to-directory <dir>`
+before `cef`).
+
+| Template | What it is |
+|---|---|
+| `browser` (the default) | A tabbed browser: the Browser example's core (Chromium's tabbed windows under a SwiftUI tab rail and toolbar, menus, settings, restoring windows) and its address bar with suggestions, bookmarks, history, start page, find bar, downloads, extensions and Memory Saver features, each a folder of `Features/`, with their unit tests. Needs macOS 15. |
+| `app` | An app shell: native sections that are web pages, the app's own content served from its resources at `app://content/`, and a JavaScript bridge to Swift. |
+| `minimal` | One window with one web page, on the `.embedded` configuration. |
+
+The browser template copies those files from `Examples/Sources/Browser`
+when it runs, so it is the example's code at the version it comes from;
+`Templates/browser/template.json` lists what it copies. Each template's
+app takes `-smoke YES` (the browser: `-screenshot <file.png>`) to check that
+it starts and loads a page.
+
+| Option | Default | Effect |
+|---|---|---|
+| `--template browser\|app\|minimal` | `browser` | Which template. |
+| `--output <dir>` | `<Name>` (`cefswift`: in the current directory; the plugin: in the package) | Where the package goes. It must not exist, or be empty. |
+| `--display-name <name>` | The name, split into words (`My Browser`) | `displayName` in cefapp.json. |
+| `--bundle-id <id>` | `com.example.<name>` | `bundleIdentifier` in cefapp.json. |
+| `--xcode` | Off | Also writes `<Name>.xcodeproj` and `CefSwift.xcconfig`: an app target on the same sources, set up as in [Xcode](#xcode). |
+| `--cefswift-version <1.2.3>` | The release the templates come from, when they come from a release tag | Depends on that release, up to the next minor version. |
+| `--cefswift-branch <name>` | | Depends on a branch of CefSwift's repository. |
+| `--cefswift-path <dir>` | The checkout the templates come from, when it is not at a release tag | Depends on a local checkout. |
+
+`<Name>` is the package, target and module name, so it must be a Swift
+identifier.
 
 ### Without Xcode
 

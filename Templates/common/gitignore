@@ -1,0 +1,9 @@
+.DS_Store
+/.build
+/.swiftpm
+# The CEF download (about 135 MB) and the bundled apps.
+.cef/
+dist/
+xcuserdata/
+DerivedData/
+/build

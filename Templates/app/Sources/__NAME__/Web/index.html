@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>__DISPLAY_NAME__</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main>
+    <h1>__DISPLAY_NAME__</h1>
+    <p>This page comes from <code>Sources/__NAME__/Web</code>, served at
+      <code>app://content/</code> by a <code>CefDirectorySchemeHandler</code>.
+      Edit it, bundle again, and it changes.</p>
+
+    <h2>Talk to Swift</h2>
+    <form id="note">
+      <input id="text" placeholder="A note for the sidebar" autofocus>
+      <button>Send to Swift</button>
+    </form>
+    <p id="reply" class="muted">The page calls <code>app.addNote(text)</code>, a Swift function,
+      and awaits its answer.</p>
+  </main>
+  <script>
+    document.getElementById('note').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const field = document.getElementById('text');
+      const count = await app.addNote(field.value || 'Untitled');
+      document.getElementById('reply').textContent =
+        `Swift has ${count} note${count === 1 ? '' : 's'}.`;
+      field.value = '';
+    });
+    app.on('cleared', () => {
+      document.getElementById('reply').textContent = 'Swift cleared the notes.';
+    });
+  </script>
+</body>
+</html>

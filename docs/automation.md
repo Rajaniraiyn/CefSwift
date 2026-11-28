@@ -114,7 +114,7 @@ description to `.cef/update/`.
 
 `.github/workflows/ci.yml` runs on pushes and pull requests to `main`, and
 when dispatched. Its `ci` job, on a `macos-15` runner, does everything
-below; two jobs run beside it:
+below; three jobs run beside it:
 
 - `intel` compiles the package and its tests for x86_64
   (`swift build --build-tests --arch x86_64`) on the same arm64 runner,
@@ -130,6 +130,13 @@ below; two jobs run beside it:
   check: release tags and CEF updates wait for `ci` and `intel` only. It
   had not run on GitHub when it was added; the runner's Xcode is older
   than the Xcode 27.2 it was written with.
+- `templates` generates each `cefswift new` template (`Templates/`)
+  against the checkout, runs the browser template's unit tests, bundles
+  each, runs `cef doctor` on it and launches it (`-smoke YES`, or for the
+  browser `-screenshot`), then builds the browser template's Xcode project
+  with `xcodebuild` and launches that. It catches a change to the Browser
+  example that breaks the browser template, which copies its code. It is
+  not a required check.
 
 The `ci` job:
 
