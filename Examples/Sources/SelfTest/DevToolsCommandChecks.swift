@@ -11,6 +11,7 @@ extension SelfTest {
         defer {
             page.close(force: true)
             view.removeFromSuperview()
+            CefRuntime.shared.removeSchemeHandler(scheme: "https", domain: "devtools.cefswift.test")
         }
         guard await loaded(page, title: "commands") else {
             check("devToolsCommands: page loads", false, detail: page.title)
