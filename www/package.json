@@ -1,0 +1,21 @@
+{
+  "name": "cefswift-www",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "pages": "bun scripts/build-pages.ts",
+    "dev": "bun scripts/build-pages.ts && bun --bun blume dev",
+    "build": "bun scripts/build-pages.ts && bun --bun blume build",
+    "preview": "bun --bun blume preview",
+    "validate": "bun scripts/build-pages.ts && bun --bun blume validate",
+    "audit": "bun --bun blume audit"
+  },
+  "packageManager": "bun@1.4.0",
+  "engines": {
+    "bun": ">=1.4.0"
+  },
+  "dependencies": {
+    "blume": "1.7.0",
+    "github-slugger": "2.0.0"
+  }
+}

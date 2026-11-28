@@ -190,9 +190,12 @@ loop.
 
 ## Check the documentation samples
 
-`Scripts/check-doc-samples.py` compiles every Swift block in `README.md`
-and `docs/*.md` against this checkout, for macOS 14; CI runs it. It does
-not read `CONTRIBUTING.md` or `Examples/README.md`. Run it after
+`Scripts/check-doc-samples.py` compiles every Swift block in `README.md`,
+`docs/*.md`, the website's page openings (`www/pages/`) and the agent
+skills (`skills/`) against this checkout, for macOS 14; CI runs it. It does
+not read `CONTRIBUTING.md` or `Examples/README.md`. Blocks that are files
+of one app start with their path (`// Sources/MyBrowser/TopBar.swift`) and
+compile together. Run it after
 changing public API or a sample. Names an app would define (`page`,
 `openTab`, …) come from stubs in the script; add one there when a sample
 needs it, never a stub of CefSwift API. A sample that needs a later macOS
