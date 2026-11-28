@@ -19,6 +19,7 @@ extension SelfTest {
         defer {
             pages.forEach { $0.close(force: true) }
             views.forEach { $0.removeFromSuperview() }
+            hosts.forEach { CefRuntime.shared.removeSchemeHandler(scheme: "https", domain: $0) }
         }
         for page in pages {
             guard await loaded(page, title: "site data") else {
