@@ -82,6 +82,7 @@ The runtime, page, window and profile APIs are `@MainActor`.
   - [The profile's extensions](#the-profiles-extensions)
   - [Installing extensions with the app](#installing-extensions-with-the-app)
   - [Toolbars, popups and the Web Store](#toolbars-popups-and-the-web-store)
+  - [Native messaging hosts](#native-messaging-hosts)
   - [Trust](#trust)
 - [DevTools](#devtools)
 - [Compatibility with bot protection](#compatibility-with-bot-protection)
@@ -187,6 +188,7 @@ Common options:
 | `productName`, `stringOverrides` | Your product name, and replacements for other built-in strings. See [Customizing Chromium's own pages](#customizing-chromiums-own-pages). |
 | `chromeToolbar` | Hides Chrome app-menu commands, toolbar buttons and page-action icons in Chrome-style windows. |
 | `extensions` | Extensions the app installs: `.webStore(id)`, `.package(at:id:version:)`, `.unpacked(at:)`. See [Extensions](#extensions). |
+| `nativeMessagingHostDirectories` | Directories of native messaging hosts extensions may use, besides Chromium's own; `.chrome` lists Google Chrome's and Chromium's. See [Native messaging hosts](#native-messaging-hosts). |
 | `processPolicy` | How many helper processes Chromium keeps running. See [Footprint and launch time](#footprint-and-launch-time). |
 | `enabledFeatures`, `disabledFeatures` | Chromium feature names, passed as `--enable-features` and `--disable-features`. CefKit turns off `RemoteCoreAnimationAPI`, with which no page Chromium draws itself reaches the screen on macOS 27.2 ([why](architecture.md#presenting-pages)); listing it in `enabledFeatures` turns it back on. |
 | `safeStorage`, `keychainItem` | Whether Chromium uses the keychain, and which item. See [Keychain access](#keychain-access). |
@@ -2102,7 +2104,7 @@ it can ([bundling](bundling.md#features)):
 | USB and NFC security keys | Nothing. |
 | A phone or tablet (QR code and Bluetooth) | `NSBluetoothAlwaysUsageDescription` in the app's `Info.plist` and, under the hardened runtime, `com.apple.security.device.bluetooth`; and a launch from Finder or `open`, which makes the app responsible for its own Bluetooth access. |
 | iCloud Keychain passkeys, through AuthenticationServices | The `com.apple.developer.web-browser.public-key-credential` entitlement, which Apple grants to web browsers on request, in a provisioning profile, and an Apple Development or Developer ID signature. |
-| Chromium's own profile passkeys (Touch ID) | Not available: CEF 156 checks for a keychain access group without a team prefix, which no provisioning profile can authorize. |
+| Chromium's own profile passkeys (Touch ID) | Not available: CEF 158 checks for a keychain access group without a team prefix, which no provisioning profile can authorize. |
 
 An ad hoc signed app gets security keys and, with the Bluetooth key,
 phones. `CefRuntime.shared.capabilities.webAuthnAuthenticators` lists what the running app gets. Chromium shows its dialog
@@ -2843,7 +2845,7 @@ alive forever.
 A `CefProfile.Cookie` carries everything CEF stores: `name`, `value`,
 `domain` (a leading dot for a domain cookie), `path`, `isSecure`,
 `isHTTPOnly`, `expirationDate` (nil for a session cookie), `sameSite`,
-`priority`, and Chromium's `creationDate` and `lastAccessDate`. CEF 156
+`priority`, and Chromium's `creationDate` and `lastAccessDate`. CEF 158
 reports no partition key, so a partitioned (CHIPS) cookie is listed
 without the site it is keyed to. Every cookie call returns once Chromium
 has finished:
@@ -3726,17 +3728,63 @@ struct ExtensionButtons: View {
 }
 ```
 
+### Native messaging hosts
+
+Password managers and other desktop apps talk to their extensions through
+native messaging hosts: a program the extension starts with
+`chrome.runtime.connectNative` or `sendNativeMessage`, found through a
+manifest the app installs for each browser it supports. 1Password and
+Bitwarden install theirs for Google Chrome, in
+`~/Library/Application Support/Google/Chrome/NativeMessagingHosts`, not
+for an app built on CEF. Chromium in CEF looks only in
+`NativeMessagingHosts` in the root cache directory and in
+`/Library/Application Support/Chromium/NativeMessagingHosts`.
+
+`nativeMessagingHostDirectories` lists more directories to take hosts
+from. The `.chrome` preset lists
+`CefRuntime.Configuration.chromeNativeMessagingHostDirectories`: Google
+Chrome's (stable, Beta, Dev and Canary) and Chromium's in the user's
+Application Support, and Google Chrome's in `/Library/Google/Chrome`. The
+other presets list none.
+
+```swift
+var configuration = CefRuntime.Configuration.chrome
+// Chrome's and Chromium's hosts, then Brave's.
+configuration.nativeMessagingHostDirectories = CefRuntime.Configuration.chromeNativeMessagingHostDirectories + [
+    FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("Library/Application Support/BraveSoftware/Brave-Browser/NativeMessagingHosts"),
+]
+```
+
+At start-up CefKit links each manifest in those directories into the root
+cache directory's `NativeMessagingHosts`, where Chromium reads it when an
+extension connects. The first directory with a host's name wins it, and a
+manifest the app writes there itself wins over all of them and is never
+replaced. Links to hosts that are gone are removed. A host installed while
+the app runs is found at its next start.
+
+A host answers only the extensions its manifest's `allowed_origins` names,
+by identifier, so an extension installed from the Chrome Web Store reaches
+its own app's host, as in Chrome. The host also learns the calling
+extension and can check the app that started it: the desktop app decides
+whether to trust a browser it does not know, and some ask the user or
+refuse until it is added to their list of browsers. SelfTest's
+`extensions` group checks the lookup, `connectNative`, `sendNativeMessage`
+and an uninstalled host with an echo host of its own; it does not run any
+password manager's host.
+
 ### Trust
 
 Extensions are third-party code with the reach Chrome gives them, inside
 the app's browser processes: they read and change the pages they have
 access to, see requests, and can talk to native messaging hosts the user
-installed. The app controls which can be installed: CefChromium's
-`installed` and `uninstall`, the configuration's list, and, on managed
-Macs, the administrator's policies. Extensions run in incognito only when
-allowed, one by one; they never run in Alloy-style pages' own
-interface, but their content scripts and network rules do apply to pages
-there.
+installed (in the root cache directory and the directories
+`nativeMessagingHostDirectories` lists). The app controls which can be
+installed: CefChromium's `installed` and `uninstall`, the configuration's
+list, and, on managed Macs, the administrator's policies. Extensions run
+in incognito only when allowed, one by one; they never run in Alloy-style
+pages' own interface, but their content scripts and network rules do
+apply to pages there.
 
 ## DevTools
 
@@ -3828,8 +3876,8 @@ pages, and attach no DevTools session.
 
 | Choice | `User-Agent` | Client hints |
 |---|---|---|
-| `.chromium` (default) | `… AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36` | All |
-| `.appendingProduct("MyApp/1.0")` | `… Chrome/156.0.0.0 MyApp/1.0 Safari/537.36` | All |
+| `.chromium` (default) | `… AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0.0.0 Safari/537.36` | All |
+| `.appendingProduct("MyApp/1.0")` | `… Chrome/158.0.0.0 MyApp/1.0 Safari/537.36` | All |
 | `.replacingProduct("MyApp/1.0")` | `… (KHTML, like Gecko) MyApp/1.0 Safari/537.36` | All |
 | `.custom("…")` | That string | Low-entropy ones only: `getHighEntropyValues()` returns no versions or architecture |
 
@@ -4365,13 +4413,20 @@ the switches measured and not used.
   credential the app cannot use; `page(_:passkeyStoreDidFail:)` gets
   the unsaved passkey.
 - Chromium's profile passkey authenticator (Touch ID, without a controller) is not
-  available: CEF 156 compiles in Chromium's keychain access group,
+  available: CEF 158 compiles in Chromium's keychain access group,
   `.org.chromium.Chromium.webauthn`, with an empty team identifier, and
   macOS lets a signed app claim only groups its provisioning profile
   authorizes, which start with the team identifier.
 - The App Sandbox is not supported with official CEF builds, so CefSwift
   apps do not ship in the Mac App Store: Chromium registers a Mach service
   the App Sandbox refuses ([bundling](bundling.md#app-sandbox)).
+- Building without Xcode, with the Command Line Tools 27.2 and their
+  macOS 27 SDK, `@State` in the app's own views does not compile: the SDK
+  makes it a macro whose plugin only Xcode ships. CefSwift and its
+  examples avoid it; an app builds against the tools' macOS 26 SDK or
+  names the property wrapper through an alias
+  ([bundling](bundling.md#without-xcode)). `@Entry` and `#Preview` need
+  Xcode with every SDK.
 - Chromium plays Widevine only as an unverified software (L3) client and
   has no H.264, HEVC or AAC, so Netflix-class services do not play in it;
   WebKit plays them with FairPlay, beside Chromium in the Browser example

@@ -16,7 +16,7 @@ struct PermissionsDemo: Demo {
 }
 
 private struct PermissionsView: View {
-    @State private var model = PermissionModel()
+    @ViewState private var model = PermissionModel()
 
     var body: some View {
         HSplitView {
@@ -89,7 +89,7 @@ private final class PermissionModel: CefPageDelegate {
 /// made anywhere, the prompt's answers included.
 private struct SiteSettingsList: View {
     let origin: URL
-    @State private var revision = 0
+    @ViewState private var revision = 0
     private let permissions: [(CefSitePermission, String)] = [
         (.windowManagement, "Window Management"), (.midiSystemExclusive, "MIDI"),
         (.popups, "Pop-ups"), (.javaScript, "JavaScript"), (.images, "Images"),

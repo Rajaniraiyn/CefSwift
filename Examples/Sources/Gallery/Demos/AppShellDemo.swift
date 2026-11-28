@@ -16,7 +16,7 @@ struct AppShellDemo: Demo {
 }
 
 private struct AppShell: View {
-    @State private var window: CefChromeWindow?
+    @ViewState private var window: CefChromeWindow?
     private let sections = ["Home", "Library", "Search"]
 
     var body: some View {

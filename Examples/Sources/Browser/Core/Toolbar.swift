@@ -26,7 +26,7 @@ struct ToolbarIconButtonStyle: ButtonStyle {
     private struct StyledButton: View {
         let configuration: Configuration
         @Environment(\.isEnabled) private var isEnabled
-        @State private var isHovered = false
+        @ViewState private var isHovered = false
 
         var body: some View {
             configuration.label

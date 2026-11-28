@@ -37,7 +37,7 @@ struct MinimalApp: CefSwiftApp {
         return configuration
     }
 
-    @State private var page = CefPage(url: Self.pageURL, delegate: BenchmarkReporter.shared)
+    @ViewState private var page = CefPage(url: Self.pageURL, delegate: BenchmarkReporter.shared)
 
     init() {
         BenchmarkReporter.shared.start()

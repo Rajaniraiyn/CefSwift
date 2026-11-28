@@ -9,6 +9,9 @@
 #     "Toolchain" step prints what each run used.
 #   - One short job beside it, in parallel and without CEF: `intel`
 #     compiles everything for x86_64 on the same arm64 runner.
+#   - One more in parallel, `command-line-tools`: the package built and
+#     tested, the examples built and Minimal bundled with the Command Line
+#     Tools alone (DEVELOPER_DIR), so nothing comes to need Xcode.
 #   - One more in parallel, `xcode`: the Xcode example built, archived and
 #     run by xcodebuild (about 2.5 minutes on an M3; more on a runner). It
 #     is not a required check, so it never holds up a CEF update.
@@ -264,6 +267,65 @@ jobs:
           lipo -archs "$helper" | tee "$RUNNER_TEMP/archs.txt"
           grep -qx x86_64 "$RUNNER_TEMP/archs.txt"
           xcrun vtool -show-build "$helper" | grep -Eq 'minos 14\.0$'
+
+  # The Command Line Tools track: no Xcode at all. DEVELOPER_DIR points at
+  # the tools, so swift, clang and the SDK are theirs and xcodebuild is not
+  # there; the package builds and tests, the Examples build, and Minimal is
+  # bundled and checked by cef doctor (docs/bundling.md, CONTRIBUTING). It
+  # keeps CefSwift from coming to need Xcode, as it did through SwiftUI's
+  # @Entry, whose macro plugin only Xcode ships.
+  command-line-tools:
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      DEVELOPER_DIR: /Library/Developer/CommandLineTools
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          test -d "$DEVELOPER_DIR"
+          pkgutil --pkg-info=com.apple.pkg.CLTools_Executables || true
+          xcrun --show-sdk-path
+          xcrun --show-sdk-version
+          swift --version
+          # Nothing below may reach Xcode.
+          if xcodebuild -version 2>/dev/null; then echo "xcodebuild is reachable"; exit 1; fi
+
+      - name: Read the pinned CEF version
+        id: cef
+        run: echo "version=$(jq -r .cef CEF_VERSION.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache CEF downloads
+        uses: actions/cache@v4
+        with:
+          path: Examples/.cef/downloads
+          key: cef-${{ steps.cef.outputs.version }}-macosarm64-minimal
+
+      - name: Build
+        run: swift build --build-tests
+
+      - name: Test
+        run: swift test
+
+      - name: Build and test the examples
+        run: swift test --package-path Examples
+
+      # The doc samples are what apps write (@State included).
+      - name: Documentation samples
+        run: Scripts/check-doc-samples.py
+
+      - name: Bundle Minimal
+        run: |
+          swift package --package-path Examples \
+            --allow-writing-to-package-directory --allow-network-connections all \
+            cef bundle --product Minimal
+
+      - name: cef doctor on Minimal
+        run: |
+          swift package --package-path Examples \
+            --allow-writing-to-package-directory --allow-network-connections all \
+            cef doctor "$PWD/Examples/dist/Minimal.app"
 
   # The Xcode track: Examples/Xcode built with xcodebuild, Debug and Release,
   # archived and exported, each launched with -smoke YES, and cef doctor on

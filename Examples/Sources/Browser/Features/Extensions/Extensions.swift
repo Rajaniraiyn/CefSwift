@@ -211,7 +211,7 @@ private struct AnchoredButton<Label: View>: View {
     let title: String
     @ViewBuilder let label: () -> Label
     let action: (NSView) -> Void
-    @State private var anchor = AnchorView()
+    @ViewState private var anchor = AnchorView()
 
     var body: some View {
         Button {

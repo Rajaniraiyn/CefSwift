@@ -24,8 +24,8 @@ private struct AddressField: View {
     let page: CefPage
     @Environment(BrowserController.self) private var controller
 
-    @State private var text = ""
-    @State private var suggestions = AddressSuggestions()
+    @ViewState private var text = ""
+    @ViewState private var suggestions = AddressSuggestions()
     @FocusState private var isFocused: Bool
 
     var body: some View {

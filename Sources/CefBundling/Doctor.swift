@@ -451,7 +451,7 @@ enum Doctor {
                     detail: "unavailable: needs NSBluetoothAlwaysUsageDescription" + (runtime ? " and com.apple.security.device.bluetooth." : "."),
                     fix: "add \"passkeys\" or \"bluetooth\" to capabilities."))
         features.append(.init(status: .info, title: "passkeys: Touch ID",
-                    detail: "unavailable: CEF 156 looks for the keychain group \"\(group)\", which has no team " +
+                    detail: "unavailable: CEF looks for the keychain group \"\(group)\", which has no team " +
                         "prefix, so no provisioning profile can authorize it. Use CefPasskeyController.Policy.app with " +
                         "CefKeychainPasskeyStore for passkeys verified with Touch ID."))
         features.append(iCloud

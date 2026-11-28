@@ -18,10 +18,10 @@ extension CefRuntime {
     public enum UserAgent: Sendable, Equatable {
         /// Chromium's own, as Chrome sends it: `Mozilla/5.0 (Macintosh; Intel
         /// Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko)
-        /// Chrome/156.0.0.0 Safari/537.36`. The default.
+        /// Chrome/158.0.0.0 Safari/537.36` with CEF 158. The default.
         case chromium
         /// Chromium's own with your product's token after Chromium's, as Edge
-        /// and Opera do: `… Chrome/156.0.0.0 MyApp/1.0 Safari/537.36`. Client
+        /// and Opera do: `… Chrome/158.0.0.0 MyApp/1.0 Safari/537.36`. Client
         /// hints are unchanged.
         case appendingProduct(String)
         /// Your product's token in place of `Chrome/<version>`: `…

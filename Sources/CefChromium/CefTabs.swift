@@ -342,12 +342,6 @@ public final class CefTabs {
         await withCheckedContinuation { readWaiters.append((request, $0)) }
     }
 
-    /// Reads again soon: after a change Chromium may not report, such as a
-    /// tab muted through CEF.
-    func scheduleRead() {
-        setNeedsRead()
-    }
-
     /// Reads Chromium's tabs once more, with groups' names and colours and
     /// what Chromium can reopen, and returns when `CefTabs` shows them.
     public func refresh() async {

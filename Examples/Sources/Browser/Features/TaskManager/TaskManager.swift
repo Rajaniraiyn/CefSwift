@@ -42,7 +42,7 @@ private enum TaskManagerWindow {
 private struct TaskManagerView: View {
     // Reading `tasks` keeps it refreshing while the window shows it.
     private let manager = CefRuntime.shared.taskManager
-    @State private var selection: Set<CefTaskManager.Task.ID> = []
+    @ViewState private var selection: Set<CefTaskManager.Task.ID> = []
 
     var body: some View {
         let tasks = manager.tasks

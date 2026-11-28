@@ -84,7 +84,7 @@ enum BundledExtensions {
             if inspection.version == nil { inspection.problems.append("its manifest has no version") }
             switch manifest["manifest_version"] as? Int {
             case 3: break
-            case 2: inspection.warnings.append("Manifest V2, which Chromium 156 no longer runs")
+            case 2: inspection.warnings.append("Manifest V2, which Chromium no longer runs")
             default: inspection.problems.append("its manifest has no manifest_version")
             }
             if let key = manifest["key"] as? String {

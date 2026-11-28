@@ -16,7 +16,7 @@ struct TabStripDemo: Demo {
 }
 
 private struct TabOverview: View {
-    @State private var window: CefChromeWindow?
+    @ViewState private var window: CefChromeWindow?
 
     var body: some View {
         List {

@@ -18,8 +18,8 @@ struct HistoryDemo: Demo {
 
 private struct HistoryView: View {
     private let history = CefProfile.default.history
-    @State private var query = ""
-    @State private var entries: [CefHistory.Entry] = []
+    @ViewState private var query = ""
+    @ViewState private var entries: [CefHistory.Entry] = []
     @Environment(\.demoReadiness) private var readiness
 
     var body: some View {
