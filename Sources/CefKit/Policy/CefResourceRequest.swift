@@ -195,8 +195,9 @@ public struct CefResourceRequest: Sendable, Equatable {
 
 /// What a ``CefRequestFilter`` does with a request.
 ///
-/// A filter cannot edit a response: CEF lets an embedder change a request
-/// before it is sent, but not a response's headers in place.
+/// A filter can rewrite a response's body (``rewriteResponse(_:)``) but
+/// not its status or headers: CEF lets an embedder filter the body as it
+/// streams, not change the headers in place.
 public enum CefResourceRequestAction: Sendable, Equatable {
     /// Send it unchanged.
     case allow
@@ -210,6 +211,9 @@ public enum CefResourceRequestAction: Sendable, Equatable {
     /// through: `[]` sends none of the profile's cookies and saves none the
     /// response sets, `.save` only saves them.
     case restrictCookies(to: CefResourceRequest.CookieAccess)
+    /// Send it unchanged, and rewrite the body of its response as
+    /// ``CefResponseRewriter`` describes.
+    case rewriteResponse(CefResponseRewriter)
 }
 
 /// Inspects the network requests of a profile, or of one page — the hook
@@ -439,6 +443,8 @@ private final class FilteredRequest: @unchecked Sendable {
     let initiator: String?
     /// The cookie traffic the last decision lets through.
     var cookieAccess: CefResourceRequest.CookieAccess = [.send, .save]
+    /// The last decision's response rewriter.
+    var rewriter: CefResponseRewriter?
 
     init(filter: CefCompiledRequestFilter, isNavigation: Bool, pageIdentifier: Int32?, initiator: String?) {
         self.filter = filter
@@ -491,6 +497,7 @@ private final class FilteredRequest: @unchecked Sendable {
                 CefDiagnostics.record(.requestFilter, since: filterStarted)
             }
             owner.cookieAccess = [.send, .save]
+            owner.rewriter = nil
             switch action {
             case .allow:
                 break
@@ -508,8 +515,38 @@ private final class FilteredRequest: @unchecked Sendable {
                 }
             case .restrictCookies(let access):
                 owner.cookieAccess = access
+            case .rewriteResponse(let rewriter):
+                owner.rewriter = rewriter
             }
             return RV_CONTINUE
+        }
+        // Asked once the response's headers have arrived; a response no
+        // rewriter wants gets no filter and is not copied.
+        h.pointee.get_resource_response_filter = { s, page, frame, request, response in
+            cefRelease(page)
+            cefRelease(frame)
+            cefRelease(request)
+            guard let owned = CefOwned(response) else { return nil }
+            guard let owner = cefOwner(FilteredRequest.self, s), let rewriter = owner.rewriter else { return nil }
+            let r = owned.pointer
+            let url = CefStringUtil.takingUserFree(r.pointee.get_url(r)).flatMap(URL.init(string:))
+                ?? URL(string: "about:blank")!
+            var headers = cefHeaderFields { r.pointee.get_header_map(r, $0) }
+            // HTTPURLResponse reads the type from the header; CEF keeps it apart.
+            if headers.keys.contains(where: { $0.caseInsensitiveCompare("Content-Type") == .orderedSame }) == false,
+               let mimeType = CefStringUtil.takingUserFree(r.pointee.get_mime_type(r)), !mimeType.isEmpty {
+                let charset = CefStringUtil.takingUserFree(r.pointee.get_charset(r)) ?? ""
+                headers["Content-Type"] = charset.isEmpty ? mimeType : "\(mimeType); charset=\(charset)"
+            }
+            guard let httpResponse = HTTPURLResponse(
+                url: url, statusCode: Int(r.pointee.get_status(r)), httpVersion: "HTTP/1.1", headerFields: headers)
+            else { return nil }
+            let prepare = rewriter.prepare
+            guard let rewrite = CefIOActor.assumeIsolated({ prepare(httpResponse) }) else { return nil }
+            // CEF filters on the IO thread, the actor's.
+            return ResponseBodyRewrite(maximumLength: rewriter.maximumLength) { body in
+                CefIOActor.assumeIsolated { rewrite(body) }
+            }.makeFilter()
         }
         h.pointee.get_cookie_access_filter = { s, page, frame, request in
             cefRelease(page)

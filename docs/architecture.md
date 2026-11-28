@@ -193,7 +193,7 @@ and thread names at run time (CEF 156):
 
 | Callback | Thread | CefKit |
 |---|---|---|
-| `cef_request_handler_t.get_resource_request_handler`, `cef_request_context_handler_t.get_resource_request_handler`, `cef_resource_request_handler_t.on_before_resource_load`, `cef_cookie_access_filter_t` | IO (`Chrome_IOThread`) | The filter's declarative match runs in C in `get_resource_request_handler`; the filter itself runs in `on_before_resource_load`, isolated to `CefIOActor`. |
+| `cef_request_handler_t.get_resource_request_handler`, `cef_request_context_handler_t.get_resource_request_handler`, `cef_resource_request_handler_t.on_before_resource_load` and `get_resource_response_filter`, `cef_cookie_access_filter_t`, `cef_response_filter_t` | IO (`Chrome_IOThread`) | The filter's declarative match runs in C in `get_resource_request_handler`; the filter itself runs in `on_before_resource_load`, isolated to `CefIOActor`. |
 | `cef_scheme_handler_factory_t.create` | IO | Creates the resource handler. |
 | `cef_resource_handler_t.get_response_headers`, `cancel` | IO | Read and change the handler's locked state. |
 | `cef_resource_handler_t.open`, `skip`, `read` | Chromium's thread pool (`ThreadPoolForegroundWorker`), in sequence | `open` starts the `CefSchemeHandler` in a task; `read` reads a file, copies buffered bytes or waits for them. |
@@ -316,6 +316,13 @@ can per request context, so CefKit scopes it there too:
   `on_before_resource_load` builds the `CefResourceRequest` (the
   initiator comes from `get_resource_request_handler`), runs the filter,
   and whose `get_cookie_access_filter` applies `.restrictCookies(to:)`.
+  After `.rewriteResponse(_:)`, its `get_resource_response_filter` builds
+  an `HTTPURLResponse` from the read-only `cef_response_t` and asks the
+  rewriter's `prepare`; a rewrite gets a `cef_response_filter_t`
+  (`ResponseBodyRewrite`) that reads every chunk into one buffer, rewrites
+  it when CEF calls with no input (the body has ended), and writes the
+  result out across as many calls as CEF's output buffer needs. Past
+  `maximumLength` it writes out what it held and copies the rest through.
 - **Scheme handlers.** `register_scheme_handler_factory` registers on the
   page context, so every context of a profile shares a registration.
   A runtime registration goes to the global context

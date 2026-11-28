@@ -2898,7 +2898,8 @@ service pages get none of a profile's page policy.
 
 `profile.requestFilter` sees the network requests of every page of the
 profile and of their service and shared workers, and returns `.allow`,
-`.block`, `.redirect(_:)`, `.setHeaders(_:)` or `.restrictCookies(to:)`.
+`.block`, `.redirect(_:)`, `.setHeaders(_:)`, `.restrictCookies(to:)` or
+`.rewriteResponse(_:)`.
 A page with a `requestFilter` of its own uses that one for its own
 requests instead. The app's own requests ([Requests through Chromium's
 network stack](#requests-through-chromiums-network-stack)) are not
@@ -2931,9 +2932,41 @@ second label (`example.co.uk`); it has no public suffix list.
 
 `.restrictCookies(to: [])` sends the request without the profile's cookies
 and saves none its response sets (`get_cookie_access_filter`); `.save` or
-`.send` lets one direction through. A filter cannot change a response: CEF
-lets an embedder change a request before it is sent, not a response's
-headers in place, and CefKit offers no response rewriting.
+`.send` lets one direction through.
+
+`.rewriteResponse(_:)` rewrites the body of the request's response. Its
+`CefResponseRewriter` sees the response's status and headers once they
+arrive and returns the rewrite for the body, or `nil` to let the response
+through untouched:
+
+```swift
+profile.requestFilter = CefRequestFilter(hosts: ["example.com"], resourceTypes: [.mainFrame]) { _ in
+    .rewriteResponse(CefResponseRewriter { response in
+        guard response.mimeType == "text/html" else { return nil }
+        return { body in
+            Data(String(decoding: body, as: UTF8.self)
+                .replacingOccurrences(of: "</head>", with: "<style>.ad { display: none }</style></head>").utf8)
+        }
+    })
+}
+```
+
+The rewrite gets the whole body once its last byte has arrived, after
+Chromium has undone its `Content-Encoding`; the page receives nothing of
+the response until then. A body longer than `maximumLength` (16 MB by
+default) is not rewritten and passes through as it arrives. A rewritten
+body may be shorter or longer than the original: Chromium does not hold
+it to the response's `Content-Length`. Both closures run on the IO
+thread, like `decide`.
+
+The status and headers cannot change: CEF filters a response's body as it
+streams, but hands the response's headers to the embedder read-only
+(`get_resource_response_filter`, `on_resource_response`). Rewriting them
+would mean answering the request with the app's own resource handler
+that fetches it again, outside Chromium's network loader, so that CORS,
+the HTTP cache and service workers would see the app's response rather
+than the site's; CefKit does not do that. What a rewrite costs is in the
+[design notes](design-notes.md#rewriting-response-bodies).
 
 Chromium waits for the answer on its IO thread, so the closure runs
 there, isolated to `CefIOActor`, and must be fast. State it keeps on
@@ -4242,9 +4275,9 @@ the switches measured and not used.
 
 ## Known limits
 
-- A request filter cannot edit a response or its headers: CEF changes
-  requests before they are sent, and has no way to rewrite response
-  headers in place.
+- A request filter can rewrite a response's body
+  (`.rewriteResponse(_:)`) but not its status or headers: CEF hands an
+  embedder the response's headers read-only.
 - The app's own requests through `CefProfile.data(for:)`, `bytes(for:)` and
   `download(for:to:)` do not reach a profile's request filter.
 - A page in a window Chromium opens by itself gets its profile's scripts
