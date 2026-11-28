@@ -19,8 +19,8 @@ struct TabRail: View {
     @Environment(BrowserController.self) private var controller
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.layoutDirection) private var layoutDirection
-    @State private var extents: [Int: ClosedRange<CGFloat>] = [:]
-    @State private var dropTarget: TabRailLogic.DropTarget?
+    @ViewState private var extents: [Int: ClosedRange<CGFloat>] = [:]
+    @ViewState private var dropTarget: TabRailLogic.DropTarget?
 
     var body: some View {
         let items = Self.items(of: window, isCollapsed: controller.isCollapsed)
@@ -269,7 +269,7 @@ struct RailButtonStyle: ButtonStyle {
 
     private struct Styled: View {
         let configuration: ButtonStyleConfiguration
-        @State private var isHovered = false
+        @ViewState private var isHovered = false
 
         var body: some View {
             configuration.label

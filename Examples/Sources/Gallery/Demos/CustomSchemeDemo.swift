@@ -17,8 +17,8 @@ struct CustomSchemeDemo: Demo {
 }
 
 private struct CustomSchemeView: View {
-    @State private var site = SiteHandler()
-    @State private var page: CefPage?
+    @ViewState private var site = SiteHandler()
+    @ViewState private var page: CefPage?
 
     var body: some View {
         HSplitView {

@@ -4330,6 +4330,13 @@ the switches measured and not used.
 - The App Sandbox is not supported with official CEF builds, so CefSwift
   apps do not ship in the Mac App Store: Chromium registers a Mach service
   the App Sandbox refuses ([bundling](bundling.md#app-sandbox)).
+- Building without Xcode, with the Command Line Tools 27.2 and their
+  macOS 27 SDK, `@State` in the app's own views does not compile: the SDK
+  makes it a macro whose plugin only Xcode ships. CefSwift and its
+  examples avoid it; an app builds against the tools' macOS 26 SDK or
+  names the property wrapper through an alias
+  ([bundling](bundling.md#without-xcode)). `@Entry` and `#Preview` need
+  Xcode with every SDK.
 - Chromium plays Widevine only as an unverified software (L3) client and
   has no H.264, HEVC or AAC, so Netflix-class services do not play in it;
   WebKit plays them with FairPlay, beside Chromium in the Browser example

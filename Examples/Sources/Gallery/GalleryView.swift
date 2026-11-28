@@ -23,7 +23,7 @@ final class GalleryModel {
 
 struct GalleryView: View {
     @Bindable var model: GalleryModel
-    @State private var search = ""
+    @ViewState private var search = ""
 
     var body: some View {
         NavigationSplitView {

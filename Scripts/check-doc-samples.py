@@ -28,6 +28,12 @@ that what it shows needs no SwiftUI.
 A sample that needs a later macOS says so in a comment (`// macOS 15`) and
 compiles as available from it.
 
+Samples write `@State`, as apps do. The Command Line Tools' macOS 27 SDK
+makes `@State` a macro whose plugin only Xcode ships, so the samples
+compile with it spelled `@DocState`, an alias of the property wrapper
+(docs/bundling.md#without-xcode): the same type, and a build that works
+with the tools alone.
+
 The scratch package is .build/doc-samples (or --scratch), so a second run
 reuses the build. A block that is not Swift for the app, such as a
 Package.swift manifest, is left out; mark one to leave out by putting
@@ -214,7 +220,7 @@ let package = Package(
     ]
 )
 """)
-    (sources / "Prelude.swift").write_text(PRELUDE)
+    (sources / "Prelude.swift").write_text(PRELUDE + "\n/// `@State` without its macro (module docstring).\ntypealias DocState = SwiftUI.State\n")
     # A target needs a source file even when no sample is AppKit only.
     (appkit_sources / "Empty.swift").write_text("import CefKit\n")
     origins = {}
@@ -222,6 +228,7 @@ let package = Package(
         if kind(source) == "skipped":
             continue
         imports, text = render(number, source)
+        text = re.sub(r"@State\b", "@DocState", text)
         file = (appkit_sources if is_appkit_only(source) else sources) / f"Sample{number:03}.swift"
         added = set() if is_appkit_only(source) else {"import AppKit", "import CefSwiftUI", "import SwiftUI"}
         header = "\n".join(sorted(set(imports) | added))

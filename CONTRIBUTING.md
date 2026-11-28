@@ -26,14 +26,20 @@ The default build system links the helper-startup library without the
 Address Sanitizer runtime, so that one uses the native build system.
 
 The Command Line Tools are enough; only the Xcode example needs Xcode.
-SwiftUI's macros (`@Entry`, `#Preview`) need Xcode's macro plugin, so the
-packages write their environment keys out instead. The Command Line
-Tools' macOS 27 SDK makes `@State` a macro too; until the tools ship its
-plugin, build against their macOS 26 SDK:
+CI's `command-line-tools` job builds, tests and bundles with the tools
+alone (`DEVELOPER_DIR=/Library/Developer/CommandLineTools`), so keep
+everything building that way. SwiftUI's macros need a plugin only Xcode
+ships, so the library and the examples use none:
 
-```sh
-export SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.sdk
-```
+- No `@Entry`, `#Preview` or `@Previewable`: write an `EnvironmentKey` out.
+- No `@State`: the tools' macOS 27 SDK makes it a macro. Each target that
+  needs state declares `typealias ViewState = SwiftUI.State` (see
+  `Sources/CefSwiftUI/ViewState.swift`) and writes `@ViewState`. Doc
+  comments and the guide keep `@State`, as apps write it.
+
+Building your own SwiftUI code against the tools' macOS 26 SDK
+(`SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.sdk`) also
+avoids it ([bundling](docs/bundling.md#without-xcode)).
 `CefKitTests` covers CefKit and its AppKit views, `CefPasskeysTests` and
 `CefChromiumTests` those libraries, `CefKitAppKitTests` hosts a page through
 CefKit's public API alone (no SwiftUI), and `CefBundlingTests` covers

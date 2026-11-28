@@ -55,7 +55,7 @@ public struct CefWebView: View {
         let url: URL
         // SwiftUI keeps the first page and discards the ones later
         // initializers make; a page does nothing in Chromium until hosted.
-        @State private var page: CefPage
+        @ViewState private var page: CefPage
 
         init(url: URL, configuration: CefPage.Configuration) {
             self.url = url

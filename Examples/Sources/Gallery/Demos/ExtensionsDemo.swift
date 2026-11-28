@@ -19,8 +19,8 @@ struct ExtensionsDemo: Demo {
 
 private struct ExtensionsView: View {
     private let extensions = CefProfile.default.extensions
-    @State private var error: String?
-    @State private var page: CefWindow?
+    @ViewState private var error: String?
+    @ViewState private var page: CefWindow?
 
     var body: some View {
         List(extensions.installed) { item in

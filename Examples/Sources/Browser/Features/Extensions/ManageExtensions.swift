@@ -41,7 +41,7 @@ private struct ManageExtensionsView: View {
     let extensions: CefExtensions
     @Bindable var selection: ExtensionSelection
     @Environment(BrowserController.self) private var controller
-    @State private var error: String?
+    @ViewState private var error: String?
 
     var body: some View {
         NavigationSplitView {

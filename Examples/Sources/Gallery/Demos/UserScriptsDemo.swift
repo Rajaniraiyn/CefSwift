@@ -15,9 +15,9 @@ struct UserScriptsDemo: Demo {
 }
 
 private struct UserScriptsView: View {
-    @State private var addsBanner = true
-    @State private var restyles = true
-    @State private var page = UserScriptsView.makePage(addsBanner: true, restyles: true)
+    @ViewState private var addsBanner = true
+    @ViewState private var restyles = true
+    @ViewState private var page = UserScriptsView.makePage(addsBanner: true, restyles: true)
 
     var body: some View {
         CefWebView(page)

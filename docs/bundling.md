@@ -88,6 +88,44 @@ and the helper's startup library with SwiftPM, and runs `cefswift` for the
 rest: it checks the settings before building, downloads CEF, then
 assembles and signs the bundle.
 
+### Without Xcode
+
+The `cef` command needs only the Command Line Tools
+(`xcode-select --install`): `swift build`, `swift test` and `swift package
+cef bundle` build, test and assemble an app with them alone, and CI checks
+that on every pull request. Two SwiftUI features are macros whose plugin
+(`SwiftUIMacros`) Apple ships only with Xcode, so code built with the tools
+alone avoids them:
+
+- `@Entry`, `#Preview` and `@Previewable`, in every SDK: write an
+  `EnvironmentKey` out instead of `@Entry`, and leave previews to Xcode.
+- `@State`, with the macOS 27 SDK of the Command Line Tools 27.2: that SDK
+  declares a `State` macro beside the property wrapper, and `@State`
+  resolves to the macro (`external macro implementation type
+  'SwiftUIMacros.StateMacro' could not be found for macro 'State()'`).
+  `@StateObject`, `@Binding`, `@Environment` and `@FocusState` are
+  unaffected. Either build against the tools' macOS 26 SDK,
+
+  ```sh
+  export SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.sdk
+  ```
+
+  or name the property wrapper through an alias, which is what CefSwift
+  and its examples do; it is the same `State` type at run time:
+
+  ```swift
+  // Anywhere in the target: the property wrapper under another name.
+  typealias ViewState = SwiftUI.State
+
+  struct ContentView: View {
+      @ViewState private var page = CefPage(url: URL(string: "https://example.com")!)
+      var body: some View { CefWebView(page) }
+  }
+  ```
+
+  No release of the Command Line Tools ships the plugin yet (27.2 does
+  not); once one does, `@State` works again and the alias can go.
+
 ## Xcode
 
 An Xcode app target builds, embeds and signs the app as it always does. A
@@ -947,6 +985,7 @@ line at start-up naming what the signature leaves out. See
 | Xcode: "This build is for arm64 and x86_64, but CEF's distributions hold one architecture each" | A Release build's default `ARCHS` | `ARCHS = $(NATIVE_ARCH_ACTUAL)` ([Universal apps](#universal-apps)). |
 | Xcode: "The app lacks the entitlement com.apple.security.cs.disable-library-validation" | A Release build signed ad hoc keeps the hardened runtime | Sign with a team, or set `RUNTIME_EXCEPTION_DISABLE_LIBRARY_VALIDATION = YES` until then ([Signing in Xcode](#signing-in-xcode)). |
 | `dyld: Library not loaded: @rpath/MyApp.debug.dylib … different Team IDs` | An ad hoc, hardened Debug build (hardened runtime forced on) | As above, or leave `ENABLE_HARDENED_RUNTIME` to Xcode for ad hoc Debug builds. |
+| Without Xcode: `external macro implementation type 'SwiftUIMacros.StateMacro' could not be found for macro 'State()'` (or `EntryMacro`, `PreviewMacro`) | SwiftUI macros, whose plugin only Xcode ships; the tools' macOS 27 SDK makes `@State` one | `SDKROOT=…/MacOSX26.sdk`, or the `ViewState` alias; `EnvironmentKey` for `@Entry` ([Without Xcode](#without-xcode)). |
 | A SwiftUI preview of a view with a `CefWebView` shows a globe | Previews cannot start Chromium | Expected: run the app to see the page ([Debugging and previews](#debugging-and-previews)). |
 
 ## Flavors
