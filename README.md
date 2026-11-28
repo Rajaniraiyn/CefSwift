@@ -114,6 +114,16 @@ benchmarks ([footprint](docs/guide.md#footprint-and-launch-time),
 
 ## Quick start
 
+Three tracks build the same app bundle; pick the one you work in:
+
+| Track | Needs | Build |
+|---|---|---|
+| SwiftPM package | The Command Line Tools | `swift build`, then `swift package cef bundle` |
+| Hand-written SwiftUI app, plain SwiftPM | The Command Line Tools | Your own `@main CefSwiftApp` in `Sources/`, the same two commands |
+| Xcode project | Xcode 16 or later | Xcode's build, with CefSwift's Run Script phase |
+
+With SwiftPM (the first two tracks):
+
 1. Depend on CefSwift in `Package.swift`:
 
    ```swift
@@ -169,7 +179,7 @@ For a tabbed browser, follow
 [Your first browser in 10 minutes](https://rajaniraiyn.dev/cefswift/start/first-browser).
 
 <details>
-<summary>With Xcode</summary>
+<summary>With an Xcode project</summary>
 
 1. In an app project (File › New › Project › macOS › App, SwiftUI), add the
    package: File › Add Package Dependencies…, enter
@@ -299,9 +309,8 @@ These come from CEF 158 and official CEF builds. The guide's
 - macOS 14 or later (the examples need macOS 15), Apple silicon or Intel.
   CI builds for macOS 14 and runs on macOS 15; it compiles for Intel but
   runs nothing there.
-- A Swift 6 toolchain from Xcode 16 or later. `CefSwiftUI` uses SwiftUI's
-  `@Entry` macro, whose plugin ships with Xcode: the Command Line Tools for
-  macOS 27.2 build `CefKit` and `CefChromium` but not `CefSwiftUI`.
+- A Swift 6 toolchain: the Command Line Tools are enough for SwiftPM;
+  Xcode 16 or later for Xcode projects.
 
 The CEF version is pinned in `CEF_VERSION.json` and updated by
 [automation](docs/automation.md). CefSwift is pre-1.0 and its API can
