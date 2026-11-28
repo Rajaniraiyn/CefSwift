@@ -67,11 +67,11 @@ Options of `bundle`:
 | `--package zip\|dmg` | None | Packages the result, as `cef package` does. |
 | `--notarize` | Off | Packages and notarizes the result; needs `--keychain-profile <name>` or `notarization.keychainProfile`. |
 | `--flavor minimal\|standard` | `minimal` | Which CEF distribution to download. See [Flavors](#flavors). |
-| `--platform macosarm64\|macosx64` | The build machine's | Which architecture's CEF to bundle. It must be the architecture SwiftPM builds for, which is the one `swift package` runs as; anything else is an error. Run `arch -x86_64 swift package …` to bundle for Intel on Apple silicon. |
+| `--architectures arm64\|x86_64\|universal` | `architectures`, else the build machine's | What to build the app and helper for, and which CEF framework to bundle. See [Architectures](#architectures). |
 | `--manifest <path>` | `CEF_VERSION.json` | A different CEF manifest. |
 
-`download` takes `--platform`, `--flavor` and `--manifest` as well, and
-`info` takes `--manifest`.
+`download` takes `--platform` (or `--architectures`), `--flavor` and
+`--manifest` as well, and `info` takes `--manifest`.
 
 The plugin finds `CEF_VERSION.json` in the invoking package or in any of its
 dependencies, so an app that depends on CefSwift uses the CEF version that
@@ -109,7 +109,7 @@ before Xcode signs the app:
    | Setting | Value | Why |
    |---|---|---|
    | `ENABLE_USER_SCRIPT_SANDBOXING` | `NO` | The phase runs SwiftPM on the package and writes the helper apps into the app; a sandboxed script can do neither. |
-   | `ARCHS` | `$(NATIVE_ARCH_ACTUAL)` | A CEF distribution holds one architecture; Release builds otherwise build for both. See [Universal apps](#universal-apps). |
+   | `ARCHS` | `$(NATIVE_ARCH_ACTUAL)`, or Xcode's default for a universal app | The phase fetches CEF for each architecture the build targets: this one Mac's keeps Release builds and archives to one download. See [Architectures](#architectures). |
    | `CEFSWIFT_PACKAGE_DIR` | `$(BUILD_DIR)/../../SourcePackages/checkouts/CefSwift` | Where Xcode put the package, to find the phase's script. For a local package, its path. |
    | `RUNTIME_EXCEPTION_DISABLE_LIBRARY_VALIDATION` | `YES`, only while the target signs ad hoc | See [Signing in Xcode](#signing-in-xcode). |
 
@@ -213,13 +213,36 @@ one renders the rest of the view. Run the app to see the page. An AppKit
 host view (`CefWindowedPageView`) needs a running runtime; keep it out
 of previews.
 
-### Universal apps
+### Architectures
 
-A CEF distribution, and so the framework the phase embeds, holds one
-architecture, so the target builds for the Mac it builds on
-(`ARCHS = $(NATIVE_ARCH_ACTUAL)`); `swift package cef bundle` does the
-same. An app for both Apple silicon and Intel needs a universal framework,
-which this release does not provide.
+Each track builds the helper and fetches CEF for exactly the
+architectures the app is built for, and nothing else:
+
+| Build | Architectures | Downloads, first time | Cache afterwards |
+|---|---|---|---|
+| `cef bundle` (default), or an Xcode Debug build (`ONLY_ACTIVE_ARCH`) | The build machine's | One distribution: 141 MB for arm64, 149 MB for x86_64 | 486 MiB: the archive and the distribution |
+| `cef bundle --architectures x86_64` on Apple silicon | x86_64 | 149 MB | 506 MiB |
+| `cef bundle --architectures universal`, or an Xcode Release build or archive with `ARCHS` for both | arm64 and x86_64 | Both distributions, 290 MB; only the one not in the cache yet | Both, and the universal framework merged from them: 1.6 GiB (both archives 277 MiB, both distributions 716 MiB, the universal framework 606 MiB) |
+
+CEF publishes one distribution per architecture. A universal build merges
+the two frameworks: each Mach-O file is `lipo -create` of the two official
+files, the resources CEF names by architecture
+(`v8_context_snapshot.arm64.bin`, `webui_code_cache.x86_64.pak`) come from
+their own distribution, and every other file must be identical in both,
+or the merge stops. The merged framework is cached beside the two, so
+switching between arm64, x86_64 and universal downloads nothing twice.
+Merging takes about 3 seconds. A universal `Minimal.app` is 592,916 KiB,
+against 306,136 KiB for arm64 and 322,212 KiB for x86_64.
+
+`swift package cef bundle` builds for the machine it runs on unless
+`--architectures` (or `cefapp.json`'s `architectures`) asks for another;
+it builds the app, the helper and its startup library for those with
+`swift build --arch`, so an Apple silicon Mac makes an Intel or universal
+app without Rosetta. In Xcode the architectures are Xcode's own,
+`ARCHS` and `ONLY_ACTIVE_ARCH`: a Debug build on Apple silicon is arm64
+only, and an archive for both is universal. `cefapp.json`'s
+`architectures` read through `CEF_APP_CONFIG` does not change them; the
+phase warns when it disagrees.
 
 ## Settings
 
@@ -267,14 +290,17 @@ With the archive there, nothing is downloaded; a clone of another `.cef`
 
 ## Where CEF comes from
 
-Both tracks download the official CEF distribution that `CEF_VERSION.json`
-pins (the minimal flavor, for the build machine's architecture) from
-`cef-builds.spotifycdn.com`, check its size and SHA-1, convert the
-framework to the versioned layout, and keep it in the cache: `.cef/` in the
-package for SwiftPM, `CEF_CACHE_DIR` for Xcode.
+Both tracks download the official CEF distributions that `CEF_VERSION.json`
+pins (the minimal flavor, for each architecture the build targets) from
+`cef-builds.spotifycdn.com`, check their size and SHA-1, convert the
+framework to the versioned layout, merge a universal one when the build is
+for both ([Architectures](#architectures)), and keep them in the cache:
+`.cef/` in the package for SwiftPM, `CEF_CACHE_DIR` for Xcode.
 
-Packaging the framework as an XCFramework binary target, so Xcode embeds
-and signs it itself, is proposed separately and not part of this release.
+CefSwift hosts no copy of CEF. A SwiftPM binary target was measured and
+not used: it cannot be conditioned on architecture, so it would make every
+dependent download both architectures (design notes,
+[The framework as a binary target](design-notes.md#the-framework-as-a-binary-target)).
 
 ## Per-product settings
 
@@ -323,6 +349,7 @@ a misspelled key does not go unnoticed.
 | `notarization.keychainProfile`, `notarization.format` | None, `zip` | Defaults of `cef notarize` and `bundle --notarize`. |
 | `cef.localizations` | `"application"` | Which of Chromium's locale packs the app keeps: `"application"`, `"all"`, or a list of localizations. As `--localizations`. See [Locale packs](#locale-packs). |
 | `cef.softwareGPUFallback` | `"include"` | `"exclude"` leaves out SwiftShader. As `--software-gpu-fallback`. See [Software GPU fallback](#software-gpu-fallback). |
+| `architectures` | The build machine's | `["arm64"]`, `["x86_64"]`, `["universal"]` or `["arm64", "x86_64"]`. As `--architectures`. See [Architectures](#architectures). |
 | `extensions` | None | Chrome extensions the app ships, `.crx` packages or unpacked directories, copied into `Contents/Resources/Extensions` and checked by `cef doctor`. The app installs them with `CefRuntime.Configuration.extensions`; see the guide's [Extensions](guide.md#installing-extensions-with-the-app). |
 
 An Xcode target takes these from its build settings instead, or reads a
@@ -365,7 +392,8 @@ the toolchain. `bundle` removes each absolute run path outside `/usr/lib`
 and `/System` from the binaries it copies, and adds
 `@executable_path/../Frameworks` to the app's executable, so the app loads
 its libraries from the bundle on every Mac, the build machine included.
-Every Mach-O file in the bundle must have the product's architecture.
+Every Mach-O file in the bundle must have each of the product's
+architectures.
 
 `bundle` assembles the app in a staging directory beside the destination,
 signs it there, and only then replaces `<Name>.app`. A build that fails
@@ -944,7 +972,7 @@ line at start-up naming what the signature leaves out. See
 | The app stops at launch with `bootstrap_check_in …MachPortRendezvousServer…: Permission denied (1100)` | The App Sandbox | Remove App Sandbox; both tracks refuse it ([App Sandbox](#app-sandbox)). |
 | Xcode: `Sandbox: … deny(1) file-read-data …` or `deny(1) file-write-create …` in the CefSwift phase | User Script Sandboxing | `ENABLE_USER_SCRIPT_SANDBOXING = NO` for the target. |
 | Xcode: `…/xcode-embed.sh: No such file or directory` | `CEFSWIFT_PACKAGE_DIR` does not point at the package | Set it: `$(BUILD_DIR)/../../SourcePackages/checkouts/CefSwift` for a remote package, the path of a local one; with `xcodebuild -clonedSourcePackagesDirPath <dir>`, `<dir>/checkouts/CefSwift`. |
-| Xcode: "This build is for arm64 and x86_64, but CEF's distributions hold one architecture each" | A Release build's default `ARCHS` | `ARCHS = $(NATIVE_ARCH_ACTUAL)` ([Universal apps](#universal-apps)). |
+| A universal build downloads CEF twice the first time | It needs each architecture's distribution | Expected; build for one architecture (`ARCHS = $(NATIVE_ARCH_ACTUAL)`, no `--architectures`) until you ship ([Architectures](#architectures)). |
 | Xcode: "The app lacks the entitlement com.apple.security.cs.disable-library-validation" | A Release build signed ad hoc keeps the hardened runtime | Sign with a team, or set `RUNTIME_EXCEPTION_DISABLE_LIBRARY_VALIDATION = YES` until then ([Signing in Xcode](#signing-in-xcode)). |
 | `dyld: Library not loaded: @rpath/MyApp.debug.dylib … different Team IDs` | An ad hoc, hardened Debug build (hardened runtime forced on) | As above, or leave `ENABLE_HARDENED_RUNTIME` to Xcode for ad hoc Debug builds. |
 | A SwiftUI preview of a view with a `CefWebView` shows a globe | Previews cannot start Chromium | Expected: run the app to see the page ([Debugging and previews](#debugging-and-previews)). |

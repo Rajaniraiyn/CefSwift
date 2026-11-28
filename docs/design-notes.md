@@ -1072,6 +1072,65 @@ checks: it skips SwiftPM when the tool and helper are newer than their
 sources, since SwiftPM's own checks (three builds, each with its own linker flags,
 and their `--show-bin-path`) took 15.7 s to find nothing to do.
 
+## The framework as a binary target
+
+**Measured and not used.** Pull request #27, ported as the first version
+of #41, made CEF a SwiftPM binary target: both architectures' minimal
+distributions merged into one XCFramework zip (`lipo -create` of each
+Mach-O file, everything else unchanged), hosted as a GitHub release asset
+and pinned by checksum, so SwiftPM and Xcode would fetch it while
+resolving the package. Measured with CEF 158.0.6 on an M3:
+
+| | CEF's distributions (kept) | XCFramework binary target (not used) |
+|---|---|---|
+| Download for an arm64 build | 141 MB | 278 MB (both architectures, always) |
+| Download for an x86_64 build | 149 MB | 278 MB |
+| Download for a universal build | 290 MB | 278 MB |
+| An arm64-only zip, same packaging | – | 154 MB |
+| Hosting | CEF's CDN | A release asset per CEF version, never deleted once a tag pins it |
+| `Minimal.app`, arm64 | 306,148 KiB | 306,136 KiB, the same files |
+
+What decided it:
+
+- **A binary target cannot be conditioned on architecture.** Its
+  conditions are platforms, so a package cannot fetch only the slices a
+  build targets; and SwiftPM fetches every remote binary target of every
+  package in the graph when it resolves it, whether or not a product being
+  built uses it (a fixture whose unused binary target named a missing
+  asset failed `swift build` of an unrelated product with
+  `badResponseStatusCode(404)`). Every dependent, a library-only one
+  included, would download 278 MB, about twice what a one-architecture
+  build needs.
+- **CEF's own archives are as small, and already pinned.** The arm64
+  distribution, `.tar.bz2`, is 141 MB against 154 MB for the arm64
+  framework alone as a zip, and `CEF_VERSION.json` already pins each
+  archive's size and SHA-1, so per-architecture fetches need no hosting
+  and no one-way release asset.
+- What the binary target did offer, Xcode embedding the framework itself
+  and a cache shared by every project, is not needed by the Xcode phase,
+  which embeds and signs the framework either way.
+
+So both tracks fetch CEF's distribution for each architecture they build
+for, and merge the two for a universal build
+([Architectures](bundling.md#architectures)). The merge is the same one
+the XCFramework packaging did, with the same checks. Measured on the same Mac:
+
+| `cef bundle --product Minimal` | Downloads | Time | App |
+|---|---|---|---|
+| arm64, empty cache | arm64 (141 MB) | 198 s | 306,136 KiB, arm64 |
+| `--architectures universal` after it | x86_64 only (149 MB), then a 3.2 s merge | 497 s, most of it compiling for x86_64 | 592,916 KiB, both |
+| `--architectures x86_64` after it | Nothing | 150 s | 322,212 KiB, x86_64 |
+| arm64 again | Nothing | 32 s | 306,136 KiB |
+
+The Xcode phase, driven with an Xcode build's environment and an empty
+cache: a Debug build (`ONLY_ACTIVE_ARCH`, `ARCHS` for both) fetched arm64
+alone and took 365 s, most of it building `cefswift` and the helper; an
+archive for both then fetched only x86_64, merged, and made a universal
+helper and framework in 177 s. The universal app runs natively, and under
+Rosetta (`arch -x86_64`) with its browser process in x86_64 and some
+helpers natively; the x86_64 app runs entirely under Rosetta. Each loaded
+its page and quit cleanly. Timings were taken with other builds running.
+
 ## Request filter matching
 
 A profile's request filter is consulted for every request of every page
