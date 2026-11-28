@@ -82,6 +82,7 @@ The runtime, page, window and profile APIs are `@MainActor`.
   - [The profile's extensions](#the-profiles-extensions)
   - [Installing extensions with the app](#installing-extensions-with-the-app)
   - [Toolbars, popups and the Web Store](#toolbars-popups-and-the-web-store)
+  - [Native messaging hosts](#native-messaging-hosts)
   - [Trust](#trust)
 - [DevTools](#devtools)
 - [Compatibility with bot protection](#compatibility-with-bot-protection)
@@ -186,6 +187,7 @@ Common options:
 | `productName`, `stringOverrides` | Your product name, and replacements for other built-in strings. See [Customizing Chromium's own pages](#customizing-chromiums-own-pages). |
 | `chromeToolbar` | Hides Chrome app-menu commands, toolbar buttons and page-action icons in Chrome-style windows. |
 | `extensions` | Extensions the app installs: `.webStore(id)`, `.package(at:id:version:)`, `.unpacked(at:)`. See [Extensions](#extensions). |
+| `nativeMessagingHostDirectories` | Directories of native messaging hosts extensions may use, besides Chromium's own; `.chrome` lists Google Chrome's and Chromium's. See [Native messaging hosts](#native-messaging-hosts). |
 | `processPolicy` | How many helper processes Chromium keeps running. See [Footprint and launch time](#footprint-and-launch-time). |
 | `enabledFeatures`, `disabledFeatures` | Chromium feature names, passed as `--enable-features` and `--disable-features`. CefKit turns off `RemoteCoreAnimationAPI`, with which no page Chromium draws itself reaches the screen on macOS 27.2 ([why](architecture.md#presenting-pages)); listing it in `enabledFeatures` turns it back on. |
 | `safeStorage`, `keychainItem` | Whether Chromium uses the keychain, and which item. See [Keychain access](#keychain-access). |
@@ -3725,17 +3727,63 @@ struct ExtensionButtons: View {
 }
 ```
 
+### Native messaging hosts
+
+Password managers and other desktop apps talk to their extensions through
+native messaging hosts: a program the extension starts with
+`chrome.runtime.connectNative` or `sendNativeMessage`, found through a
+manifest the app installs for each browser it supports. 1Password and
+Bitwarden install theirs for Google Chrome, in
+`~/Library/Application Support/Google/Chrome/NativeMessagingHosts`, not
+for an app built on CEF. Chromium in CEF looks only in
+`NativeMessagingHosts` in the root cache directory and in
+`/Library/Application Support/Chromium/NativeMessagingHosts`.
+
+`nativeMessagingHostDirectories` lists more directories to take hosts
+from. The `.chrome` preset lists
+`CefRuntime.Configuration.chromeNativeMessagingHostDirectories`: Google
+Chrome's (stable, Beta, Dev and Canary) and Chromium's in the user's
+Application Support, and Google Chrome's in `/Library/Google/Chrome`. The
+other presets list none.
+
+```swift
+var configuration = CefRuntime.Configuration.chrome
+// Chrome's and Chromium's hosts, then Brave's.
+configuration.nativeMessagingHostDirectories = CefRuntime.Configuration.chromeNativeMessagingHostDirectories + [
+    FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("Library/Application Support/BraveSoftware/Brave-Browser/NativeMessagingHosts"),
+]
+```
+
+At start-up CefKit links each manifest in those directories into the root
+cache directory's `NativeMessagingHosts`, where Chromium reads it when an
+extension connects. The first directory with a host's name wins it, and a
+manifest the app writes there itself wins over all of them and is never
+replaced. Links to hosts that are gone are removed. A host installed while
+the app runs is found at its next start.
+
+A host answers only the extensions its manifest's `allowed_origins` names,
+by identifier, so an extension installed from the Chrome Web Store reaches
+its own app's host, as in Chrome. The host also learns the calling
+extension and can check the app that started it: the desktop app decides
+whether to trust a browser it does not know, and some ask the user or
+refuse until it is added to their list of browsers. SelfTest's
+`extensions` group checks the lookup, `connectNative`, `sendNativeMessage`
+and an uninstalled host with an echo host of its own; it does not run any
+password manager's host.
+
 ### Trust
 
 Extensions are third-party code with the reach Chrome gives them, inside
 the app's browser processes: they read and change the pages they have
 access to, see requests, and can talk to native messaging hosts the user
-installed. The app controls which can be installed: CefChromium's
-`installed` and `uninstall`, the configuration's list, and, on managed
-Macs, the administrator's policies. Extensions run in incognito only when
-allowed, one by one; they never run in Alloy-style pages' own
-interface, but their content scripts and network rules do apply to pages
-there.
+installed (in the root cache directory and the directories
+`nativeMessagingHostDirectories` lists). The app controls which can be
+installed: CefChromium's `installed` and `uninstall`, the configuration's
+list, and, on managed Macs, the administrator's policies. Extensions run
+in incognito only when allowed, one by one; they never run in Alloy-style
+pages' own interface, but their content scripts and network rules do
+apply to pages there.
 
 ## DevTools
 

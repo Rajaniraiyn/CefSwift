@@ -148,6 +148,23 @@ extension CefRuntime {
         /// See ``Extension``.
         public var extensions: [Extension] = []
 
+        /// Directories of native messaging host manifests that extensions in
+        /// Chrome-style profiles may use (`chrome.runtime.connectNative`,
+        /// `sendNativeMessage`), besides the hosts Chromium finds itself: those
+        /// in `NativeMessagingHosts` in the root cache directory and in
+        /// `/Library/Application Support/Chromium/NativeMessagingHosts`.
+        /// Searched in order at start-up; the first directory with a host's
+        /// name wins it, and a manifest the app put in the root cache
+        /// directory's `NativeMessagingHosts` wins over all of them. A host
+        /// installed while the app runs is found at its next start.
+        ///
+        /// Empty by default. The ``chrome`` preset lists
+        /// ``chromeNativeMessagingHostDirectories``, so that password managers'
+        /// extensions reach the desktop apps that installed hosts for Google
+        /// Chrome. A host still answers only the extensions its manifest's
+        /// `allowed_origins` names, and may check which app started it.
+        public var nativeMessagingHostDirectories: [URL] = []
+
         /// How many helper processes Chromium keeps running, trading memory for
         /// speed and resilience. See ``CefRuntime/ProcessPolicy``.
         public var processPolicy: CefRuntime.ProcessPolicy = .automatic
@@ -300,6 +317,9 @@ extension CefRuntime {
         /// - Switches (``extraCommandLineSwitches``): `no-first-run` and
         ///   `no-default-browser-check`, so Chromium shows neither its
         ///   first-run nor its default-browser prompt.
+        /// - ``nativeMessagingHostDirectories``:
+        ///   ``chromeNativeMessagingHostDirectories``, so extensions find the
+        ///   native messaging hosts installed for Google Chrome and Chromium.
         ///
         /// Everything else is as in ``init()``, which is as Chromium has it
         /// and as users set it in `chrome://settings`:
@@ -316,6 +336,7 @@ extension CefRuntime {
             configuration.persistsSessionCookies = true
             configuration.extraCommandLineSwitches["no-first-run"] = .some(nil)
             configuration.extraCommandLineSwitches["no-default-browser-check"] = .some(nil)
+            configuration.nativeMessagingHostDirectories = chromeNativeMessagingHostDirectories
             return configuration
         }
     }
