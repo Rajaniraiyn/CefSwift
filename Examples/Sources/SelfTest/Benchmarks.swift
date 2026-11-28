@@ -24,6 +24,7 @@ enum Benchmarks {
         switch name {
         case "requests": await requests()
         case "filters": await requestFilters()
+        case "rewrite": await responseRewriting()
         case "lifecycle": await lifecycleCPU()
         case "visibility": await windowedVisibility()
         case "probes": await probes()
@@ -70,6 +71,63 @@ enum Benchmarks {
                 format: "bench filters run %d (%@): %@; main thread %.0f ms; match %.2f µs each (%d); around the filter %.2f µs each (%d); filter %.2f µs each (%d)",
                 run, kind, page.title, meter.busy.benchMilliseconds, match.microsecondsEach, match.count,
                 overhead.microsecondsEach, overhead.count, filter.microsecondsEach, filter.count))
+            page.close(force: true)
+            _ = await SelfTest.waitUntil { page.state == .closed }
+            view.removeFromSuperview()
+            try? await Task.sleep(for: .seconds(1))
+        }
+    }
+
+    /// What rewriting response bodies costs a page: a 64 MB response and
+    /// 200 small ones fetched from the local server, with no filter, a
+    /// filter that decides `.allow`, a rewriter that declines (`nil`), one
+    /// that passes the large body through (past `maximumLength`), and one
+    /// that rewrites every body whole (returning it unchanged).
+    static func responseRewriting() async {
+        guard let server = try? await LocalServer.start() else { return print("bench error: no server") }
+        defer { server.stop() }
+        let base = "http://127.0.0.1:\(server.port)"
+        let kinds = ["none", "allow", "declined", "passthrough", "rewrite"]
+        for run in 1...(3 * kinds.count) {
+            let kind = kinds[(run - 1) % kinds.count]
+            var configuration = CefPage.Configuration()
+            configuration.profile = CefProfile.incognito()
+            switch kind {
+            case "allow": configuration.requestFilter = CefRequestFilter { _ in .allow }
+            case "declined":
+                configuration.requestFilter = CefRequestFilter { _ in .rewriteResponse(CefResponseRewriter { _ in nil }) }
+            case "passthrough":
+                configuration.requestFilter = CefRequestFilter { _ in
+                    .rewriteResponse(CefResponseRewriter(maximumLength: 1 << 20) { _ in { $0 } })
+                }
+            case "rewrite":
+                configuration.requestFilter = CefRequestFilter { _ in
+                    .rewriteResponse(CefResponseRewriter(maximumLength: 128 << 20) { _ in { $0 } })
+                }
+            default: break
+            }
+            let page = CefPage(url: URL(string: "\(base)/page")!, configuration: configuration)
+            let view = CefWindowedPageView(page: page)
+            view.frame = SelfTest.window.contentView!.bounds
+            SelfTest.window.contentView!.addSubview(view)
+            _ = await SelfTest.loaded(page)
+            let memory = MemorySampler()
+            let cpu = ProcessCPU.sample()
+            memory.start()
+            let large = (try? await page.evaluateJavaScript("""
+                (async () => { const t = performance.now(); const b = await (await fetch('/large?\(64 << 20)')).arrayBuffer();
+                  return Math.round(performance.now() - t) + ' ms ' + b.byteLength; })()
+                """, timeout: .seconds(120)).stringValue) ?? "failed"
+            let small = (try? await page.evaluateJavaScript("""
+                (async () => { const t = performance.now(); let n = 0;
+                  for (let i = 0; i < 200; i++) n += (await (await fetch('/policy/page?' + i)).text()).length;
+                  return Math.round(performance.now() - t) + ' ms ' + n; })()
+                """, timeout: .seconds(120)).stringValue) ?? "failed"
+            memory.stop()
+            print(String(
+                format: "bench rewrite run %d (%@): 64 MB %@; 200 small %@; peak footprint %.0f MB (+%.0f MB); app CPU %.0f ms",
+                run, kind, large, small, memory.peakMB, memory.peakMB - memory.startMB,
+                ProcessCPU.used(from: cpu, to: ProcessCPU.sample()).app * 1000))
             page.close(force: true)
             _ = await SelfTest.waitUntil { page.state == .closed }
             view.removeFromSuperview()

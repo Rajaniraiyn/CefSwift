@@ -176,6 +176,7 @@ enum SelfTest {
         ("profile", profileChecks),
         ("profileStorage", profileStorageChecks),
         ("profilePolicy", profilePolicyChecks),
+        ("responses", responseRewriteChecks),
         ("pageState", pageStateChecks),
         ("systemPrompts", systemPromptChecks),
         ("window", windowChecks),

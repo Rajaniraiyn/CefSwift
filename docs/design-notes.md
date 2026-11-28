@@ -1095,3 +1095,42 @@ microsecond, an address read and tested in C, and the request never
 reaches Swift values. The page's own timing does not move measurably:
 Chromium's work for 500 requests dominates.
 
+
+## Rewriting response bodies
+
+`.rewriteResponse(_:)` installs a `cef_response_filter_t` only for a
+response whose rewriter's `prepare` returns a rewrite; a rewriter that
+returns `nil` installs none. `-benchmark rewrite` fetches a 64 MB
+response and 200 small pages from the local server in a windowed page,
+with no filter, a filter that allows, a rewriter that declines, one that
+passes the body through (past `maximumLength`) and one that rewrites the
+whole body (returning it unchanged), three runs each in alternation, on
+an M2 on AC power with other builds running (2026-11-28, CEF 158.0.6).
+The app process's peak footprint above where it started, and the 64 MB
+fetch as the page timed it:
+
+| Filter | 64 MB fetch | Peak footprint | App CPU |
+|---|---|---|---|
+| None | 69–130 ms | +0–5 MB | 387–564 ms |
+| `.allow` | 48–78 ms | +1–3 MB | 304–558 ms |
+| Rewriter declines (`nil`) | 66–70 ms | +1–3 MB | 416–550 ms |
+| Body passes through the filter | 146–181 ms | +57–64 MB | 732–764 ms |
+| Whole body rewritten | 240–253 ms | +90–135 MB | 788–815 ms |
+
+Declining costs nothing measurable. A filter that only copies the body
+through, holding at most 1 MB of its own, still adds about the body's
+size to the browser process's peak footprint and doubles the fetch's
+time: what CEF buffers around a response filter, not the rewriter. A
+whole-body rewrite adds the body once more, as it must. So a rewriter
+looks at `Content-Type` and `expectedContentLength` and declines media,
+downloads and anything large, as the guide's example does; the 200 small
+pages showed no difference beyond the run-to-run noise (148–750 ms).
+
+Response headers are not rewritten. CEF hands them to
+`get_resource_response_filter` and `on_resource_response` read-only. The
+one route around that, a `cef_resource_handler_t` that fetches the
+request itself with `cef_urlrequest_t` and answers with edited headers,
+takes the response out of Chromium's network loader: CORS, the HTTP
+cache, service workers and the cookie access filter would act on the
+app's answer rather than the site's, and every byte would cross the IO
+thread twice. It was not built.

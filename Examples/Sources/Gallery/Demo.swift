@@ -58,6 +58,7 @@ enum Demos {
 
         CustomSchemeDemo(),
         RequestsDemo(),
+        ResponseRewritingDemo(),
         ProfilesDemo(),
         PermissionsDemo(),
         DownloadsDemo(),
