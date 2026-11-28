@@ -77,7 +77,7 @@ struct CefEmbedder {
             try Self.fixRunPaths(of: helperApp.appendingPathComponent("Contents/MacOS/\(kind.appName(for: executableName))"),
                                  adding: nil)
         }
-        let mediaService = try makeMediaService(in: contents)
+        let services = try makeServices(in: contents)
         try Self.checkArchitectures(in: contents, required: architectures, executableName: executableName)
 
         // Inside out, each item before what contains it, and without
@@ -94,38 +94,40 @@ struct CefEmbedder {
         for (kind, helperApp) in helperApps {
             try signer.sign(helperApp, entitlements: plan.helperEntitlements[kind] ?? [:], name: kind.rawValue)
         }
-        if let mediaService {
-            try signer.sign(mediaService, entitlements: MediaService.entitlements, name: "media")
+        for (service, bundle) in services {
+            try signer.sign(bundle, entitlements: service.entitlements, name: service.product)
         }
         return Result(trim: trimmed, signer: signer)
     }
 
-    /// `Contents/XPCServices/<App> Media.xpc` when the plan asks for the
-    /// media service; removes one left from an earlier build otherwise.
-    private func makeMediaService(in contents: URL) throws -> URL? {
+    /// `Contents/XPCServices/<App> <Name>.xpc` for each service the plan
+    /// asks for; removes those left from an earlier build otherwise.
+    private func makeServices(in contents: URL) throws -> [(MediaService, URL)] {
         let fm = FileManager.default
-        let services = contents.appendingPathComponent("XPCServices")
-        let service = services.appendingPathComponent(MediaService.bundleName(for: executableName))
-        try? fm.removeItem(at: service)
-        guard plan.embedsMediaService else {
-            if (try? fm.contentsOfDirectory(atPath: services.path))?.isEmpty == true { try? fm.removeItem(at: services) }
-            return nil
+        let directory = contents.appendingPathComponent("XPCServices")
+        var made: [(MediaService, URL)] = []
+        for service in MediaService.all {
+            let bundle = directory.appendingPathComponent(service.bundleName(for: executableName))
+            try? fm.removeItem(at: bundle)
+            guard plan.services.contains(service) else { continue }
+            guard let executable = helper.services[service.product] else {
+                throw BundlingError(
+                    "The bundle needs CefSwift's \(service.name) service, the \(service.product) product; build it and " +
+                    "pass it with --xpc-service \(service.product)=<file>.")
+            }
+            let macOS = bundle.appendingPathComponent("Contents/MacOS")
+            try fm.createDirectory(at: macOS, withIntermediateDirectories: true)
+            let name = service.executableName(for: executableName)
+            try fm.copyItem(at: executable, to: macOS.appendingPathComponent(name))
+            try Plist.write(service.infoPlist(executableName: name, bundleIdentifier: bundleIdentifier,
+                                              version: version, build: build,
+                                              minimumSystemVersion: minimumSystemVersion),
+                            to: bundle.appendingPathComponent("Contents/Info.plist"))
+            try Self.fixRunPaths(of: macOS.appendingPathComponent(name), adding: nil)
+            made.append((service, bundle))
         }
-        guard let executable = helper.mediaService else {
-            throw BundlingError(
-                "The systemMediaDecoders capability needs CefSwift's media service, the \(HelperLink.mediaServiceProduct) " +
-                "product; build it and pass it with --media-service.")
-        }
-        let macOS = service.appendingPathComponent("Contents/MacOS")
-        try fm.createDirectory(at: macOS, withIntermediateDirectories: true)
-        let name = MediaService.executableName(for: executableName)
-        try fm.copyItem(at: executable, to: macOS.appendingPathComponent(name))
-        try Plist.write(MediaService.infoPlist(executableName: name, bundleIdentifier: bundleIdentifier,
-                                               version: version, build: build,
-                                               minimumSystemVersion: minimumSystemVersion),
-                        to: service.appendingPathComponent("Contents/Info.plist"))
-        try Self.fixRunPaths(of: macOS.appendingPathComponent(name), adding: nil)
-        return service
+        if (try? fm.contentsOfDirectory(atPath: directory.path))?.isEmpty == true { try? fm.removeItem(at: directory) }
+        return made
     }
 
     private func makeHelperApp(in frameworks: URL, kind: HelperKind, appInfoPlist: PlistDictionary) throws -> URL {

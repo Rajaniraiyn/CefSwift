@@ -1,4 +1,5 @@
 import AppKit
+import CefProtectedMedia
 import CefSwiftUI
 import SwiftUI
 import SystemEngine
@@ -11,9 +12,21 @@ import SystemEngine
 /// of its own (`WebKitTab`) beside the browser's windows rather than an
 /// entry in their tab rail, marked with a WebKit badge, and its "Open in
 /// Chromium" button moves the page back.
+///
+/// With Settings › "Play Spotify in Chromium with FairPlay" (off by
+/// default), Spotify's web player stays in Chromium and plays its FairPlay
+/// audio through CefProtectedMedia's `CefFairPlay`; when that fails, the
+/// tab moves to WebKit as it would have without the setting.
 @MainActor
-final class WebKitTabs: BrowserFeature {
+final class WebKitTabs: BrowserFeature, CefFairPlayDelegate {
     static let automaticKey = "streamingInSystemEngine"
+    static let fairPlayKey = "fairPlayInChromium"
+
+    /// Whether FairPlay sites play in Chromium.
+    static var playsFairPlayInChromium: Bool { UserDefaults.standard.bool(forKey: fairPlayKey) }
+
+    /// FairPlay in Chromium tabs, for Spotify's web player.
+    private let fairPlay = CefFairPlay(origins: CefFairPlay.spotify)
 
     /// Whether streaming services open in WebKit by themselves.
     static var opensStreamingSitesAutomatically: Bool {
@@ -28,10 +41,36 @@ final class WebKitTabs: BrowserFeature {
 
     func start(_ controller: BrowserController) {
         self.controller = controller
+        fairPlay.isEnabled = Self.playsFairPlayInChromium && CefFairPlay.isServiceAvailable
+        fairPlay.delegate = self
+        // The setting reaches pages already open on Spotify at once.
+        NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: .main) {
+            [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.fairPlay.isEnabled = Self.playsFairPlayInChromium && CefFairPlay.isServiceAvailable
+            }
+        }
+    }
+
+    func configure(_ configuration: inout CefPage.Configuration) {
+        fairPlay.install(in: configuration.profile ?? .default)
+    }
+
+    /// Whether a FairPlay site stays in Chromium.
+    private func playsInChromium(_ url: URL) -> Bool {
+        guard fairPlay.isEnabled, let scheme = url.scheme, let host = url.host else { return false }
+        return fairPlay.origins.contains("\(scheme)://\(host)")
+    }
+
+    func fairPlay(_ fairPlay: CefFairPlay, page: CefPage, didFail error: CefFairPlayError) {
+        // The page's player got a media error; WebKit plays the site as Safari does.
+        guard let url = page.url else { return }
+        open(url, profile: page.configuration.profile ?? .default, replacing: page)
     }
 
     func decidePolicy(for navigation: CefNavigationAction, in page: CefPage) -> CefNavigationDecision? {
         guard navigation.isMainFrame, let url = navigation.url, Self.opensStreamingSitesAutomatically,
+              !playsInChromium(url),
               !keptInChromium.contains(ObjectIdentifier(page)), SystemPage.prefersSystemEngine(for: url)
         else { return nil }
         open(url, profile: page.configuration.profile ?? .default, replacing: page)
@@ -104,12 +143,18 @@ final class WebKitTabs: BrowserFeature {
 
     private struct Setting: View {
         @AppStorage(WebKitTabs.automaticKey) private var streamingInSystemEngine = true
+        @AppStorage(WebKitTabs.fairPlayKey) private var fairPlayInChromium = false
 
         var body: some View {
             Toggle(isOn: $streamingInSystemEngine) {
                 Text("Play streaming services with WebKit")
                 Text("Netflix, Disney+ and other services that need FairPlay open in a tab shown by the system's WebKit.")
             }
+            Toggle(isOn: $fairPlayInChromium) {
+                Text("Play Spotify in Chromium with FairPlay")
+                Text("Experimental. Spotify's web player stays in a Chromium tab and plays its protected audio with macOS's FairPlay; if that fails, the tab moves to WebKit.")
+            }
+            .disabled(!CefFairPlay.isServiceAvailable)
         }
     }
 }

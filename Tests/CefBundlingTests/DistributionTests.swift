@@ -203,12 +203,24 @@ private func profile(
         #expect(plan.embedsMediaService)
         #expect(plan.appEntitlements["com.apple.security.app-sandbox"] == nil)
         #expect(plan.helperEntitlements.values.allSatisfy { $0["com.apple.security.app-sandbox"] == nil })
-        #expect(MediaService.entitlements == ["com.apple.security.app-sandbox": .bool(true)])
-        let info = MediaService.infoPlist(
+        #expect(MediaService.media.entitlements == ["com.apple.security.app-sandbox": .bool(true)])
+        let info = MediaService.media.infoPlist(
             executableName: "Browser Media", bundleIdentifier: "com.example.browser", version: "1", build: "1",
             minimumSystemVersion: "14.0")
         #expect(info["CFBundleIdentifier"] == .string("com.example.browser.media"))
         #expect(info["CFBundlePackageType"] == .string("XPC!"))
+    }
+
+    @Test func fairPlayEmbedsItsServiceWithOutgoingConnectionsOnly() throws {
+        var settings = DistributionSettings(bundleIdentifier: "com.example.browser", identity: developerID)
+        settings.capabilities = ["fairPlay", "systemMediaDecoders"]
+        let plan = try settings.plan()
+        #expect(plan.services == [.fairPlay, .media])
+        #expect(MediaService.fairPlay.entitlements == [
+            "com.apple.security.app-sandbox": .bool(true), "com.apple.security.network.client": .bool(true),
+        ])
+        #expect(MediaService.fairPlay.bundleName(for: "Browser") == "Browser FairPlay.xpc")
+        #expect(plan.appEntitlements["com.apple.security.network.client"] == nil)
     }
 
     @Test func capabilitiesExpandToKeysAndEntitlements() throws {

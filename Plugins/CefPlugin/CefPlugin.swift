@@ -181,13 +181,13 @@ struct CefPlugin: CommandPlugin {
         let helper = try buildProduct(named: "cefswift-helper", kind: .executable, configuration: configuration,
                                       context: context,
                                       linkerFlags: try tool.buildFlags(framework: framework, startup: startup)["helper"] ?? [])
-        // The products the settings add, such as the media service of the
-        // systemMediaDecoders capability.
+        // The XPC services the settings add, such as the media service of
+        // the systemMediaDecoders capability.
         var extra: [String] = []
         for product in try tool.output(bundleArguments + ["--check", "--products"]).split(separator: "\n") {
             let built = try buildProduct(named: String(product), kind: .executable, configuration: configuration,
                                          context: context, linkerFlags: [])
-            if product == "cefswift-media" { extra += ["--media-service", built.path] }
+            extra += ["--xpc-service", "\(product)=\(built.path)"]
         }
 
         // 4. Assemble and sign.

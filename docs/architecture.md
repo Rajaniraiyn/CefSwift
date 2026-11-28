@@ -127,6 +127,27 @@ Chromium first attaches a child window to it, takes up the surfaces
 already attached. Until then Chromium's interface shows natively, as
 without the module.
 
+**CefProtectedMedia** is FairPlay Streaming in Chromium pages
+([guide](guide.md#fairplay-in-chromium-pages)), built only on CefKit's
+public API: a `CefBridge` (`cefswiftFairPlay`, access limited to the listed
+origins), a `CefUserScript` for those origins' top frames, and a
+`CefPageAttachment` that ends a page's session when it closes.
+
+```text
+page (listed origin, main frame)  fairplay.js: EME for com.apple.fps, catches the playlist and certificate
+  │  bridge: open / license / control / close        frame and origin established by the browser process
+app (CefFairPlay)                 checks origin, frame, sizes; CefFairPlayPlaylist: https segments, skd/https keys
+  │  NSXPCConnection, both ways
+<App> FairPlay.xpc                AVPlayer + AVContentKeySession; playlist served by a resource loader
+  │  keyRequest (SPC) ──▶ page's license server ──▶ license (CKC)      state ──▶ element mirrors it
+```
+
+The service is an XPC service of its own (`Sources/CefFairPlayService`,
+product `cefswift-fairplay`) in the App Sandbox with outgoing connections
+only, separate from the media decoders' service, which has no network.
+One service process holds every page's session (at most eight); the app
+names a session by the page and the page's own session name.
+
 ## The C bridge
 
 CefSwift calls CEF through its C API and resolves every function at run

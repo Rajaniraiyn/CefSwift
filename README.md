@@ -187,6 +187,11 @@ These come from CEF 156 and official CEF builds. The guide's
   `systemMediaDecoders` capability), in documents' main worlds and not in
   workers or encrypted media
   ([System media decoders](docs/guide.md#system-media-decoders)).
+- FairPlay plays in Chromium pages only as audio, only for the origins an
+  app lists with the experimental CefProtectedMedia, and only for players
+  that hand the element an HLS media playlist
+  ([FairPlay in Chromium pages](docs/guide.md#fairplay-in-chromium-pages));
+  FairPlay video plays in WebKit.
 
 ## Requirements
 

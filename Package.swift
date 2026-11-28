@@ -12,6 +12,7 @@ let package = Package(
         .library(name: "CefSwiftUI", targets: ["CefSwiftUI"]),
         .library(name: "CefPasskeys", targets: ["CefPasskeys"]),
         .library(name: "CefChromium", targets: ["CefChromium"]),
+        .library(name: "CefProtectedMedia", targets: ["CefProtectedMedia"]),
         .plugin(name: "CefPlugin", targets: ["CefPlugin"]),
         // Assembles, signs and checks CEF app bundles: what the `cef` plugin
         // and the Xcode build phase (Scripts/xcode-embed.sh) both run.
@@ -24,6 +25,9 @@ let package = Package(
         // The XPC service that decodes pages' audio with the system's
         // decoders, for apps with the `systemMediaDecoders` capability.
         .executable(name: "cefswift-media", targets: ["CefMediaService"]),
+        // The XPC service that plays FairPlay audio for CefProtectedMedia,
+        // for apps with the `fairPlay` capability.
+        .executable(name: "cefswift-fairplay", targets: ["CefFairPlayService"]),
     ],
     targets: [
         // Vendored CEF C API headers + runtime dlopen/dlsym loader.
@@ -59,6 +63,20 @@ let package = Package(
         .executableTarget(
             name: "CefMediaService",
             linkerSettings: [.linkedFramework("AudioToolbox")]
+        ),
+        // Optional: FairPlay Streaming in Chromium pages of the origins an
+        // app lists, played by the FairPlay service. On CefKit's public
+        // bridge, user scripts and attachments.
+        .target(
+            name: "CefProtectedMedia",
+            dependencies: ["CefKit"],
+            resources: [.copy("Resources/fairplay.js")]
+        ),
+        // The FairPlay service (product cefswift-fairplay): AVPlayer and
+        // AVContentKeySession in the App Sandbox. No CEF.
+        .executableTarget(
+            name: "CefFairPlayService",
+            linkerSettings: [.linkedFramework("AVFoundation")]
         ),
         // The helper executable: a few lines calling CefRenderer.
         .executableTarget(
@@ -160,6 +178,10 @@ let package = Package(
         .testTarget(
             name: "CefMediaServiceTests",
             dependencies: ["CefMediaService"]
+        ),
+        .testTarget(
+            name: "CefProtectedMediaTests",
+            dependencies: ["CefProtectedMedia", "CefKit"]
         ),
     ],
     cLanguageStandard: .c11

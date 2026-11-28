@@ -98,6 +98,7 @@ The runtime, page, window and profile APIs are `@MainActor`.
   - [WebKit and FairPlay](#webkit-and-fairplay)
   - [Services](#services)
   - [System media decoders](#system-media-decoders)
+  - [FairPlay in Chromium pages](#fairplay-in-chromium-pages)
 - [Footprint and launch time](#footprint-and-launch-time)
   - [What every bundle does](#what-every-bundle-does)
   - [What the presets turn off](#what-the-presets-turn-off)
@@ -4258,6 +4259,85 @@ messages). The shim leaves no global. What still tells:
   native player's failure, plays from a `MediaSource` of the shim's, and
   an `abort` the shim fires for an append it cancels has `isTrusted`
   false.
+
+### FairPlay in Chromium pages
+
+CefProtectedMedia's `CefFairPlay` plays FairPlay Streaming audio in
+Chromium pages of the origins an app lists, with AVFoundation, in
+CefSwift's FairPlay service. It is experimental, off until installed, and
+audio only; Spotify's web player is the first site. Add the
+`CefProtectedMedia` product, list the `fairPlay` capability in
+`cefapp.json`, and install it in the profiles whose pages may use it:
+
+```swift
+import CefProtectedMedia
+
+let fairPlay = CefFairPlay(origins: CefFairPlay.spotify)
+fairPlay.install(in: .default)
+fairPlay.origins.insert("https://music.example")   // reaches open pages at once
+```
+
+```json
+{ "capabilities": ["fairPlay"] }
+```
+
+**How it works.** For the listed origins, in top-level documents only, a
+page script offers `com.apple.fps.1_0` (and `com.apple.fps`,
+`com.apple.fps.3_0`) from `requestMediaKeySystemAccess`, keeps the
+certificate the player gives its `MediaKeys`, and catches the HLS media
+playlist the player gives the element, as a `data:` or `https` address.
+The app checks the call and the playlist and hands both to
+`<App> FairPlay.xpc`, which plays the stream with AVPlayer, serving the
+playlist from memory, and an `AVContentKeySession`. Each key request
+(SPC) reaches the page as its session's `message` event, the page's
+license server answers, and the license (CKC) goes back through
+`update`. The element then mirrors the service's player: `currentTime`,
+`duration`, `paused`, `ended`, `readyState` and their events, and `play`,
+`pause`, seeking, `volume`, `muted` and `playbackRate` go to the service.
+Keys and decrypted audio never leave AVFoundation. The tab's mute
+(`CefPage.isAudioMuted`) mutes the service's player, and
+`page(_:didChangePlaying:)` on the delegate drives a playing indicator.
+
+**What is checked.** The bridge exists only in documents of the listed
+origins, and each call is checked again against the frame and origin the
+browser process establishes from the frame's address: only the main frame
+of a listed `https` origin, while `isEnabled`, may call. A playlist passes
+`CefFairPlayPlaylist` only as a media playlist (no variants, which would
+make AVFoundation load playlists the app has not seen) of at most 2 MB
+whose segments and initialization map are `https` addresses with a host,
+and whose keys are `skd://` or `https`. Certificates are limited to
+64 KB, licenses to 256 KB. Anything refused gives the element a media
+error (code 3) and calls `fairPlay(_:page:didFail:)`, so the app can show
+the page in WebKit instead; the Browser example does
+([WebKit and FairPlay](#webkit-and-fairplay)).
+
+**Setting changes.** `origins` and `isEnabled` reach pages already open on
+a listed origin at once: turned off, a page's next
+`requestMediaKeySystemAccess` gets Chromium's own answer and playing
+sessions stop. The page script itself reaches documents that load after an
+origin is added.
+
+**Measured.** With CEF 158.0.6 on macOS 27.2.1, an Apple M2, in the Compat
+example (`-features fairplay`, the page's own origin listed), online: the
+audio of Axinom's public FairPlay test vector
+(`protected_hls_1080p_h264_singlekey`, SAMPLE-AES), handed to the element
+as a `data:` playlist as Spotify's player does, went `loadstart`,
+`encrypted`, a 6304-byte SPC from AVFoundation in the session's `message`,
+Axinom's license server answering 200 with an 844-byte CKC,
+`loadedmetadata`, `canplay` (`duration` 734.21), `play`, `waiting`,
+`playing`, and `currentTime` advanced 2.0 s in 2 s; the delegate heard it
+play. A playlist with a `file:` segment got media error 3 and the delegate
+`refused("a segment that is not https: file:///etc/hosts")`. A page of an
+origin without the module gets `NotSupportedError` and no bridge.
+SelfTest's `fairPlay` group checks the same against
+`https://cefswift.test`. Spotify needs an account, so playing a Spotify
+track is unverified.
+
+**What a page can observe.** On a listed origin: the `cefswiftFairPlay`
+global (in same-origin subframes too, whose calls are refused), the replaced EME and media element members (JavaScript functions
+there, not native ones), `MediaKeys` and sessions that are not Chromium's
+objects, events the script dispatches (`isTrusted` false), and an element
+whose own player stays empty. Other origins see none of it.
 
 ## Footprint and launch time
 

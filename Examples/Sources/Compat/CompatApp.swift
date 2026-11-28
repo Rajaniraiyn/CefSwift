@@ -1,6 +1,7 @@
 import AppKit
 @_spi(Testing) import CefKit
 import CefPasskeys
+import CefProtectedMedia
 
 /// Shows one page in one kind of host with one set of CefSwift features
 /// turned on, for the web-compatibility matrix (`Scripts/compat-matrix.py`).
@@ -16,7 +17,8 @@ import CefPasskeys
 ///   `bridge`, `userscript`, `evaluate` (one `evaluateJavaScript` as the
 ///   page loads), `passkeys` (app-answered passkeys), `accessibility`
 ///   (offscreen accessibility tree from the start), `systemaudio`
-///   (`services.systemMediaDecoders = .audio`).
+///   (`services.systemMediaDecoders = .audio`), `fairplay` (CefProtectedMedia's
+///   `CefFairPlay` for the page's origin).
 /// - `-wait <seconds>`: how long to show the page (default 12).
 /// - `-capture <path.png>`: where to save a screenshot of the window, taken
 ///   with `screencapture` from outside the page, when the time is up.
@@ -36,6 +38,7 @@ enum CompatApp {
     static var pageWindow: CefWindow?
     static var page: CefPage!
     static let bridge = CefBridge(name: "compatBridge")
+    static let fairPlay = CefFairPlay(origins: [])
 
     static var features: Set<String> {
         Set((defaults.string(forKey: "features") ?? "").split(separator: ",").map(String.init))
@@ -70,6 +73,11 @@ enum CompatApp {
         }
 
         let url = URL(string: defaults.string(forKey: "url") ?? "about:blank")!
+        if features.contains("fairplay"), let scheme = url.scheme, let host = url.host {
+            fairPlay.origins = ["\(scheme)://\(host)"]
+            fairPlay.delegate = CompatDelegate.shared
+            fairPlay.install(in: .default)
+        }
         var pageConfiguration = CefPage.Configuration()
         if features.contains("bridge") {
             bridge.handle("ping") { (_: CefJSON) in "pong" }
@@ -183,5 +191,15 @@ final class CompatDelegate: CefPageDelegate {
 
     func page(_ page: CefPage, renderProcessDidTerminate reason: CefTerminationReason) {
         print("compat renderer terminated: \(reason)")
+    }
+}
+
+extension CompatDelegate: CefFairPlayDelegate {
+    func fairPlay(_ fairPlay: CefFairPlay, page: CefPage, didFail error: CefFairPlayError) {
+        print("compat fairplay failed: \(error)")
+    }
+
+    func fairPlay(_ fairPlay: CefFairPlay, page: CefPage, didChangePlaying isPlaying: Bool) {
+        print("compat fairplay playing: \(isPlaying)")
     }
 }

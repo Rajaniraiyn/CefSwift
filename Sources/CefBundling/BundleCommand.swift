@@ -21,9 +21,9 @@ struct BundleCommand {
     var helper: URL?
     var helperStartup: URL?
     var framework: URL?
-    /// CefSwift's media service (`cefswift-media`), for the
-    /// `systemMediaDecoders` capability.
-    var mediaService: URL?
+    /// CefSwift's XPC services' built executables, by product, for the
+    /// capabilities that add them (`--xpc-service <product>=<file>`).
+    var services: [String: URL] = [:]
     var isCheckOnly = false
     /// With `--check`: print the CefSwift products the bundle needs beyond
     /// the helper, one per line, and nothing else.
@@ -54,7 +54,7 @@ struct BundleCommand {
     USAGE: cefswift bundle --product-name <Name> --package-directory <dir> --work-directory <dir>
                            --output <dir> [--source-directory <dir>] [--check]
                            [--executable <file> --resource-bundle <name>... --helper <file>
-                            --helper-startup <file> --framework <dir> [--media-service <file>]]
+                            --helper-startup <file> --framework <dir> [--xpc-service <product>=<file>...]]
                            [--check --products]
                            [the options of 'swift package cef bundle']
     Run by the cef command plugin; see 'swift package cef help'.
@@ -78,7 +78,11 @@ struct BundleCommand {
         helper = args.option("helper").map { URL(fileURLWithPath: $0) }
         helperStartup = args.option("helper-startup").map { URL(fileURLWithPath: $0) }
         framework = args.option("framework").map { URL(fileURLWithPath: $0) }
-        mediaService = args.option("media-service").map { URL(fileURLWithPath: $0) }
+        for entry in args.options("xpc-service") {
+            let parts = entry.split(separator: "=", maxSplits: 1).map(String.init)
+            guard parts.count == 2 else { throw BundlingError("--xpc-service takes <product>=<file>, got '\(entry)'.") }
+            services[parts[0]] = URL(fileURLWithPath: parts[1])
+        }
         isCheckOnly = args.flag("check")
         listsProducts = args.flag("products")
 
@@ -114,7 +118,7 @@ struct BundleCommand {
         let settings = try resolveSettings()
         Log.isQuiet = false
         if isCheckOnly {
-            if listsProducts, settings.plan.embedsMediaService { print(HelperLink.mediaServiceProduct) }
+            if listsProducts { for service in settings.plan.services { print(service.product) } }
             return
         }
         guard let executable, let helper, let helperStartup, let framework else {
@@ -128,7 +132,7 @@ struct BundleCommand {
         var helperProducts = try HelperLink.prepare(
             startup: helperStartup, helper: helper, framework: framework,
             in: workDirectory.appendingPathComponent("helper"))
-        helperProducts.mediaService = mediaService
+        helperProducts.services = services
         try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
 
         let identity = settings.identity
