@@ -35,7 +35,7 @@ struct GalleryApp: CefSwiftApp {
         return configuration
     }
 
-    @State private var model = GalleryModel()
+    @ViewState private var model = GalleryModel()
 
     init() {
         // Chromium is running by now: serve the sample pages before any

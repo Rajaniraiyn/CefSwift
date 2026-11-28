@@ -661,13 +661,6 @@ extension CefChromiumSurface {
             return false
         }
 
-        /// Whether this anchor follows a view, which can move within the
-        /// window.
-        var isViewAnchor: Bool {
-            if case .view = target { return true }
-            return false
-        }
-
         /// The anchor in screen coordinates, or `nil` when its view is gone or
         /// not in `window`.
         func screenRect(in window: NSWindow) -> CGRect? {

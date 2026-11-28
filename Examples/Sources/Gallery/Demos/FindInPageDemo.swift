@@ -15,7 +15,7 @@ struct FindInPageDemo: Demo {
 }
 
 private struct FindInPageView: View {
-    @State private var page = CefPage(url: SamplePage.article.url)
+    @ViewState private var page = CefPage(url: SamplePage.article.url)
 
     var body: some View {
         FindBar(session: page.findSession) {

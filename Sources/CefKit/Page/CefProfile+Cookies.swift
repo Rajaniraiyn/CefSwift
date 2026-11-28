@@ -6,7 +6,7 @@ extension CefProfile {
     /// A cookie as Chromium stores it, with everything CEF reports about
     /// it.
     ///
-    /// CEF 156 does not report a cookie's partition key: a partitioned
+    /// CEF 158 does not report a cookie's partition key: a partitioned
     /// (CHIPS) cookie is listed like any other, without the top-level site
     /// it is keyed to, and cannot be set with one.
     public struct Cookie: Sendable, Hashable {

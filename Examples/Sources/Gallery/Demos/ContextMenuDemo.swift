@@ -15,7 +15,7 @@ struct ContextMenuDemo: Demo {
 }
 
 private struct ContextMenuView: View {
-    @State private var model = ContextMenuModel()
+    @ViewState private var model = ContextMenuModel()
 
     var body: some View {
         VStack(spacing: 0) {

@@ -17,8 +17,8 @@ struct ProfilesDemo: Demo {
 private struct ProfilesView: View {
     // Chromium loads a persistent profile in the background the first
     // time it is used; the page waits for it by itself.
-    @State private var onDisk = CefPage.inProfile(.persistent(id: "gallery", displayName: "Gallery"))
-    @State private var incognito = CefPage.inProfile(.incognito())
+    @ViewState private var onDisk = CefPage.inProfile(.persistent(id: "gallery", displayName: "Gallery"))
+    @ViewState private var incognito = CefPage.inProfile(.incognito())
 
     var body: some View {
         HStack(spacing: 1) {
@@ -45,8 +45,8 @@ private struct ProfilePane: View {
     let page: CefPage
     let name: String
     let symbol: String
-    @State private var cookies: [CefProfile.Cookie] = []
-    @State private var failure: String?
+    @ViewState private var cookies: [CefProfile.Cookie] = []
+    @ViewState private var failure: String?
 
     var body: some View {
         VStack(spacing: 0) {

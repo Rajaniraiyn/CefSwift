@@ -55,7 +55,7 @@ public struct CefWebView: View {
         let url: URL
         // SwiftUI keeps the first page and discards the ones later
         // initializers make; a page does nothing in Chromium until hosted.
-        @State private var page: CefPage
+        @ViewState private var page: CefPage
 
         init(url: URL, configuration: CefPage.Configuration) {
             self.url = url
@@ -152,10 +152,33 @@ private struct PageRepresentable<HostView: CefPageHostView>: NSViewRepresentable
 
 // MARK: - Offscreen geometry
 
+// Written out rather than with `@Entry`, whose macro plugin comes with
+// Xcode, not with the Command Line Tools.
+private struct OffscreenResizePolicyKey: EnvironmentKey {
+    static let defaultValue: CefOffscreenPageView.ResizePolicy = .live
+}
+
+private struct OffscreenFramePlacementKey: EnvironmentKey {
+    static let defaultValue: CefOffscreenPageView.FramePlacement = .stretch
+}
+
+private struct OffscreenPageSizeKey: EnvironmentKey {
+    static let defaultValue: CGSize? = nil
+}
+
 extension EnvironmentValues {
-    @Entry var offscreenResizePolicy: CefOffscreenPageView.ResizePolicy = .live
-    @Entry var offscreenFramePlacement: CefOffscreenPageView.FramePlacement = .stretch
-    @Entry var offscreenPageSize: CGSize? = nil
+    var offscreenResizePolicy: CefOffscreenPageView.ResizePolicy {
+        get { self[OffscreenResizePolicyKey.self] }
+        set { self[OffscreenResizePolicyKey.self] = newValue }
+    }
+    var offscreenFramePlacement: CefOffscreenPageView.FramePlacement {
+        get { self[OffscreenFramePlacementKey.self] }
+        set { self[OffscreenFramePlacementKey.self] = newValue }
+    }
+    var offscreenPageSize: CGSize? {
+        get { self[OffscreenPageSizeKey.self] }
+        set { self[OffscreenPageSizeKey.self] = newValue }
+    }
 }
 
 extension View {

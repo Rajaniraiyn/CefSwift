@@ -14,7 +14,7 @@ struct Downloads: BrowserFeature {
 
 private struct DownloadsButton: View {
     let page: CefPage
-    @State private var isPresented = false
+    @ViewState private var isPresented = false
 
     private var isActive: Bool { page.downloads.contains { $0.state == .inProgress } }
 

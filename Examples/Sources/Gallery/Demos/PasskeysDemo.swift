@@ -18,7 +18,7 @@ struct PasskeysDemo: Demo {
 }
 
 private struct PasskeysView: View {
-    @State private var model = PasskeyModel()
+    @ViewState private var model = PasskeyModel()
 
     var body: some View {
         HSplitView {

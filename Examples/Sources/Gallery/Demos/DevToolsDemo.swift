@@ -15,9 +15,9 @@ struct DevToolsDemo: Demo {
 }
 
 private struct DevToolsView: View {
-    @State private var page = CefPage(url: Self.page.url)
-    @State private var messages: [String] = []
-    @State private var emulatesPhone = false
+    @ViewState private var page = CefPage(url: Self.page.url)
+    @ViewState private var messages: [String] = []
+    @ViewState private var emulatesPhone = false
 
     var body: some View {
         VSplitView {

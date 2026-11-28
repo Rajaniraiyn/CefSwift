@@ -17,7 +17,7 @@ struct ChromiumSurfacesDemo: Demo {
 }
 
 private struct ChromiumSurfacesView: View {
-    @State private var window: CefWindow?
+    @ViewState private var window: CefWindow?
 
     var body: some View {
         ContentUnavailableView {

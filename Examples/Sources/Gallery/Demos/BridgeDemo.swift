@@ -15,8 +15,8 @@ struct BridgeDemo: Demo {
 }
 
 private struct BridgeView: View {
-    @State private var model = TodoModel()
-    @State private var colors = ["tomato", "seagreen", "royalblue", "goldenrod"]
+    @ViewState private var model = TodoModel()
+    @ViewState private var colors = ["tomato", "seagreen", "royalblue", "goldenrod"]
 
     var body: some View {
         HSplitView {

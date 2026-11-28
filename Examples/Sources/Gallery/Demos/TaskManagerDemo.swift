@@ -15,7 +15,7 @@ struct TaskManagerDemo: Demo {
 
 private struct TaskManagerView: View {
     private let manager = CefRuntime.shared.taskManager
-    @State private var selection: CefTaskManager.Task.ID?
+    @ViewState private var selection: CefTaskManager.Task.ID?
     @Environment(\.demoReadiness) private var readiness
 
     var body: some View {

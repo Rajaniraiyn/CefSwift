@@ -16,9 +16,9 @@ struct PDFDemo: Demo {
 }
 
 private struct PDFDemoView: View {
-    @State private var page = CefPage(url: SamplePage.article.url)
-    @State private var isLandscape = false
-    @State private var document: PDFDocument?
+    @ViewState private var page = CefPage(url: SamplePage.article.url)
+    @ViewState private var isLandscape = false
+    @ViewState private var document: PDFDocument?
 
     var body: some View {
         HSplitView {
