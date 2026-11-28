@@ -20,8 +20,8 @@ private struct Echo: Decodable {
 }
 
 private struct RequestsView: View {
-    @State private var log: [String] = []
-    @State private var received: Int64 = 0
+    @ViewState private var log: [String] = []
+    @ViewState private var received: Int64 = 0
     private let profile = CefProfile.default
     private let server = LocalServer.shared
 

@@ -25,16 +25,16 @@ private enum Scene: String, CaseIterable, Identifiable {
 }
 
 private struct AnimationView: View {
-    @State private var windowed = CefPage(url: AnimationDemo.page.url)
-    @State private var offscreen: CefPage = {
+    @ViewState private var windowed = CefPage(url: AnimationDemo.page.url)
+    @ViewState private var offscreen: CefPage = {
         var configuration = CefPage.Configuration()
         configuration.rendering = .offscreen(frameRate: 120)
         return CefPage(url: AnimationDemo.page.url, configuration: configuration)
     }()
-    @State private var scene = Scene.resize
-    @State private var settles = false
-    @State private var toggled = false
-    @State private var frameTimes = FrameTimes()
+    @ViewState private var scene = Scene.resize
+    @ViewState private var settles = false
+    @ViewState private var toggled = false
+    @ViewState private var frameTimes = FrameTimes()
     @Namespace private var namespace
     @Environment(\.demoReadiness) private var readiness
 
@@ -274,7 +274,7 @@ extension AnimationDemo {
 /// thumbnails; the focused one grows to full size.
 private struct PreviewGrid: View {
     let focused: Bool
-    @State private var pages: [CefPage] = AnimationDemo.previews.map { sample in
+    @ViewState private var pages: [CefPage] = AnimationDemo.previews.map { sample in
         var configuration = CefPage.Configuration()
         configuration.rendering = .offscreen(frameRate: 30)
         return CefPage(url: sample.url, configuration: configuration)

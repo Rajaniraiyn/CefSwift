@@ -16,8 +16,8 @@ struct DiscardDemo: Demo {
 }
 
 private struct DiscardView: View {
-    @State private var tabs = [CefPage(url: SamplePage.tour[0].url), CefPage(url: SamplePage.article.url)]
-    @State private var selected = 0
+    @ViewState private var tabs = [CefPage(url: SamplePage.tour[0].url), CefPage(url: SamplePage.article.url)]
+    @ViewState private var selected = 0
 
     var body: some View {
         VStack(spacing: 0) {
@@ -44,7 +44,7 @@ private struct TabCard: View {
     let page: CefPage
     let isSelected: Bool
     let select: () -> Void
-    @State private var blockers = ""
+    @ViewState private var blockers = ""
 
     var body: some View {
         HStack {

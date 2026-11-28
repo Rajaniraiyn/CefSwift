@@ -15,12 +15,12 @@ struct OffscreenOverlayDemo: Demo {
 }
 
 private struct OffscreenOverlayView: View {
-    @State private var page: CefPage = {
+    @ViewState private var page: CefPage = {
         var configuration = CefPage.Configuration()
         configuration.rendering = .offscreen
         return CefPage(url: SamplePage.article.url, configuration: configuration)
     }()
-    @State private var zoom = 0.0
+    @ViewState private var zoom = 0.0
 
     var body: some View {
         CefWebView(page)

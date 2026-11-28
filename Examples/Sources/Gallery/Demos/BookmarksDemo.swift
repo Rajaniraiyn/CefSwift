@@ -17,8 +17,8 @@ struct BookmarksDemo: Demo {
 
 private struct BookmarksView: View {
     private let bookmarks = CefProfile.default.bookmarks
-    @State private var roots: [CefBookmark] = []
-    @State private var error: String?
+    @ViewState private var roots: [CefBookmark] = []
+    @ViewState private var error: String?
 
     var body: some View {
         List {

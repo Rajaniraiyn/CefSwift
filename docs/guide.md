@@ -2103,7 +2103,7 @@ it can ([bundling](bundling.md#features)):
 | USB and NFC security keys | Nothing. |
 | A phone or tablet (QR code and Bluetooth) | `NSBluetoothAlwaysUsageDescription` in the app's `Info.plist` and, under the hardened runtime, `com.apple.security.device.bluetooth`; and a launch from Finder or `open`, which makes the app responsible for its own Bluetooth access. |
 | iCloud Keychain passkeys, through AuthenticationServices | The `com.apple.developer.web-browser.public-key-credential` entitlement, which Apple grants to web browsers on request, in a provisioning profile, and an Apple Development or Developer ID signature. |
-| Chromium's own profile passkeys (Touch ID) | Not available: CEF 156 checks for a keychain access group without a team prefix, which no provisioning profile can authorize. |
+| Chromium's own profile passkeys (Touch ID) | Not available: CEF 158 checks for a keychain access group without a team prefix, which no provisioning profile can authorize. |
 
 An ad hoc signed app gets security keys and, with the Bluetooth key,
 phones. `CefRuntime.shared.capabilities.webAuthnAuthenticators` lists what the running app gets. Chromium shows its dialog
@@ -2844,7 +2844,7 @@ alive forever.
 A `CefProfile.Cookie` carries everything CEF stores: `name`, `value`,
 `domain` (a leading dot for a domain cookie), `path`, `isSecure`,
 `isHTTPOnly`, `expirationDate` (nil for a session cookie), `sameSite`,
-`priority`, and Chromium's `creationDate` and `lastAccessDate`. CEF 156
+`priority`, and Chromium's `creationDate` and `lastAccessDate`. CEF 158
 reports no partition key, so a partitioned (CHIPS) cookie is listed
 without the site it is keyed to. Every cookie call returns once Chromium
 has finished:
@@ -3875,8 +3875,8 @@ pages, and attach no DevTools session.
 
 | Choice | `User-Agent` | Client hints |
 |---|---|---|
-| `.chromium` (default) | `… AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36` | All |
-| `.appendingProduct("MyApp/1.0")` | `… Chrome/156.0.0.0 MyApp/1.0 Safari/537.36` | All |
+| `.chromium` (default) | `… AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0.0.0 Safari/537.36` | All |
+| `.appendingProduct("MyApp/1.0")` | `… Chrome/158.0.0.0 MyApp/1.0 Safari/537.36` | All |
 | `.replacingProduct("MyApp/1.0")` | `… (KHTML, like Gecko) MyApp/1.0 Safari/537.36` | All |
 | `.custom("…")` | That string | Low-entropy ones only: `getHighEntropyValues()` returns no versions or architecture |
 
@@ -4371,13 +4371,20 @@ the switches measured and not used.
   credential the app cannot use; `page(_:passkeyStoreDidFail:)` gets
   the unsaved passkey.
 - Chromium's profile passkey authenticator (Touch ID, without a controller) is not
-  available: CEF 156 compiles in Chromium's keychain access group,
+  available: CEF 158 compiles in Chromium's keychain access group,
   `.org.chromium.Chromium.webauthn`, with an empty team identifier, and
   macOS lets a signed app claim only groups its provisioning profile
   authorizes, which start with the team identifier.
 - The App Sandbox is not supported with official CEF builds, so CefSwift
   apps do not ship in the Mac App Store: Chromium registers a Mach service
   the App Sandbox refuses ([bundling](bundling.md#app-sandbox)).
+- Building without Xcode, with the Command Line Tools 27.2 and their
+  macOS 27 SDK, `@State` in the app's own views does not compile: the SDK
+  makes it a macro whose plugin only Xcode ships. CefSwift and its
+  examples avoid it; an app builds against the tools' macOS 26 SDK or
+  names the property wrapper through an alias
+  ([bundling](bundling.md#without-xcode)). `@Entry` and `#Preview` need
+  Xcode with every SDK.
 - Chromium plays Widevine only as an unverified software (L3) client and
   has no H.264, HEVC or AAC, so Netflix-class services do not play in it;
   WebKit plays them with FairPlay, beside Chromium in the Browser example

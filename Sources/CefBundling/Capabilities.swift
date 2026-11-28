@@ -78,7 +78,7 @@ struct Capability: Sendable {
     var restrictedEffect: String = ""
 
     /// The keychain access group of Chromium's profile passkey (Touch ID)
-    /// authenticator in CEF 156, as compiled into the framework:
+    /// authenticator in CEF 156 and 158, as compiled into the framework:
     /// `MAC_TEAM_IDENTIFIER_STRING "." MAC_BUNDLE_IDENTIFIER_STRING
     /// ".webauthn"` with Chromium's branding, whose team identifier is
     /// empty. It has no team prefix, so no provisioning profile can

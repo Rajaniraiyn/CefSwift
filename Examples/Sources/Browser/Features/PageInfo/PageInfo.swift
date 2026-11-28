@@ -38,7 +38,7 @@ private struct PageInfoButton: View {
     let page: CefPage
     @Environment(BrowserController.self) private var controller
     @Environment(\.isEditingAddress) private var isEditingAddress
-    @State private var isShowing = false
+    @ViewState private var isShowing = false
 
     var body: some View {
         if !isEditingAddress, !controller.isStartPage(page.url), let security = SiteSecurity(page: page) {

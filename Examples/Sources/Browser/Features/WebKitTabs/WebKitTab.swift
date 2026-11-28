@@ -88,7 +88,7 @@ private struct WebKitTabView: View {
 /// The site, with a badge saying the page is shown by WebKit.
 private struct WebKitAddressBar: View {
     let tab: WebKitTab
-    @State private var text = ""
+    @ViewState private var text = ""
     @FocusState private var isFocused: Bool
 
     var body: some View {

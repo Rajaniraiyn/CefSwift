@@ -19,8 +19,8 @@ struct SuggestionsDemo: Demo {
 
 private struct SuggestionsView: View {
     private let autocomplete = CefProfile.default.autocomplete
-    @State private var text = "gallery"
-    @State private var suggestions: [CefAutocomplete.Suggestion] = []
+    @ViewState private var text = "gallery"
+    @ViewState private var suggestions: [CefAutocomplete.Suggestion] = []
     @Environment(\.demoReadiness) private var readiness
 
     var body: some View {

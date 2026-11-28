@@ -38,8 +38,17 @@ struct DemoFailure: Error {
     var reason: String
 }
 
+// Written out rather than with `@Entry`, whose macro plugin comes with
+// Xcode, not with the Command Line Tools.
+private struct DemoReadinessKey: EnvironmentKey {
+    static let defaultValue: DemoReadiness? = nil
+}
+
 extension EnvironmentValues {
-    @Entry var demoReadiness: DemoReadiness?
+    var demoReadiness: DemoReadiness? {
+        get { self[DemoReadinessKey.self] }
+        set { self[DemoReadinessKey.self] = newValue }
+    }
 }
 
 extension View {

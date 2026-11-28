@@ -5,7 +5,7 @@ import SwiftUI
 /// A site's page info: who it is, how it is connected, and what it may use.
 struct PageInfoView: View {
     let page: CefPage
-    @State private var settings: [CefSitePermission: CefSitePermission.Setting] = [:]
+    @ViewState private var settings: [CefSitePermission: CefSitePermission.Setting] = [:]
 
     /// The permissions listed for every site; others appear once the site
     /// has a value of its own for them.

@@ -187,9 +187,9 @@ Chromium's UI thread is the app's main thread. CEF runs with an external
 message pump driven from the main run loop (`CefMessagePump`), so SwiftUI and
 Chromium share one thread, and the public API is `@MainActor`.
 
-CEF calls a few handlers on other threads. Where each arrives in CEF 156,
-from the C API's comments and checked with `cef_currently_on` and thread
-names at run time:
+CEF calls a few handlers on other threads. Where each arrives, from the C
+API's comments (CEF 158's headers) and checked with `cef_currently_on`
+and thread names at run time (CEF 156):
 
 | Callback | Thread | CefKit |
 |---|---|---|
@@ -255,7 +255,7 @@ time (about 200 ms).
 The renderer side runs on the renderer's main thread (`TID_RENDERER`),
 which is the helper process's main thread, so its extensions are
 `@MainActor` and CEF's callbacks enter it with `MainActor.assumeIsolated`.
-CEF 156's `cef_render_process_handler_t` reports only frames' contexts
+CEF 158's `cef_render_process_handler_t`, as 156's, reports only frames' contexts
 (`on_context_created`, `on_context_released`); it has no callbacks for
 worker or service-worker contexts, so the renderer side has no worker
 hooks.

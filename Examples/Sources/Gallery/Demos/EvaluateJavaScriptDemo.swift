@@ -21,8 +21,8 @@ private struct Viewport: Decodable {
 }
 
 private struct EvaluateJavaScriptView: View {
-    @State private var page = CefPage(url: SamplePage.article.url)
-    @State private var output = "Run a script."
+    @ViewState private var page = CefPage(url: SamplePage.article.url)
+    @ViewState private var output = "Run a script."
 
     var body: some View {
         VStack(spacing: 0) {
