@@ -20,6 +20,10 @@ import CefPasskeys
 /// - `-capture <path.png>`: where to save a screenshot of the window, taken
 ///   with `screencapture` from outside the page, when the time is up.
 /// - `-cacheDirectory <path>`: Chromium's data directory.
+/// - `-script <path.js>`: a script evaluated in the page when the time is
+///   up, before the screenshot; its result is printed as `compat script
+///   <result>`. For pages that need a step, such as typing an address
+///   into a sign-in form.
 ///
 /// It prints `compat window <number>` once the window is up and
 /// `compat done` before quitting.
@@ -137,6 +141,15 @@ enum CompatApp {
         }
         let wait = defaults.double(forKey: "wait")
         try? await Task.sleep(for: .seconds(wait > 0 ? wait : 12))
+        if let path = defaults.string(forKey: "script"),
+           let source = try? String(contentsOfFile: path, encoding: .utf8) {
+            do {
+                let result = try await page.evaluateJavaScript(source, timeout: .seconds(60))
+                print("compat script \(result.stringValue ?? result.text)")
+            } catch {
+                print("compat script failed: \(error)")
+            }
+        }
         if let path = defaults.string(forKey: "capture"),
            let number = (window ?? pageWindow?.window)?.windowNumber {
             let capture = Process()
