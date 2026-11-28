@@ -25,6 +25,10 @@ public enum CefTool {
       notarize <App.app> --keychain-profile <name> [--format zip|dmg] [--sign <identity>] [--keychain <file>]
           As 'swift package cef doctor|package|notarize', for an app built any way.
 
+      framework --xcframework <ChromiumEmbeddedFramework.xcframework>
+          Print the path of the framework inside the XCFramework that SwiftPM
+          resolved for CefSwift's ChromiumEmbeddedFramework binary target.
+
       download --cache <dir> --manifest <CEF_VERSION.json> [--platform <p>] [--flavor <f>]
                [--cef-version <V>] [--print-framework-path]
       info --cache <dir> --manifest <CEF_VERSION.json>
@@ -48,6 +52,7 @@ public enum CefTool {
             case "embed": try XcodeEmbed(environment: environment).run()
             case "bundle": try BundleCommand(arguments: rest).run()
             case "download": try download(rest)
+            case "framework": try framework(rest)
             case "build-flags": try buildFlags(rest)
             case "doctor": return try doctor(rest)
             case "package": try package(rest)
@@ -103,6 +108,15 @@ public enum CefTool {
             return
         }
         print(framework.path)
+    }
+
+    private static func framework(_ arguments: [String]) throws {
+        var args = Arguments(arguments)
+        guard let xcframework = args.option("xcframework").map({ URL(fileURLWithPath: $0) }) else {
+            throw BundlingError("Missing --xcframework.")
+        }
+        try args.rejectLeftovers(usage: usage)
+        print(try CefXCFramework.framework(in: xcframework).path)
     }
 
     /// The linker flags the plugin builds the app, the startup library and

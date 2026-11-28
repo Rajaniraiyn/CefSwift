@@ -1019,7 +1019,7 @@ only SwiftPM can run. The options:
 | An Xcode command plugin (XcodeProjectPlugin) | Runs from Xcode's menu | Manual, not part of a build | No |
 | Helper apps as Xcode targets | Xcode signs and embeds them | Five targets, Info.plists and Copy Files phases in every app project; helper names follow the app's, so they cannot come with the package | No |
 | Prebuilt helpers shipped in a framework or XCFramework | Xcode embeds them | Chromium finds helpers as `<executable> Helper (…)` in the app's `Contents/Frameworks`, their bundle identifiers follow the app's, and they must carry the app's signature for library validation, while Embed & Sign signs the framework, not the apps inside it | No |
-| CEF as an XCFramework binary target (proposed separately) | Xcode embeds, signs and links the framework itself; universal builds | Needs a release asset per CEF version; does not cover the helpers | The seam: `CEF_EMBED_FRAMEWORK = NO` |
+| CEF as an XCFramework binary target | SwiftPM and Xcode download, verify and cache the framework as they resolve the package; Xcode can embed and link it itself | Needs a release asset per CEF version; does not cover the helpers | Yes, as the framework's source for both tracks ([The framework as a binary target](#the-framework-as-a-binary-target)); `CEF_EMBED_FRAMEWORK = NO` lets Xcode embed it |
 
 The phase's script builds the tool and runs `cefswift embed`, which reads
 Xcode's build settings from its environment, as Xcode's own tools do; the

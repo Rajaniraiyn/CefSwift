@@ -55,6 +55,9 @@ cefswift     the command-line tool over CefBundling (Sources/CefSwiftTool),
 CefPlugin    swift package cef download | bundle | info | clean | doctor |
              package | notarize; builds the product, the helper and its
              startup library with SwiftPM and runs cefswift
+ChromiumEmbeddedFramework  the official CEF framework, both architectures,
+             as a binary target (an XCFramework release asset); no library
+             links it, bundling copies it into the app
 ```
 
 ### Extension points

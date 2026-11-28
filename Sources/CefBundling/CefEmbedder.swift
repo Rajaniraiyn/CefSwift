@@ -52,7 +52,13 @@ struct CefEmbedder {
         } else {
             try FrameworkLayout.validate(framework: framework)
         }
-        // Before signing, which seals what is left.
+        // Before signing, which seals what is left. The XCFramework holds
+        // both architectures; the app keeps its own.
+        let thinning = try CefXCFramework.thin(framework, to: architectures)
+        if thinning.thinnedFiles > 0 {
+            print("[cef] Framework thinned to \(architectures.joined(separator: ", ")): " +
+                  "\(FrameworkTrim.formatted(thinning.removedBytes)) of other architectures left out")
+        }
         let trimmed = try FrameworkTrim.apply(
             trim, to: framework, appLocalizations: FrameworkTrim.appLocalizations(infoPlist: appInfoPlist),
             developmentLanguage: FrameworkTrim.developmentLanguage(infoPlist: appInfoPlist))

@@ -37,6 +37,9 @@ struct CefPlugin: CommandPlugin {
             try rejectLeftovers(extractor)
             try tool.run(["info", "--cache", cacheRoot(context).path, "--manifest", manifest.path])
             print("")
+            print("  XCFramework:      " + (Self.resolvedXCFramework(in: context.package)?.path
+                ?? "not resolved; bundling downloads the distribution into .cef/"))
+            print("")
             print("  Download with: swift package --allow-writing-to-package-directory " +
                   "--allow-network-connections all cef download")
         case "clean":
@@ -60,6 +63,8 @@ struct CefPlugin: CommandPlugin {
                [--cef-version <V>] [--manifest <path>]
           Download the pinned CEF distribution into .cef/, verify, extract, and
           convert the framework to the versioned bundle layout. Idempotent.
+          bundle needs it only with --manifest or --flavor standard: otherwise
+          it uses the XCFramework SwiftPM resolved for CefSwift.
           --cef-version must match the manifest; to use another version, pass
           --manifest with a manifest pinned to it.
 
@@ -105,7 +110,8 @@ struct CefPlugin: CommandPlugin {
           cefapp.json "notarization": {"keychainProfile", "format"} sets defaults.
 
       info
-          Print the pinned CEF version and the state of the .cef/ cache.
+          Print the pinned CEF version, the XCFramework SwiftPM resolved, and
+          the state of the .cef/ cache.
 
       clean
           Remove the .cef/ cache directory.
@@ -163,12 +169,20 @@ struct CefPlugin: CommandPlugin {
         bundleArguments += settingsArguments
         try tool.run(bundleArguments + ["--check"])
 
-        // 2. The CEF distribution, downloaded on first use.
-        let manifest = try manifestPath(context: context, explicit: manifestOption)
-        let framework = URL(fileURLWithPath: try tool.output([
-            "download", "--cache", cacheRoot(context).path, "--manifest", manifest.path,
-            "--platform", platform, "--flavor", flavor, "--print-framework-path",
-        ]))
+        // 2. The framework: the XCFramework SwiftPM resolved for CefSwift's
+        // binary target; or, for another manifest or the standard flavor,
+        // the CEF distribution, downloaded into .cef/ on first use.
+        let framework: URL
+        if manifestOption == nil, flavor == "minimal", let xcframework = Self.resolvedXCFramework(in: context.package) {
+            framework = URL(fileURLWithPath: try tool.output(["framework", "--xcframework", xcframework.path]))
+            print("[cef] Framework: \(framework.path)")
+        } else {
+            let manifest = try manifestPath(context: context, explicit: manifestOption)
+            framework = URL(fileURLWithPath: try tool.output([
+                "download", "--cache", cacheRoot(context).path, "--manifest", manifest.path,
+                "--platform", platform, "--flavor", flavor, "--print-framework-path",
+            ]))
+        }
         let flags = try tool.buildFlags(framework: framework, startup: nil)
 
         // 3. The product, linked to the framework; then the helper and its
@@ -253,6 +267,20 @@ struct CefPlugin: CommandPlugin {
     }
 
     // MARK: - Shared
+
+    /// The `ChromiumEmbeddedFramework` binary target's XCFramework, which
+    /// SwiftPM downloaded and verified when it resolved the package graph:
+    /// in the invoking package or its dependencies, the first found.
+    static func resolvedXCFramework(in package: Package) -> URL? {
+        for package in LocatedProduct.allPackages(from: package) {
+            for case let target as BinaryArtifactTarget in package.targets
+            where target.name == "ChromiumEmbeddedFramework"
+                && FileManager.default.fileExists(atPath: target.artifactURL.appendingPathComponent("Info.plist").path) {
+                return target.artifactURL
+            }
+        }
+        return nil
+    }
 
     #if arch(arm64)
     static let hostPlatform = "macosarm64"

@@ -72,8 +72,9 @@ covers each track.
    open dist/MyApp.app
    ```
 
-The first run downloads the pinned CEF build (about 135 MB) into `.cef/`.
-Add `.cef/` and `dist/` to `.gitignore`. `swift run` cannot start
+Resolving the package downloads the pinned CEF framework (a 278 MB
+XCFramework of both architectures) into SwiftPM's shared cache, once for
+every project. Add `dist/` to `.gitignore`. `swift run` cannot start
 Chromium, which runs only from the bundle. Settings go in a `cefapp.json`
 beside the sources ([Per-product settings](docs/bundling.md#per-product-settings)).
 
@@ -99,7 +100,7 @@ beside the sources ([Per-product settings](docs/bundling.md#per-product-settings
 
 5. Write the app ([below](#show-a-web-page)), then Run.
 
-The first build downloads CEF into `.cef/` beside the project. Settings are
+Xcode downloads the CEF framework when it resolves the package. Settings are
 build settings: Xcode's own, and `CEF_…` ones for what only CefSwift has.
 [`Examples/Xcode`](Examples/Xcode) is a project set up this way.
 

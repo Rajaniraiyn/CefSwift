@@ -33,6 +33,7 @@ struct XcodeEmbed {
         ("CEF_FLAVOR", "(--flavor)"),
         ("CEF_DOCTOR", "(cef doctor)"),
         ("CEF_EMBED_FRAMEWORK", "(none)"),
+        ("CEF_XCFRAMEWORK", "(none)"),
     ]
 
     /// cefapp.json keys whose setting Xcode owns, and that setting.
@@ -356,13 +357,19 @@ struct XcodeEmbed {
         let manifest = try CefManifest.load(from: build.manifest)
         let existingFramework = build.app.appendingPathComponent("Contents/Frameworks/\(BuiltProduct.cefFrameworkName)")
         // CEF_EMBED_FRAMEWORK = NO: Xcode embeds the framework itself, from
-        // a binary framework product the target depends on (the
-        // XCFramework of pull request #27); this phase keeps that copy.
+        // CefSwift's ChromiumEmbeddedFramework product, which the target
+        // depends on; this phase keeps that copy. Otherwise the phase copies
+        // the XCFramework SwiftPM resolved, or, for another manifest or
+        // flavor, the CEF distribution it downloads.
         var frameworkSource: URL?
         if setting("CEF_EMBED_FRAMEWORK")?.uppercased() != "NO" {
-            let downloader = Downloader(cacheRoot: build.cacheDirectory)
-            let dist = try downloader.ensure(manifest: manifest, platform: build.platform, flavor: build.flavor)
-            frameworkSource = downloader.frameworkURL(in: dist)
+            if let xcframework = resolvedXCFramework(build: build) {
+                frameworkSource = try CefXCFramework.framework(in: xcframework)
+            } else {
+                let downloader = Downloader(cacheRoot: build.cacheDirectory)
+                let dist = try downloader.ensure(manifest: manifest, platform: build.platform, flavor: build.flavor)
+                frameworkSource = downloader.frameworkURL(in: dist)
+            }
         }
 
         let framework = frameworkSource ?? existingFramework
@@ -389,6 +396,29 @@ struct XcodeEmbed {
 
         if setting("CEF_DOCTOR")?.uppercased() != "NO" {
             try doctor(build: build, settings: settings)
+        }
+    }
+
+    /// The XCFramework of CefSwift's `ChromiumEmbeddedFramework` binary
+    /// target: `CEF_XCFRAMEWORK`; else, unless `CEF_MANIFEST` or
+    /// `CEF_FLAVOR` asks for another distribution, the copy Xcode resolved
+    /// in `SourcePackages`, the one SwiftPM resolved for Scripts/xcode-embed.sh's
+    /// build of the helper, or with `CEFSWIFT_LOCAL_FRAMEWORK=1` the one
+    /// Scripts/package-cef.py built in the CefSwift checkout.
+    func resolvedXCFramework(build: Build) -> URL? {
+        if let explicit = path("CEF_XCFRAMEWORK") { return explicit }
+        guard setting("CEF_MANIFEST") == nil, build.flavor == "minimal" else { return nil }
+        var candidates: [URL] = []
+        if let buildDirectory = setting("BUILD_DIR") {
+            candidates.append(CefXCFramework.resolvedArtifact(underScratch: URL(fileURLWithPath: buildDirectory)
+                .appendingPathComponent("../../SourcePackages").standardizedFileURL))
+        }
+        candidates.append(CefXCFramework.resolvedArtifact(underScratch: build.scratchDirectory))
+        if !["", "0"].contains(setting("CEFSWIFT_LOCAL_FRAMEWORK") ?? "") {
+            candidates.insert(CefXCFramework.localArtifact(inPackage: build.packageDirectory), at: 0)
+        }
+        return candidates.first {
+            FileManager.default.fileExists(atPath: $0.appendingPathComponent("Info.plist").path)
         }
     }
 

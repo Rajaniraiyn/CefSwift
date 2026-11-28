@@ -31,10 +31,13 @@ if [ "${ENABLE_USER_SCRIPT_SANDBOXING:-NO}" = YES ]; then
 fi
 
 # SwiftPM gets a plain environment: Xcode's build settings (SDKROOT, ARCHS,
-# deployment targets and the like) would otherwise leak into its build.
+# deployment targets and the like) would otherwise leak into its build. Its
+# resolution of the package also fetches the CEF XCFramework into
+# $scratch/artifacts, where `cefswift embed` finds it.
 swiftpm() {
     env -i HOME="$HOME" PATH=/usr/bin:/bin:/usr/sbin:/sbin TMPDIR="${TMPDIR:-/tmp}" \
         DEVELOPER_DIR="${DEVELOPER_DIR:-$(xcode-select -p)}" \
+        CEFSWIFT_LOCAL_FRAMEWORK="${CEFSWIFT_LOCAL_FRAMEWORK:-}" \
         /usr/bin/xcrun swift build --package-path "$package" --scratch-path "$scratch" --configuration release "$@"
 }
 
@@ -50,4 +53,5 @@ if [ -z "$bin" ] || [ ! -x "$bin/cefswift" ] || [ -n "$(find "$package/Package.s
     printf '%s\n' "$bin" > "$scratch/cefswift-bin-path"
 fi
 
-CEFSWIFT_PACKAGE_DIR="$package" CEFSWIFT_SCRATCH_DIR="$scratch" CEFSWIFT_BIN_DIR="$bin" exec "$bin/cefswift" embed
+CEFSWIFT_PACKAGE_DIR="$package" CEFSWIFT_SCRATCH_DIR="$scratch" CEFSWIFT_BIN_DIR="$bin" \
+    CEFSWIFT_LOCAL_FRAMEWORK="${CEFSWIFT_LOCAL_FRAMEWORK:-}" exec "$bin/cefswift" embed

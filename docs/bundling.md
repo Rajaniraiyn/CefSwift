@@ -11,7 +11,7 @@ implementation, the package's `cefswift` tool (`Sources/CefBundling`):
 | Who adds the framework and helpers | The plugin, through `cefswift bundle` | A Run Script phase, through `cefswift embed` ([Xcode](#xcode)) |
 | Who signs the app | `cefswift`, last | Xcode, last; `cefswift` signs the parts inside first, with the build's identity |
 | Settings | [`cefapp.json`](#per-product-settings) and options | Xcode's build settings, and `CEF_…` ones ([Settings](#settings)) |
-| CEF download and cache | `.cef/` in the package | `.cef/` beside the project (`CEF_CACHE_DIR`) |
+| Where the framework comes from | The XCFramework SwiftPM resolves for CefSwift ([Where CEF comes from](#where-cef-comes-from)) | The same, as Xcode or the phase's own SwiftPM build resolved it |
 | Checks | `swift package cef doctor` | The phase runs `cef doctor`'s checks on every build, as Xcode errors and warnings |
 
 What goes in the bundle, how it is signed and what each feature needs is
@@ -27,17 +27,18 @@ swift package --allow-writing-to-package-directory --allow-network-connections a
 ```
 
 The two `--allow-…` options pre-approve the plugin's permissions: it writes
-`.cef/` and the bundle into the package directory and downloads CEF from
-`cef-builds.spotifycdn.com`. Every subcommand needs them.
+the bundle into the package directory and, for `download` and the cases
+below that need it, downloads a CEF distribution from
+`cef-builds.spotifycdn.com` into `.cef/`. Every subcommand needs them.
 
 | Subcommand | Does |
 |---|---|
-| `download` | Downloads the pinned CEF distribution into `.cef/`, verifies its size and SHA-1, extracts it and converts the framework to the versioned layout. Does nothing if it is already prepared. |
-| `bundle` | Builds the product, compiles the helper, then assembles and signs `<Name>.app`. Downloads CEF first if needed. See [What `bundle` puts in the app](#what-bundle-puts-in-the-app). |
+| `download` | Downloads the pinned CEF distribution into `.cef/`, verifies its size and SHA-1, extracts it and converts the framework to the versioned layout. Does nothing if it is already prepared. `bundle` needs it only with `--manifest` or `--flavor standard`. |
+| `bundle` | Builds the product, compiles the helper, then assembles and signs `<Name>.app` with the framework of the XCFramework SwiftPM resolved. See [What `bundle` puts in the app](#what-bundle-puts-in-the-app). |
 | `doctor <App.app>` | Inspects a built bundle and reports, per feature, whether it works and what is missing. See [cef doctor](#cef-doctor). |
 | `package <App.app>` | Wraps the app in a zip (`ditto`) or a disk image (`hdiutil`). |
 | `notarize <App.app>` | Packages the app, submits it with `xcrun notarytool submit --wait`, and staples the ticket. |
-| `info` | Prints the pinned CEF and Chromium versions and the state of the `.cef/` cache. |
+| `info` | Prints the pinned CEF and Chromium versions, the XCFramework SwiftPM resolved, and the state of the `.cef/` cache. |
 | `clean` | Removes `.cef/`. |
 
 `doctor`, `package` and `notarize` take the app's path, or `--product
@@ -66,9 +67,9 @@ Options of `bundle`:
 | `--[no-]timestamp` | `timestamp`, else on for Developer ID and App Store identities | A secure timestamp from Apple's server. |
 | `--package zip\|dmg` | None | Packages the result, as `cef package` does. |
 | `--notarize` | Off | Packages and notarizes the result; needs `--keychain-profile <name>` or `notarization.keychainProfile`. |
-| `--flavor minimal\|standard` | `minimal` | Which CEF distribution to download. See [Flavors](#flavors). |
+| `--flavor minimal\|standard` | `minimal` | `standard` bundles the Release framework of the downloaded standard distribution instead of the XCFramework. See [Flavors](#flavors). |
 | `--platform macosarm64\|macosx64` | The build machine's | Which architecture's CEF to bundle. It must be the architecture SwiftPM builds for, which is the one `swift package` runs as; anything else is an error. Run `arch -x86_64 swift package …` to bundle for Intel on Apple silicon. |
-| `--manifest <path>` | `CEF_VERSION.json` | A different CEF manifest. |
+| `--manifest <path>` | `CEF_VERSION.json` | A different CEF manifest, whose distribution is downloaded instead of using the XCFramework. |
 
 `download` takes `--platform`, `--flavor` and `--manifest` as well, and
 `info` takes `--manifest`.
@@ -80,13 +81,13 @@ CefSwift pins. To bundle a different CEF version, pass `--manifest` with a
 `CEF_API_VERSION` the vendored headers pin, with the same API hash, or the
 app fails to start with `CefError.apiHashMismatch` or `CefError.loadFailed`.
 
-The cache lives in the invoking package's `.cef/`. Add `.cef/` and `dist/`
-to `.gitignore`.
+A downloaded distribution lives in the invoking package's `.cef/`. Add
+`.cef/` and `dist/` to `.gitignore`.
 
 The plugin finds the product in the package graph, builds it, the helper
 and the helper's startup library with SwiftPM, and runs `cefswift` for the
-rest: it checks the settings before building, downloads CEF, then
-assembles and signs the bundle.
+rest: it checks the settings before building, takes the framework from
+the XCFramework SwiftPM resolved, then assembles and signs the bundle.
 
 ## Xcode
 
@@ -109,7 +110,7 @@ before Xcode signs the app:
    | Setting | Value | Why |
    |---|---|---|
    | `ENABLE_USER_SCRIPT_SANDBOXING` | `NO` | The phase runs SwiftPM on the package and writes the helper apps into the app; a sandboxed script can do neither. |
-   | `ARCHS` | `$(NATIVE_ARCH_ACTUAL)` | A CEF distribution holds one architecture; Release builds otherwise build for both. See [Universal apps](#universal-apps). |
+   | `ARCHS` | `$(NATIVE_ARCH_ACTUAL)` | The helpers are built for one architecture; Release builds otherwise build for both. See [Universal apps](#universal-apps). |
    | `CEFSWIFT_PACKAGE_DIR` | `$(BUILD_DIR)/../../SourcePackages/checkouts/CefSwift` | Where Xcode put the package, to find the phase's script. For a local package, its path. |
    | `RUNTIME_EXCEPTION_DISABLE_LIBRARY_VALIDATION` | `YES`, only while the target signs ad hoc | See [Signing in Xcode](#signing-in-xcode). |
 
@@ -135,7 +136,11 @@ The phase (`Scripts/xcode-embed.sh`, then `cefswift embed`):
   SwiftPM, in release, into `$(OBJROOT)/CefSwift` (about a minute, the
   first time; later, only when their sources change), with a clean
   environment so that Xcode's settings do not reach that build;
-- downloads the pinned CEF distribution into `CEF_CACHE_DIR` on first use;
+- takes the framework from the XCFramework of CefSwift's binary target:
+  `CEF_XCFRAMEWORK` if set, else Xcode's copy in `SourcePackages/artifacts`,
+  else the copy the phase's own SwiftPM build resolved; with `CEF_MANIFEST`
+  or `CEF_FLAVOR = standard` it downloads that distribution into
+  `CEF_CACHE_DIR` instead;
 - adds `LSEnvironment` (`MallocNanoZone = 0`) and `NSPrincipalClass` to the
   app's Info.plist and, from `CEF_CAPABILITIES`, the capabilities' keys;
   Xcode's own keys win;
@@ -215,11 +220,13 @@ of previews.
 
 ### Universal apps
 
-A CEF distribution, and so the framework the phase embeds, holds one
-architecture, so the target builds for the Mac it builds on
+The XCFramework holds both architectures, but each track builds the
+helper for the Mac it builds on and thins the framework to the app's
+architecture, so the target builds for that Mac too
 (`ARCHS = $(NATIVE_ARCH_ACTUAL)`); `swift package cef bundle` does the
-same. An app for both Apple silicon and Intel needs a universal framework,
-which this release does not provide.
+same, and bundles for Intel on Apple silicon under Rosetta (`arch -x86_64
+swift package …`). An app for both Apple silicon and Intel needs universal
+helpers as well, which neither track builds yet.
 
 ## Settings
 
@@ -253,28 +260,55 @@ phase warns, at the key's line, when the file disagrees with Xcode.
 | Chrome extensions the app ships | `CEF_EXTENSIONS` (paths from the project's directory, separated by spaces) | `extensions` |
 | CEF version | `CEF_MANIFEST` (a `CEF_VERSION.json`) | `--manifest` |
 | CEF flavor | `CEF_FLAVOR` | `--flavor` |
-| CEF cache | `CEF_CACHE_DIR`, default `$(PROJECT_DIR)/.cef` | `.cef/` in the package |
+| CEF XCFramework | `CEF_XCFRAMEWORK`, default the one SwiftPM resolved | The one SwiftPM resolved |
+| CEF cache, for `CEF_MANIFEST` and `CEF_FLAVOR` | `CEF_CACHE_DIR`, default `$(PROJECT_DIR)/.cef` | `.cef/` in the package |
 | Notarization | The Organizer, or `xcrun notarytool` ([Distribution](#distribution)) | `notarization` (`--notarize`) |
 | `cef doctor` | Every build (`CEF_DOCTOR = NO` turns it off), and `cefswift doctor <App.app>` | `swift package cef doctor` |
 
 Helper names and bundle identifiers derive from the app's, because
 Chromium finds the helpers by name; neither is a setting.
 
-For CI and offline builds, keep the cache between runs: `.cef/downloads`
-holds the archive (about 135 MB) and `.cef/dist` the prepared framework.
-With the archive there, nothing is downloaded; a clone of another `.cef`
-(`cp -Rc`) works as well.
+For CI and offline builds, keep SwiftPM's cache between runs
+(`~/Library/Caches/org.swift.swiftpm/artifacts`); with the XCFramework
+there, resolving the package downloads nothing.
 
 ## Where CEF comes from
 
-Both tracks download the official CEF distribution that `CEF_VERSION.json`
-pins (the minimal flavor, for the build machine's architecture) from
-`cef-builds.spotifycdn.com`, check its size and SHA-1, convert the
-framework to the versioned layout, and keep it in the cache: `.cef/` in the
-package for SwiftPM, `CEF_CACHE_DIR` for Xcode.
+CefSwift's `Package.swift` declares the CEF framework as a binary target,
+`ChromiumEmbeddedFramework`: the official minimal distributions of both
+architectures that `CEF_VERSION.json` pins, repackaged as one XCFramework
+without changes to their files (`Scripts/package-cef.py`), and hosted as
+the asset of the `cef-<version>` GitHub release, pinned by URL and SHA-256
+checksum. SwiftPM and Xcode download and verify it when they resolve the
+package, as they do for any binary target, keep it in their shared cache,
+and reuse it in every project that depends on the same CefSwift. Nothing
+else downloads CEF: the plugin and the Xcode phase take the framework from
+that XCFramework.
 
-Packaging the framework as an XCFramework binary target, so Xcode embeds
-and signs it itself, is proposed separately and not part of this release.
+| | Size |
+|---|---|
+| Download (the zip, both architectures) | 278 MB |
+| Unpacked XCFramework | 612 MB |
+| The framework in an arm64 app, thinned and before trimming | 340 MB |
+
+The framework in the XCFramework is universal; `cefswift` thins it to the
+app's architecture as it copies it ([Universal apps](#universal-apps)), so
+a bundle is as large as with one architecture's distribution. SwiftPM
+downloads every remote binary target of every package in the graph when it
+resolves it, so a package that depends on CefSwift downloads the
+framework even when it only builds a library; there is no way to have it
+fetch one architecture's.
+
+`--manifest` (`CEF_MANIFEST`) and `--flavor standard` (`CEF_FLAVOR`) still
+download that CEF distribution from `cef-builds.spotifycdn.com`, check its
+size and SHA-1, convert the framework to the versioned layout, and keep it
+in `.cef/` (`CEF_CACHE_DIR`).
+
+To work on CefSwift against a framework that is not published yet, build
+the XCFramework with `Scripts/package-cef.py --no-zip` and set
+`CEFSWIFT_LOCAL_FRAMEWORK=1` for every `swift` command (and for Xcode,
+in the environment it starts from): `Package.swift` then points the binary
+target at `.cef/xcframework` instead of the release.
 
 ## Per-product settings
 

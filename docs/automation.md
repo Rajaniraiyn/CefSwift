@@ -10,16 +10,20 @@ Thursday at 06:17 UTC and keeps the pinned CEF on the newest stable release.
    macOS architectures. A newer release that is out for one architecture
    only is logged and waited for.
 2. If that release is newer than `CEF_VERSION.json`, the script downloads the
-   arm64 minimal distribution into `.cef/downloads` (resuming a partial
-   download, verifying size and SHA-1, and starting over once if a resumed
-   download does not verify). It stages the new headers in `.cef/update`,
-   regenerates the C bridge there, and only then moves the headers and
-   generated files into `Sources/CCef` and rewrites `CEF_VERSION.json`. A
-   failure at any step leaves the tree unchanged, and a second run does
-   nothing.
-3. The workflow commits the change to the `cef-update` branch, opens a pull
-   request or refreshes the open one, saves the download to the Actions
-   cache for CI, starts CI on the branch, and enables auto-merge. An open
+   minimal distributions of both architectures into `.cef/downloads`
+   (resuming a partial download, verifying size and SHA-1, and starting
+   over once if a resumed download does not verify). It stages the new
+   headers in `.cef/update`, regenerates the C bridge there, repackages the
+   two frameworks as the XCFramework zip in `.cef/xcframework`
+   (`Scripts/package-cef.py`), and only then moves the headers and
+   generated files into `Sources/CCef`, pins the zip's release URL and
+   checksum in `Package.swift`, and rewrites `CEF_VERSION.json`. A failure
+   at any step leaves the tree unchanged, and a second run does nothing.
+3. The workflow publishes the zip as the prerelease `cef-<version>`
+   ([Publishing the framework](#publishing-the-framework)), commits the
+   change to the `cef-update` branch, opens a pull request or refreshes the
+   open one, saves the downloads to the Actions cache for CI, starts CI on
+   the branch, and enables auto-merge. An open
    pull request that already pins the same CEF and `CEF_API_VERSION` is left
    alone, so fixes pushed to it survive later runs.
 4. When there is nothing to update and a `cef-update` pull request is still
@@ -106,9 +110,47 @@ Scripts/generate-bindings.py --check --framework <path to Chromium Embedded Fram
 
 `--check` only reports and cannot be combined with `--to` or
 `--api-version`. The update script writes its results (`updated`, `cef_old`,
-`cef_new`, `api_old`, `api_new`, `subject`) to `$GITHUB_OUTPUT`, or to
-standard output outside Actions, and the commit message and pull-request
-description to `.cef/update/`.
+`cef_new`, `api_old`, `api_new`, `subject`, `xcframework_tag`,
+`xcframework_checksum`) to `$GITHUB_OUTPUT`, or to standard output outside
+Actions, and the commit message and pull-request description to
+`.cef/update/`.
+
+## Publishing the framework
+
+`Package.swift` links CEF from the asset of a GitHub release,
+`cef-<version>`: `ChromiumEmbeddedFramework.xcframework.zip`, the official
+minimal distributions of both architectures in one XCFramework, made by
+`Scripts/package-cef.py` without changes to CEF's files (each Mach-O file
+is a `lipo -create` of the two official ones, checked slice by slice;
+every other file is identical in both, except the resources CEF names by
+architecture). The zip's entries are sorted, with fixed dates and modes,
+so the same distributions give the same bytes with the same zlib; CI
+rebuilds it and requires the pinned checksum.
+
+```sh
+Scripts/package-cef.py                # the XCFramework and its zip in .cef/xcframework
+Scripts/package-cef.py --no-zip       # only the XCFramework, for CEFSWIFT_LOCAL_FRAMEWORK=1
+Scripts/package-cef.py --write        # also pin the zip's URL and checksum
+Scripts/package-cef.py --check        # fail unless the zip matches the pin
+Scripts/package-cef.py --self-test    # offline checks
+Scripts/cef-release.sh publish|verify|promote|prune …
+```
+
+A CEF update publishes the zip as a prerelease before it pushes the
+branch, so CI on the pull request resolves it. The release workflow
+checks that the asset a version tag pins exists with its checksum and
+marks it as a full release. Each CEF Update run promotes the release the
+default branch pins, and deletes `cef-*` releases nothing pins: a release
+stays while the default branch, a `v*` tag or an open update branch pins
+it. Once a version tag pins an asset, it is never deleted or replaced,
+since every CefSwift version that pins it resolves it by checksum; a
+packaging change for the same CEF version gets a new tag (`PACKAGING_REVISION`
+in `Scripts/package-cef.py`, `cef-<version>-r2`).
+
+A branch that pins an asset not yet published (one changed by hand rather
+than by the update workflow) builds in CI against the rebuilt framework,
+with a warning, through `CEFSWIFT_LOCAL_FRAMEWORK=1`; `main` and the update
+branches fail instead.
 
 ## CI
 
@@ -120,13 +162,13 @@ below; two jobs run beside it:
   (`swift build --build-tests --arch x86_64`) on the same arm64 runner,
   and checks that the result is x86_64 for macOS 14. CefKit loads the CEF
   framework at run time and the plugin builds the helper only when it
-  bundles, so compiling needs no `macosx64` CEF archive.
+  bundles, so compiling needs nothing beyond the XCFramework SwiftPM
+  resolves.
 - `xcode` runs `Scripts/check-xcode-example.sh`: the Xcode example
   (`Examples/Xcode`) built with `xcodebuild`, Debug and Release, archived
   and exported, each build launched with `-smoke YES`, and `cef doctor` on
-  the exported app. Its build phase downloads CEF into
-  `Examples/Xcode/.cef` unless the cache, with the same key as `ci`'s, has
-  the archive. It takes about 2.5 minutes on an M3 and is not a required
+  the exported app. Its build phase takes the framework from the
+  XCFramework SwiftPM resolved. It takes about 2.5 minutes on an M3 and is not a required
   check: release tags and CEF updates wait for `ci` and `intel` only. It
   had not run on GitHub when it was added; the runner's Xcode is older
   than the Xcode 27.2 it was written with.
@@ -136,8 +178,11 @@ The `ci` job:
 1. Print the macOS, Xcode and Swift versions. The `macos-15` label selects
    an image family that GitHub updates in place, so these can change
    between runs without a commit.
-2. The update script's self-test.
-3. Download CEF (minimal, arm64), cached by CEF version.
+2. The update and packaging scripts' self-tests.
+3. Rebuild the XCFramework from the two minimal distributions (cached by
+   CEF version) with `Scripts/package-cef.py --check`, which fails unless
+   the zip has the pinned checksum; then check that the pinned release
+   asset is published ([Publishing the framework](#publishing-the-framework)).
 4. `Scripts/generate-bindings.py --check --framework …`: the generated
    bridge must match the headers, and the framework must export every
    function it binds.
@@ -150,8 +195,7 @@ The `ci` job:
 7. `Scripts/check-doc-samples.py`: every Swift sample in the README and
    the docs compiles.
 8. Build the Examples package in release, then bundle SelfTest and run `cef doctor`
-   on it. The Examples package gets a copy-on-write clone of the
-   downloaded archive instead of downloading it again.
+   on it. The plugin takes the framework from the resolved XCFramework.
 9. Run SelfTest with `SELFTEST_ISOLATED=1` (each group in a process of its
    own), `SELFTEST_STRICT=1` (a skip for a reason of the environment
    fails) and `SELFTEST_JSON`. `SELFTEST_EXPECTED_SKIPS` names the checks a
