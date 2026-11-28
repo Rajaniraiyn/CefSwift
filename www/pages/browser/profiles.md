@@ -11,6 +11,7 @@ _ = try await CefChromeWindow.open(url: url, profile: work)
 _ = try await CefChromeWindow.open(url: url, profile: .incognito())   // a private window
 ```
 
+Google sign-in works in a profile like any site's (verified by hand).
 Gallery: [`ProfilesDemo`](https://github.com/Rajaniraiyn/CefSwift/blob/main/Examples/Sources/Gallery/Demos/ProfilesDemo.swift).
 Browser example: [`Features/PrivateTabs`](https://github.com/Rajaniraiyn/CefSwift/tree/main/Examples/Sources/Browser/Features/PrivateTabs) opens private windows on the incognito profile.
 

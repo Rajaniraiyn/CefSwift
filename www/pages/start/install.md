@@ -1,11 +1,19 @@
 ---
 title: "Install"
-description: "Add CefSwift to a SwiftPM package or an Xcode project and bundle your first app."
+description: "Add CefSwift to a SwiftPM package (Command Line Tools only) or an Xcode project and bundle your first app."
 ---
 
 An app that embeds Chromium is an app bundle with Chromium's framework and
-five helper apps inside. Both tracks run the same `cefswift` tool to add
-them, sign them and check the result, so the bundles are the same.
+five helper apps inside. Three tracks build it, as equal choices; all run
+the same `cefswift` tool to add the framework and helpers, sign them and
+check the result, so the bundles are the same:
+
+| Track | Needs | Build |
+|---|---|---|
+| SwiftPM package | The Command Line Tools | `swift build`, then `swift package cef bundle` |
+| Hand-written SwiftUI app, plain SwiftPM | The Command Line Tools | Your own `@main CefSwiftApp` in `Sources/`, the same two commands |
+| Xcode project | Xcode 16 or later | Xcode's build, with CefSwift's Run Script phase |
+
 
 ```swift
 import CefSwiftUI
@@ -23,6 +31,8 @@ Gallery: [`ObservableStateDemo`](https://github.com/Rajaniraiyn/CefSwift/blob/ma
 [Minimal example](https://github.com/Rajaniraiyn/CefSwift/tree/main/Examples/Sources/Minimal).
 
 ## With SwiftPM
+
+The first two tracks. Only the Command Line Tools are needed.
 
 1. Depend on CefSwift in `Package.swift`:
 
@@ -58,7 +68,7 @@ Add `.cef/` and `dist/` to `.gitignore`. `swift run` cannot start
 Chromium, which runs only from the bundle. Settings go in a `cefapp.json`
 beside the sources ([Bundling](/ship/bundling)).
 
-## With Xcode
+## With an Xcode project
 
 1. In an app project (File › New › Project › macOS › App, SwiftUI), add the
    package: File › Add Package Dependencies…, enter
@@ -86,4 +96,5 @@ The first build downloads CEF into `.cef/` beside the project.
 ## Requirements
 
 - macOS 14 or later (the examples need macOS 15), Apple silicon or Intel.
-- A Swift 6 toolchain. An Xcode project needs Xcode 16 or later.
+- A Swift 6 toolchain: the Command Line Tools are enough for SwiftPM;
+  Xcode 16 or later for Xcode projects.
