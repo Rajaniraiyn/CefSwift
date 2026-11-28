@@ -92,16 +92,22 @@ final class PageOverlayView: NSView {
 // MARK: - Views delegates
 
 /// Owner of a `cef_browser_view_delegate_t`. Popups opened from the view get
-/// a delegate of their own showing Chrome's location bar.
+/// a delegate of their own showing Chrome's location bar; DevTools docked
+/// in the window (``CefWindow/devToolsPlacement``) gets one that knows the
+/// window.
 final class BrowserViewDelegate: Sendable {
     let toolbar: CefWindow.Toolbar
-    /// The window whose page may open popups; UI thread only.
+    /// The window whose page may open popups, or that holds the docked
+    /// DevTools view; UI thread only.
     private let windowReference: CefWeak<CefWindow>
     private var window: CefWindow? { windowReference.object }
+    /// Whether this is the delegate of DevTools docked in ``window``.
+    private let isDockedDevTools: Bool
 
-    init(toolbar: CefWindow.Toolbar, window: CefWindow?) {
+    init(toolbar: CefWindow.Toolbar, window: CefWindow?, isDockedDevTools: Bool = false) {
         self.toolbar = toolbar
         windowReference = CefWeak(window)
+        self.isDockedDevTools = isDockedDevTools
     }
 
     func makeDelegate() -> UnsafeMutablePointer<cef_browser_view_delegate_t> {
@@ -111,16 +117,33 @@ final class BrowserViewDelegate: Sendable {
             cefRelease(view)
             cefRelease(page)
         }
-        d.pointee.on_browser_destroyed = { _, view, page in
+        d.pointee.on_browser_destroyed = { s, view, page in
             cefRelease(view)
             cefRelease(page)
+            // Docked DevTools has closed. Releasing CefKit's reference to
+            // the view inside this callback frees it while CEF still uses
+            // it (EXC_BAD_ACCESS, CEF 158.0.6), so it waits a turn.
+            guard let owner = cefOwner(BrowserViewDelegate.self, s), owner.isDockedDevTools else { return }
+            DispatchQueue.main.async { MainActor.assumeIsolated { owner.window?.dockedDevToolsDidClose() } }
         }
         d.pointee.get_delegate_for_popup_browser_view = { s, view, _, client, isDevTools in
             cefRelease(view)
             cefRelease(client)
+            let owner = cefOwner(BrowserViewDelegate.self, s)
+            if isDevTools != 0, let owner {
+                // DevTools the window docks gets a delegate that knows the
+                // window; otherwise Chromium gives it a window with a
+                // location bar.
+                return MainActor.assumeIsolated {
+                    guard let window = owner.window, case .docked = window.devToolsPlacement
+                    else { return CefRef(adopting: BrowserViewDelegate(toolbar: .location, window: nil).makeDelegate()) }
+                    return CefRef(adopting: BrowserViewDelegate(
+                        toolbar: .none, window: window, isDockedDevTools: true).makeDelegate())
+                }.retainedPointer()
+            }
             // A popup the app will host keeps the opener's toolbar choice;
             // one Chromium hosts shows its location bar.
-            guard isDevTools == 0, let owner = cefOwner(BrowserViewDelegate.self, s) else {
+            guard isDevTools == 0, let owner else {
                 return BrowserViewDelegate(toolbar: .location, window: nil).makeDelegate()
             }
             return MainActor.assumeIsolated {
@@ -133,8 +156,10 @@ final class BrowserViewDelegate: Sendable {
             cefRelease(view)
             // Adopted before anything can return early.
             let popupView = CefRef(adopting: popupView)
-            guard isDevTools == 0, let popupView, let owner = cefOwner(BrowserViewDelegate.self, s)
-            else { return 0 }
+            guard let popupView, let owner = cefOwner(BrowserViewDelegate.self, s) else { return 0 }
+            if isDevTools != 0 {
+                return MainActor.assumeIsolated { owner.window?.dockDevTools(popupView) == true ? 1 : 0 }
+            }
             // Non-zero tells CEF the app is giving the popup a window.
             return MainActor.assumeIsolated { owner.window?.adoptPopup(popupView) == true ? 1 : 0 }
         }
