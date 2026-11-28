@@ -44,6 +44,7 @@ import argparse
 import re
 import shutil
 import subprocess
+import textwrap
 import sys
 from pathlib import Path
 
@@ -124,7 +125,7 @@ struct StatusBubble: View { let text: String; var body: some View { EmptyView() 
 struct QRCodeView: View { let url: URL?; var body: some View { EmptyView() } }
 """
 
-DECLARATION = re.compile(r"^(@main|@MainActor|@objc|struct |final class |class |enum |actor |extension |protocol )")
+DECLARATION = re.compile(r"^(@main|@MainActor|@Observable|@objc|struct |final class |class |enum |actor |extension |protocol )")
 MEMBER = re.compile(r"^(@State |@Environment|static var |static let |var body|private var |let [a-z]\w*: )")
 GLOBAL_ACTOR_VAR = re.compile(r"^@\w+Actor var ")
 
@@ -140,7 +141,8 @@ def samples():
                 end = start
                 while end < len(lines) and lines[end].strip() != "```":
                     end += 1
-                yield document, start + 1, "\n".join(lines[start:end])
+                # A block inside a list item is indented with it.
+                yield document, start + 1, textwrap.dedent("\n".join(lines[start:end]))
                 index = end
             index += 1
 
