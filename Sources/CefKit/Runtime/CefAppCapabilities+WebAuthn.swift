@@ -7,7 +7,7 @@ extension CefAppCapabilities {
     /// is signed and what it is entitled to.
     ///
     /// Chromium's own profile passkeys, verified with Touch ID, are not
-    /// among them: CEF 156 looks for a keychain access group without a
+    /// among them: CEF 158 looks for a keychain access group without a
     /// team prefix, which no provisioning profile can authorize, so stock
     /// CEF never offers them (docs/bundling.md). CefPasskeys'
     /// `CefPasskeyController` verifies the user with Touch ID instead.
