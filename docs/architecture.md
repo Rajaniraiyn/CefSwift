@@ -1478,6 +1478,17 @@ configuration drops them. Chromium installs these disabled (an external
 install, `ExternalInstallManager`); `CefExtensions` enables each configured
 one once and records it in the profile's `CefSwift Accepted Extensions`.
 
+`CefRuntime.Configuration.nativeMessagingHostDirectories` is CefKit's too.
+Chromium looks for a native messaging host's manifest in the user data
+directory's `NativeMessagingHosts` (`chrome::DIR_USER_NATIVE_MESSAGING`) and
+in `/Library/Application Support/Chromium/NativeMessagingHosts`
+(`chrome::DIR_NATIVE_MESSAGING` for an unbranded build), and reads it when an
+extension connects. Before `cef_initialize`, CefKit links every
+`<name>.json` of the configured directories into the first of those,
+leaving alone the files it did not make. Links, not copies, so that it
+follows a host whose manifest changes. It keeps a ledger,
+`.cefswift-hosts`, and removes its own links once their manifests are gone.
+
 CefKit adds Chrome's toolbar to a `CefWindow` that asks for one: CEF
 creates it with the browser view (`get_chrome_toolbar_type`) but leaves it
 to the window to place (`cef_browser_view_t::get_chrome_toolbar`), hidden.

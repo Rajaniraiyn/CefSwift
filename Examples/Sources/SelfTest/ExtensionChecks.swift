@@ -71,6 +71,9 @@ extension SelfTest {
         if isOnline, ProcessInfo.processInfo.environment[extensionPhaseKey] != nil {
             configuration.extensions.append(.webStore(storeExtensionByID))
         }
+        if ProcessInfo.processInfo.environment[extensionPhaseKey] != nil, let root = configuration.rootCacheDirectory {
+            configureNativeMessagingProbe(&configuration, root: root)
+        }
         guard ProcessInfo.processInfo.environment[extensionPhaseKey] == "2",
               let root = configuration.rootCacheDirectory else { return }
         let packed = packedCopy(in: root)
@@ -162,6 +165,7 @@ extension SelfTest {
         }
         await extensionIncognitoChecks(base: base, extensions: extensions, fixtureID: fixtureID)
         await extensionProfileIsolationChecks(base: base, fixtureID: fixtureID)
+        await nativeMessagingChecks()
 
         // Developer mode: load unpacked, pack.
         guard let root = CefRuntime.shared.configuration?.rootCacheDirectory, let source = ExtensionFixture.directory else { return }
@@ -478,6 +482,7 @@ extension SelfTest {
         let packedSource = extensions.installed.first { $0.name == "CefSwift Packed Copy" }?.installSource
         check("it is an external install", packedSource == .external,
               detail: "\(String(describing: packedSource))")
+        await nativeMessagingChecks()
         guard isOnline else {
             skip("installing a Chrome Web Store extension by identifier", because: "no network", .environment)
             return
