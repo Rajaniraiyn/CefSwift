@@ -89,6 +89,7 @@ The runtime, page, window and profile APIs are `@MainActor`.
   - [Features that use the DevTools Protocol](#features-that-use-the-devtools-protocol)
   - [How the app names itself](#how-the-app-names-itself)
   - [Offscreen pages](#offscreen-pages)
+  - [Google sign-in](#google-sign-in)
   - [Differences that stay](#differences-that-stay)
 - [Serving your own content](#serving-your-own-content)
   - [Where a handler runs](#where-a-handler-runs)
@@ -3854,6 +3855,45 @@ browser window. `CefOffscreenViewInfo` carries these values; a custom
 itself at the page's frame rate (`.offscreen(frameRate:)`, 60 by
 default), so `requestAnimationFrame` runs as often as in a window.
 
+### Google sign-in
+
+Google refuses sign-in from browsers it takes for embedded ones, with
+"Couldn't sign you in: This browser or app may not be secure". CefSwift
+adds nothing to a Chrome-style page that a page can observe (above), and
+no preset passes a switch Google's check looks for: no
+`--enable-automation`, no debugging port, and `navigator.webdriver` is
+`false`.
+
+Measured with CEF 158.0.6 on 2026-11-28, without credentials, with the
+Compat example (`-url https://accounts.google.com/ -script
+Scripts/compat/google-signin.js`), which types an address into the
+identifier step and presses Next.
+
+| Host, preset | Identifier step |
+|---|---|
+| `CefWindow`, `.chrome` | Account lookup ("Couldn't find this account" for an address that has none) |
+| `CefWindow`, `Configuration()` | Same |
+| `CefWebView` windowed, `.embedded` | Same |
+| `CefWebView` offscreen, `.embedded` | Same |
+
+No host got the "may not be secure" page at the identifier step. After
+six tries in ten minutes from one address, Google asked every host for a
+CAPTCHA ("Type the text you hear or see"), as it does for any browser
+that signs in repeatedly. Without an account, the measurement stops
+before the password step, where Google can still refuse a browser; it
+was not reached. Not measured, but each changes what the sign-in page
+sees and so could change Google's answer:
+
+- A `.custom` user agent, which drops the client hints' versions, or one
+  that names another browser than the one running.
+- DevTools Protocol features attached to the page, such as
+  `CefPasskeyController` (`Debugger`, `Runtime`), and
+  `remoteDebuggingPort`.
+- Bridges or user scripts that change what the sign-in page reads.
+
+Sign in to Google in a Chrome-style page with none of them, on the
+`.chrome` preset.
+
 ### Differences that stay
 
 These come with CEF and Chromium as CefSwift uses them; no setting of
@@ -3865,7 +3905,9 @@ CefSwift's changes them, and some need a different Chromium build:
   returns `"probably"`. Adding them takes a CEF build with
   `proprietary_codecs` and the licenses that come with them.
 - **Google services**: no Google network voices for speech synthesis
-  (Chrome lists about 20 more), no Safe Browsing, sync or Google sign-in.
+  (Chrome lists about 20 more), no Safe Browsing, sync or Chrome's own
+  browser sign-in. Signing in to Google's sites is another matter; see
+  [Google sign-in](#google-sign-in).
 - **Alloy style** (`CefWebView`): CEF answers Chromium's media permission
   check with "allowed", so `navigator.mediaDevices.enumerateDevices()`
   lists every camera, microphone and speaker before the user grants

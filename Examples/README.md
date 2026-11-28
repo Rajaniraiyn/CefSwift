@@ -197,7 +197,11 @@ and feature, next to stock Google Chrome. `-host window|windowed|offscreen`
 picks a `CefWindow` or a view, `-preset default|chrome|embedded`
 the configuration, and `-features` a comma-separated list of `devtools`,
 `runtime`, `page`, `bridge`, `userscript`, `evaluate`,
-`passkeys` and `accessibility`. The script's documentation lists the rest.
+`passkeys` and `accessibility`. `-script <file.js>` evaluates a script in
+the page when the time is up and prints its result, for pages that need a
+step first: `Scripts/compat/google-signin.js` types an address into
+Google's sign-in form ([Google sign-in](../docs/guide.md#google-sign-in)).
+The script's documentation lists the rest.
 
 ```sh
 swift package --package-path Examples --allow-writing-to-package-directory \
