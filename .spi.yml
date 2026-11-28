@@ -1,0 +1,7 @@
+version: 1
+builder:
+  configs:
+    # CefSwift is macOS only. The framework is loaded at run time, so the
+    # documentation builds without CEF.
+    - platform: macos-spm
+      documentation_targets: [CefKit, CefSwiftUI, CefChromium, CefPasskeys]
