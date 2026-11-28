@@ -4222,6 +4222,12 @@ One service process decodes for every page of the app; a crash in it fails
 the appends waiting on it (the page sees a decode error) and the next
 append starts it again.
 
+**Video.** H.264 and HEVC stay unplayable: Chromium decodes neither
+through MSE or WebCodecs, and no route to show them keeps the page's
+element as it is at a cost worth paying yet. [Design
+notes](design-notes.md#system-video-decoders-measured-not-built) record
+the routes measured; such pages belong in WebKit.
+
 **What a page can observe.** The replaced functions are native functions
 that call the shim, so `Function.prototype.toString` prints `function
 appendBuffer() { [native code] }` for them as for Chromium's, `name` and

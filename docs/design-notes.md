@@ -1139,3 +1139,62 @@ The alternatives were worse: a `Proxy` of the original prints
 exactly its input samples (unit test), and 5.1 AAC plays each channel in
 FLAC's place: 498, 750, 1002, 64, 1248 and 1500 Hz heard for 500, 750,
 1000, 62.5, 1250 and 1500 Hz written (the analyser's bins are 5.9 Hz wide).
+
+## System video decoders: measured, not built
+
+CEF's official builds cannot decode H.264 or HEVC, and unlike AAC
+([System media decoders](guide.md#system-media-decoders)) there is no
+lossless, cheap format Chromium does decode that a decoded video frame can
+be rewritten into. These are the routes measured with CEF 158.0.6 on
+macOS 27.2.1, an Apple M2, by pages run in the Compat example
+(`-printValue`), and why none of them was built. SelfTest's `videoRoutes`
+group checks the facts they rest on against each CEF update.
+
+| Route | What it keeps | Result |
+|---|---|---|
+| WebCodecs `VideoDecoder` with `avc1` or `hvc1` | Everything: the page decodes in Chromium's sandboxed GPU process | Closed: `isConfigSupported` is `false` for `avc1.640028`, `avc1.42E01E`, `hvc1.1.6.L120.90` and `hev1.1.6.L93.B0`; `true` for `vp09.00.10.08` and `av01.0.04M.08`. CEF's build leaves H.264 and HEVC out (`proprietary_codecs`), WebCodecs' decoders included. (WebCodecs *encodes* `avc1.640028` through VideoToolbox; that does not help a page that must decode.) |
+| Decode in the media service (VideoToolbox), re-encode to VP9 or AV1 in the renderer (WebCodecs, libvpx/libaom in software), append that to a native `SourceBuffer` | Everything the element does: clock, `buffered`, seeking, full screen, picture in picture, `drawImage`, `requestVideoFrameCallback`; page content above the video stays above it | Feasible in throughput, not built: WebCodecs in real-time mode at 4 Mb/s encoded 1280×720 at 239–256 frames a second (VP9), 200–259 (VP8), 225 (AV1), and 1920×1080 at 170–187 (VP9), 55–111 (VP8), on synthetic frames, with the machine idle (load average 3); with its load at 30–45 the same runs gave 2 to 31. A 30 fps 1080p stream would spend about a sixth of the encoder's real-time capacity, every frame crosses two processes uncompressed (1080p NV12 is 3.1 MB, 93 MB/s at 30 fps), and the picture is lossy a second time at the bitrate the shim picks. See "The re-encoding route" below. |
+| `MediaStream` (`srcObject`) from decoded frames, or WebRTC's H.264 decoder | The element's picture | Closed, as #28 found: a `MediaStream` replaces the element's clock, `buffered`, `duration` and seeking with a live stream's, which hls.js, Shaka and dash.js rely on; CEF lists no H.264 in `RTCRtpSender.getCapabilities`, and Blink refuses an encoded frame whose `payloadType` changed (0 of 300 frames decoded). |
+| Native layer over the element: decode in the media service, present in an `AVSampleBufferDisplayLayer` the app positions over the element's rectangle, timed by the element's clock; a black VP9 track of the same timeline in the element keeps its clock, `buffered` and size | The element's clock and events, and hardware decoding at about the cost of native playback | Not built. It shows the video, but over the page: whatever the page draws above the video — the player's controls, subtitles, an ad overlay — is hidden under the layer, the element itself shows black in full screen, picture in picture, `drawImage` and `requestVideoFrameCallback`, and clipping (`overflow`, `border-radius`, transforms, `clip-path`) is the page's to know and the app's to mimic. Chromium has no hole-punching for an embedder (its `VideoHoleFrame` is for Android and Cast), and a transparent video track still leaves the player's own background above a layer underneath. |
+
+What the overlay route would need, measured as far as it goes:
+
+- **A placeholder track.** WebCodecs encodes one black 1920×1080 VP9 key
+  frame in 965 bytes, and MSE accepts `video/mp4; codecs="vp09.00.10.08"`;
+  one such sample a GOP would give the element a real video track with the
+  source's size and timeline at one decode a second.
+- **The clock.** `currentTime` read at each animation frame against the
+  page's clock is what the layer's timebase would follow; the app would
+  get it in a process message, a 0.13 ms round trip floor
+  ([Service calls](#service-calls-measured)), and set the timebase rate
+  from `playbackRate`.
+- **Decoding outside the app.** The media service would decode with
+  `VTDecompressionSession` and hand frames to the app as `IOSurface`s
+  (`IOSurfaceCreateXPCObject`) without a copy; the app would only display
+  them. Not measured: whether VideoToolbox's hardware decoder opens in the
+  App Sandbox service as AudioToolbox does.
+
+### The re-encoding route
+
+The one route that keeps the page's element whole is to hand Chromium a
+codec it decodes. For AAC that is lossless FLAC at about the cost of
+native playback; for video it is a second, lossy encode. The pieces exist
+and were measured separately:
+
+1. The shim already demuxes MP4 video (`avcC`, `hvcC`, sample flags and
+   composition offsets in `mp4.js`).
+2. The media service would decode with VideoToolbox, in hardware, and
+   return NV12 frames in shared memory (3.1 MB a 1080p frame).
+3. The renderer would wrap each in a `VideoFrame` and encode it with
+   WebCodecs, VP9 at 170–256 frames a second here, keeping the source's
+   timestamps and key frames, and append the result as `vp09` in
+   fragmented MP4 (the FLAC writer's boxes with a `vpcC` sample entry) to
+   a native `SourceBuffer`.
+
+What is left to measure before building it: the CPU of the whole chain
+against native VP9 playback, which the encoder dominates; the quality loss
+at a bitrate that keeps the buffer within Chromium's 150 MB video limit;
+and how far ahead of the playhead the chain must run, since a seek
+outside what is encoded costs a decode and an encode of the GOP before the
+first frame. Until then, H.264 and HEVC pages stay with WebKit (the Browser
+example's WebKit tabs), and the app decides when to hand a page over.

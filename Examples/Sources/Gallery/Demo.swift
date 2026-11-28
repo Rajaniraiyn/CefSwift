@@ -71,6 +71,7 @@ enum Demos {
         DiscardDemo(),
         MediaRouterDemo(),
         SystemMediaDemo(),
+        CodecSupportDemo(),
 
         BookmarksDemo(),
         HistoryDemo(),
