@@ -3037,6 +3037,33 @@ one; close all connections too, or the page keeps going without
 asking. `resolveHost(_:)` uses the profile's DNS settings, Secure DNS
 included, and throws when the name does not resolve.
 
+### Clearing a site's data
+
+`clearSiteData(for:types:)` deletes what one site keeps in the profile:
+its cookies, `localStorage`, IndexedDB, Cache Storage, service workers,
+file systems, Shared Storage and Storage Buckets, or the
+`CefProfile.SiteDataTypes` asked for. Other sites keep theirs, and the
+HTTP cache, which Chromium does not keep per site, stays.
+
+```swift
+// "Forget this site"
+try await profile.clearSiteData(for: URL(string: "https://example.com")!)
+// Sign out of it, keeping its offline data
+try await profile.clearSiteData(for: URL(string: "https://example.com")!, types: [.cookies, .localStorage])
+```
+
+Only the address's scheme, host and port count. CEF has no call for this,
+so it runs the DevTools Protocol's `Storage.clearDataForOrigin` in one
+of the profile's live pages, whose `devTools` session attaches with no
+domain enabled (see [Features that use the DevTools
+Protocol](#features-that-use-the-devtools-protocol)); a discarded page is
+not restored for it, and a profile with no live page throws. Cookies are
+deleted for the origin's host: a cookie a parent domain set
+(`Domain=example.com`, seen from `www.example.com`) stays, as with
+`deleteCookies(for:named:)`. Clearing one site's cookie, `localStorage`,
+IndexedDB database and Cache Storage cache took 28 ms (CEF 158.0.6, M2,
+2026-11-28).
+
 ### Requests through Chromium's network stack
 
 A profile makes the app's own requests the way its pages make theirs:
@@ -3814,6 +3841,7 @@ measurement a page can make.
 | `evaluateJavaScript(_:userGesture: true)` | `Runtime.evaluate`, no domain | The gesture itself. |
 | `snapshot()` of a windowed page | `Page.captureScreenshot`, no domain | Nothing measured. An offscreen page's snapshot is the frame its view shows, with an open `<select>` list or date picker drawn in, and uses no protocol. |
 | `discard()`, `discardBlockers()` | `DOMDebugger.getEventListeners` on every frame's window, reached with `Runtime.evaluate`, `Page.getFrameTree` and `DOM` look-ups, and for a cross-site frame a session attached with `Target.attachToTarget` and detached again; no domain | Nothing measured; the page is about to be unloaded. |
+| `profile.clearSiteData(for:types:)` | `Storage.clearDataForOrigin` in one of the profile's live pages, no domain | Not measured; the page it runs in may be on another site. |
 | Offscreen accessibility actions | `Accessibility` for the length of one lookup; `DOM.focus`, `DOM.scrollIntoViewIfNeeded`; `Input.insertText` only for a field that takes no input-method text | Nothing measured. Only an assistive app's actions use it. |
 
 CefKit's internal services (tab discarding, and CefChromium's bookmarks,

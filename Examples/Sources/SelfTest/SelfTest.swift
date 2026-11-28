@@ -211,6 +211,7 @@ enum SelfTest {
         ("operations", operationChecks),
         ("loading", loadingChecks),
         ("siteSettings", siteSettingsChecks),
+        ("siteData", siteDataChecks),
         ("processes", processChecks),
         ("pdf", pdfChecks),
         ("security", securityChecks),
