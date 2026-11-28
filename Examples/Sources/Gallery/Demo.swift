@@ -72,6 +72,7 @@ enum Demos {
         MediaRouterDemo(),
         SystemMediaDemo(),
         CodecSupportDemo(),
+        FairPlayDemo(),
 
         BookmarksDemo(),
         HistoryDemo(),

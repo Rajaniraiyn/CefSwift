@@ -470,7 +470,8 @@ MyApp.app/
     │   ├── MyApp_MyApp.bundle             # each target's resources (Bundle.module)
     │   └── CefSwift_CefKit.bundle         # the built-in sheets' strings
     ├── XPCServices/
-    │   └── MyApp Media.xpc                # with the systemMediaDecoders capability
+    │   ├── MyApp Media.xpc                # with the systemMediaDecoders capability
+    │   └── MyApp FairPlay.xpc             # with the fairPlay capability
     └── Frameworks/
         ├── libMyLibrary.dylib             # dynamic libraries the product loads
         ├── libcefswift_helper_startup.dylib   # seals the helpers' sandbox
@@ -805,6 +806,7 @@ Each capability adds what its feature needs. Usage descriptions come from
 | `passkeys` | `NSWebBrowserPublicKeyCredentialUsageDescription` (optional); includes `bluetooth` | `com.apple.developer.web-browser.public-key-credential` (restricted) | Apple, on request, to web browsers; in a provisioning profile | iCloud Keychain passkeys through AuthenticationServices. Request it from Apple with the [passkey entitlement request form](https://developer.apple.com/contact/request/macos-browsers-passkeys/); Apple then enables it for the App ID as a managed capability. |
 | `defaultBrowser` | `CFBundleURLTypes` (`http`, `https`), `CFBundleDocumentTypes` (`public.html`, `public.xhtml`) | None | Any signature | The app can be chosen as the default browser, and can ask with `NSWorkspace.setDefaultApplication(at:toOpenURLsWithScheme:)`. `com.apple.developer.web-browser` is an iOS entitlement; macOS needs none. |
 | `handoff` | `NSUserActivityTypes` (`NSUserActivityTypeBrowsingWeb`) | None | Any signature | Handoff of web pages. |
+| `fairPlay` | None | `com.apple.security.app-sandbox` and `com.apple.security.network.client`, and nothing else, on `Contents/XPCServices/<App> FairPlay.xpc` (bundle identifier `<app>.fairplay`), CefSwift's FairPlay service (`cefswift-fairplay`) | Any signature | FairPlay Streaming audio in Chromium pages of the origins an app lists with CefProtectedMedia's `CefFairPlay`. The service fetches the stream's segments itself, hence the network entitlement. See [FairPlay in Chromium pages](guide.md#fairplay-in-chromium-pages). |
 | `systemMediaDecoders` | None | `com.apple.security.app-sandbox`, and nothing else, on `Contents/XPCServices/<App> Media.xpc` (bundle identifier `<app>.media`), CefSwift's media service (`cefswift-media`), which the plugin and the Xcode build phase build when the capability is listed | Any signature | AAC, AC-3, E-AC-3 and Apple Lossless audio in pages with `CefRuntime.Configuration.services.systemMediaDecoders = .audio`, decoded in the service rather than the app's process. See [System media decoders](guide.md#system-media-decoders). |
 | `protectedMedia` | None | `com.apple.security.cs.disable-library-validation` (base helper) | Any signature | Lets a team-signed, hardened helper load Google's Widevine CDM, which Chromium downloads when `CefRuntime.Configuration.services.protectedMedia` is `.automatic`. Ad hoc builds without the hardened runtime load it without the capability. It does not give the app Verified Media Path: see [Playing streaming services](guide.md#playing-streaming-services). |
 

@@ -21,6 +21,7 @@ extension SelfTest {
         "surfaceInventory": surfaceInventoryProbe,
         "widevine": widevineProbeChecks,
         "systemMedia": systemMediaProbeChecks,
+        "fairPlay": fairPlayProbeChecks,
         "profilePersistence": profilePersistenceProbeChecks,
         "launchPrompts": launchPromptsProbeChecks,
         "quitWhilePending": quitWhilePendingProbeChecks,

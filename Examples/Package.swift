@@ -16,6 +16,7 @@ let package = Package(
                 .product(name: "CefSwiftUI", package: "CefSwift"),
                 .product(name: "CefChromium", package: "CefSwift"),
                 .product(name: "CefPasskeys", package: "CefSwift"),
+                .product(name: "CefProtectedMedia", package: "CefSwift"),
                 "SystemEngine",
             ],
             exclude: ["cefapp.json", "Browser.entitlements", "Browser-Distribution.entitlements"]
@@ -37,6 +38,7 @@ let package = Package(
                 .product(name: "CefSwiftUI", package: "CefSwift"),
                 .product(name: "CefChromium", package: "CefSwift"),
                 .product(name: "CefPasskeys", package: "CefSwift"),
+                .product(name: "CefProtectedMedia", package: "CefSwift"),
             ],
             exclude: ["cefapp.json"],
             resources: [.copy("Resources/Site")]
@@ -56,6 +58,7 @@ let package = Package(
             dependencies: [
                 .product(name: "CefKit", package: "CefSwift"),
                 .product(name: "CefPasskeys", package: "CefSwift"),
+                .product(name: "CefProtectedMedia", package: "CefSwift"),
             ],
             exclude: ["cefapp.json"]
         ),
@@ -66,6 +69,7 @@ let package = Package(
                 .product(name: "CefSwiftUI", package: "CefSwift"),
                 .product(name: "CefChromium", package: "CefSwift"),
                 .product(name: "CefPasskeys", package: "CefSwift"),
+                .product(name: "CefProtectedMedia", package: "CefSwift"),
                 "SystemEngine",
             ],
             exclude: ["cefapp.json"],
