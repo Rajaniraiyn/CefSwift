@@ -475,6 +475,71 @@ session on every Chrome-style page, which pages can notice
 ([guide](guide.md#features-that-use-the-devtools-protocol)); it was not
 adopted or tried. SelfTest keeps its two limitation skips.
 
+## Docked DevTools, measured and not used
+
+Measured 2026-11-28 with CEF 158.0.6 on macOS 27.2, with a SelfTest probe
+(not kept) that ran each route in a process of its own, debug build. None
+gives DevTools in a view the app places beside the page that survives
+being closed, so DevTools stays in a window of its own.
+
+- **A parent `NSView` for DevTools (Alloy pages).** `show_dev_tools` with
+  `window_info.parent_view` set, for a page in a `CefWindowedPageView`,
+  stops the app at a Chromium check (`EXC_BREAKPOINT` inside
+  `show_dev_tools`, called from CefKit) with `runtime_style` left at its
+  default, set to Chrome, and set to Alloy. For Alloy it first logs
+  `Alloy style is not supported for this browser`
+  (`browser_host_create.cc:245`). CEF 156.0.28 logged the same line and
+  opened nothing.
+- **The DevTools view in the page's `CefWindow`: opens, then cannot
+  change.** `on_popup_browser_view_created` (`is_devtools` 1) can add the
+  DevTools browser view to the opener's window and return 1. It then
+  shows `devtools://devtools/bundled/devtools_app.html` beside the page,
+  drawn, with no other window, although CEF refuses a second Chrome-style
+  page view in a window. In the probe, at the bottom of a window with no
+  toolbar, it took exactly the 300 points asked for, and the page the rest
+  (four checks passed). The DevTools popup is Chrome style only: a popup
+  delegate's `get_browser_runtime_style` answering Alloy logs
+  `GetBrowserRuntimeStyle() requested Alloy style; only Chrome style is
+  supported for DevTools popups` (`browser_view_impl.cc:46`) and is
+  ignored. What follows opening it fails:
+  - `close_dev_tools` makes Chromium close the Views window the DevTools
+    view is in, here the page's own: the window's `can_close` is asked, no
+    `do_close` comes for the DevTools browser, and with the close allowed
+    the app crashes as the window closes (`EXC_BAD_ACCESS` in a
+    notification observer under `-[NSWindow _finishClosingWindow]`).
+  - With that close refused, the window's next `layout()`, after the
+    DevTools browser is destroyed, stops the app at a Chromium check
+    (`EXC_BREAKPOINT`), whether the DevTools view was taken out of the
+    window, hidden, or left as it was.
+  - Hiding the DevTools view instead of closing it, with DevTools still
+    open, stops the app at the same check on the next layout, with or
+    without CefKit calling `layout()` itself.
+  - Taking the DevTools view out of the window while its browser is open
+    stops the app at the same check.
+
+  The official build's checks carry no message. Each failure fits one
+  cause: a Chrome-style DevTools browser treats the Views window it is in
+  as its own, which works only when that window holds nothing else.
+- Two details on the way, for anyone who tries again. A box layout gives
+  a flex-0 child its preferred size, and a `get_preferred_size` answer with
+  either side 0 counts as empty, so CEF uses the view's own (for a browser
+  view, the whole window): answer 1 for the stretched side. And releasing
+  the last reference to a browser view inside its own
+  `on_browser_destroyed` frees it while CEF still uses it
+  (`EXC_BAD_ACCESS` under `CefRef.deinit`).
+- **The DevTools frontend in an ordinary page: not built.** Chromium's
+  frontend loads in any page from `devtools://devtools/bundled/`, and
+  connects to a page with `?ws=` over a WebSocket. The one WebSocket
+  Chromium serves is `remoteDebuggingPort`'s, which opens the browser to
+  anything on the machine. The other way is a WebSocket the app serves on
+  the loopback and relays to `send_dev_tools_message`. The frontend sends
+  every domain's methods, nested target sessions included, with its own
+  message ids, while CefKit's `CefDevTools` and CefPasskeys share that
+  connection and lease domains on it, so the relay would have to rewrite
+  ids and keep the frontend's `disable` calls from switching CefKit's
+  domains off. It is the route left for an app that needs DevTools in
+  its own view.
+
 ## Tabs: Chromium's tab strip under the app's own
 
 A tabbed browser on CefSwift wants its own tab interface over Chromium's

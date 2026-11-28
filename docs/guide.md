@@ -4281,10 +4281,12 @@ the switches measured and not used.
   `enabledFeatures` turns it back on
   ([architecture](architecture.md#presenting-pages)).
 - DevTools opens in a window of its own; there is no docked DevTools.
-  Measured with CEF 156.0.28: `show_dev_tools` given a parent view (which
-  makes the DevTools page Alloy style) logs `Alloy style is not
-  supported for this browser` (`browser_host_create.cc`) and opens
-  nothing, so DevTools cannot be embedded in an app's view.
+  Measured with CEF 158.0.6: `show_dev_tools` given a parent `NSView`
+  stops the app at a Chromium check, whatever runtime style it asks for.
+  In a `CefWindow`, the DevTools view can be put in the page's own window,
+  and it opens and draws there, but the window's next layout after that
+  (DevTools hidden, closed or taken out) stops the app at a Chromium
+  check ([design notes](design-notes.md#docked-devtools-measured-and-not-used)).
 - In offscreen pages, assistive apps can focus elements inside frames
   only by clicking text fields, and press them only while they are in
   view; elements of the main frame have no such limit. The scroll
