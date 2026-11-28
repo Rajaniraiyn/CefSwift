@@ -66,7 +66,7 @@ used.
 | `show_dev_tools`, `close_dev_tools`, `has_dev_tools` | `showDevTools(inspecting:)` | Exposed; docked DevTools is not possible ([Known limits](guide.md#known-limits)) |
 | `send_dev_tools_message`, `add_dev_tools_message_observer` | `CefDevTools.send`, `events(_:bufferingPolicy:)` | Exposed |
 | `execute_dev_tools_method` | `send_dev_tools_message` builds the same message | Not exposed: one path is enough |
-| `set_auto_resize_enabled`, `cef_display_handler_t.on_auto_resize` | — | Missing: sizing a view to its content (popovers, inline widgets) |
+| `set_auto_resize_enabled`, `cef_display_handler_t.on_auto_resize` | — | Missing: sizing a view to its content (popovers, inline widgets). Tried on 2026-11-28 with CEF 158.0.6: offscreen and windowed pages report later size changes, but the first report after enabling arrived in some runs and not in others, and a windowed page turned off and on again reported nothing more and kept its old layout size. It needs a reliable first size before it is worth an API |
 | `run_file_dialog` | — | Not exposed: an app shows `NSOpenPanel` itself |
 | `replace_misspelling`, `add_word_to_dictionary` | `replaceMisspelling(with:)`, `learnSpelling(_:)` | Exposed |
 | `exit_fullscreen`, `cef_display_handler_t.on_fullscreen_mode_change` | `exitFullscreen()`, `isFullscreen` | Exposed |
@@ -122,7 +122,7 @@ used.
 |---|---|---|
 | `cef_cookie_manager_t` (`visit_all_cookies`, `visit_url_cookies`, `set_cookie`, `delete_cookies`, `flush_store`) | `CefProfile.cookies(for:)`, `enumerateCookies`, `setCookie(_:for:)`, `deleteCookies(for:named:)`, `flushCookies()` | Exposed |
 | `cef_cookie_manager_get_global_manager` | Each profile's context's manager | Not exposed: the global manager is the default profile's |
-| Site data other than cookies (local storage, IndexedDB, cache storage, service workers) for one origin | — | Missing: CEF has no call; Chromium's DevTools `Storage.clearDataForOrigin` does it in an open page |
+| Site data other than cookies (local storage, IndexedDB, cache storage, service workers) for one origin | — | Missing: CEF has no call; Chromium's DevTools `Storage.clearDataForOrigin` does it in an open page (draft PR #44) |
 | All browsing data | `CefChromeCommand.clearBrowsingData` (Chrome's dialog) | Partial: no programmatic call |
 | `CefPage.Configuration` storage switches | `CefPage.Configuration.content` (`localStorage` and the rest) | Exposed |
 
@@ -195,7 +195,7 @@ not exposed: an app builds its interface in AppKit or SwiftUI.
 | CEF API | CefSwift | Status |
 |---|---|---|
 | `send_dev_tools_message`, `cef_dev_tools_message_observer_t` | `page.devTools`: `send(_:_:)`, `send(_:_:as:)` (`Decodable` result), `events(_:bufferingPolicy:)`, domain leases shared with CefKit's own features | Exposed |
-| Typed protocol commands (input, screenshots, DOM and accessibility snapshots) | `send(_:_:as:)` decodes a result; parameters are `CefJSON` | Partial: no typed commands, and a typed result is decoded from a `CefJSON` tree rather than from the reply's bytes |
+| Typed protocol commands (input, screenshots, DOM and accessibility snapshots) | `send(_:_:as:)` decodes a result; parameters are `CefJSON` | Partial: no typed commands, and a typed result is decoded from a `CefJSON` tree rather than from the reply's bytes (draft PR #43) |
 | Screenshots | `CefPage.snapshot()` (PNG; offscreen frames without the protocol), CefChromium's `CefTab.capturePreview(scale:)` | Exposed |
 | `remote_debugging_port` | `CefRuntime.Configuration.remoteDebuggingPort` | Exposed |
 | `cef_begin_tracing`, `cef_end_tracing`, `cef_end_tracing_callback_t` | — | Missing: a Chromium trace (`chrome://tracing` and Perfetto format) without DevTools |
