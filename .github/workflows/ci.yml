@@ -300,6 +300,19 @@ jobs:
       - name: Build, archive and run the Xcode example
         run: Scripts/check-xcode-example.sh
 
+      # The API reference, each module's DocC catalog, as the Swift Package
+      # Index builds it (.spi.yml). A failed build fails the step; DocC's
+      # warnings (unresolved links) are listed in the log.
+      - name: Build the documentation
+        run: |
+          for scheme in CefKit CefSwiftUI CefChromium CefPasskeys; do
+            log="$RUNNER_TEMP/docbuild-$scheme.log"
+            xcodebuild docbuild -scheme "$scheme" -destination 'generic/platform=macOS' \
+              -derivedDataPath "$RUNNER_TEMP/docbuild" > "$log" 2>&1 || { tail -40 "$log"; exit 1; }
+            echo "$scheme: $(grep -c 'warning: ' "$log" || true) warnings"
+            grep -E '\.(md|swift):[0-9]+:[0-9]+: warning: ' "$log" | sort -u || true
+          done
+
       - name: Working tree must stay clean
         run: |
           git diff --exit-code

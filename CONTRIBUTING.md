@@ -198,6 +198,22 @@ changing public API or a sample. Names an app would define (`page`,
 needs it, never a stub of CefSwift API. A sample that needs a later macOS
 says so in a comment (`// macOS 15`).
 
+## Build the API reference
+
+Each public module has a DocC catalog (`Sources/<Module>/<Module>.docc`)
+with its landing page and topic groups; CefSwiftUI's also has the "Build
+a browser" article. The Swift Package Index builds them from `.spi.yml`,
+and CI's `xcode` job builds them on every pull request. DocC needs Xcode
+(the Command Line Tools do not ship `docc`):
+
+```sh
+xcodebuild docbuild -scheme CefKit -destination 'generic/platform=macOS' \
+    -derivedDataPath .build/docbuild
+```
+
+Add a new public type to its module's topic groups, so it is not left
+in "Other".
+
 ## Regenerate the C bridge
 
 `Scripts/generate-bindings.py` writes `ccef_capi.h` and `ccef_symbols.h` in
