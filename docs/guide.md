@@ -4333,6 +4333,12 @@ SelfTest's `fairPlay` group checks the same against
 `https://cefswift.test`. Spotify needs an account, so playing a Spotify
 track is unverified.
 
+**Video.** FairPlay video does not play in Chromium pages: its frames
+never leave AVFoundation, so the only way to show them is a layer of the
+service's over the page, which would hide the player's own controls and
+subtitles. [Design notes](design-notes.md#fairplay-video-designed-not-built)
+lay the route out; FairPlay video belongs in WebKit.
+
 **What a page can observe.** On a listed origin: the `cefswiftFairPlay`
 global (in same-origin subframes too, whose calls are refused), the replaced EME and media element members (JavaScript functions
 there, not native ones), `MediaKeys` and sessions that are not Chromium's

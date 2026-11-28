@@ -1198,3 +1198,61 @@ and how far ahead of the playhead the chain must run, since a seek
 outside what is encoded costs a decode and an encode of the GOP before the
 first frame. Until then, H.264 and HEVC pages stay with WebKit (the Browser
 example's WebKit tabs), and the app decides when to hand a page over.
+
+## FairPlay video: designed, not built
+
+CefProtectedMedia plays FairPlay audio
+([guide](guide.md#fairplay-in-chromium-pages)); video is a different
+problem, because the decrypted frames must stay inside AVFoundation. Every
+route that works for clear video by handing Chromium frames
+([System video decoders](#system-video-decoders-measured-not-built)) is
+closed for protected video by design: FairPlay does not hand decoded
+frames to the process, so nothing can re-encode them, draw them into a
+canvas or put them in a `VideoFrame`. What remains is presenting them where
+AVFoundation draws.
+
+**The one route.** The FairPlay service already plays the stream; for video
+it would attach an `AVPlayerLayer` (or an `AVSampleBufferDisplayLayer`
+with an `AVContentKeySession`) and show that layer over the page's
+element, as the overlay of the clear-video notes:
+
+1. The service makes the layer and shares it with the app's window process
+   with `CARemoteLayerClient` (public QuartzCore API: a client in one
+   process, a `CARemoteLayerServer` port from the app, and a `clientId` the
+   app hosts with `+[CALayer layerWithRemoteClientId:]`).
+2. The page script reports the element's rectangle, visibility and clip
+   as they change (`ResizeObserver`, `IntersectionObserver`, scrolling),
+   and the app positions the hosted layer over the page view: the
+   windowed view's layer tree, or the offscreen view's, which CefSwift
+   composites itself ([Hosting](architecture.md#hosting)).
+3. The element mirrors the service's player as the audio path does; the
+   picture follows the player, not the element's clock, so there is
+   nothing to synchronize.
+
+**Why it is not built.**
+
+- It has the clear-video overlay's flaw, made worse: the layer sits over
+  the page, so the player's controls, subtitles and anything a service
+  draws above the video are hidden, and full screen, picture in picture
+  and the page's own canvas captures of the element show nothing. Every
+  FairPlay video service draws its controls over the video.
+- macOS keeps protected video out of screenshots and screen recording;
+  a hosted remote layer is composited by the window server like any other,
+  so it should keep that protection, but whether FairPlay's output
+  protection accepts a layer hosted across processes in a third-party
+  window was not measured.
+- Spotify, the first site, is audio only, and the services that are video
+  (Apple TV, Netflix, Disney+, Max) already play with FairPlay in WebKit
+  beside Chromium, with their own players intact.
+
+**What would reopen it.** A way to put native content into Chromium's
+compositor below page content (CEF has none: Chromium's video hole
+punching is for Android and Cast), or a service whose player draws no UI
+over the video (a kiosk, a single-purpose app), where hiding the page's
+UI does not matter. Until then FairPlay video belongs in WebKit, and the
+Browser example hands such pages over ([WebKit and
+FairPlay](guide.md#webkit-and-fairplay)).
+
+Not measured: `CARemoteLayerClient` from the App Sandbox service; the cost
+of hosting a remote `AVPlayerLayer` against native playback; whether
+FairPlay's output protection holds for a hosted layer.
