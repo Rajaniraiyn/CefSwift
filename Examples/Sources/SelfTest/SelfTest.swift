@@ -202,6 +202,7 @@ enum SelfTest {
         ("relaunch", relaunchChecks),
         ("protectedMedia", protectedMediaChecks),
         ("systemMedia", systemMediaChecks),
+        ("videoRoutes", videoRouteChecks),
         ("systemEngine", systemEngineChecks),
         ("passkeys", passkeyChecks),
         ("chromiumTabs", chromiumTabChecks),
