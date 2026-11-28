@@ -21,7 +21,13 @@ struct BundleCommand {
     var helper: URL?
     var helperStartup: URL?
     var framework: URL?
+    /// CefSwift's media service (`cefswift-media`), for the
+    /// `systemMediaDecoders` capability.
+    var mediaService: URL?
     var isCheckOnly = false
+    /// With `--check`: print the CefSwift products the bundle needs beyond
+    /// the helper, one per line, and nothing else.
+    var listsProducts = false
 
     // The user's options.
     var configPath: String?
@@ -48,7 +54,8 @@ struct BundleCommand {
     USAGE: cefswift bundle --product-name <Name> --package-directory <dir> --work-directory <dir>
                            --output <dir> [--source-directory <dir>] [--check]
                            [--executable <file> --resource-bundle <name>... --helper <file>
-                            --helper-startup <file> --framework <dir>]
+                            --helper-startup <file> --framework <dir> [--media-service <file>]]
+                           [--check --products]
                            [the options of 'swift package cef bundle']
     Run by the cef command plugin; see 'swift package cef help'.
     """
@@ -71,7 +78,9 @@ struct BundleCommand {
         helper = args.option("helper").map { URL(fileURLWithPath: $0) }
         helperStartup = args.option("helper-startup").map { URL(fileURLWithPath: $0) }
         framework = args.option("framework").map { URL(fileURLWithPath: $0) }
+        mediaService = args.option("media-service").map { URL(fileURLWithPath: $0) }
         isCheckOnly = args.flag("check")
+        listsProducts = args.flag("products")
 
         configPath = args.option("config")
         bundleIDOption = args.option("bundle-id")
@@ -101,10 +110,13 @@ struct BundleCommand {
 
     func run() throws {
         // A second run resolves the same settings; say them once.
-        Log.isQuiet = !isCheckOnly
+        Log.isQuiet = !isCheckOnly || listsProducts
         let settings = try resolveSettings()
         Log.isQuiet = false
-        if isCheckOnly { return }
+        if isCheckOnly {
+            if listsProducts, settings.plan.embedsMediaService { print(HelperLink.mediaServiceProduct) }
+            return
+        }
         guard let executable, let helper, let helperStartup, let framework else {
             throw BundlingError("Missing --executable, --helper, --helper-startup or --framework.\n\(Self.usage)")
         }
@@ -113,9 +125,10 @@ struct BundleCommand {
         for item in product.resourceBundles + product.libraries {
             Log.info("Includes \(item.lastPathComponent)")
         }
-        let helperProducts = try HelperLink.prepare(
+        var helperProducts = try HelperLink.prepare(
             startup: helperStartup, helper: helper, framework: framework,
             in: workDirectory.appendingPathComponent("helper"))
+        helperProducts.mediaService = mediaService
         try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
 
         let identity = settings.identity

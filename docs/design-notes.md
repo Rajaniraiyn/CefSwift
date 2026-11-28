@@ -1095,3 +1095,47 @@ microsecond, an address read and tested in C, and the request never
 reaches Swift values. The page's own timing does not move measurably:
 Chromium's work for 500 requests dominates.
 
+
+## System media decoders: a sandboxed service, FLAC and native functions
+
+`services.systemMediaDecoders = .audio`
+([guide](guide.md#system-media-decoders)) decodes pages' AAC, ALAC, AC-3
+and E-AC-3 with AudioToolbox. Measured with CEF 158.0.6 on macOS 27.2.1,
+an Apple M2, in the Compat example, on a machine shared with other builds
+(load average 10 to 105), so the times are upper bounds.
+
+**Where decoding runs.**
+
+| Place | Result |
+|---|---|
+| The renderer | Closed: Chromium's sandbox refuses the decoder, `AudioConverterNew` returns `'fmt?'`. |
+| The browser process (#28) | Works, but the page's audio is parsed in the one process with no sandbox at all. |
+| An XPC service in the App Sandbox (`<App> Media.xpc`), chosen | Works with no entitlement besides `com.apple.security.app-sandbox`. The first append, which starts the service, took 4.6 s here; later one-second fragments took 16 to 19 ms each, the service's decode and the two copies included. Playing a 30-second AAC file used 0.93, 1.00 and 1.44 s of CPU per 15 s across every process of the app and the service; the same audio as a native FLAC file 0.52, 0.99 and 1.29 s; the idle page 0.22 to 1.06 s. |
+
+**What Chromium gets.** The service writes FLAC in fragmented MP4 itself,
+in Swift, rather than handing PCM to the renderer for JavaScript to wrap as
+#28 did: the decoder writes planar big-endian samples, which are FLAC's
+verbatim subframes byte for byte, so the FLAC is one copy of the decoded
+audio, and the renderer appends the service's answer in one native
+`appendBuffer`. A page's append then fires one `updatestart`, `update` and
+`updateend`, as natively, which a wrapper `SourceBuffer` (#28's) could
+only imitate; `addSourceBuffer` returns Chromium's own buffer, so
+`sourceBuffers`, `instanceof` and identity checks hold.
+
+**How the replacements look.** CEF's `cef_v8_value_create_function` makes a
+native function whose `toString` is `function name() { [native code] }`;
+calling the JavaScript implementation with `set_rethrow_exceptions` passes
+its exceptions to the caller untouched (`TypeError: Illegal invocation`,
+Chromium's `InvalidStateError` messages). Measured: the 14 replaced
+functions print as native code with the originals' `name` and `length`.
+They differ in two ways CEF cannot change: they have an own, non-configurable
+`prototype` (`delete` returns `false`) and they can be called with `new`.
+The alternatives were worse: a `Proxy` of the original prints
+`function () { [native code] }`, without the name, and patching
+`Function.prototype.toString` is itself a replaced native.
+
+**Lossless at any depth.** AAC and Dolby decode to 16-bit FLAC; ALAC keeps
+24 bits when its source had more than 16. A 16-bit ALAC file decodes to
+exactly its input samples (unit test), and 5.1 AAC plays each channel in
+FLAC's place: 498, 750, 1002, 64, 1248 and 1500 Hz heard for 500, 750,
+1000, 62.5, 1250 and 1500 Hz written (the analyser's bins are 5.9 Hz wide).

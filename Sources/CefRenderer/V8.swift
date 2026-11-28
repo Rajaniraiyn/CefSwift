@@ -66,6 +66,41 @@ final class V8Value {
     var isPromise: Bool { raw.pointee.is_promise(raw) != 0 }
 
     var stringValue: String { CefStringUtil.takingUserFree(raw.pointee.get_string_value(raw)) ?? "" }
+    var isArrayBuffer: Bool { raw.pointee.is_array_buffer(raw) != 0 }
+    /// The value as a JavaScript number converted to a 32-bit integer.
+    var intValue: Int32 { raw.pointee.is_int(raw) != 0 ? raw.pointee.get_int_value(raw) : Int32(clamping: Int(exactly: doubleValue.rounded(.towardZero)) ?? 0) }
+    var doubleValue: Double {
+        raw.pointee.is_double(raw) != 0 || raw.pointee.is_int(raw) != 0 || raw.pointee.is_uint(raw) != 0
+            ? raw.pointee.get_double_value(raw) : 0
+    }
+    var boolValue: Bool { raw.pointee.is_bool(raw) != 0 && raw.pointee.get_bool_value(raw) != 0 }
+
+    /// An ArrayBuffer's memory, in place: valid until script next runs,
+    /// which could detach the buffer. `nil` for any other value.
+    var arrayBufferBytes: UnsafeRawBufferPointer? {
+        guard isArrayBuffer else { return nil }
+        let count = raw.pointee.get_array_buffer_byte_length(raw)
+        guard count > 0, let data = raw.pointee.get_array_buffer_data(raw) else { return UnsafeRawBufferPointer(start: nil, count: 0) }
+        return UnsafeRawBufferPointer(start: data, count: count)
+    }
+
+    /// An ArrayBuffer holding a copy of `bytes`.
+    static func arrayBuffer(copying bytes: UnsafeRawBufferPointer) -> V8Value? {
+        V8Value(adopting: cef_v8_value_create_array_buffer_with_copy(UnsafeMutableRawPointer(mutating: bytes.baseAddress), bytes.count))
+    }
+
+    /// Calls the function, whose exceptions are set to be rethrown
+    /// (`set_rethrow_exceptions`): an exception goes on to the JavaScript
+    /// that called the native code calling this, and the result is `nil`.
+    /// Only inside a V8 function callback; touch nothing of the context
+    /// after a `nil`.
+    func callRethrowing(this: V8Value?, _ arguments: [V8Value]) -> V8Value? {
+        let argumentPointers: [UnsafeMutablePointer<cef_v8_value_t>?] = arguments.map { $0.retained() }
+        let result = argumentPointers.withUnsafeBufferPointer { buffer in
+            raw.pointee.execute_function(raw, this?.retained(), buffer.count, buffer.baseAddress)
+        }
+        return V8Value(adopting: result)
+    }
 
     /// A `cef_basetime_t` in milliseconds since 1970.
     nonisolated static func milliseconds(of basetime: cef_basetime_t) -> Double {

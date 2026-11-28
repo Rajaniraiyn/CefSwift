@@ -2,6 +2,8 @@
   "bundleIdentifier": "dev.rajaniraiyn.cefswift.selftest",
   "displayName": "CefSwift SelfTest",
   "minimumSystemVersion": "15.0",
+  // The media service, for the systemMedia checks.
+  "capabilities": ["systemMediaDecoders"],
   // The localization checks start SelfTest in these languages; the
   // bundle keeps Chromium's packs for them and English.
   "infoPlist": {

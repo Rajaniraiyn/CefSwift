@@ -367,9 +367,12 @@ struct XcodeEmbed {
 
         let framework = frameworkSource ?? existingFramework
         let built = try buildHelper(build: build, framework: framework)
-        let helper = HelperLink.Products(
+        var helper = HelperLink.Products(
             executable: build.workDirectory.appendingPathComponent("helper/\(HelperLink.helperProduct)"),
             startupLibrary: build.workDirectory.appendingPathComponent("helper/\(HelperLink.startupLibraryName)"))
+        if settings.plan.embedsMediaService {
+            helper.mediaService = try buildMediaService(build: build)
+        }
         let embedder = embedder(build: build, settings: settings, frameworkSource: frameworkSource, helper: helper)
         let trimInfo = Self.embeddingInfoPlist(settings.infoPlist, app: build.app)
         let stamp = stamp(cef: manifest.cef, build: build, settings: settings, embedder: embedder,
@@ -434,6 +437,27 @@ struct XcodeEmbed {
         }
         try Data(stamp.utf8).write(to: stampFile)
         return HelperLink.Products(executable: helper, startupLibrary: startup)
+    }
+
+    /// Builds the media service (the systemMediaDecoders capability) with
+    /// SwiftPM, in release, beside the helper. It links nothing of CEF.
+    private func buildMediaService(build: Build) throws -> URL {
+        let binDirectory = setting("CEFSWIFT_BIN_DIR").map { URL(fileURLWithPath: $0) }
+            ?? URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent()
+        let service = binDirectory.appendingPathComponent(HelperLink.mediaServiceProduct)
+        if let builtAt = Self.modificationDate(service),
+           let newest = Self.newestSource(of: ["Sources/CefMediaService"], in: build.packageDirectory), newest < builtAt {
+            return service
+        }
+        let arguments = ["swift", "build", "--package-path", build.packageDirectory.path,
+                         "--scratch-path", build.scratchDirectory.path, "--configuration", "release",
+                         "--product", HelperLink.mediaServiceProduct]
+        Log.info("Building \(HelperLink.mediaServiceProduct)…")
+        let status = try Shell.runStreaming("/usr/bin/xcrun", arguments, environment: Self.swiftEnvironment(environment))
+        guard status == 0, FileManager.default.fileExists(atPath: service.path) else {
+            throw BundlingError("'xcrun \(arguments.joined(separator: " "))' failed with exit code \(status).")
+        }
+        return service
     }
 
     static func modificationDate(_ url: URL) -> Date? {

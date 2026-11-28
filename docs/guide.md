@@ -97,6 +97,7 @@ The runtime, page, window and profile APIs are `@MainActor`.
   - [Widevine in Chromium](#widevine-in-chromium)
   - [WebKit and FairPlay](#webkit-and-fairplay)
   - [Services](#services)
+  - [System media decoders](#system-media-decoders)
 - [Footprint and launch time](#footprint-and-launch-time)
   - [What every bundle does](#what-every-bundle-does)
   - [What the presets turn off](#what-the-presets-turn-off)
@@ -193,6 +194,7 @@ Common options:
 | `enterprisePolicy` | Whether Chromium applies administrator-managed policies, and from which preferences domain. See [Enterprise policies](#enterprise-policies). |
 | `authenticationPrompt` | Who asks for HTTP sign-in credentials. See [HTTP authentication](#http-authentication). |
 | `services.protectedMedia` | Whether Chromium fetches Google's Widevine CDM for protected (DRM) media: `.automatic`, `.disabled` (the `.embedded` preset), or `.preinstalled(widevineDirectory:)`. See [Playing streaming services](#playing-streaming-services). |
+| `services.systemMediaDecoders` | **Experimental**, empty by default: `.audio` plays AAC, AC-3, E-AC-3 and Apple Lossless with macOS's decoders, in a sandboxed XPC service the `systemMediaDecoders` capability adds. See [System media decoders](#system-media-decoders). |
 | `rootCacheDirectory` | Where Chromium keeps its data: `Local State`, the default profile in `Default`, each persistent profile in `Profile-<id>` beside it. Defaults to `~/Library/Application Support/<bundle ID>/CefSwift`. See [Profiles](#profiles). |
 | `persistsSessionCookies` | Whether session cookies survive a relaunch. |
 | `localization`, `acceptLanguages` | The language of Chromium's own interface, and the languages pages are offered. See [Languages](#languages). |
@@ -3810,6 +3812,7 @@ measurement a page can make.
 | Feature | What attaches | What a page can observe |
 |---|---|---|
 | `page.devTools` | Whatever you send; CefKit's features share the session, and a domain stays enabled until every `X.enable` sent through it has had its `X.disable` | `Runtime.enable` makes every `console` call serialize its arguments: logging a large object takes 2–3 times as long. `Debugger.enable` stops the page at `debugger` statements. `Page.enable`, `Network.enable` and the like: nothing measured. |
+| `services.systemMediaDecoders = .audio` | The media shim, in every document's main world, before its scripts | In `Scripts/compat-matrix.py` (windowed and offscreen, CEF 158.0.6), only the AAC answer differs: `canPlayType` says `probably` for AAC where the other cells say `""`. The replaced functions print as native code but are constructible and have a `prototype` ([System media decoders](#system-media-decoders)). |
 | CefPasskeys' `CefPasskeyController` | `WebAuthn`, `Debugger`, `Page` and `Runtime`, for the page's lifetime | Each `debugger` statement takes about 10 ms (the controller resumes at once), and `console` calls serialize their arguments as above. Leave passkeys to Chromium (no controller) for pages that show sites you do not control. |
 | `evaluateJavaScript(_:userGesture: true)` | `Runtime.evaluate`, no domain | The gesture itself. |
 | `snapshot()` of a windowed page | `Page.captureScreenshot`, no domain | Nothing measured. An offscreen page's snapshot is the frame its view shows, with an open `<select>` list or date picker drawn in, and uses no protocol. |
@@ -3863,7 +3866,11 @@ CefSwift's changes them, and some need a different Chromium build:
 - **Codecs**: CEF's standard builds have no H.264, AAC or HEVC, so
   `canPlayType('video/mp4; codecs="avc1.42E01E"')` returns `""` where Chrome
   returns `"probably"`. Adding them takes a CEF build with
-  `proprietary_codecs` and the licenses that come with them.
+  `proprietary_codecs` and the licenses that come with them. The
+  experimental `services.systemMediaDecoders = .audio` answers
+  `"probably"` for AAC and the other system audio codecs, and still `""`
+  for H.264 and HEVC; [System media decoders](#system-media-decoders)
+  lists what else a page can tell from it.
 - **Google services**: no Google network voices for speech synthesis
   (Chrome lists about 20 more), no Safe Browsing, sync or Google sign-in.
 - **Alloy style** (`CefWebView`): CEF answers Chromium's media permission
@@ -4154,6 +4161,97 @@ playing DRM video shows black or the page behind it.
 no FairPlay. PlayReady exists only in Microsoft Edge and Chrome on Windows.
 Firefox uses the same Widevine CDM, downloaded from Google under Mozilla's
 own agreement; there is no other DRM a third-party macOS browser can adopt.
+
+### System media decoders
+
+`services.systemMediaDecoders = .audio` plays audio in codecs CEF's builds
+leave out, with the decoders macOS ships: AAC (LC, HE-AAC, HE-AAC v2,
+xHE-AAC), Apple Lossless, AC-3 and E-AC-3. It is experimental, off by
+default and app-wide. Decoding happens in CefSwift's media service, an XPC
+service in the App Sandbox, which the `systemMediaDecoders` capability puts
+in the bundle; without it the option does nothing and pages see what they
+would without it (`CefRuntime.shared.capabilities.hasSystemMediaService`).
+
+```swift
+var configuration = CefRuntime.Configuration.chrome
+configuration.services.systemMediaDecoders = .audio
+```
+
+```json
+{ "capabilities": ["systemMediaDecoders"] }
+```
+
+**What plays.** Measured with CEF 158.0.6 on macOS 27.2.1, an Apple M2,
+with local media made by AVFoundation and `afconvert`, in the Compat
+example (`-features systemaudio`) and SelfTest's `systemMedia` group:
+
+| Content | Plays | Notes |
+|---|---|---|
+| MSE `audio/mp4` with `mp4a.40.2` (AAC-LC), `mp4a.40.5` (HE-AAC) | Yes | Each 1-second fragment becomes one native append: one `updatestart`, `update`, `updateend`; `buffered` is one range. |
+| MSE `mp4a.40.29`, `mp4a.40.42`, `mp4a.67`, `alac`, `ac-3`, `ec-3` | Supported | `isTypeSupported` is true. HE-AAC v2 and ALAC play as files (below); macOS has no AC-3, E-AC-3 or xHE-AAC encoder to make test media with, so those were not played. |
+| `<audio>`/`<video>` with a same-origin `.m4a`, `.mp4` (audio only) or `.aac` (ADTS) | Yes | AAC-LC, HE-AAC, HE-AAC v2, 16- and 24-bit ALAC (lossless at its depth). `src` and `currentSrc` keep the page's address. Seeking lands where asked. `play()` called right after `src`, and `new Audio(url)` never put in the document, play once the shim has taken over. |
+| 5.1 AAC | Yes | Each channel in its place, as FLAC orders them (L R C LFE Ls Rs); AAC stores 5.1 centre first. |
+| `playbackRate` 0.5 and 2 | Yes | The element's clock runs at the rate asked (0.4998 and 2.004 measured). |
+| The same, cross-origin with `crossorigin` and a CORS response | Yes | |
+| Cross-origin media without CORS | No | Refused before any fetch, so nothing becomes readable that was not; the page gets Chromium's error. |
+| H.264 or HEVC video, and MSE types that mix `avc1` with AAC | No | `isTypeSupported` and `canPlayType` stay false and `""`. |
+| Encrypted media (EME) | Untouched | Clear Key and Widevine behave as without the option. |
+| `MediaSource` in a worker (`MediaSourceHandle`) | No | Only documents' main worlds get the shim. |
+
+**How it works.** A renderer demuxes what the page appends, or the file
+an element could not play, and sends the packets with their times to the
+browser process, which relays the bytes to the media service without
+reading them. The service decodes them with AudioToolbox and returns FLAC
+(verbatim, 16-bit, or 24-bit for deeper lossless sources) in fragmented
+MP4, which the renderer appends to a native `audio/mp4; codecs="flac"`
+`SourceBuffer` of the page's own `MediaSource`. The media element, its
+clock, `buffered`, seeking, `playbackRate`, full screen and picture in
+picture are Chromium's own. FLAC takes about twelve times AAC's bytes, so
+the option raises Chromium's audio `SourceBuffer` limit to 96 MB
+(`--mse-audio-buffer-size-limit-mb`), about 8 minutes of 48 kHz stereo. Playing a 30-second AAC file took 1.0 s of CPU every 15 s across the
+app's processes and the service (median of three), against 0.99 s for the
+same audio as a native FLAC file: within the noise of a shared machine.
+[Architecture](architecture.md#page-facing-features) has the details.
+
+**Why a service.** Chromium's sandbox keeps AudioToolbox's decoders out of
+renderers (`AudioConverterNew` returns `'fmt?'`), and the browser process
+runs outside any sandbox. So the page's audio is parsed and decoded in
+`<App> Media.xpc`, signed with `com.apple.security.app-sandbox` and no
+other entitlement: no network, no files outside its container, no devices.
+One service process decodes for every page of the app; a crash in it fails
+the appends waiting on it (the page sees a decode error) and the next
+append starts it again.
+
+**What a page can observe.** The replaced functions are native functions
+that call the shim, so `Function.prototype.toString` prints `function
+appendBuffer() { [native code] }` for them as for Chromium's, `name` and
+`length` are the originals', and what they throw is what Chromium throws
+(`TypeError: Illegal invocation`, `InvalidStateError`, with Chromium's
+messages). The shim leaves no global. What still tells:
+
+- The replaced members (`MediaSource.isTypeSupported`,
+  `MediaSource.prototype.addSourceBuffer` and `endOfStream`,
+  `SourceBuffer.prototype.appendBuffer`, `remove`, `abort`, `changeType`
+  and the `updating`, `timestampOffset`, `appendWindowStart` and `mode`
+  accessors, `HTMLMediaElement.prototype.canPlayType`, `play` and the
+  `src` and `currentSrc` accessors, `MediaCapabilities.prototype.decodingInfo`,
+  and `window.Audio`, so that an `Audio` element out of the document is
+  watched from its creation) have an own `prototype` property and can be
+  called with `new`, as CEF's native functions can; Chromium's cannot.
+  `Audio()` without `new` returns an element instead of throwing. CEF 158
+  offers no way to make a native function that is not a constructor.
+- `canPlayType` and `isTypeSupported` answer yes for the system codecs,
+  as Chrome does and CEF does not.
+- A system-codec `SourceBuffer` is Chromium's own, of type FLAC: its
+  `audioTracks` and an error's message name FLAC.
+- Appends complete later than native ones (the first, which starts the
+  service, took 4.6 s on a loaded machine; later one-second fragments took
+  16 to 19 ms each on average),
+  and the buffer holds the decoded audio's size.
+- A media element whose file the shim plays fires no `error` for the
+  native player's failure, plays from a `MediaSource` of the shim's, and
+  an `abort` the shim fires for an append it cancels has `isTrusted`
+  false.
 
 ## Footprint and launch time
 

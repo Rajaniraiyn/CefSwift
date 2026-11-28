@@ -30,6 +30,13 @@ final class CefAppContext: @unchecked Sendable {
     /// ``CefRuntime/Configuration/enabledFeatures`` turns it back on.
     static let remoteCoreAnimationFeature = "RemoteCoreAnimationAPI"
 
+    /// Chromium's limit on an audio `SourceBuffer`, in megabytes.
+    static let audioBufferLimitSwitch = "mse-audio-buffer-size-limit-mb"
+
+    /// Whether pages get the system media decoders: the option is on and
+    /// the app carries the media service.
+    var usesSystemMediaDecoders: Bool { CefMediaDecoding.isAvailable(configuration: configuration) }
+
     private var browserProcessHandler: UnsafeMutablePointer<cef_browser_process_handler_t>?
     private var resourceBundleHandler: UnsafeMutablePointer<cef_resource_bundle_handler_t>?
 
@@ -64,8 +71,13 @@ final class CefAppContext: @unchecked Sendable {
         }
         process.pointee.on_before_child_process_launch = { s, commandLine in
             defer { cefRelease(commandLine) }
-            guard let commandLine, let owner = cefOwner(CefAppContext.self, s), !owner.customSchemes.isEmpty
-            else { return }
+            guard let commandLine, let owner = cefOwner(CefAppContext.self, s) else { return }
+            // The system media decoders: renderers install the media shim
+            // only with this switch, and only when the app has the service.
+            if owner.usesSystemMediaDecoders {
+                CefCommandLine.borrowing(commandLine) { $0.appendSwitch(CefMediaMessage.rendererSwitch) }
+            }
+            guard !owner.customSchemes.isEmpty else { return }
             // CEF does not tell subprocesses about app-registered schemes;
             // pass them along so the helper registers the same list.
             CefCommandLine.borrowing(commandLine) {
@@ -137,6 +149,12 @@ final class CefAppContext: @unchecked Sendable {
         }
         if configuration.safeStorage.resolved() == .mockKeychain, !commandLine.hasSwitch("use-mock-keychain") {
             commandLine.appendSwitch("use-mock-keychain")
+        }
+        // The system media decoders play audio as lossless FLAC, about
+        // twelve times AAC's bytes, so an audio SourceBuffer holds
+        // proportionally more: about 8 minutes of 48 kHz stereo.
+        if usesSystemMediaDecoders, !commandLine.hasSwitch(Self.audioBufferLimitSwitch) {
+            commandLine.appendSwitch(Self.audioBufferLimitSwitch, value: "96")
         }
 
         var (enabledFeatures, disabledFeatures) = configuration.chromiumFeatures

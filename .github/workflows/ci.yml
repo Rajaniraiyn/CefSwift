@@ -84,6 +84,10 @@ jobs:
       - name: C bridge matches the headers and the framework
         run: Scripts/generate-bindings.py --check --framework "${{ steps.cef.outputs.framework }}"
 
+      # The media shim's page script is generated from its sources.
+      - name: Media shim script matches its sources
+        run: Scripts/generate-media-shim.py --check
+
       - name: Build
         run: swift build --build-tests
 

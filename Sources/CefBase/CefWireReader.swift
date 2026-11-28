@@ -157,4 +157,22 @@ package struct CefWireReader {
     package mutating func readString() throws -> String {
         String(decoding: try readStringBytes(), as: UTF8.self)
     }
+
+    /// An `int32` or `float64` value.
+    package mutating func readNumber() throws -> Double {
+        switch try readTag() {
+        case .int32: return Double(try readInt32Body())
+        case .float64: return try readDoubleBody()
+        default: throw Failure.badTag(base.load(fromByteOffset: offset - 1, as: UInt8.self))
+        }
+    }
+
+    /// A `bytes` value's bytes, in place; empty for `null`.
+    package mutating func readBytes() throws -> UnsafeRawBufferPointer {
+        switch try readTag() {
+        case .bytes: return try readRun()
+        case .null: return UnsafeRawBufferPointer(start: nil, count: 0)
+        default: throw Failure.badTag(base.load(fromByteOffset: offset - 1, as: UInt8.self))
+        }
+    }
 }

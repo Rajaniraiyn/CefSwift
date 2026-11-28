@@ -63,6 +63,7 @@ ROWS = [
     ("evaluateJavaScript", "evaluate", None),
     ("passkeys .app", "passkeys", None),
     ("accessibility", "accessibility", None),
+    ("system audio", "systemaudio", None),
     ("preset default", "", "default"),
     ("preset chrome", "", "chrome"),
     ("preset embedded", "", "embedded"),

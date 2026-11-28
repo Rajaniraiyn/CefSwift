@@ -64,7 +64,14 @@ enum HelperLink {
     struct Products: Sendable {
         let executable: URL
         let startupLibrary: URL
+        /// The media service's executable (`cefswift-media`), for bundles
+        /// with the `systemMediaDecoders` capability.
+        var mediaService: URL?
     }
+
+    /// The media service's product, which links Foundation and
+    /// AudioToolbox and nothing of CEF.
+    static let mediaServiceProduct = "cefswift-media"
 
     /// Copies the built files into `workDirectory` and points the helper at
     /// the libraries' places in the bundle.

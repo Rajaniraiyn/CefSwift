@@ -57,6 +57,12 @@ extension CefRuntime.Configuration {
         /// in ``CefRuntime/Configuration/enabledFeatures`` does the same.
         public var systemNotifications: CefRuntime.Setting = .disabled
 
+        /// Media that CEF's builds cannot decode and pages play with the
+        /// decoders macOS ships, through CefSwift's media service.
+        /// **Experimental**; empty by default, in every preset. See
+        /// ``SystemMediaDecoders``.
+        public var systemMediaDecoders: SystemMediaDecoders = []
+
         public init() {}
     }
 

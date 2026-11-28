@@ -15,11 +15,16 @@ import CefPasskeys
 ///   domain enabled), `runtime` (`Runtime.enable`), `page` (`Page.enable`),
 ///   `bridge`, `userscript`, `evaluate` (one `evaluateJavaScript` as the
 ///   page loads), `passkeys` (app-answered passkeys), `accessibility`
-///   (offscreen accessibility tree from the start).
+///   (offscreen accessibility tree from the start), `systemaudio`
+///   (`services.systemMediaDecoders = .audio`).
 /// - `-wait <seconds>`: how long to show the page (default 12).
 /// - `-capture <path.png>`: where to save a screenshot of the window, taken
 ///   with `screencapture` from outside the page, when the time is up.
 /// - `-cacheDirectory <path>`: Chromium's data directory.
+/// - `-switches name=value,…`: more Chromium switches, such as
+///   `autoplay-policy=no-user-gesture-required`.
+/// - `-printValue <script>`: evaluates the script when the time is up,
+///   awaiting a promise, and prints `compat value <JSON>`.
 ///
 /// It prints `compat window <number>` once the window is up and
 /// `compat done` before quitting.
@@ -50,6 +55,13 @@ enum CompatApp {
             configuration.rootCacheDirectory = URL(fileURLWithPath: path, isDirectory: true)
         }
         configuration.preferences["browser.confirm_to_quit"] = false
+        if features.contains("systemaudio") {
+            configuration.services.systemMediaDecoders = .audio
+        }
+        for entry in (defaults.string(forKey: "switches") ?? "").split(separator: ",") {
+            let parts = entry.split(separator: "=", maxSplits: 1).map(String.init)
+            configuration.extraCommandLineSwitches[parts[0]] = .some(parts.count > 1 ? parts[1] : nil)
+        }
         do {
             try CefRuntime.shared.initialize(configuration: configuration)
         } catch {
@@ -144,6 +156,14 @@ enum CompatApp {
             capture.arguments = ["-x", "-o", "-l", String(number), path]
             try? capture.run()
             capture.waitUntilExit()
+        }
+        if let script = defaults.string(forKey: "printValue") {
+            do {
+                let value = try await page.evaluateJavaScript(script, timeout: .seconds(120))
+                print("compat value \(value.text)")
+            } catch {
+                print("compat value error \(error)")
+            }
         }
         print("compat done")
         page.close(force: true)

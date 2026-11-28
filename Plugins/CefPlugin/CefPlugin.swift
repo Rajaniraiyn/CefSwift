@@ -181,12 +181,20 @@ struct CefPlugin: CommandPlugin {
         let helper = try buildProduct(named: "cefswift-helper", kind: .executable, configuration: configuration,
                                       context: context,
                                       linkerFlags: try tool.buildFlags(framework: framework, startup: startup)["helper"] ?? [])
+        // The products the settings add, such as the media service of the
+        // systemMediaDecoders capability.
+        var extra: [String] = []
+        for product in try tool.output(bundleArguments + ["--check", "--products"]).split(separator: "\n") {
+            let built = try buildProduct(named: String(product), kind: .executable, configuration: configuration,
+                                         context: context, linkerFlags: [])
+            if product == "cefswift-media" { extra += ["--media-service", built.path] }
+        }
 
         // 4. Assemble and sign.
         try tool.run(bundleArguments + [
             "--executable", executable.path, "--helper", helper.path, "--helper-startup", startup.path,
             "--framework", framework.path,
-        ] + located.resourceBundleNames.flatMap { ["--resource-bundle", $0] })
+        ] + extra + located.resourceBundleNames.flatMap { ["--resource-bundle", $0] })
     }
 
     /// Builds a product through SwiftPM and returns the built file. A

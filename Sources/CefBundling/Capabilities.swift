@@ -76,6 +76,9 @@ struct Capability: Sendable {
     /// What the user loses when the restricted entitlements cannot be
     /// applied.
     var restrictedEffect: String = ""
+    /// Whether the bundle carries CefSwift's media service, an XPC service
+    /// in the App Sandbox (``MediaService``).
+    var embedsMediaService = false
 
     /// The keychain access group of Chromium's profile passkey (Touch ID)
     /// authenticator in CEF 156, as compiled into the framework:
@@ -143,6 +146,11 @@ struct Capability: Sendable {
             // library validation lets a process load only its own team's
             // libraries (or Apple's), so a team-signed helper refuses it.
             helperEntitlements: [.base: [Capability.disableLibraryValidation: .bool(true)]]),
+        Capability(
+            name: "systemMediaDecoders",
+            summary: "AAC, AC-3, E-AC-3 and Apple Lossless audio in pages, decoded with the system's decoders in "
+                + "CefSwift's media service, an XPC service in the App Sandbox",
+            embedsMediaService: true),
         Capability(
             name: "defaultBrowser",
             summary: "being chosen as the default web browser",
