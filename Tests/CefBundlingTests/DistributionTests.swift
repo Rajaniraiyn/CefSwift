@@ -195,6 +195,22 @@ private func profile(
         #expect(plan.appEntitlements[key] == nil)
     }
 
+    @Test func systemMediaDecodersEmbedASandboxedServiceAndNothingElse() throws {
+        var settings = DistributionSettings(bundleIdentifier: "com.example.browser", identity: developerID)
+        #expect(try !settings.plan().embedsMediaService)
+        settings.capabilities = ["systemMediaDecoders"]
+        let plan = try settings.plan()
+        #expect(plan.embedsMediaService)
+        #expect(plan.appEntitlements["com.apple.security.app-sandbox"] == nil)
+        #expect(plan.helperEntitlements.values.allSatisfy { $0["com.apple.security.app-sandbox"] == nil })
+        #expect(MediaService.entitlements == ["com.apple.security.app-sandbox": .bool(true)])
+        let info = MediaService.infoPlist(
+            executableName: "Browser Media", bundleIdentifier: "com.example.browser", version: "1", build: "1",
+            minimumSystemVersion: "14.0")
+        #expect(info["CFBundleIdentifier"] == .string("com.example.browser.media"))
+        #expect(info["CFBundlePackageType"] == .string("XPC!"))
+    }
+
     @Test func capabilitiesExpandToKeysAndEntitlements() throws {
         var settings = DistributionSettings(bundleIdentifier: "com.example.browser", identity: .adHoc)
         settings.capabilities = ["camera", "microphone", "localNetwork", "defaultBrowser"]

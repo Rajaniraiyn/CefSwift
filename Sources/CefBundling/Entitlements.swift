@@ -99,6 +99,10 @@ struct DistributionPlan: Sendable {
     var helperEntitlements: [HelperKind: PlistDictionary] = [:]
     var hardenedRuntime: Bool = false
     var secureTimestamp: Bool = false
+    /// Whether the bundle carries CefSwift's media service
+    /// (`Contents/XPCServices/<App> Media.xpc`), for the
+    /// `systemMediaDecoders` capability.
+    var embedsMediaService = false
     /// What the user should know: features left out, and why.
     var warnings: [String] = []
 }
@@ -175,6 +179,7 @@ struct DistributionSettings: Sendable {
             }
             plan.appInfoPlist = Plist.merge(plan.appInfoPlist, capability.infoPlist)
             appEntitlements = Plist.merge(appEntitlements, capability.entitlements)
+            if capability.embedsMediaService { plan.embedsMediaService = true }
             for (helper, entitlements) in capability.helperEntitlements {
                 helperEntitlements[helper] = Plist.merge(helperEntitlements[helper] ?? [:], entitlements)
             }

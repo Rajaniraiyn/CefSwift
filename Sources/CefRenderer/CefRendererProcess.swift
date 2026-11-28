@@ -26,6 +26,9 @@ protocol CefRendererExtension: AnyObject {
     func received(_ message: CefProcessMessage, in frame: CefRendererFrame)
     /// A page-scripting message with a wire payload.
     func received(_ kind: CefPageScriptingMessage.Kind, payload: CefWirePayload, in frame: CefRendererFrame)
+    /// A media message (``CefMediaMessage``); the browser process sends
+    /// only `decoded`.
+    func received(mediaPayload payload: CefWirePayload, in frame: CefRendererFrame)
 }
 
 extension CefRendererExtension {
@@ -35,6 +38,7 @@ extension CefRendererExtension {
     func contextReleased(_ context: V8Context, in frame: CefRendererFrame) {}
     func received(_ message: CefProcessMessage, in frame: CefRendererFrame) {}
     func received(_ kind: CefPageScriptingMessage.Kind, payload: CefWirePayload, in frame: CefRendererFrame) {}
+    func received(mediaPayload payload: CefWirePayload, in frame: CefRendererFrame) {}
 }
 
 /// A frame of a browser, as a renderer sees it.
@@ -121,12 +125,20 @@ final class CefRendererProcess {
             // messages are copied into a `CefProcessMessage`.
             let name = message.pointee.get_name(message)
             let kind = CefPageScriptingMessage.Kind(name: name)
+            let isMedia = kind == nil && CefMediaMessage.isMedia(name)
             cef_string_userfree_utf16_free(name)
-            let payload = kind?.isWire == true ? CefWirePayload(message: message) : nil
+            let payload = kind?.isWire == true || isMedia ? CefWirePayload(message: message) : nil
             let received = payload == nil ? CefProcessMessage(reading: message) : nil
             nonisolated(unsafe) let raw = frame
             return MainActor.assumeIsolated {
                 let frame = CefRendererFrame(adopting: raw, browserID: browserID)
+                if isMedia {
+                    guard let payload,
+                          let target = process.extensions.first(where: { $0.messagePrefix == CefMediaMessage.prefix })
+                    else { return 0 }
+                    target.received(mediaPayload: payload, in: frame)
+                    return 1
+                }
                 if let kind, let payload {
                     guard let target = process.extensions.first(where: { $0.messagePrefix == CefPageScriptingMessage.prefix.description })
                     else { return 0 }

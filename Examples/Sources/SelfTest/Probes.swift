@@ -20,6 +20,7 @@ extension SelfTest {
         "policies": policiesProbeChecks,
         "surfaceInventory": surfaceInventoryProbe,
         "widevine": widevineProbeChecks,
+        "systemMedia": systemMediaProbeChecks,
         "profilePersistence": profilePersistenceProbeChecks,
         "launchPrompts": launchPromptsProbeChecks,
         "quitWhilePending": quitWhilePendingProbeChecks,
@@ -44,6 +45,10 @@ extension SelfTest {
             configureSurfaceInventoryProbe(&configuration)
         case "widevine":
             configuration.services.protectedMedia = .automatic
+        case "systemMedia":
+            configuration.services.systemMediaDecoders = .audio
+            // The checks play audio without a click.
+            configuration.extraCommandLineSwitches["autoplay-policy"] = "no-user-gesture-required"
         case "launchPrompts":
             configureLaunchPromptsProbe(&configuration)
         case "extensionSurvey", "extensions":

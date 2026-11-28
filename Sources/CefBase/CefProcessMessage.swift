@@ -175,6 +175,41 @@ package enum CefPageScriptingMessage {
     }
 }
 
+/// The system media decoders' protocol between `MediaShim` in the helper's
+/// renderer and `CefMediaDecoding` in the browser process
+/// (`CefRuntime.Configuration.Services.SystemMediaDecoders`). Every
+/// message carries a wire payload.
+package enum CefMediaMessage {
+    /// The start of every media message's name.
+    package static let prefix = "cefswift.media."
+    /// The helper switch that turns the shim on in renderers.
+    package static let rendererSwitch = "cefswift-media-shim"
+
+    // Renderer → browser process.
+
+    /// Header `target`: the stream, `call`: the request, `succeeded`: a
+    /// discontinuity. Values: the codec (an MP4 sample entry's type), the
+    /// sample rate, the channel count, the decoder configuration (bytes),
+    /// the packets (bytes), each packet's size (bytes, little-endian
+    /// `UInt32`s) and each packet's start and duration in seconds (bytes,
+    /// little-endian `Float64` pairs).
+    package static let decode = CefStaticString("cefswift.media.decode")
+    /// Header `target`: the stream, no longer needed.
+    package static let release = CefStaticString("cefswift.media.release")
+
+    // Browser process → renderer.
+
+    /// Header `call`: the request, `succeeded`. Values: the FLAC segments
+    /// to append, in order (bytes each), or the error message.
+    package static let decoded = CefStaticString("cefswift.media.decoded")
+
+    /// Whether a message's name is a media message's, compared without
+    /// making a Swift string.
+    package static func isMedia(_ name: UnsafePointer<cef_string_t>?) -> Bool {
+        CefStringUtil.hasPrefix(name, "cefswift.media.")
+    }
+}
+
 extension CefProcessMessage {
     /// A message named by a static string.
     package init(_ name: CefStaticString, _ arguments: [Argument] = []) {

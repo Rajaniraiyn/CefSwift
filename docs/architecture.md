@@ -974,6 +974,54 @@ and `V8Exception` wrap the V8 C API; `CefProcessMessage` (in `CefBase`,
 shared with the browser process) is a message's name and plain arguments.
 A later renderer-side feature is one more extension type.
 
+`MediaShim` is the extension behind `services.systemMediaDecoders`
+([System media decoders](guide.md#system-media-decoders)). Three
+processes take part, and only one of them parses the page's audio:
+
+```text
+renderer (MediaShim)       demux MP4 / ADTS → packets + times     wire payload, shared memory
+  │  cefswift.media.decode
+browser (CefMediaDecoding) relays the bytes, reads nothing          NSXPCConnection
+  │  decodeAudio(…)
+<App> Media.xpc            AudioToolbox → FLAC in fragmented MP4    App Sandbox, no entitlement
+  │  [Data] segments → cefswift.media.decoded
+renderer                   one native appendBuffer per page append  Chromium's own element and clock
+```
+
+- The browser process passes `--cefswift-media-shim` to renderers only
+  when the option is on and the bundle has the service
+  (`CefMediaDecoding.isAvailable`), and the helper registers the
+  extension only then. When a document's main world is created, before
+  its scripts, the extension runs `MediaShimScript`, which evaluates to a
+  function, and calls it with a native object of `decode`, `release` and
+  `function`; the page's globals gain nothing. The script is generated
+  from `Sources/CefRenderer/MediaShim/*.js` by
+  `Scripts/generate-media-shim.py`, which CI runs with `--check`.
+- `function(name, implementation)` makes a native function
+  (`cef_v8_value_create_function`) that calls the JavaScript
+  implementation with `set_rethrow_exceptions`, so what the replaced
+  `MediaSource`, `SourceBuffer`, `HTMLMediaElement` and
+  `MediaCapabilities` members throw reaches the page as thrown (a
+  `DOMException`, Chromium's own `TypeError`), and
+  `Function.prototype.toString` prints `[native code]`.
+- `addSourceBuffer` for a system type returns Chromium's own
+  `audio/mp4; codecs="flac"` `SourceBuffer`; the replaced
+  `SourceBuffer.prototype` members change only what such a buffer does
+  with an append: demux it, send its packets with their times, and append
+  the service's answer in one native `appendBuffer`, so the page sees one
+  `updatestart`, `update` and `updateend` per append.
+- Chromium's sandbox keeps AudioToolbox's decoders out of renderers
+  (`AudioConverterNew` returns `'fmt?'`), and the browser process is not
+  sandboxed, so the service is an XPC service of its own
+  (`Sources/CefMediaService`, product `cefswift-media`), signed with
+  `com.apple.security.app-sandbox` alone. It keeps one `AudioStream` per
+  stream (decoder, timeline, FLAC writer), named by frame identifier and
+  the renderer's stream number, at most 32, the least recently used
+  dropped. The decoder writes planar big-endian samples straight into
+  the planes that become FLAC's verbatim subframes; the browser process
+  hands the payload's memory to XPC without a copy and the service's
+  segments to a shared memory region with one.
+
 `PageScripting` is the extension behind bridges, user scripts and
 `evaluateJavaScript`:
 

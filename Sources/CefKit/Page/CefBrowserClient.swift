@@ -228,7 +228,18 @@ final class CefBrowserClient {
             // copying the message into Swift values first.
             let name = message.pointee.get_name(message)
             let kind = CefPageScriptingMessage.Kind(name: name)
+            let isMedia = kind == nil && CefMediaMessage.isMedia(name)
+            let mediaName = isMedia ? CefStringUtil.string(from: name) : ""
             cef_string_userfree_utf16_free(name)
+            if isMedia {
+                // The system media decoders: the payload goes to the media
+                // service as it is.
+                cefRelease(page)
+                guard let payload = CefWirePayload(message: message) else { return 0 }
+                return MainActor.assumeIsolated {
+                    CefMediaDecoding.shared.received(mediaName, payload: payload, from: frame) ? 1 : 0
+                }
+            }
             guard let kind else {
                 cefRelease(page)
                 return 0

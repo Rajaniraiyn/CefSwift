@@ -28,6 +28,8 @@ struct GalleryApp: CefSwiftApp {
         // The demos work offline; nothing needs Chromium's components.
         configuration.services.componentUpdates = .disabled
         configuration.services.protectedMedia = .disabled
+        // AAC and the other codecs Chromium lacks, for SystemMediaDemo.
+        configuration.services.systemMediaDecoders = .audio
         configuration.preferences["browser.confirm_to_quit"] = false
         if let directory = Smoke.cacheDirectory ?? AnimationShots.cacheDirectory {
             configuration.rootCacheDirectory = directory

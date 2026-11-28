@@ -21,6 +21,9 @@ let package = Package(
         // in the app bundle.
         .executable(name: "cefswift-helper", targets: ["CefHelper"]),
         .library(name: "cefswift_helper_startup", type: .dynamic, targets: ["CefHelperStartup"]),
+        // The XPC service that decodes pages' audio with the system's
+        // decoders, for apps with the `systemMediaDecoders` capability.
+        .executable(name: "cefswift-media", targets: ["CefMediaService"]),
     ],
     targets: [
         // Vendored CEF C API headers + runtime dlopen/dlsym loader.
@@ -42,9 +45,20 @@ let package = Package(
         ),
         // Renderer-side features (bridges, user scripts, evaluation) on the
         // V8 API, run by the helper processes. No Foundation, no AppKit.
+        // The media shim's page script is generated from MediaShim/*.js by
+        // Scripts/generate-media-shim.py into MediaShimScript.swift.
         .target(
             name: "CefRenderer",
-            dependencies: ["CCef", "CefBase"]
+            dependencies: ["CCef", "CefBase"],
+            exclude: ["MediaShim"]
+        ),
+        // The system media decoders' XPC service (product cefswift-media),
+        // which `cef bundle` puts in Contents/XPCServices with the App
+        // Sandbox when an app lists the `systemMediaDecoders` capability.
+        // Foundation and AudioToolbox; no CEF.
+        .executableTarget(
+            name: "CefMediaService",
+            linkerSettings: [.linkedFramework("AudioToolbox")]
         ),
         // The helper executable: a few lines calling CefRenderer.
         .executableTarget(
@@ -142,6 +156,10 @@ let package = Package(
         .testTarget(
             name: "CefChromiumTests",
             dependencies: ["CefChromium", "CefKit"]
+        ),
+        .testTarget(
+            name: "CefMediaServiceTests",
+            dependencies: ["CefMediaService"]
         ),
     ],
     cLanguageStandard: .c11

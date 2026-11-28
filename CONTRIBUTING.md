@@ -214,6 +214,22 @@ Do not edit the vendored headers in `Sources/CCef/include/include` or
 [Automation](docs/automation.md) describes CEF updates and moving the API
 pin.
 
+## Regenerate the media shim script
+
+The system media decoders' page script is written in
+`Sources/CefRenderer/MediaShim/*.js`; `Scripts/generate-media-shim.py`
+joins the files into `Sources/CefRenderer/MediaShimScript.swift`. Edit
+the sources, never the Swift file, and run the script after changing them;
+CI checks the two agree.
+
+```sh
+Scripts/generate-media-shim.py           # regenerate
+Scripts/generate-media-shim.py --check   # verify, as CI does
+```
+
+The media service's decoding and FLAC writing have unit tests in
+`CefMediaServiceTests`, which need no CEF framework.
+
 ## Coding notes
 
 - Swift 6 language mode. Prefer `@MainActor` to locks. No force-unwraps in

@@ -70,6 +70,7 @@ enum Demos {
         TaskManagerDemo(),
         DiscardDemo(),
         MediaRouterDemo(),
+        SystemMediaDemo(),
 
         BookmarksDemo(),
         HistoryDemo(),

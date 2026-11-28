@@ -181,7 +181,12 @@ These come from CEF 156 and official CEF builds. The guide's
 - CefKit turns Chromium's `RemoteCoreAnimationAPI` feature off by default:
   with it on, pages Chromium draws itself do not reach the screen on
   macOS 27.2 ([why](docs/architecture.md#presenting-pages)).
-- No H.264, HEVC or AAC, and Widevine only as a software (L3) client.
+- No H.264 or HEVC, and Widevine only as a software (L3) client. AAC,
+  AC-3, E-AC-3 and Apple Lossless audio play only with the experimental
+  system media decoders (`services.systemMediaDecoders`, the
+  `systemMediaDecoders` capability), in documents' main worlds and not in
+  workers or encrypted media
+  ([System media decoders](docs/guide.md#system-media-decoders)).
 
 ## Requirements
 

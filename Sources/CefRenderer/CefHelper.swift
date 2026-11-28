@@ -31,7 +31,14 @@ package enum CefHelper {
         // Only renderers run page code; the other process types get an app
         // that registers the schemes and nothing else.
         let isRenderer = arguments.contains("--type=renderer")
-        let process = CefRendererProcess(extensions: isRenderer ? [PageScripting()] : [], schemes: schemes)
+        var extensions: [CefRendererExtension] = isRenderer ? [PageScripting()] : []
+        // The system media decoders: the browser process passes this
+        // switch to renderers when the app has them on and carries the
+        // media service.
+        if isRenderer, arguments.contains("--" + CefMediaMessage.rendererSwitch) {
+            extensions.append(MediaShim())
+        }
+        let process = CefRendererProcess(extensions: extensions, schemes: schemes)
         let app = process.makeApp()
         var mainArguments = cef_main_args_t(argc: CommandLine.argc, argv: CommandLine.unsafeArgv)
         return cef_execute_process(&mainArguments, app, nil)

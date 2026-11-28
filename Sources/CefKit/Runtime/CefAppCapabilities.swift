@@ -61,6 +61,11 @@ public struct CefAppCapabilities: Sendable, Equatable {
     /// `protectedMedia` capability in `cefapp.json`). Whether Chromium has
     /// downloaded the CDM is ``CefRuntime/widevine``.
     public let canLoadWidevine: Bool
+    /// Whether the app carries CefSwift's media service
+    /// (`Contents/XPCServices/<App> Media.xpc`, the `systemMediaDecoders`
+    /// capability in `cefapp.json`), which
+    /// `CefRuntime.Configuration.Services.systemMediaDecoders` needs.
+    public let hasSystemMediaService: Bool
 
     /// Creates a value of your own, for previews and tests.
     public init(
@@ -71,7 +76,8 @@ public struct CefAppCapabilities: Sendable, Equatable {
         entitlements: Set<String> = [],
         keychainAccessGroups: [String] = [],
         usageDescriptions: Set<String> = [],
-        canLoadWidevine: Bool = false
+        canLoadWidevine: Bool = false,
+        hasSystemMediaService: Bool = false
     ) {
         self.signature = signature
         self.teamIdentifier = teamIdentifier
@@ -81,6 +87,7 @@ public struct CefAppCapabilities: Sendable, Equatable {
         self.keychainAccessGroups = keychainAccessGroups
         self.usageDescriptions = usageDescriptions
         self.canLoadWidevine = canLoadWidevine
+        self.hasSystemMediaService = hasSystemMediaService
     }
 
     /// The running app's capabilities.
@@ -125,6 +132,7 @@ public struct CefAppCapabilities: Sendable, Equatable {
         let validatesLibraries = helperFlags & 0x10000 != 0
             && (helperEntitlements["com.apple.security.cs.disable-library-validation"] as? Bool) != true
         canLoadWidevine = !(validatesLibraries && helperHasTeam)
+        hasSystemMediaService = CefMediaDecoding.serviceName != nil
     }
 
     /// Whether ``CefRuntime/SafeStoragePolicy/automatic`` uses the keychain: only

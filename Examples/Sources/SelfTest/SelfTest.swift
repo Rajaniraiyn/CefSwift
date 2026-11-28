@@ -81,6 +81,7 @@ enum SelfTest {
         CefRuntime.shared.registerSchemeHandler(scheme: "selftest", domain: "bench", handler: BenchmarkPages())
         CefRuntime.shared.registerSchemeHandler(scheme: "selftest", domain: "ax", handler: AccessibilityPages())
         CefRuntime.shared.registerSchemeHandler(scheme: "selftest", domain: "loading", handler: LoadingPages())
+        CefRuntime.shared.registerSchemeHandler(scheme: "selftest", domain: "media", handler: SystemMediaPages())
         CefRuntime.shared.registerSchemeHandler(scheme: "https", domain: "cefswift.test", handler: CapabilityPages())
 
         window = NSWindow(
@@ -200,6 +201,7 @@ enum SelfTest {
         ("surfaces", surfaceStateChecks),
         ("relaunch", relaunchChecks),
         ("protectedMedia", protectedMediaChecks),
+        ("systemMedia", systemMediaChecks),
         ("systemEngine", systemEngineChecks),
         ("passkeys", passkeyChecks),
         ("chromiumTabs", chromiumTabChecks),

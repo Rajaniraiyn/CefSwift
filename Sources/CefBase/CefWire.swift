@@ -440,7 +440,7 @@ extension CefWireBuffer {
     /// A process message named `name` carrying this payload, with one
     /// reference: as its first argument when small, in shared memory
     /// otherwise.
-    func makeMessage(_ name: CefStaticString) -> UnsafeMutablePointer<cef_process_message_t>? {
+    package func makeMessage(_ name: CefStaticString) -> UnsafeMutablePointer<cef_process_message_t>? {
         if needsSharedMemory {
             guard let builder = cef_shared_process_message_builder_create(name.pointer, totalCount) else { return nil }
             defer { cefRelease(builder) }
